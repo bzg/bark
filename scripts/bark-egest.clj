@@ -70,7 +70,8 @@
     :report/urgent :report/important
     :report/descendants :report/digested-at
     {:report/email [:email/subject :email/from-address
-                    :email/date-sent :email/imap-uid]}])
+                    :email/date-sent :email/imap-uid
+                    :email/headers-edn]}])
 
 (defn all-reports-by-type [db report-type]
   (->> (d/q (list :find (list 'pull '?r report-pull-pattern)
@@ -129,6 +130,15 @@
 ;; Report → map for JSON
 ;; ---------------------------------------------------------------------------
 
+(defn- get-header
+  "Case-insensitive header lookup from a parsed headers map."
+  [headers name]
+  (some (fn [[k v]] (when (= (str/lower-case k) (str/lower-case name)) v)) headers))
+
+(defn- archived-at [email]
+  (when-let [edn-str (:email/headers-edn email)]
+    (get-header (edn/read-string edn-str) "Archived-At")))
+
 (defn- report->map [report]
   (let [email (:report/email report)]
     (cond-> {:type    (name (:report/type report))
@@ -141,7 +151,8 @@
       (:report/version report)     (assoc :version (:report/version report))
       (:report/topic report)       (assoc :topic (:report/topic report))
       (:report/patch-seq report)   (assoc :patch-seq (:report/patch-seq report))
-      (:report/patch-source report) (assoc :patch-source (mapv name (:report/patch-source report))))))
+      (:report/patch-source report) (assoc :patch-source (mapv name (:report/patch-source report)))
+      (archived-at email)           (assoc :archived-at (archived-at email)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Display: gum table
