@@ -1,0 +1,75 @@
+;; bark-schema.edn — Shared schema for bark-digest and bark-egest.
+;;
+;; This file is the union of the email schema (from bark-ingest) and the
+;; report/roles schema (from bark-digest).  Both bb scripts read it so
+;; they can open the Datalevin DB with the full schema.
+
+{;; --- Email (defined by bark-ingest) ---
+ :email/uid              {:db/valueType :db.type/string
+                          :db/unique    :db.unique/identity}
+ :email/imap-uid         {:db/valueType :db.type/long}
+ :email/mailbox          {:db/valueType :db.type/string}
+ :email/message-id       {:db/valueType :db.type/string
+                          :db/unique    :db.unique/identity}
+ :email/subject          {:db/valueType :db.type/string}
+ :email/from-name        {:db/valueType :db.type/string}
+ :email/from-address     {:db/valueType :db.type/string}
+ :email/to               {:db/valueType :db.type/string
+                          :db/cardinality :db.cardinality/many}
+ :email/cc               {:db/valueType :db.type/string
+                          :db/cardinality :db.cardinality/many}
+ :email/date-sent        {:db/valueType :db.type/instant}
+ :email/date-received    {:db/valueType :db.type/instant}
+ :email/body-text        {:db/valueType :db.type/string}
+ :email/body-html        {:db/valueType :db.type/string}
+ :email/body-text-from-html {:db/valueType :db.type/string}
+ :email/content-type     {:db/valueType :db.type/string}
+ :email/flags            {:db/valueType :db.type/keyword
+                          :db/cardinality :db.cardinality/many}
+ :email/attachments      {:db/valueType   :db.type/ref
+                          :db/cardinality :db.cardinality/many
+                          :db/isComponent true}
+ :attachment/filename    {:db/valueType :db.type/string}
+ :attachment/content-type {:db/valueType :db.type/string}
+ :attachment/size        {:db/valueType :db.type/long}
+ :email/in-reply-to      {:db/valueType :db.type/string}
+ :email/references       {:db/valueType :db.type/string
+                          :db/cardinality :db.cardinality/many}
+ :email/headers-edn      {:db/valueType :db.type/string}
+ :email/ingested-at      {:db/valueType :db.type/instant}
+ :watermark/mailbox      {:db/valueType :db.type/string
+                          :db/unique    :db.unique/identity}
+ :watermark/imap-uid     {:db/valueType :db.type/long}
+
+ ;; --- Reports (defined by bark-digest) ---
+ :report/type            {:db/valueType :db.type/keyword}
+ :report/email           {:db/valueType :db.type/ref}
+ :report/message-id      {:db/valueType :db.type/string
+                          :db/unique    :db.unique/identity}
+ :report/version         {:db/valueType :db.type/string}
+ :report/topic           {:db/valueType :db.type/string}
+ :report/patch-seq       {:db/valueType :db.type/string}
+ :report/patch-source    {:db/valueType :db.type/keyword
+                          :db/cardinality :db.cardinality/many}
+ :report/descendants     {:db/valueType   :db.type/ref
+                          :db/cardinality :db.cardinality/many}
+ :report/acked           {:db/valueType :db.type/ref}
+ :report/owned           {:db/valueType :db.type/ref}
+ :report/closed          {:db/valueType :db.type/ref}
+ :report/urgent          {:db/valueType :db.type/ref}
+ :report/important       {:db/valueType :db.type/ref}
+ :report/digested-at     {:db/valueType :db.type/instant}
+
+ ;; --- Watermark ---
+ :digest/id              {:db/valueType :db.type/string
+                          :db/unique    :db.unique/identity}
+ :digest/last-run        {:db/valueType :db.type/instant}
+
+ ;; --- Per-mailbox roles ---
+ :roles/mailbox-email    {:db/valueType :db.type/string
+                          :db/unique    :db.unique/identity}
+ :roles/admin            {:db/valueType :db.type/string}
+ :roles/maintainers      {:db/valueType   :db.type/string
+                          :db/cardinality :db.cardinality/many}
+ :roles/ignored          {:db/valueType   :db.type/string
+                          :db/cardinality :db.cardinality/many}}
