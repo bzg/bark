@@ -399,6 +399,23 @@
 (defn add-descendant! [conn report-eid email-eid]
   (d/transact! conn [[:db/add report-eid :report/descendants email-eid]]))
 
+(defn close-changes-for-release!
+  "When a [REL x] report is created, close any open [CHG x] with the same version."
+  [conn version release-email-eid]
+  (when (and version (not (str/blank? version)))
+    (let [db      (d/db conn)
+          open-chgs (d/q '[:find [?r ...]
+                            :in $ ?ver
+                            :where
+                            [?r :report/type :change]
+                            [?r :report/version ?ver]
+                            (not [?r :report/closed _])]
+                          db version)]
+      (when (seq open-chgs)
+        (d/transact! conn (mapv (fn [r] {:db/id r :report/closed release-email-eid}) open-chgs))
+        (println (str "    → auto-closed " (count open-chgs)
+                      " [CHG " version "] (superseded by release)"))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Digest command
 ;; ---------------------------------------------------------------------------
@@ -440,6 +457,8 @@
                        (if new-report?
                          (do (println (str "  [" (name (:type report-info)) "] " (:email/subject email)))
                              (create-report! conn eid message-id report-info)
+                             (when (and (= :release (:type report-info)) (:version report-info))
+                               (close-changes-for-release! conn (:version report-info) eid))
                              (let [report-eid (d/q '[:find ?r . :in $ ?mid :where [?r :report/message-id ?mid]]
                                                    (d/db conn) message-id)]
                                [(inc created)
