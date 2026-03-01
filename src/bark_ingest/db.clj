@@ -60,9 +60,6 @@
    :email/references     {:db/valueType :db.type/string
                           :db/cardinality :db.cardinality/many}
 
-   ;; Raw headers as EDN string (for debugging / advanced use)
-   :email/headers-edn    {:db/valueType :db.type/string}
-
    ;; Ingestion metadata
    :email/ingested-at    {:db/valueType :db.type/instant}})
 
