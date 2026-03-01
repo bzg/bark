@@ -15,7 +15,7 @@
 ;;   bb bugs
 ;;
 ;; Environment / defaults:
-;;   BARK_DB — path to db (default: ~/data/bark-db)
+;;   BARK_DB — path to db (default: ./data/bark-db)
 
 (require '[babashka.pods :as pods]
          '[clojure.string :as str])
@@ -51,7 +51,7 @@
    :report/urgent      {:db/valueType :db.type/ref}
    :report/important   {:db/valueType :db.type/ref}
 
-   ;; When this report was created by woof-digest
+   ;; When this report was created by bark-digest
    :report/digested-at {:db/valueType :db.type/instant}
 
    ;; High-water mark: last UID processed by digest
@@ -191,12 +191,9 @@
 (let [args    *command-line-args*
       all?    (some #{"--all"} args)
       clean   (remove #{"--all"} args)
-      ;; Support being called from bb.edn tasks via `forced-command`
-      command (or (when (bound? #'forced-command) forced-command)
-                  (first clean)
-                  "digest")
-      db-path (or (System/getenv "BARK_DB")
-                  (str (System/getProperty "user.home") "/data/bark-db"))
+      ;; When called via bb tasks, command is passed as first arg
+      command (or (first clean) "digest")
+      db-path (or (System/getenv "BARK_DB") "data/bark-db")
       conn    (d/get-conn db-path report-schema)]
   (try
     (case command
@@ -204,6 +201,6 @@
       "bugs"   (cmd-bugs conn)
       (do (println (str "Unknown command: " command))
           (println "Usage: bb bark-digest.clj [digest|bugs] [--all]")
-          (println "  BARK_DB — db path (default: ~/data/bark-db)")))
+          (println "  BARK_DB — db path (default: ./data/bark-db)")))
     (finally
       (d/close conn))))

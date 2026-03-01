@@ -1,6 +1,5 @@
 {:tasks
  {digest {:doc  "Digest emails into reports (use --all to rescan everything)"
-          :task (load-file "scripts/bark-digest.clj")}
+          :task (apply shell "bb scripts/bark-digest.clj digest" *command-line-args*)}
   bugs   {:doc  "List all bug reports"
-          :task (do (def forced-command "bugs")
-                    (load-file "scripts/bark-digest.clj"))}}}
+          :task (shell "bb scripts/bark-digest.clj bugs")}}}
