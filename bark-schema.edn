@@ -63,6 +63,18 @@
  :report/votes-down      {:db/valueType :db.type/long}
  :report/voters          {:db/valueType   :db.type/string
                           :db/cardinality :db.cardinality/many}
+ :report/series          {:db/valueType :db.type/ref}
+
+ ;; --- Patch series ---
+ :series/id              {:db/valueType :db.type/string
+                          :db/unique    :db.unique/identity}
+ :series/topic           {:db/valueType :db.type/string}
+ :series/sender          {:db/valueType :db.type/string}
+ :series/expected        {:db/valueType :db.type/long}
+ :series/cover-letter    {:db/valueType :db.type/ref}
+ :series/patches         {:db/valueType   :db.type/ref
+                          :db/cardinality :db.cardinality/many}
+ :series/closed          {:db/valueType :db.type/ref}
 
  ;; --- Watermark ---
  :digest/id              {:db/valueType :db.type/string

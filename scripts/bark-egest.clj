@@ -70,6 +70,9 @@
     :report/urgent :report/important
     :report/votes-up :report/votes-down
     :report/descendants :report/digested-at
+    {:report/series [:series/id :series/expected :series/closed
+                     {:series/patches [:db/id]}
+                     {:series/cover-letter [:email/message-id]}]}
     {:report/email [:email/subject :email/from-address
                     :email/date-sent :email/imap-uid
                     :email/headers-edn]}])
@@ -117,6 +120,15 @@
     (when (pos? total)
       (str up "/" total))))
 
+(defn- series-str
+  "Format series info: received/expected, e.g. \"2/5\"."
+  [report]
+  (when-let [s (:report/series report)]
+    (let [received (count (:series/patches s))
+          expected (:series/expected s)
+          closed?  (some? (:series/closed s))]
+      (str received "/" expected (when closed? " closed")))))
+
 (defn- extra-str [report]
   (let [parts (remove nil?
                 [(when-let [v (:report/version report)] v)
@@ -124,7 +136,8 @@
                  (when-let [s (:report/patch-seq report)] s)
                  (when-let [sources (:report/patch-source report)]
                    (str "src:" (str/join "," (map name sources))))
-                 (when-let [v (votes-str report)] (str "votes:" v))])]
+                 (when-let [v (votes-str report)] (str "votes:" v))
+                 (when-let [s (series-str report)] (str "series:" s))])]
     (when (seq parts) (str/join " " parts))))
 
 ;; ---------------------------------------------------------------------------
@@ -151,7 +164,8 @@
 (defn- report->map [report]
   (let [email (:report/email report)
         arch  (archived-at email)
-        votes (votes-str report)]
+        votes (votes-str report)
+        series (:report/series report)]
     (cond-> {:type    (name (:report/type report))
              :subject (or (:email/subject email) "")
              :from    (or (:email/from-address email) "")
@@ -164,7 +178,13 @@
       (:report/patch-seq report)    (assoc :patch-seq (:report/patch-seq report))
       (:report/patch-source report) (assoc :patch-source (mapv name (:report/patch-source report)))
       arch                          (assoc :archived-at arch)
-      votes                         (assoc :votes votes))))
+      votes                         (assoc :votes votes)
+      series                        (assoc :series
+                                           {:received (count (:series/patches series))
+                                            :expected (:series/expected series)
+                                            :complete (= (count (:series/patches series))
+                                                         (:series/expected series))
+                                            :closed   (some? (:series/closed series))}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Display: gum table

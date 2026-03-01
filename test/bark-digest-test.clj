@@ -88,9 +88,28 @@
             :report/urgent :report/important
             :report/votes-up :report/votes-down :report/voters
             {:report/descendants [:email/message-id]}
+            {:report/series [:series/id :series/expected :series/closed
+                             {:series/patches [:db/id]}
+                             {:series/cover-letter [:email/message-id]}]}
             {:report/email [:email/subject :email/from-address
                             :email/headers-edn]}]
           [:report/message-id message-id]))
+
+(defn get-series-by-id [db sid]
+  (when-let [eid (d/q '[:find ?s . :in $ ?sid :where [?s :series/id ?sid]] db sid)]
+    (let [base (d/pull db
+                       '[:series/id :series/topic :series/sender :series/expected
+                         :series/closed :series/patches
+                         {:series/cover-letter [:email/message-id]}]
+                       eid)]
+      base)))
+
+(defn series-patch-count [db sid]
+  (when-let [eid (d/q '[:find ?s . :in $ ?sid :where [?s :series/id ?sid]] db sid)]
+    (count (d/q '[:find [?r ...]
+                  :in $ ?s
+                  :where [?s :series/patches ?r]]
+                db eid))))
 
 (defn report-exists? [db message-id]
   (some? (d/q '[:find ?r .
@@ -272,6 +291,42 @@
         (println "\n--- Email 33: admin bypasses List-Post check ---")
         (let [r (get-report db "<33@test.org>")]
           (assert= "Type is :bug" :bug (:report/type r)))
+
+        ;; --- Series v1: emails 34-37 ---
+        (println "\n--- Series v1: [PATCH parser 0/3] through 3/3 ---")
+        (let [v1 (get-series-by-id db "parser|user@test.org|3")]
+          (assert= "v1 topic" "parser" (:series/topic v1))
+          (assert= "v1 expected" 3 (:series/expected v1))
+          (assert= "v1 cover letter" "<34@test.org>"
+                   (get-in v1 [:series/cover-letter :email/message-id]))
+          (assert= "v1 has 3 patches" 3
+                   (series-patch-count db "parser|user@test.org|3"))
+          (assert-test "v1 is closed (superseded by v2)"
+                       (some? (:series/closed v1))))
+
+        ;; Check individual patches link back to series
+        (let [r35 (get-report db "<35@test.org>")]
+          (assert-test "Patch 1/3 has series ref"
+                       (some? (:report/series r35)))
+          (assert= "Patch 1/3 seq" "1/3" (:report/patch-seq r35)))
+
+        ;; --- Series v2: emails 38-39 ---
+        (println "\n--- Series v2: new series after restart ---")
+        (let [v2 (get-series-by-id db "parser|user@test.org|3#2")]
+          (assert-test "v2 series exists" (some? (:series/id v2)))
+          (assert-test "v2 series is not closed"
+                       (nil? (:series/closed v2)))
+          (assert= "v2 expected 3" 3 (:series/expected v2))
+          (assert= "v2 cover letter" "<38@test.org>"
+                   (get-in v2 [:series/cover-letter :email/message-id]))
+          (assert= "v2 has 1 patch" 1
+                   (series-patch-count db "parser|user@test.org|3#2")))
+
+        ;; v2 patch 1/3 should point to v2 series
+        (let [r39 (get-report db "<39@test.org>")
+              s   (:report/series r39)]
+          (assert-test "v2 patch has series ref" (some? s))
+          (assert= "v2 patch seq" "1/3" (:report/patch-seq r39)))
 
         ;; --- Summary ---
         (println "\n=== Summary ===")

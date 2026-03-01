@@ -466,4 +466,92 @@
   :email/date-sent  #inst "2026-01-14T13:00:00"
   :email/ingested-at #inst "2026-01-14T13:00:00"
   :email/body-text  "Admin can bypass list check.\n"}
+
+ ;; =========================================================================
+ ;; 34 — Cover letter for patch series (0/3)
+ ;; =========================================================================
+ {:email/uid        "uid-34"
+  :email/imap-uid   34
+  :email/mailbox    "test-mb"
+  :email/message-id "<34@test.org>"
+  :email/subject    "[PATCH parser 0/3] Rewrite the parser"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-15T10:00:00"
+  :email/ingested-at #inst "2026-01-15T10:00:00"
+  :email/body-text  "This series rewrites the parser.\n"}
+
+ ;; =========================================================================
+ ;; 35 — First patch in series (1/3)
+ ;; =========================================================================
+ {:email/uid        "uid-35"
+  :email/imap-uid   35
+  :email/mailbox    "test-mb"
+  :email/message-id "<35@test.org>"
+  :email/subject    "[PATCH parser 1/3] Tokenizer"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-15T10:01:00"
+  :email/ingested-at #inst "2026-01-15T10:01:00"
+  :email/in-reply-to "<34@test.org>"
+  :email/references #{"<34@test.org>"}
+  :email/body-text  "Tokenizer rewrite.\n"}
+
+ ;; =========================================================================
+ ;; 36 — Second patch in series (2/3)
+ ;; =========================================================================
+ {:email/uid        "uid-36"
+  :email/imap-uid   36
+  :email/mailbox    "test-mb"
+  :email/message-id "<36@test.org>"
+  :email/subject    "[PATCH parser 2/3] AST builder"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-15T10:02:00"
+  :email/ingested-at #inst "2026-01-15T10:02:00"
+  :email/in-reply-to "<34@test.org>"
+  :email/references #{"<34@test.org>"}
+  :email/body-text  "AST builder rewrite.\n"}
+
+ ;; =========================================================================
+ ;; 37 — Third patch in series (3/3) — completes the series
+ ;; =========================================================================
+ {:email/uid        "uid-37"
+  :email/imap-uid   37
+  :email/mailbox    "test-mb"
+  :email/message-id "<37@test.org>"
+  :email/subject    "[PATCH parser 3/3] Renderer"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-15T10:03:00"
+  :email/ingested-at #inst "2026-01-15T10:03:00"
+  :email/in-reply-to "<34@test.org>"
+  :email/references #{"<34@test.org>"}
+  :email/body-text  "Renderer rewrite.\n"}
+
+ ;; =========================================================================
+ ;; 38 — v2 cover letter, as reply to old series (closes old, starts new)
+ ;; =========================================================================
+ {:email/uid        "uid-38"
+  :email/imap-uid   38
+  :email/mailbox    "test-mb"
+  :email/message-id "<38@test.org>"
+  :email/subject    "[PATCH parser 0/3] Rewrite the parser v2"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-16T10:00:00"
+  :email/ingested-at #inst "2026-01-16T10:00:00"
+  :email/in-reply-to "<34@test.org>"
+  :email/references #{"<34@test.org>"}
+  :email/body-text  "v2 addressing review comments.\n"}
+
+ ;; =========================================================================
+ ;; 39 — v2 patch 1/3, reply to v2 cover letter
+ ;; =========================================================================
+ {:email/uid        "uid-39"
+  :email/imap-uid   39
+  :email/mailbox    "test-mb"
+  :email/message-id "<39@test.org>"
+  :email/subject    "[PATCH parser 1/3] Tokenizer v2"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-16T10:01:00"
+  :email/ingested-at #inst "2026-01-16T10:01:00"
+  :email/in-reply-to "<38@test.org>"
+  :email/references #{"<38@test.org>" "<34@test.org>"}
+  :email/body-text  "Tokenizer v2.\n"}
 ]
