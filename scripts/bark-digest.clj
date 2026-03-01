@@ -227,54 +227,139 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Trigger detection: body lines that update report state
+;;
+;; Words are case-sensitive. A punctuation mark among .,;: is mandatory.
+;; Triggers are matched at the beginning of a line.
 ;; ---------------------------------------------------------------------------
 
-;; Announcement triggers: only "Canceled" → :report/closed
-(def announcement-triggers
-  {:closed #"(?m)^Canceled[.,;:]"})
+(defn- trigger-pattern
+  "Build a regex that matches any of the given words at start of line,
+  followed by mandatory punctuation [.,;:]."
+  [& words]
+  (re-pattern (str "(?m)^(" (str/join "|" words) ")[.,;:]")))
 
-;; Map from report type to the triggers that apply
-(def triggers-by-type
-  {:announcement announcement-triggers
+;; --- Set triggers: match → set :report/<state> to email ref ---
+
+(def bug-triggers
+  {:acked (trigger-pattern "Approved" "Confirmed")
+   :owned (trigger-pattern "Handled")
+   :closed (trigger-pattern "Canceled" "Fixed")})
+
+(def patch-triggers
+  {:acked (trigger-pattern "Approved" "Reviewed")
+   :owned (trigger-pattern "Handled")
+   :closed (trigger-pattern "Canceled" "Applied")})
+
+(def request-triggers
+  {:acked (trigger-pattern "Approved")
+   :owned (trigger-pattern "Handled")
+   :closed (trigger-pattern "Canceled" "Done" "Closed")})
+
+(def announcement-triggers
+  {:closed (trigger-pattern "Canceled")})
+
+;; --- Unset triggers: match → retract :report/<state> ---
+
+(def report-unset-triggers
+  {:urgent    (trigger-pattern "Not Urgent")
+   :important (trigger-pattern "Unimportant")})
+
+;; --- Priority triggers: match → set :report/<state> to email ref ---
+;; These apply to reports (bug, patch, request) only.
+;; "Not Urgent" must be checked before "Urgent" to avoid false match.
+
+(def report-priority-triggers
+  {:urgent    (trigger-pattern "Urgent")
+   :important (trigger-pattern "Important")})
+
+;; --- Map from report type to triggers ---
+
+(def set-triggers-by-type
+  {:bug          bug-triggers
+   :patch        patch-triggers
+   :request      request-triggers
+   :announcement announcement-triggers
    :release      announcement-triggers
    :change       announcement-triggers})
 
+(def report-types-with-priority
+  #{:bug :patch :request})
+
 (defn detect-triggers
-  "Given a report type and email body text, return a map of state updates.
-  E.g. {:report/closed true} if a trigger matches.
-  Values are truthy placeholders — the actual ref will be the email eid."
+  "Given a report type and email body text, return:
+  {:set {attr true ...} :unset #{attr ...}}
+  where :set attrs should be set to the email ref,
+  and :unset attrs should be retracted."
   [report-type body-text]
-  (when-let [triggers (triggers-by-type report-type)]
-    (when body-text
-      (into {}
-            (keep (fn [[state-key pattern]]
-                    (when (re-find pattern body-text)
-                      [(keyword "report" (name state-key)) true])))
-            triggers))))
+  (when body-text
+    (let [set-triggers (set-triggers-by-type report-type)
+          ;; Detect state-setting triggers
+          sets (when set-triggers
+                 (into {}
+                       (keep (fn [[state-key pattern]]
+                               (when (re-find pattern body-text)
+                                 [(keyword "report" (name state-key)) true])))
+                       set-triggers))
+          ;; Detect priority triggers (reports only)
+          priority-sets (when (report-types-with-priority report-type)
+                          (into {}
+                                (keep (fn [[state-key pattern]]
+                                        (when (re-find pattern body-text)
+                                          [(keyword "report" (name state-key)) true])))
+                                report-priority-triggers))
+          ;; Detect unset triggers (reports only)
+          ;; Check unset BEFORE merging priority sets, since "Not Urgent"
+          ;; would also match "Urgent" — unset takes precedence.
+          unsets (when (report-types-with-priority report-type)
+                  (into #{}
+                        (keep (fn [[state-key pattern]]
+                                (when (re-find pattern body-text)
+                                  (keyword "report" (name state-key)))))
+                        report-unset-triggers))
+          ;; Merge sets, removing any that are also in unsets
+          all-sets (into {} (remove (fn [[k _]] (contains? unsets k)))
+                         (merge sets priority-sets))]
+      (when (or (seq all-sets) (seq unsets))
+        {:set   all-sets
+         :unset unsets}))))
 
 (defn apply-triggers!
   "Check if an email triggers state changes on a report.
-  If so, transact the updates using the email eid as the ref value."
+  Sets use the email eid as the ref value. Unsets retract the attribute."
   [conn report-eid report-type email]
   (let [body-text (or (:email/body-text email)
                       (:email/body-text-from-html email))
-        updates   (detect-triggers report-type body-text)]
-    (when (seq updates)
-      (let [eid (:db/id email)
-            ;; Check which states are not already set
+        result    (detect-triggers report-type body-text)]
+    (when result
+      (let [eid     (:db/id email)
             current (d/pull (d/db conn)
                             [:report/acked :report/owned :report/closed
                              :report/urgent :report/important]
                             report-eid)
-            new-updates (into {}
-                              (remove (fn [[k _]] (get current k)))
-                              updates)]
-        (when (seq new-updates)
-          ;; Replace truthy placeholders with the email eid
-          (let [tx-data (assoc (into {} (map (fn [[k _]] [k eid])) new-updates)
-                               :db/id report-eid)]
-            (d/transact! conn [tx-data])
-            (println (str "    → " (str/join ", " (map (comp name key) new-updates))
+            ;; Only set attrs that are not already set
+            new-sets (into {}
+                          (remove (fn [[k _]] (get current k)))
+                          (:set result))
+            ;; Only unset attrs that are currently set
+            new-unsets (into #{}
+                            (filter (fn [k] (get current k)))
+                            (:unset result))
+            set-tx   (when (seq new-sets)
+                       [(assoc (into {} (map (fn [[k _]] [k eid])) new-sets)
+                               :db/id report-eid)])
+            unset-tx (when (seq new-unsets)
+                       (mapv (fn [attr]
+                               (let [ref-val (get current attr)
+                                     ref-eid (if (map? ref-val) (:db/id ref-val) ref-val)]
+                                 [:db/retract report-eid attr ref-eid]))
+                             new-unsets))
+            all-tx   (into (or set-tx []) unset-tx)]
+        (when (seq all-tx)
+          (d/transact! conn all-tx)
+          (let [labels (concat
+                        (map (fn [[k _]] (name k)) new-sets)
+                        (map (fn [k] (str "un-" (name k))) new-unsets))]
+            (println (str "    → " (str/join ", " labels)
                           " (by " (:email/message-id email) ")"))))))))
 
 (defn ancestor-mids
