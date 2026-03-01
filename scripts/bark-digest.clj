@@ -462,6 +462,18 @@
 (defn add-descendant! [conn report-eid email-eid]
   (d/transact! conn [[:db/add report-eid :report/descendants email-eid]]))
 
+(defn link-related-reports!
+  "Link a newly created report to all existing reports it's threaded with.
+  The relation is bi-directional: both sides get :report/related."
+  [conn new-report-eid parent-report-eids]
+  (when (seq parent-report-eids)
+    (let [txdata (into []
+                       (mapcat (fn [rid]
+                                 [[:db/add new-report-eid :report/related rid]
+                                  [:db/add rid :report/related new-report-eid]]))
+                       parent-report-eids)]
+      (d/transact! conn txdata))))
+
 (defn close-changes-for-release!
   "When a [REL x] report is created, close any open [CHG x] with the same version."
   [conn version release-email-eid]
@@ -694,6 +706,12 @@
                              [(+ threaded (count parent-report-eids))
                               (reduce #(index-assoc %1 message-id %2) thread-index parent-report-eids)])
                          [threaded thread-index])
+                       ;; Link related reports (bi-directional)
+                       _ (when (and new-report? (seq parent-report-eids))
+                           (let [report-eid (d/q '[:find ?r . :in $ ?mid
+                                                   :where [?r :report/message-id ?mid]]
+                                                 (d/db conn) message-id)]
+                             (link-related-reports! conn report-eid parent-report-eids)))
                        ;; Manage patch series
                        _ (when (and new-report? (= :patch (:type report-info))
                                     (:patch-seq report-info))

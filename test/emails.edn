@@ -554,4 +554,19 @@
   :email/in-reply-to "<38@test.org>"
   :email/references #{"<38@test.org>" "<34@test.org>"}
   :email/body-text  "Tokenizer v2.\n"}
+
+ ;; =========================================================================
+ ;; 40 — Patch sent as reply to bug 23 (creates a relation)
+ ;; =========================================================================
+ {:email/uid        "uid-40"
+  :email/imap-uid   40
+  :email/mailbox    "test-mb"
+  :email/message-id "<40@test.org>"
+  :email/subject    "[PATCH] Fix slow export"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-17T10:00:00"
+  :email/ingested-at #inst "2026-01-17T10:00:00"
+  :email/in-reply-to "<23@test.org>"
+  :email/references #{"<23@test.org>"}
+  :email/body-text  "Here is a fix for the slow export bug.\n"}
 ]

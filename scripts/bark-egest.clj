@@ -70,6 +70,7 @@
     :report/urgent :report/important
     :report/votes-up :report/votes-down
     :report/descendants :report/digested-at
+    {:report/related [:report/type :report/message-id]}
     {:report/series [:series/id :series/expected :series/closed
                      {:series/patches [:db/id]}
                      {:series/cover-letter [:email/message-id]}]}
@@ -129,6 +130,12 @@
           closed?  (some? (:series/closed s))]
       (str received "/" expected (when closed? " closed")))))
 
+(defn- related-str
+  "Format related reports as compact type list, e.g. \"bug,patch\"."
+  [report]
+  (when-let [related (seq (:report/related report))]
+    (str/join "," (distinct (map #(name (:report/type %)) related)))))
+
 (defn- extra-str [report]
   (let [parts (remove nil?
                 [(when-let [v (:report/version report)] v)
@@ -137,7 +144,8 @@
                  (when-let [sources (:report/patch-source report)]
                    (str "src:" (str/join "," (map name sources))))
                  (when-let [v (votes-str report)] (str "votes:" v))
-                 (when-let [s (series-str report)] (str "series:" s))])]
+                 (when-let [s (series-str report)] (str "series:" s))
+                 (when-let [r (related-str report)] (str "→" r))])]
     (when (seq parts) (str/join " " parts))))
 
 ;; ---------------------------------------------------------------------------
@@ -162,10 +170,11 @@
     (get-header (edn/read-string edn-str) "Archived-At")))
 
 (defn- report->map [report]
-  (let [email (:report/email report)
-        arch  (archived-at email)
-        votes (votes-str report)
-        series (:report/series report)]
+  (let [email   (:report/email report)
+        arch    (archived-at email)
+        votes   (votes-str report)
+        series  (:report/series report)
+        related (:report/related report)]
     (cond-> {:type    (name (:report/type report))
              :subject (or (:email/subject email) "")
              :from    (or (:email/from-address email) "")
@@ -184,7 +193,12 @@
                                             :expected (:series/expected series)
                                             :complete (= (count (:series/patches series))
                                                          (:series/expected series))
-                                            :closed   (some? (:series/closed series))}))))
+                                            :closed   (some? (:series/closed series))})
+      (seq related)                 (assoc :related
+                                           (mapv (fn [r]
+                                                   {:type       (name (:report/type r))
+                                                    :message-id (:report/message-id r)})
+                                                 related)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Display: gum table

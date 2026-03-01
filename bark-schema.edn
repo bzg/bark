@@ -64,6 +64,8 @@
  :report/voters          {:db/valueType   :db.type/string
                           :db/cardinality :db.cardinality/many}
  :report/series          {:db/valueType :db.type/ref}
+ :report/related         {:db/valueType   :db.type/ref
+                          :db/cardinality :db.cardinality/many}
 
  ;; --- Patch series ---
  :series/id              {:db/valueType :db.type/string

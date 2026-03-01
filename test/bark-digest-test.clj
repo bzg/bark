@@ -88,6 +88,7 @@
             :report/urgent :report/important
             :report/votes-up :report/votes-down :report/voters
             {:report/descendants [:email/message-id]}
+            {:report/related [:report/type :report/message-id]}
             {:report/series [:series/id :series/expected :series/closed
                              {:series/patches [:db/id]}
                              {:series/cover-letter [:email/message-id]}]}
@@ -239,7 +240,7 @@
         (let [r (get-report db "<23@test.org>")]
           (assert= "Type is :bug" :bug (:report/type r))
           (assert-test "Important unset" (nil? (:report/important r)))
-          (assert= "2 descendants" 2
+          (assert= "3 descendants" 3
                    (count (:report/descendants r))))
 
         ;; --- TASK 26: synonym for request ---
@@ -327,6 +328,20 @@
               s   (:report/series r39)]
           (assert-test "v2 patch has series ref" (some? s))
           (assert= "v2 patch seq" "1/3" (:report/patch-seq r39)))
+
+        ;; --- Email 40: patch related to bug 23 ---
+        (println "\n--- Email 40: patch related to bug ---")
+        (let [patch (get-report db "<40@test.org>")
+              bug   (get-report db "<23@test.org>")]
+          (assert= "Patch type" :patch (:report/type patch))
+          ;; Patch should be related to the bug
+          (assert-test "Patch is related to bug"
+                       (some #(= "<23@test.org>" (:report/message-id %))
+                             (:report/related patch)))
+          ;; Bug should be related to the patch (bi-directional)
+          (assert-test "Bug is related to patch"
+                       (some #(= "<40@test.org>" (:report/message-id %))
+                             (:report/related bug))))
 
         ;; --- Summary ---
         (println "\n=== Summary ===")
