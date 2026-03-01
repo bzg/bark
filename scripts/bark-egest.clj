@@ -24,7 +24,8 @@
          '[babashka.process :as process]
          '[cheshire.core :as json]
          '[clojure.string :as str]
-         '[clojure.edn :as edn])
+         '[clojure.edn :as edn]
+         '[clojure.pprint :as pprint])
 
 (deps/add-deps '{:deps {io.github.lispyclouds/bblgum
                          {:git/sha "881a426d9df9df40eb305ceaeb3996ea1c7ae0d3"}}})
@@ -147,22 +148,17 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- report->row
-  "Format a report as a CSV row for gum table."
+  "Format a report as a tab-separated row for gum table."
   [report show-type?]
-  (let [email (:report/email report)
-        ;; Escape commas in fields by quoting
-        esc   (fn [s] (if (and s (str/includes? s ","))
-                        (str "\"" (str/replace s "\"" "\"\"") "\"")
-                        (or s "")))]
-    (str/join ","
+  (let [email (:report/email report)]
+    (str/join "\t"
               (concat
                (when show-type? [(name (:report/type report))])
                [(flags-str report)
                 (str (descendant-count report))
-                (esc (or (:email/from-address email) "?"))
+                (or (:email/from-address email) "?")
                 (format-date (:email/date-sent email))
-                (esc (or (:email/subject email) "(no subject)"))
-                (esc (or (extra-str report) ""))]))))
+                (or (:email/subject email) "(no subject)")]))))
 
 (defn- report->line
   "Format a report as a plain text line."
@@ -182,21 +178,34 @@
     (zero? (:exit (process/shell {:out :string :err :string :continue true} "gum" "--version")))
     (catch Exception _ false)))
 
+;; ---------------------------------------------------------------------------
+;; Display
+;; ---------------------------------------------------------------------------
+
 (defn display-reports!
-  "Display reports interactively with gum table, or fall back to plain text."
+  "Display reports interactively with gum table.
+  Selecting a row prints the full report data as EDN."
   [reports label show-type?]
   (if (empty? reports)
     (println (str "No " label "s found."))
     (if (gum-available?)
-      (let [header (str/join ","
-                             (concat
-                              (when show-type? ["Type"])
-                              ["Flags" "#" "From" "Date" "Subject" "Extra"]))
-            rows   (mapv #(report->row % show-type?) reports)
-            input  (str/join "\n" (cons header rows))
-            {:keys [result]} (gum/gum :table :in input :print true)]
-        ;; gum table -p prints to stdout via bblgum, result captured
-        (doseq [line result] (println line)))
+      (let [columns (concat
+                     (when show-type? ["Type"])
+                     ["Flags" "#" "From" "Date" "Subject"])
+            rows    (mapv #(report->row % show-type?) reports)
+            input   (str/join "\n" rows)
+            {:keys [status result]}
+            (gum/gum :table
+                     :in input
+                     :columns (str/join "," columns)
+                     :separator "\t")]
+        (when (and (zero? status) (seq result))
+          ;; gum table returns the selected CSV row — match it back to report
+          (let [selected (first result)
+                idx      (.indexOf ^java.util.List rows selected)]
+            (when (>= idx 0)
+              (let [report (nth reports idx)]
+                (pprint/pprint (report->map report)))))))
       ;; Plain text fallback
       (do (println (str (count reports) " " label "(s):\n"))
           (doseq [r reports]
