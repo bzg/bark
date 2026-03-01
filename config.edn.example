@@ -1,0 +1,19 @@
+{;; IMAP connection settings
+ :imap {:host     "imap.example.com"
+        :port     993
+        :ssl      true
+        :user     "you@example.com"
+        :password "your-password"
+        ;; Which folder to watch
+        :folder   "INBOX"}
+
+ ;; Datalevin database path
+ :db {:path "data/bark-db"}
+
+ ;; Ingest settings
+ :ingest {;; :idle for IMAP IDLE push, :poll for periodic polling
+          :mode :idle
+          ;; Poll interval in seconds (only used if :mode is :poll)
+          :poll-interval 60
+          ;; Fetch this many recent messages on first run
+          :initial-fetch 50}}
