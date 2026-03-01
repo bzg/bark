@@ -9,11 +9,16 @@
             [clojure.string :as str]
             [clojure.tools.logging :as log])
   (:import [java.util Date]
+           [java.security MessageDigest]
            [org.jsoup Jsoup]))
+
+;; ---------------------------------------------------------------------------
+;; Helpers
+;; ---------------------------------------------------------------------------
 
 (defn- format-address
   "Format {:name \"Alice\" :address \"alice@example.com\"} as a string."
-  [{:keys [address] addr-name :name}]
+  [{addr-name :name address :address}]
   (if addr-name
     (str addr-name " <" address ">")
     address))
@@ -30,89 +35,142 @@
   Returns a set of message-id strings, or nil if empty."
   [s]
   (when s
-    (let [ids (set (re-seq #"<[^>]+>" s))]
+    (let [ids (->> (re-seq #"<[^>]+>" s)
+                   (map str)
+                   set)]
       (when (seq ids) ids))))
 
-(defn- extract-header
-  "Extract a header value from the headers map.
-  If multi-valued (vector), join with joiner or return first."
-  ([headers header-name]
-   (extract-header headers header-name nil))
-  ([headers header-name joiner]
-   (when-let [v (get headers header-name)]
-     (let [s (str/trim (if (vector? v)
-                         (if joiner (str/join joiner v) (first v))
-                         v))]
-       (when-not (str/blank? s) s)))))
+(defn sha256
+  "Compute SHA-256 hex digest of a string."
+  [^String s]
+  (let [digest (MessageDigest/getInstance "SHA-256")
+        bytes  (.digest digest (.getBytes s "UTF-8"))]
+    (apply str (map #(format "%02x" %) bytes))))
+
+(defn uid-hash
+  "Compute a globally unique uid from mailbox-id and IMAP UID."
+  [mailbox-id imap-uid]
+  (sha256 (str mailbox-id ":" imap-uid)))
+
+;; ---------------------------------------------------------------------------
+;; Transform
+;; ---------------------------------------------------------------------------
 
 (defn email->txdata
   "Convert a fetch-imap message map to Datalevin transaction data.
-  Returns a map suitable for d/transact!."
-  [msg]
-  (let [body           (:body msg)
-        text           (:text body)
-        html-body      (:html body)
+  mailbox-id is a string like \"imap.example.com:user@example.com\"."
+  [mailbox-id msg]
+  (let [imap-uid    (:uid msg)
+        body        (:body msg)
+        text        (:text body)
+        html-body   (:html body)
         text-from-html (strip-tags html-body)
-        from           (first (:from msg))
-        headers        (:headers msg)
-        in-reply-to    (extract-header headers "In-Reply-To")
-        references     (when-let [v (extract-header headers "References" " ")]
-                         (parse-message-ids v))
-        attachments    (mapv (fn [att]
-                               {:attachment/filename     (or (:filename att) "unnamed")
-                                :attachment/content-type (:content-type att)
-                                :attachment/size         (or (:size att)
-                                                            (when (:data att)
-                                                              (count (:data att))))})
-                             (remove nil? (:attachments body)))]
-    (into {:email/uid          (:uid msg)
-           :email/message-id   (:message-id msg)
-           :email/subject      (or (:subject msg) "(no subject)")
-           :email/content-type (:content-type msg)
-           :email/ingested-at  (Date.)}
-          (filter val)
-          {:email/from-address      (:address from)
-           :email/from-name         (:name from)
-           :email/to                (when (seq (:to msg))
-                                      (set (map format-address (:to msg))))
-           :email/cc                (when (seq (:cc msg))
-                                      (set (map format-address (:cc msg))))
-           :email/date-sent         (:date-sent msg)
-           :email/date-received     (:date-received msg)
-           :email/body-text         text
-           :email/body-html         html-body
-           :email/body-text-from-html text-from-html
-           :email/flags             (when (seq (:flags msg)) (:flags msg))
-           :email/attachments       (when (seq attachments) attachments)
-           :email/in-reply-to       in-reply-to
-           :email/references        references})))
+        from        (first (:from msg))
+        headers     (:headers msg)
+        in-reply-to (when-let [v (get headers "In-Reply-To")]
+                      (let [s (str/trim (if (vector? v) (first v) v))]
+                        (when-not (str/blank? s) s)))
+        references  (when-let [v (get headers "References")]
+                      (parse-message-ids (if (vector? v) (str/join " " v) v)))
+        attachments (mapv (fn [att]
+                            {:attachment/filename     (or (:filename att) "unnamed")
+                             :attachment/content-type (:content-type att)
+                             :attachment/size         (or (:size att)
+                                                         (when (:data att)
+                                                           (count (:data att))))})
+                          (remove nil? (:attachments body)))]
+    (cond-> {:email/uid           (uid-hash mailbox-id imap-uid)
+             :email/imap-uid      imap-uid
+             :email/mailbox       mailbox-id
+             :email/message-id    (:message-id msg)
+             :email/subject       (or (:subject msg) "(no subject)")
+             :email/content-type  (:content-type msg)
+             :email/ingested-at   (Date.)}
+
+      ;; From
+      (:address from)
+      (assoc :email/from-address (:address from))
+
+      (:name from)
+      (assoc :email/from-name (:name from))
+
+      ;; To — store as set of formatted address strings
+      (seq (:to msg))
+      (assoc :email/to (set (map format-address (:to msg))))
+
+      ;; Cc
+      (seq (:cc msg))
+      (assoc :email/cc (set (map format-address (:cc msg))))
+
+      ;; Dates
+      (:date-sent msg)
+      (assoc :email/date-sent (:date-sent msg))
+
+      (:date-received msg)
+      (assoc :email/date-received (:date-received msg))
+
+      ;; Body text
+      text
+      (assoc :email/body-text text)
+
+      ;; Body HTML
+      html-body
+      (assoc :email/body-html html-body)
+
+      ;; Plain text extracted from HTML
+      text-from-html
+      (assoc :email/body-text-from-html text-from-html)
+
+      ;; Flags
+      (seq (:flags msg))
+      (assoc :email/flags (:flags msg))
+
+      ;; Attachments (metadata only, no binary data)
+      (seq attachments)
+      (assoc :email/attachments attachments)
+
+      ;; Threading headers
+      in-reply-to
+      (assoc :email/in-reply-to in-reply-to)
+
+      references
+      (assoc :email/references references))))
+
+;; ---------------------------------------------------------------------------
+;; Store
+;; ---------------------------------------------------------------------------
 
 (defn store-email!
-  "Store a single parsed email in Datalevin. Skips if UID already exists or is nil."
-  [conn msg]
-  (let [uid (:uid msg)]
+  "Store a single parsed email in Datalevin.
+  Skips if uid hash or Message-ID already exists."
+  [conn mailbox-id msg]
+  (let [imap-uid (:uid msg)]
     (cond
-      (nil? uid)
-      (log/warn "Skipping email with nil UID, subject:" (:subject msg))
+      (nil? imap-uid)
+      (log/warn "Skipping email with nil UID")
 
-      (db/email-exists? conn uid)
-      (log/debug "Skipping already stored email UID:" uid)
+      (db/email-exists? conn (uid-hash mailbox-id imap-uid))
+      (log/debug "Skipping already stored email UID:" imap-uid "(uid-hash)")
+
+      (db/message-id-exists? conn (:message-id msg))
+      (log/debug "Skipping already stored email UID:" imap-uid
+                 "Message-ID:" (:message-id msg) "(from another mailbox)")
 
       :else
-      (let [txdata (email->txdata msg)]
+      (let [txdata (email->txdata mailbox-id msg)]
         (d/transact! conn [txdata])
-        (log/info "Stored email UID:" uid
+        (log/info "Stored email UID:" imap-uid
                   "Subject:" (subs (or (:email/subject txdata) "") 0
                                    (min 60 (count (or (:email/subject txdata) "")))))))))
 
 (defn store-emails!
-  "Store a batch of parsed emails."
-  [conn msgs]
-  (let [stored (atom 0)]
+  "Store a batch of parsed emails. Returns the count of newly stored emails."
+  [conn mailbox-id msgs]
+  (let [stored (volatile! 0)]
     (doseq [msg msgs]
       (try
-        (when (store-email! conn msg)
-          (swap! stored inc))
+        (store-email! conn mailbox-id msg)
+        (vswap! stored inc)
         (catch Exception e
           (log/error "Failed to store email UID:" (:uid msg) (.getMessage e)))))
-    (log/info "Batch complete." @stored "new email(s) stored.")))
+    (log/info "Batch complete. Stored" @stored "of" (count msgs) "emails.")))

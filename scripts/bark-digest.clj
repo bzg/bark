@@ -6,9 +6,10 @@
 ;;
 ;; Reads emails and writes reports to the same datalevin database.
 ;; For each email, either:
-;;   1. It triggers a new report
+;;   1. It triggers a new report (respecting permissions)
 ;;   2. It is a descendant of an existing report (added to :report/descendants)
-;;   3. It is unrelated
+;;   3. It contains admin/maintainer commands (role management)
+;;   4. It is unrelated or from an ignored address
 ;;
 ;; Usage:
 ;;   bb bark-digest.clj digest [--all]    — scan new emails (or all with --all)
@@ -19,24 +20,27 @@
 ;;   bb bark-digest.clj releases          — list all releases
 ;;   bb bark-digest.clj changes           — list all changes
 ;;   bb bark-digest.clj reports           — list all reports
+;;   bb bark-digest.clj roles             — show admins, maintainers, ignored
 ;;
 ;; Or via bb tasks:
 ;;   bb digest [--all]
 ;;   bb bugs / bb patches / bb requests / bb announcements / bb releases
-;;   bb changes / bb reports
+;;   bb changes / bb reports / bb roles
 ;;
 ;; Environment / defaults:
-;;   BARK_DB — path to db (default: ./data/bark-db)
+;;   BARK_DB    — path to db (default: ./data/bark-db)
+;;   BARK_ADMIN — default admin email address
 
 (require '[babashka.pods :as pods]
-         '[clojure.string :as str])
+         '[clojure.string :as str]
+         '[clojure.edn :as edn])
 
 (pods/load-pod 'huahaiy/datalevin "0.10.5")
 
 (require '[pod.huahaiy.datalevin :as d])
 
 ;; ---------------------------------------------------------------------------
-;; Schema for reports (merged into the existing email DB)
+;; Schema for reports and roles (merged into the existing email DB)
 ;; ---------------------------------------------------------------------------
 
 (def report-schema
@@ -68,8 +72,6 @@
                         :db/cardinality :db.cardinality/many}
 
    ;; States — each is a ref to the email that triggered the state change.
-   ;; Presence means "on", absence means "off".
-   ;; Retract to undo (e.g. un-ack, un-own).
    :report/acked       {:db/valueType :db.type/ref}
    :report/owned       {:db/valueType :db.type/ref}
    :report/closed      {:db/valueType :db.type/ref}
@@ -79,9 +81,197 @@
    ;; When this report was created by bark-digest
    :report/digested-at {:db/valueType :db.type/instant}
 
-   ;; High-water mark: last UID processed by digest
-   :digest/last-uid    {:db/valueType :db.type/long
-                        :db/unique    :db.unique/identity}})
+   ;; High-water mark: singleton with stable identity key
+   :digest/id           {:db/valueType :db.type/string
+                         :db/unique    :db.unique/identity}
+   :digest/last-run     {:db/valueType :db.type/instant}
+
+   ;; --- Per-mailbox roles ---
+   ;; One entity per mailbox, keyed by the mailbox's :email from config
+   :roles/mailbox-email {:db/valueType :db.type/string
+                         :db/unique    :db.unique/identity}
+   :roles/admin         {:db/valueType :db.type/string}
+   :roles/maintainers   {:db/valueType   :db.type/string
+                         :db/cardinality :db.cardinality/many}
+   :roles/ignored       {:db/valueType   :db.type/string
+                         :db/cardinality :db.cardinality/many}})
+
+;; ---------------------------------------------------------------------------
+;; Config: mailbox mappings
+;; ---------------------------------------------------------------------------
+
+(defn- mailbox-id
+  "Compute a stable mailbox identifier from a mailbox config map.
+  Matches bark-ingest.db/mailbox-id."
+  [mb]
+  (str (:host mb) ":" (:user mb)))
+
+(defn- build-mailbox-map
+  "Build a map of {mailbox-id → {:email ... :admin ... :mailing-list-email ...}}
+  from config. Falls back to top-level :admin for mailboxes without their own."
+  [config]
+  (let [default-admin (:admin config)]
+    (into {}
+          (map (fn [mb]
+                 [(mailbox-id mb)
+                  {:email              (:email mb)
+                   :admin              (or (:admin mb) default-admin)
+                   :mailing-list-email (:mailing-list-email mb)}]))
+          (:mailboxes config))))
+
+;; ---------------------------------------------------------------------------
+;; Per-mailbox roles: read and update
+;; ---------------------------------------------------------------------------
+
+(defn get-roles
+  "Return the roles entity for a mailbox-email, or a default map."
+  [db mailbox-email]
+  (or (d/pull db '[:roles/admin :roles/maintainers :roles/ignored]
+              [:roles/mailbox-email mailbox-email])
+      {}))
+
+(defn ensure-mailbox-roles!
+  "Ensure a roles entity exists for each mailbox in config, seeding admin."
+  [conn config]
+  (let [default-admin (:admin config)]
+    (doseq [mb (:mailboxes config)]
+      (let [mb-email (:email mb)
+            admin    (or (:admin mb) default-admin)
+            existing (d/q '[:find ?e .
+                            :in $ ?mbe
+                            :where [?e :roles/mailbox-email ?mbe]]
+                          (d/db conn) mb-email)]
+        (if existing
+          ;; Update admin from config (may have changed)
+          (d/transact! conn [{:roles/mailbox-email mb-email
+                              :roles/admin         admin}])
+          ;; Create new roles entity
+          (do (d/transact! conn [{:roles/mailbox-email mb-email
+                                  :roles/admin         admin}])
+              (println (str "  Initialized roles for " mb-email
+                            " (admin: " admin ")"))))))))
+
+(defn- roles-set
+  "Get a role attribute as a set (handles nil, single val, collection)."
+  [roles attr]
+  (let [v (get roles attr)]
+    (cond
+      (nil? v)    #{}
+      (string? v) #{v}
+      :else       (set v))))
+
+(defn admin? [roles addr]
+  (= (:roles/admin roles) addr))
+
+(defn maintainer? [roles addr]
+  (contains? (roles-set roles :roles/maintainers) addr))
+
+(defn admin-or-maintainer? [roles addr]
+  (or (admin? roles addr) (maintainer? roles addr)))
+
+(defn ignored? [roles addr]
+  (contains? (roles-set roles :roles/ignored) addr))
+
+(defn- roles-eid [conn mailbox-email]
+  (d/q '[:find ?e .
+         :in $ ?mbe
+         :where [?e :roles/mailbox-email ?mbe]]
+       (d/db conn) mailbox-email))
+
+(defn- add-role! [conn mailbox-email attr addresses]
+  (when-let [eid (roles-eid conn mailbox-email)]
+    (doseq [addr addresses]
+      (d/transact! conn [[:db/add eid attr addr]]))))
+
+(defn- remove-role! [conn mailbox-email attr addresses]
+  (when-let [eid (roles-eid conn mailbox-email)]
+    (doseq [addr addresses]
+      (d/transact! conn [[:db/retract eid attr addr]]))))
+
+;; ---------------------------------------------------------------------------
+;; Role commands: parsed from email body lines
+;;
+;; Syntax: "Command: addr1 addr2 ..."
+;; Commands are case-sensitive, at start of line, with mandatory colon.
+;; All commands are scoped to the mailbox the email arrived in.
+;; ---------------------------------------------------------------------------
+
+(def role-command-pattern
+  #"(?m)^(Add admin|Remove admin|Add maintainer|Remove maintainer|Ignore|Unignore):\s+(.+)$")
+
+(defn- parse-addresses
+  "Split a space-separated string of email addresses."
+  [s]
+  (when s
+    (remove str/blank? (str/split (str/trim s) #"\s+"))))
+
+(defn- parse-role-commands
+  "Parse all role commands from body text.
+  Returns a seq of {:command str :addresses [str ...]}."
+  [body-text]
+  (when body-text
+    (->> (re-seq role-command-pattern body-text)
+         (map (fn [[_ cmd addrs]]
+                {:command   cmd
+                 :addresses (parse-addresses addrs)})))))
+
+(defn apply-role-commands!
+  "Process role commands from an email, scoped to mailbox-email.
+  Returns the number of commands applied."
+  [conn roles mailbox-email from-addr body-text]
+  (let [commands (parse-role-commands body-text)
+        is-admin (admin? roles from-addr)
+        is-maint (admin-or-maintainer? roles from-addr)]
+    (reduce
+     (fn [n {:keys [command addresses]}]
+       (let [applied
+             (cond
+               ;; Admin-only commands
+               (and is-admin (= command "Add admin"))
+               ;; For per-mailbox model, "Add admin" changes the admin
+               ;; Only one admin per mailbox, so take the first address
+               (when-let [new-admin (first addresses)]
+                 (d/transact! conn [{:roles/mailbox-email mailbox-email
+                                     :roles/admin         new-admin}])
+                 (println (str "    → set admin: " new-admin
+                               " (for " mailbox-email ")"))
+                 true)
+
+               (and is-admin (= command "Remove admin"))
+               ;; Cannot remove the admin, only replace — skip
+               (do (println "    → cannot remove admin (use Add admin to replace)")
+                   false)
+
+               (and is-admin (= command "Remove maintainer"))
+               (do (remove-role! conn mailbox-email :roles/maintainers addresses)
+                   (println (str "    → remove maintainer: " (str/join " " addresses)
+                                 " (for " mailbox-email ")"))
+                   true)
+
+               (and is-admin (= command "Unignore"))
+               (do (remove-role! conn mailbox-email :roles/ignored addresses)
+                   (println (str "    → unignore: " (str/join " " addresses)
+                                 " (for " mailbox-email ")"))
+                   true)
+
+               ;; Admin or maintainer commands
+               (and is-maint (= command "Add maintainer"))
+               (do (add-role! conn mailbox-email :roles/maintainers addresses)
+                   (println (str "    → add maintainer: " (str/join " " addresses)
+                                 " (for " mailbox-email ")"))
+                   true)
+
+               (and is-maint (= command "Ignore"))
+               (do (add-role! conn mailbox-email :roles/ignored addresses)
+                   (println (str "    → ignore: " (str/join " " addresses)
+                                 " (for " mailbox-email ")"))
+                   true)
+
+               ;; No permission or unknown command
+               :else false)]
+         (if applied (inc n) n)))
+     0
+     commands)))
 
 ;; ---------------------------------------------------------------------------
 ;; Subject pattern matching
@@ -210,6 +400,10 @@
 ;; Combined report detection
 ;; ---------------------------------------------------------------------------
 
+(def announcement-types
+  "Report types that require admin/maintainer permission to create."
+  #{:announcement :release :change})
+
 (defn detect-report
   "Detect report type from email data. Returns report-info map or nil.
   Priority order: bug > patch > request > announcement > release > change."
@@ -224,6 +418,14 @@
           (detect-announcement subject)
           (detect-release subject)
           (detect-change subject)))))
+
+(defn can-create-report?
+  "Check if the sender has permission to create this report type.
+  Announcements require admin/maintainer for the email's mailbox."
+  [roles from-addr report-info]
+  (if (announcement-types (:type report-info))
+    (admin-or-maintainer? roles from-addr)
+    true))
 
 ;; ---------------------------------------------------------------------------
 ;; Trigger detection: body lines that update report state
@@ -318,8 +520,7 @@
                      (match-triggers report-priority-triggers body-text))
           unsets   (when (report-types-with-priority report-type)
                      (match-unset-triggers report-unset-triggers body-text))
-          ;; Unset wins over set when both match (e.g. body has both
-          ;; "Not urgent." and "Urgent." — only the unset applies)
+          ;; Unset wins over set when both match
           all-sets (into {} (remove (fn [[k _]] (contains? unsets k)))
                          (merge sets priority))]
       (when (or (seq all-sets) (seq unsets))
@@ -345,11 +546,9 @@
     (when result
       (let [eid     (:db/id email)
             current (d/pull (d/db conn) state-attrs report-eid)
-            ;; Only set attrs that are not already set
             new-sets (into {}
                           (remove (fn [[k _]] (get current k)))
                           (:set result))
-            ;; Only unset attrs that are currently set
             new-unsets (into #{}
                             (filter (fn [k] (get current k)))
                             (:unset result))
@@ -382,21 +581,16 @@
   (let [irt  (:email/in-reply-to email)
         refs (:email/references email)]
     (cond-> #{}
-      irt       (conj irt)
-      (coll? refs) (into refs))))
+      irt           (conj irt)
+      (coll? refs)  (into refs))))
 
 ;; ---------------------------------------------------------------------------
 ;; Thread index: message-id → #{set of report entity ids}
 ;; Type index:   report entity id → report type keyword
-;;
-;; The thread index maps every message-id that belongs to a report
-;; (either the originating email or a descendant) to the set of report
-;; entity ids it belongs to. An email can belong to multiple reports.
 ;; ---------------------------------------------------------------------------
 
 (defn- index-assoc
-  "Associate a message-id with a report eid in the thread index.
-  Accumulates into a set."
+  "Associate a message-id with a report eid in the thread index."
   [idx mid rid]
   (update idx mid (fnil conj #{}) rid))
 
@@ -432,30 +626,32 @@
 ;; Database operations
 ;; ---------------------------------------------------------------------------
 
-(defn get-last-uid [db]
-  (or (d/q '[:find ?uid .
-             :where [_ :digest/last-uid ?uid]]
-           db)
-      0))
+(defn get-last-run [db]
+  (d/q '[:find ?t .
+         :where
+         [?e :digest/id "watermark"]
+         [?e :digest/last-run ?t]]
+       db))
 
-(defn save-last-uid! [conn uid]
-  (d/transact! conn [{:digest/last-uid uid}]))
+(defn save-last-run! [conn ts]
+  (d/transact! conn [{:digest/id       "watermark"
+                      :digest/last-run  ts}]))
 
 (def email-pull-pattern
-  '[:db/id :email/uid :email/subject :email/message-id
+  '[:db/id :email/uid :email/imap-uid :email/mailbox :email/subject :email/message-id
     :email/in-reply-to :email/references
-    :email/from-address :email/date-sent
+    :email/from-address :email/date-sent :email/ingested-at
     :email/body-text :email/body-text-from-html
     {:email/attachments [:attachment/filename
                          :attachment/content-type]}])
 
-(defn emails-since [db since-uid]
+(defn emails-since [db since-ts]
   (->> (d/q (list :find (list 'pull '?e email-pull-pattern)
                   :in '$ '?since
                   :where
-                  ['?e :email/uid '?uid]
-                  '[(> ?uid ?since)])
-            db since-uid)
+                  ['?e :email/ingested-at '?t]
+                  '[(> ?t ?since)])
+            db since-ts)
        (map first)))
 
 (defn all-emails [db]
@@ -493,7 +689,7 @@
     :report/urgent :report/important
     :report/descendants
     {:report/email [:email/subject :email/from-address
-                    :email/date-sent :email/uid]}])
+                    :email/date-sent :email/imap-uid]}])
 
 (defn all-reports-by-type [db report-type]
   (->> (d/q (list :find (list 'pull '?r report-pull-pattern)
@@ -558,66 +754,92 @@
 ;; ---------------------------------------------------------------------------
 
 (defn cmd-digest!
-  [conn process-all?]
+  [conn mailbox-map process-all?]
   (let [db       (d/db conn)
-        last-uid (get-last-uid db)
+        last-run (get-last-run db)
         emails   (if process-all?
                    (do (println "Processing ALL emails...")
                        (all-emails db))
-                   (do (println (str "Processing emails since UID " last-uid "..."))
-                       (emails-since db last-uid)))
-        sorted   (sort-by :email/uid emails)
+                   (if last-run
+                     (do (println (str "Processing emails since " last-run "..."))
+                         (emails-since db last-run))
+                     (do (println "First run — processing ALL emails...")
+                         (all-emails db))))
+        sorted   (sort-by (fn [e] (or (:email/ingested-at e)
+                                       (:email/date-sent e)
+                                       (java.util.Date. 0)))
+                           emails)
         {:keys [thread-index type-index]} (build-indexes db)]
     (println (str "Found " (count sorted) " email(s) to scan. "
                   "Thread index: " (count thread-index) " entries."))
-    (let [{:keys [created threaded max-uid]}
+    (let [{:keys [created threaded skipped]}
           (reduce
-           (fn [{:keys [created threaded max-uid thread-index type-index]} email]
-             (let [uid        (:email/uid email)
-                   message-id (:email/message-id email)
-                   eid        (:db/id email)
-                   max-uid    (max max-uid uid)
-                   ;; 1. Does it trigger a new report?
-                   report-info (detect-report email)
-                   new-report? (and report-info
-                                    (not (report-exists? (d/db conn) message-id)))
-                   [created thread-index type-index]
-                   (if new-report?
-                     (do (println (str "  [" (name (:type report-info)) "] "
-                                       (:email/subject email)))
-                         (create-report! conn eid message-id report-info)
-                         (let [report-eid (d/q '[:find ?r .
-                                                 :in $ ?mid
-                                                 :where [?r :report/message-id ?mid]]
-                                               (d/db conn) message-id)]
-                           [(inc created)
-                            (index-assoc thread-index message-id report-eid)
-                            (assoc type-index report-eid (:type report-info))]))
-                     [created thread-index type-index])
-                   ;; 2. Is it a descendant of existing report(s)?
-                   parent-report-eids (find-reports-for-email email thread-index)
-                   [threaded thread-index]
-                   (if (seq parent-report-eids)
-                     (do (doseq [rid parent-report-eids]
-                           (add-descendant! conn rid eid)
-                           ;; 3. Check for triggers that update report state
-                           (when-let [rtype (type-index rid)]
-                             (apply-triggers! conn rid rtype email)))
-                         [(+ threaded (count parent-report-eids))
-                          (reduce #(index-assoc %1 message-id %2)
-                                  thread-index parent-report-eids)])
-                     [threaded thread-index])]
-               {:created created :threaded threaded
-                :max-uid max-uid :thread-index thread-index
-                :type-index type-index}))
-           {:created 0 :threaded 0 :max-uid last-uid
+           (fn [{:keys [created threaded skipped
+                        thread-index type-index]} email]
+             (let [message-id    (:email/message-id email)
+                   eid           (:db/id email)
+                   from-addr     (:email/from-address email)
+                   mb-id         (:email/mailbox email)
+                   ;; Resolve mailbox-email from mailbox-id
+                   mailbox-email (get-in mailbox-map [mb-id :email])
+                   ;; Get per-mailbox roles
+                   roles         (if mailbox-email
+                                   (get-roles (d/db conn) mailbox-email)
+                                   {})
+                   body-text     (or (:email/body-text email)
+                                     (:email/body-text-from-html email))]
+               ;; Skip ignored addresses
+               (if (and from-addr (ignored? roles from-addr))
+                 (do (println (str "  [ignored] " from-addr " — " (:email/subject email)))
+                     {:created created :threaded threaded :skipped (inc skipped)
+                      :thread-index thread-index :type-index type-index})
+                 ;; Process role commands scoped to this mailbox
+                 (let [_ (when (and from-addr body-text mailbox-email)
+                           (apply-role-commands! conn roles mailbox-email
+                                                 from-addr body-text))
+                       ;; 1. Does it trigger a new report?
+                       report-info (detect-report email)
+                       permitted?  (and report-info from-addr
+                                        (can-create-report? roles from-addr report-info))
+                       new-report? (and permitted?
+                                        (not (report-exists? (d/db conn) message-id)))
+                       [created thread-index type-index]
+                       (if new-report?
+                         (do (println (str "  [" (name (:type report-info)) "] "
+                                           (:email/subject email)))
+                             (create-report! conn eid message-id report-info)
+                             (let [report-eid (d/q '[:find ?r .
+                                                     :in $ ?mid
+                                                     :where [?r :report/message-id ?mid]]
+                                                   (d/db conn) message-id)]
+                               [(inc created)
+                                (index-assoc thread-index message-id report-eid)
+                                (assoc type-index report-eid (:type report-info))]))
+                         (do (when (and report-info (not permitted?))
+                               (println (str "  [denied] " from-addr
+                                             " cannot create " (name (:type report-info)))))
+                             [created thread-index type-index]))
+                       ;; 2. Is it a descendant of existing report(s)?
+                       parent-report-eids (find-reports-for-email email thread-index)
+                       [threaded thread-index]
+                       (if (seq parent-report-eids)
+                         (do (doseq [rid parent-report-eids]
+                               (add-descendant! conn rid eid)
+                               (when-let [rtype (type-index rid)]
+                                 (apply-triggers! conn rid rtype email)))
+                             [(+ threaded (count parent-report-eids))
+                              (reduce #(index-assoc %1 message-id %2)
+                                      thread-index parent-report-eids)])
+                         [threaded thread-index])]
+                   {:created created :threaded threaded :skipped skipped
+                    :thread-index thread-index :type-index type-index}))))
+           {:created 0 :threaded 0 :skipped 0
             :thread-index thread-index :type-index type-index}
            sorted)]
-      (when (> max-uid last-uid)
-        (save-last-uid! conn max-uid))
+      (save-last-run! conn (java.util.Date.))
       (println (str "Created " created " report(s), "
-                    "threaded " threaded " email(s). "
-                    "Last UID: " max-uid)))))
+                    "threaded " threaded " email(s), "
+                    "skipped " skipped " ignored.")))))
 
 (defn cmd-list
   "List reports, optionally filtered by type."
@@ -638,6 +860,24 @@
                           (when type-tag (str " " type-tag))
                           (format-extra report)))))))))
 
+(defn cmd-roles
+  "Display roles for each mailbox."
+  [conn mailbox-map]
+  (if (empty? mailbox-map)
+    (println "No mailboxes configured.")
+    (doseq [[mb-id {:keys [email]}] (sort-by key mailbox-map)]
+      (let [roles (get-roles (d/db conn) email)
+            maints (roles-set roles :roles/maintainers)
+            ignored (roles-set roles :roles/ignored)]
+        (println (str "\n" email " (" mb-id ")"))
+        (println (str "  Admin:       " (or (:roles/admin roles) "(none)")))
+        (println (str "  Maintainers: " (if (seq maints)
+                                          (str/join ", " (sort maints))
+                                          "(none)")))
+        (println (str "  Ignored:     " (if (seq ignored)
+                                          (str/join ", " (sort ignored))
+                                          "(none)")))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Main
 ;; ---------------------------------------------------------------------------
@@ -647,34 +887,44 @@
       clean   (remove #{"--all"} args)
       command (or (first clean) "digest")
       db-path (or (System/getenv "BARK_DB") "data/bark-db")
+      ;; Read config.edn for mailbox definitions
+      config  (let [f (clojure.java.io/file "config.edn")]
+                (when (.exists f)
+                  (edn/read-string (slurp f))))
       conn    (d/get-conn db-path report-schema)]
   (try
-    (case command
-      "digest"        (cmd-digest! conn all?)
-      "bugs"          (cmd-list conn :bug)
-      "patches"       (cmd-list conn :patch)
-      "requests"      (cmd-list conn :request)
-      "announcements" (cmd-list conn :announcement)
-      "releases"      (cmd-list conn :release)
-      "changes"       (cmd-list conn :change)
-      "reports"       (cmd-list conn nil)
-      (do (println (str "Unknown command: " command))
-          (println "Usage: bb bark-digest.clj <command> [--all]")
-          (println "")
-          (println "Commands:")
-          (println "  digest        Scan new emails and create reports")
-          (println "  bugs          List bug reports")
-          (println "  patches       List patch reports")
-          (println "  requests      List requests")
-          (println "  announcements List announcements")
-          (println "  releases      List releases")
-          (println "  changes       List changes")
-          (println "  reports       List all reports")
-          (println "")
-          (println "Options:")
-          (println "  --all         Rescan all emails (with digest)")
-          (println "")
-          (println "Environment:")
-          (println "  BARK_DB       db path (default: ./data/bark-db)")))
+    ;; Seed per-mailbox roles from config
+    (when config
+      (ensure-mailbox-roles! conn config))
+    (let [mailbox-map (if config (build-mailbox-map config) {})]
+      (case command
+        "digest"        (cmd-digest! conn mailbox-map all?)
+        "bugs"          (cmd-list conn :bug)
+        "patches"       (cmd-list conn :patch)
+        "requests"      (cmd-list conn :request)
+        "announcements" (cmd-list conn :announcement)
+        "releases"      (cmd-list conn :release)
+        "changes"       (cmd-list conn :change)
+        "reports"       (cmd-list conn nil)
+        "roles"         (cmd-roles conn mailbox-map)
+        (do (println (str "Unknown command: " command))
+            (println "Usage: bb bark-digest.clj <command> [--all]")
+            (println "")
+            (println "Commands:")
+            (println "  digest        Scan new emails and create reports")
+            (println "  bugs          List bug reports")
+            (println "  patches       List patch reports")
+            (println "  requests      List requests")
+            (println "  announcements List announcements")
+            (println "  releases      List releases")
+            (println "  changes       List changes")
+            (println "  reports       List all reports")
+            (println "  roles         Show per-mailbox admins, maintainers, ignored")
+            (println "")
+            (println "Options:")
+            (println "  --all         Rescan all emails (with digest)")
+            (println "")
+            (println "Environment:")
+            (println "  BARK_DB       db path (default: ./data/bark-db)"))))
     (finally
       (d/close conn))))

@@ -1,19 +1,32 @@
-{;; IMAP connection settings
- :imap {:host     "imap.example.com"
-        :port     993
-        :ssl      true
-        :user     "you@example.com"
-        :password "your-password"
-        ;; Which folder to watch
-        :folder   "INBOX"}
+{;; Default admin email — used for any mailbox that doesn't specify its own :admin
+ :admin "admin@example.com"
+
+ ;; IMAP mailboxes to monitor (one or more)
+ :mailboxes [{:host     "imap.example.com"
+              :port     993
+              :ssl      true
+              :user     "imap-login@example.com"
+              :password "secret"
+              :folder   "INBOX"
+              ;; The public email address for this mailbox (mandatory)
+              :email    "bugs@example.com"
+              ;; The mailing list address (optional, for mailing-list-backed mailboxes)
+              :mailing-list-email "bugs-list@example.com"
+              ;; Admin for this mailbox (optional, defaults to top-level :admin)
+              :admin    "lead@example.com"}
+
+             {:host     "imap.other.com"
+              :port     993
+              :ssl      true
+              :user     "patches-login@other.com"
+              :password "secret2"
+              :folder   "INBOX"
+              ;; :user and :email can be the same
+              :email    "patches-login@other.com"}]
 
  ;; Datalevin database path
  :db {:path "data/bark-db"}
 
  ;; Ingest settings
- :ingest {;; :idle for IMAP IDLE push, :poll for periodic polling
-          :mode :idle
-          ;; Poll interval in seconds (only used if :mode is :poll)
-          :poll-interval 60
-          ;; Fetch this many recent messages on first run
+ :ingest {;; Fetch this many recent messages on first run
           :initial-fetch 50}}

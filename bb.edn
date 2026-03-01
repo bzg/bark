@@ -14,4 +14,8 @@
   changes       {:doc  "List changes"
                  :task (shell "bb scripts/bark-digest.clj changes")}
   reports       {:doc  "List all reports"
-                 :task (shell "bb scripts/bark-digest.clj reports")}}}
+                 :task (shell "bb scripts/bark-digest.clj reports")}
+  roles         {:doc  "Show admins, maintainers, and ignored addresses"
+                 :task (shell "bb scripts/bark-digest.clj roles")}
+  validate      {:doc  "Validate config.edn (pass path as arg, default: ./config.edn)"
+                 :task (apply shell "bb scripts/validate-config.clj" *command-line-args*)}}}
