@@ -173,13 +173,18 @@
 ;; Report detection
 ;; ---------------------------------------------------------------------------
 
-(def bug-pattern          #"(?i)^\[BUG(?:\s+([^\]]*))?\]")
-(def patch-subject-pattern #"(?i)^\[PATCH(?:\s+([^\]]*))?\]")
+;; Mailing list managers may prepend "[listname] " or similar bracketed
+;; prefixes to the subject.  The bark-specific tag is always the last
+;; bracketed construct, so we skip zero or more leading "[...] " groups.
+(def ^:private ml-prefix "(?:\\[[^\\]]*\\]\\s*)*")
+
+(def bug-pattern          (re-pattern (str "(?i)^" ml-prefix "\\[BUG(?:\\s+([^\\]]*))?\\]")))
+(def patch-subject-pattern (re-pattern (str "(?i)^" ml-prefix "\\[PATCH(?:\\s+([^\\]]*))?\\]")))
 (def patch-seq-pattern    #"(\d+/\d+)\s*$")
-(def request-pattern      #"(?i)^\[(POLL|FR|FP|RFC|RFE|TASK)\]")
-(def announcement-pattern #"(?i)^\[(ANN|ANNOUNCEMENT)\]")
-(def release-pattern      #"(?i)^\[(REL|RELEASE)(?:\s+([^\]]*))?\]")
-(def change-pattern       #"(?i)^\[(CHG|CHANGE)(?:\s+([^\]]*))?\]")
+(def request-pattern      (re-pattern (str "(?i)^" ml-prefix "\\[(POLL|FR|FP|RFC|RFE|TASK)\\]")))
+(def announcement-pattern (re-pattern (str "(?i)^" ml-prefix "\\[(ANN|ANNOUNCEMENT)\\]")))
+(def release-pattern      (re-pattern (str "(?i)^" ml-prefix "\\[(REL|RELEASE)(?:\\s+([^\\]]*))?\\]")))
+(def change-pattern       (re-pattern (str "(?i)^" ml-prefix "\\[(CHG|CHANGE)(?:\\s+([^\\]]*))?\\]")))
 
 (defn detect-bug [subject]
   (when-let [m (re-find bug-pattern subject)]
