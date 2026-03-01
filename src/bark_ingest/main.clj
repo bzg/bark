@@ -39,26 +39,41 @@
 (defn shutting-down? [] @shutdown?)
 
 ;; ---------------------------------------------------------------------------
-;; Initial fetch
+;; Catch-up fetch: on restart, fetch everything since last stored UID.
+;; On first run (no watermark), fetch the N most recent messages.
 ;; ---------------------------------------------------------------------------
 
-(defn initial-fetch!
-  "Fetch recent messages and store any that aren't already in the database."
-  [imap-conn db-conn mailbox-id folder-name limit]
+(defn catch-up-fetch!
+  "Fetch messages missed while the process was down.
+  - First run (no watermark): fetch the last `initial-limit` messages.
+  - Restart (watermark exists): fetch all messages with UID > watermark."
+  [imap-conn db-conn mailbox-id folder-name initial-limit]
   (when-not (shutting-down?)
-    (log/info "Initial fetch: up to" limit "messages from" folder-name
-              "(" mailbox-id ")")
-    (let [msgs (fetch/messages imap-conn folder-name
-                               {:limit        limit
-                                :attachments? true})]
-      (log/info "Fetched" (count msgs) "messages from IMAP (" mailbox-id ")")
-      (when-not (shutting-down?)
-        (ingest/store-emails! db-conn mailbox-id msgs)
-        ;; Update per-mailbox watermark
-        (when-let [max-uid (some->> msgs (keep :uid) seq (apply max))]
-          (let [current (db/max-imap-uid db-conn mailbox-id)]
-            (when (> max-uid current)
-              (db/save-imap-uid! db-conn mailbox-id max-uid))))))))
+    (let [watermark (db/max-imap-uid db-conn mailbox-id)]
+      (if (zero? watermark)
+        ;; First run: seed the database with recent messages
+        (do (log/info "First run for" mailbox-id
+                      "— fetching last" initial-limit "messages")
+            (let [msgs (fetch/messages imap-conn folder-name
+                                       {:limit        initial-limit
+                                        :attachments? true})]
+              (log/info "Fetched" (count msgs) "messages from IMAP"
+                        "(" mailbox-id ")")
+              (when-not (shutting-down?)
+                (ingest/store-emails! db-conn mailbox-id msgs)
+                (when-let [max-uid (some->> msgs (keep :uid) seq (apply max))]
+                  (db/save-imap-uid! db-conn mailbox-id max-uid)))))
+        ;; Restart: fetch everything since watermark
+        (do (log/info "Resuming" mailbox-id
+                      "— fetching UIDs >" watermark)
+            (let [msgs (fetch/by-uid-range imap-conn folder-name
+                                            (inc watermark) Long/MAX_VALUE)]
+              (log/info "Fetched" (count msgs) "messages since watermark"
+                        "(" mailbox-id ")")
+              (when (and (seq msgs) (not (shutting-down?)))
+                (ingest/store-emails! db-conn mailbox-id msgs)
+                (when-let [max-uid (some->> msgs (keep :uid) seq (apply max))]
+                  (db/save-imap-uid! db-conn mailbox-id max-uid)))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; IDLE mode
@@ -104,8 +119,8 @@
                 "folder:" folder)
       ;; Register connection NOW so shutdown hook can disconnect it
       (swap! imap-conns conj imap-conn)
-      (initial-fetch! imap-conn db-conn mailbox-id folder
-                      (or (:initial-fetch ingest-cfg) 50))
+      (catch-up-fetch! imap-conn db-conn mailbox-id folder
+                       (or (:initial-fetch ingest-cfg) 50))
       (when-not (shutting-down?)
         (log/info "Entering IDLE for" mailbox-id)
         (start-idle! imap-conn db-conn mailbox-id folder)))))
