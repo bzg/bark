@@ -110,13 +110,13 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- get-header
-  "Case-insensitive header lookup from a parsed headers EDN string."
+  "Case-insensitive header lookup. headers-edn can be an EDN string or
+  an already-parsed map."
   [headers-edn header-name]
   (when headers-edn
-    (let [headers (edn/read-string headers-edn)]
-      (some (fn [[k v]]
-              (when (= (str/lower-case k) (str/lower-case header-name)) v))
-            headers))))
+    (let [headers (if (string? headers-edn) (edn/read-string headers-edn) headers-edn)
+          lname   (str/lower-case header-name)]
+      (some (fn [[k v]] (when (= (str/lower-case k) lname) v)) headers))))
 
 (defn- from-mailing-list?
   "True if the email was delivered through a mailing list (has List-Id header)."
@@ -146,41 +146,33 @@
          (map (fn [[_ cmd addrs]]
                 {:command cmd :addresses (parse-addresses addrs)})))))
 
+(def ^:private role-dispatch
+  {"Add admin"         {:requires :admin  :action :set-admin}
+   "Remove admin"      {:requires :admin  :action :noop :msg "cannot remove admin (use Add admin to replace)"}
+   "Remove maintainer" {:requires :admin  :attr :roles/maintainers :action :remove}
+   "Unignore"          {:requires :admin  :attr :roles/ignored     :action :remove}
+   "Add maintainer"    {:requires :maint  :attr :roles/maintainers :action :add}
+   "Ignore"            {:requires :maint  :attr :roles/ignored     :action :add}})
+
 (defn apply-role-commands! [conn roles mailbox-email from-addr body-text]
-  (let [commands (parse-role-commands body-text)
-        is-admin (admin? roles from-addr)
-        is-maint (admin-or-maintainer? roles from-addr)]
+  (let [commands  (parse-role-commands body-text)
+        is-admin  (admin? roles from-addr)
+        is-maint  (admin-or-maintainer? roles from-addr)]
     (doseq [{:keys [command addresses]} commands]
-      (cond
-        (and is-admin (= command "Add admin"))
-        (when-let [new-admin (first addresses)]
-          (d/transact! conn [{:roles/mailbox-email mailbox-email
-                              :roles/admin         new-admin}])
-          (println (str "    → set admin: " new-admin " (for " mailbox-email ")")))
-
-        (and is-admin (= command "Remove admin"))
-        (println "    → cannot remove admin (use Add admin to replace)")
-
-        (and is-admin (= command "Remove maintainer"))
-        (do (remove-role! conn mailbox-email :roles/maintainers addresses)
-            (println (str "    → remove maintainer: " (str/join " " addresses)
-                          " (for " mailbox-email ")")))
-
-        (and is-admin (= command "Unignore"))
-        (do (remove-role! conn mailbox-email :roles/ignored addresses)
-            (println (str "    → unignore: " (str/join " " addresses)
-                          " (for " mailbox-email ")")))
-
-        (and is-maint (= command "Add maintainer"))
-        (do (add-role! conn mailbox-email :roles/maintainers addresses)
-            (println (str "    → add maintainer: " (str/join " " addresses)
-                          " (for " mailbox-email ")")))
-
-        (and is-maint (= command "Ignore"))
-        (do (add-role! conn mailbox-email :roles/ignored addresses)
-            (println (str "    → ignore: " (str/join " " addresses)
-                          " (for " mailbox-email ")")))))))
-
+      (when-let [{:keys [requires action attr msg]} (role-dispatch command)]
+        (when (case requires :admin is-admin :maint is-maint)
+          (case action
+            :set-admin (when-let [new-admin (first addresses)]
+                         (d/transact! conn [{:roles/mailbox-email mailbox-email
+                                             :roles/admin         new-admin}])
+                         (println (str "    → set admin: " new-admin " (for " mailbox-email ")")))
+            :add       (do (add-role! conn mailbox-email attr addresses)
+                           (println (str "    → " (str/lower-case command) ": "
+                                         (str/join " " addresses) " (for " mailbox-email ")")))
+            :remove    (do (remove-role! conn mailbox-email attr addresses)
+                           (println (str "    → " (str/lower-case command) ": "
+                                         (str/join " " addresses) " (for " mailbox-email ")")))
+            :noop      (println (str "    → " msg))))))))
 ;; ---------------------------------------------------------------------------
 ;; Report detection
 ;; ---------------------------------------------------------------------------
@@ -276,26 +268,20 @@
   the list (List-Post header matches :mailing-list-email)."
   [roles from-addr report-info email mailbox-cfg]
   (cond
-    ;; Announcements, releases, changes: admin/maintainer only
     (announcement-types (:type report-info))
     (admin-or-maintainer? roles from-addr)
 
-    ;; Admin/maintainer: always allowed
     (admin-or-maintainer? roles from-addr)
     true
 
-    ;; List-backed mailbox: verify email came through the list
     :else
     (let [ml-email (:mailing-list-email mailbox-cfg)]
-      (if ml-email
-        (let [lp (list-post-address email)]
-          (if (= lp ml-email)
-            true
-            (do (when lp
-                  (println (str "    [list-post mismatch] expected " ml-email " got " lp)))
-                false)))
-        ;; No mailing list configured: anyone can create reports
-        true))))
+      (or (nil? ml-email)
+          (let [lp (list-post-address email)]
+            (when-not (= lp ml-email)
+              (when lp
+                (println (str "    [list-post mismatch] expected " ml-email " got " lp))))
+            (= lp ml-email))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Triggers
@@ -376,26 +362,24 @@
   (let [body-text  (or (:email/body-text email) (:email/body-text-from-html email))
         from-addr  (:email/from-address email)
         result     (detect-triggers report-type body-text)]
-    ;; Votes on POLL requests
     (when (and (= :request report-type) from-addr body-text)
       (apply-vote! conn report-eid from-addr body-text))
-    ;; Standard triggers
     (when result
       (let [eid      (:db/id email)
             current  (d/pull (d/db conn) state-attrs report-eid)
             new-sets (into {} (remove (fn [[k _]] (get current k))) (:set result))
-            new-unsets (into #{} (filter (fn [k] (get current k))) (:unset result))
+            new-unsets (into #{} (filter current) (:unset result))
             set-tx   (when (seq new-sets)
                        [(into {:db/id report-eid} (map (fn [[k _]] [k eid])) new-sets)])
             unset-tx (when (seq new-unsets)
                        (mapv (fn [attr] [:db/retract report-eid attr (ref-eid (get current attr))]) new-unsets))
-            all-tx   (vec (concat set-tx unset-tx))]
+            all-tx   (into (vec set-tx) unset-tx)]
         (when (seq all-tx)
           (d/transact! conn all-tx)
-          (let [labels (concat (map (fn [[k _]] (name k)) new-sets)
-                               (map (fn [k] (str "un-" (name k))) new-unsets))]
-            (println (str "    → " (str/join ", " labels)
-                          " (by " (:email/message-id email) ")"))))))))
+          (println (str "    → "
+                        (str/join ", " (concat (map (comp name key) new-sets)
+                                               (map #(str "un-" (name %)) new-unsets)))
+                        " (by " (:email/message-id email) ")")))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Threading
@@ -603,28 +587,26 @@
                                    (some #(str/starts-with? % "1/") existing-seqs)))))
           ;; Is this a descendant of any of those existing series' patches?
           ancestor? (when restart?
-                      (let [old-patch-mids
-                            (d/q '[:find [?mid ...]
-                                   :in $ [?s ...]
-                                   :where
-                                   [?s :series/patches ?r]
-                                   [?r :report/message-id ?mid]]
-                                 db existing-series)
-                            old-cover-mids
-                            (d/q '[:find [?mid ...]
-                                   :in $ [?s ...]
-                                   :where
-                                   [?s :series/cover-letter ?e]
-                                   [?e :email/message-id ?mid]]
-                                 db existing-series)
-                            all-old-mids (into (set old-patch-mids) old-cover-mids)
+                      (let [old-mids (into
+                                      ;; patch report message-ids
+                                      (set (d/q '[:find [?mid ...]
+                                                  :in $ [?s ...]
+                                                  :where [?s :series/patches ?r]
+                                                         [?r :report/message-id ?mid]]
+                                                db existing-series))
+                                      ;; cover letter email message-ids
+                                      (d/q '[:find [?mid ...]
+                                             :in $ [?s ...]
+                                             :where [?s :series/cover-letter ?e]
+                                                    [?e :email/message-id ?mid]]
+                                           db existing-series))
                             parent-mids (set (keep (fn [rid]
                                                      (d/q '[:find ?mid .
                                                             :in $ ?r
                                                             :where [?r :report/message-id ?mid]]
                                                           db rid))
                                                    parent-report-eids))]
-                        (some all-old-mids parent-mids)))]
+                        (some old-mids parent-mids)))]
       ;; Close old series if this is a restart and a descendant
       (when (and restart? ancestor?)
         (doseq [sid existing-series]
@@ -683,20 +665,21 @@
                                         (can-create-report? roles from-addr report-info
                                                             email mailbox-cfg))
                        new-report? (and permitted? (not (report-exists? (d/db conn) message-id)))
-                       [created thread-index type-index]
+                       [created thread-index type-index report-eid]
                        (if new-report?
                          (do (println (str "  [" (name (:type report-info)) "] " (:email/subject email)))
                              (create-report! conn eid message-id report-info)
                              (when (and (= :release (:type report-info)) (:version report-info))
                                (close-changes-for-release! conn (:version report-info) eid))
-                             (let [report-eid (d/q '[:find ?r . :in $ ?mid :where [?r :report/message-id ?mid]]
-                                                   (d/db conn) message-id)]
+                             (let [rid (d/q '[:find ?r . :in $ ?mid :where [?r :report/message-id ?mid]]
+                                            (d/db conn) message-id)]
                                [(inc created)
-                                (index-assoc thread-index message-id report-eid)
-                                (assoc type-index report-eid (:type report-info))]))
+                                (index-assoc thread-index message-id rid)
+                                (assoc type-index rid (:type report-info))
+                                rid]))
                          (do (when (and report-info (not permitted?))
                                (println (str "  [denied] " from-addr " cannot create " (name (:type report-info)))))
-                             [created thread-index type-index]))
+                             [created thread-index type-index nil]))
                        parent-report-eids (find-reports-for-email email thread-index)
                        [threaded thread-index]
                        (if (seq parent-report-eids)
@@ -706,20 +689,13 @@
                              [(+ threaded (count parent-report-eids))
                               (reduce #(index-assoc %1 message-id %2) thread-index parent-report-eids)])
                          [threaded thread-index])
-                       ;; Link related reports (bi-directional)
-                       _ (when (and new-report? (seq parent-report-eids))
-                           (let [report-eid (d/q '[:find ?r . :in $ ?mid
-                                                   :where [?r :report/message-id ?mid]]
-                                                 (d/db conn) message-id)]
-                             (link-related-reports! conn report-eid parent-report-eids)))
-                       ;; Manage patch series
-                       _ (when (and new-report? (= :patch (:type report-info))
+                       ;; Post-creation: link related reports + manage series
+                       _ (when (and report-eid (seq parent-report-eids))
+                           (link-related-reports! conn report-eid parent-report-eids))
+                       _ (when (and report-eid (= :patch (:type report-info))
                                     (:patch-seq report-info))
-                           (let [report-eid (d/q '[:find ?r . :in $ ?mid
-                                                   :where [?r :report/message-id ?mid]]
-                                                 (d/db conn) message-id)]
-                             (manage-series! conn report-eid eid report-info
-                                             from-addr parent-report-eids)))]
+                           (manage-series! conn report-eid eid report-info
+                                           from-addr parent-report-eids))]
                    {:created created :threaded threaded :skipped skipped
                     :thread-index thread-index :type-index type-index})))))
            {:created 0 :threaded 0 :skipped 0

@@ -174,11 +174,13 @@
 (defn store-emails!
   "Store a batch of parsed emails. Returns the count of newly stored emails."
   [conn mailbox-id msgs]
-  (let [stored (volatile! 0)]
-    (doseq [msg msgs]
-      (try
-        (when (store-email! conn mailbox-id msg)
-          (vswap! stored inc))
-        (catch Exception e
-          (log/error "Failed to store email UID:" (:uid msg) (.getMessage e)))))
-    (log/info "Batch complete. Stored" @stored "of" (count msgs) "emails.")))
+  (let [stored (reduce (fn [n msg]
+                         (try
+                           (if (store-email! conn mailbox-id msg)
+                             (inc n)
+                             n)
+                           (catch Exception e
+                             (log/error "Failed to store email UID:" (:uid msg) (.getMessage e))
+                             n)))
+                       0 msgs)]
+    (log/info "Batch complete. Stored" stored "of" (count msgs) "emails.")))

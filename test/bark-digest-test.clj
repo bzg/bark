@@ -98,12 +98,11 @@
 
 (defn get-series-by-id [db sid]
   (when-let [eid (d/q '[:find ?s . :in $ ?sid :where [?s :series/id ?sid]] db sid)]
-    (let [base (d/pull db
-                       '[:series/id :series/topic :series/sender :series/expected
-                         :series/closed :series/patches
-                         {:series/cover-letter [:email/message-id]}]
-                       eid)]
-      base)))
+    (d/pull db
+            '[:series/id :series/topic :series/sender :series/expected
+              :series/closed :series/patches
+              {:series/cover-letter [:email/message-id]}]
+            eid)))
 
 (defn series-patch-count [db sid]
   (when-let [eid (d/q '[:find ?s . :in $ ?sid :where [?s :series/id ?sid]] db sid)]

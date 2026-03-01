@@ -162,8 +162,9 @@
 
 (defn- get-header
   "Case-insensitive header lookup from a parsed headers map."
-  [headers name]
-  (some (fn [[k v]] (when (= (str/lower-case k) (str/lower-case name)) v)) headers))
+  [headers header-name]
+  (let [lname (str/lower-case header-name)]
+    (some (fn [[k v]] (when (= (str/lower-case k) lname) v)) headers)))
 
 (defn- archived-at [email]
   (when-let [edn-str (:email/headers-edn email)]
@@ -189,11 +190,12 @@
       arch                          (assoc :archived-at arch)
       votes                         (assoc :votes votes)
       series                        (assoc :series
-                                           {:received (count (:series/patches series))
-                                            :expected (:series/expected series)
-                                            :complete (= (count (:series/patches series))
-                                                         (:series/expected series))
-                                            :closed   (some? (:series/closed series))})
+                                           (let [patches (:series/patches series)]
+                                             {:received (count patches)
+                                              :expected (:series/expected series)
+                                              :complete (= (count patches)
+                                                           (:series/expected series))
+                                              :closed   (some? (:series/closed series))}))
       (seq related)                 (assoc :related
                                            (mapv (fn [r]
                                                    {:type       (name (:report/type r))
