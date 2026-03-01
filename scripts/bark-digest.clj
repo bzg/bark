@@ -226,8 +226,56 @@
           (detect-change subject)))))
 
 ;; ---------------------------------------------------------------------------
-;; Threading: ancestor message-ids from an email
+;; Trigger detection: body lines that update report state
 ;; ---------------------------------------------------------------------------
+
+;; Announcement triggers: only "Canceled" → :report/closed
+(def announcement-triggers
+  {:closed #"(?m)^Canceled[.,;:]"})
+
+;; Map from report type to the triggers that apply
+(def triggers-by-type
+  {:announcement announcement-triggers
+   :release      announcement-triggers
+   :change       announcement-triggers})
+
+(defn detect-triggers
+  "Given a report type and email body text, return a map of state updates.
+  E.g. {:report/closed true} if a trigger matches.
+  Values are truthy placeholders — the actual ref will be the email eid."
+  [report-type body-text]
+  (when-let [triggers (triggers-by-type report-type)]
+    (when body-text
+      (into {}
+            (keep (fn [[state-key pattern]]
+                    (when (re-find pattern body-text)
+                      [(keyword "report" (name state-key)) true])))
+            triggers))))
+
+(defn apply-triggers!
+  "Check if an email triggers state changes on a report.
+  If so, transact the updates using the email eid as the ref value."
+  [conn report-eid report-type email]
+  (let [body-text (or (:email/body-text email)
+                      (:email/body-text-from-html email))
+        updates   (detect-triggers report-type body-text)]
+    (when (seq updates)
+      (let [eid (:db/id email)
+            ;; Check which states are not already set
+            current (d/pull (d/db conn)
+                            [:report/acked :report/owned :report/closed
+                             :report/urgent :report/important]
+                            report-eid)
+            new-updates (into {}
+                              (remove (fn [[k _]] (get current k)))
+                              updates)]
+        (when (seq new-updates)
+          ;; Replace truthy placeholders with the email eid
+          (let [tx-data (assoc (into {} (map (fn [[k _]] [k eid])) new-updates)
+                               :db/id report-eid)]
+            (d/transact! conn [tx-data])
+            (println (str "    → " (str/join ", " (map (comp name key) new-updates))
+                          " (by " (:email/message-id email) ")"))))))))
 
 (defn ancestor-mids
   "Return the set of message-ids this email references as ancestors.
@@ -241,10 +289,11 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Thread index: message-id → #{set of report entity ids}
+;; Type index:   report entity id → report type keyword
 ;;
-;; Maps every message-id that belongs to a report (either the originating
-;; email or a descendant) to the set of report entity ids it belongs to.
-;; An email can belong to multiple reports (e.g. a patch reply in a bug thread).
+;; The thread index maps every message-id that belongs to a report
+;; (either the originating email or a descendant) to the set of report
+;; entity ids it belongs to. An email can belong to multiple reports.
 ;; ---------------------------------------------------------------------------
 
 (defn- index-assoc
@@ -253,20 +302,26 @@
   [idx mid rid]
   (update idx mid (fnil conj #{}) rid))
 
-(defn build-thread-index
-  "Build the initial thread index from existing reports and their descendants."
+(defn build-indexes
+  "Build the thread index and type index from existing reports and descendants.
+  Returns {:thread-index {mid → #{rids}} :type-index {rid → type}}."
   [db]
-  (let [reports     (d/q '[:find ?rid ?mid
-                            :where [?rid :report/message-id ?mid]]
+  (let [reports     (d/q '[:find ?rid ?mid ?type
+                            :where
+                            [?rid :report/message-id ?mid]
+                            [?rid :report/type ?type]]
                          db)
         descendants (d/q '[:find ?rid ?dmid
                             :where
                             [?rid :report/descendants ?de]
                             [?de :email/message-id ?dmid]]
-                         db)]
-    (as-> {} idx
-      (reduce (fn [m [rid mid]]  (index-assoc m mid rid))  idx reports)
-      (reduce (fn [m [rid dmid]] (index-assoc m dmid rid)) idx descendants))))
+                         db)
+        thread-idx  (as-> {} idx
+                      (reduce (fn [m [rid mid _]] (index-assoc m mid rid)) idx reports)
+                      (reduce (fn [m [rid dmid]]  (index-assoc m dmid rid)) idx descendants))
+        type-idx    (into {} (map (fn [[rid _ type]] [rid type])) reports)]
+    {:thread-index thread-idx
+     :type-index   type-idx}))
 
 (defn find-reports-for-email
   "Given an email and the thread index, return the set of report entity ids
@@ -412,10 +467,10 @@
                    (do (println (str "Processing emails since UID " last-uid "..."))
                        (emails-since db last-uid)))
         sorted   (sort-by :email/uid emails)
-        init-idx (build-thread-index db)
+        {:keys [thread-index type-index]} (build-indexes db)
         {:keys [created threaded max-uid]}
         (reduce
-         (fn [{:keys [created threaded max-uid thread-index]} email]
+         (fn [{:keys [created threaded max-uid thread-index type-index]} email]
            (let [uid        (:email/uid email)
                  message-id (:email/message-id email)
                  eid        (:db/id email)
@@ -424,7 +479,7 @@
                  report-info (detect-report email)
                  new-report? (and report-info
                                   (not (report-exists? (d/db conn) message-id)))
-                 [created thread-index]
+                 [created thread-index type-index]
                  (if new-report?
                    (do (println (str "  [" (name (:type report-info)) "] "
                                      (:email/subject email)))
@@ -434,24 +489,30 @@
                                                :where [?r :report/message-id ?mid]]
                                              (d/db conn) message-id)]
                          [(inc created)
-                          (index-assoc thread-index message-id report-eid)]))
-                   [created thread-index])
+                          (index-assoc thread-index message-id report-eid)
+                          (assoc type-index report-eid (:type report-info))]))
+                   [created thread-index type-index])
                  ;; 2. Is it a descendant of existing report(s)?
                  parent-report-eids (find-reports-for-email email thread-index)
                  [threaded thread-index]
                  (if (seq parent-report-eids)
                    (do (doseq [rid parent-report-eids]
-                         (add-descendant! conn rid eid))
+                         (add-descendant! conn rid eid)
+                         ;; 3. Check for triggers that update report state
+                         (when-let [rtype (type-index rid)]
+                           (apply-triggers! conn rid rtype email)))
                        [(+ threaded (count parent-report-eids))
                         (reduce #(index-assoc %1 message-id %2)
                                 thread-index parent-report-eids)])
                    [threaded thread-index])]
              {:created created :threaded threaded
-              :max-uid max-uid :thread-index thread-index}))
-         {:created 0 :threaded 0 :max-uid last-uid :thread-index init-idx}
+              :max-uid max-uid :thread-index thread-index
+              :type-index type-index}))
+         {:created 0 :threaded 0 :max-uid last-uid
+          :thread-index thread-index :type-index type-index}
          sorted)]
     (println (str "Found " (count sorted) " email(s). "
-                  "Thread index: " (count init-idx) " entries."))
+                  "Thread index: " (count thread-index) " entries."))
     (when (> max-uid last-uid)
       (save-last-uid! conn max-uid))
     (println (str "Created " created " report(s), "
