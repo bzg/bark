@@ -18,4 +18,6 @@
   roles         {:doc  "Show per-mailbox admins, maintainers, ignored"
                  :task (shell "bb scripts/bark-egest.clj roles")}
   validate      {:doc  "Validate config.edn (pass path as arg, default: ./config.edn)"
-                 :task (apply shell "bb scripts/validate-config.clj" *command-line-args*)}}}
+                 :task (apply shell "bb scripts/validate-config.clj" *command-line-args*)}
+  test          {:doc  "Run bark-digest integration tests"
+                 :task (shell "bb test/bark-digest-test.clj")}}}

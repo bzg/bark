@@ -1,0 +1,252 @@
+#!/usr/bin/env bb
+
+;; test/bark-digest-test.clj — Integration tests for bark-digest.
+;;
+;; Creates a temporary datalevin DB, inserts test emails, runs cmd-digest!,
+;; and verifies reports, triggers, threading, votes, roles, and permissions.
+;;
+;; Usage:
+;;   bb test/bark-digest-test.clj
+;;
+;; Requires: datalevin pod 0.10.5, bark-schema.edn in cwd.
+
+(require '[babashka.pods :as pods]
+         '[clojure.string :as str]
+         '[clojure.edn :as edn]
+         '[clojure.java.io :as io])
+
+(pods/load-pod 'huahaiy/datalevin "0.10.5")
+
+(require '[pod.huahaiy.datalevin :as d])
+
+;; ---------------------------------------------------------------------------
+;; Test harness
+;; ---------------------------------------------------------------------------
+
+(def ^:dynamic *test-counts* (atom {:pass 0 :fail 0}))
+
+(defn assert-test [label pred]
+  (if pred
+    (do (swap! *test-counts* update :pass inc)
+        (println (str "  ✓ " label)))
+    (do (swap! *test-counts* update :fail inc)
+        (println (str "  ✗ FAIL: " label)))))
+
+(defn assert= [label expected actual]
+  (assert-test (str label " — expected: " (pr-str expected) " got: " (pr-str actual))
+               (= expected actual)))
+
+;; ---------------------------------------------------------------------------
+;; Load bark-digest functions (everything except the main block)
+;; ---------------------------------------------------------------------------
+
+;; We load the schema and use the same functions bark-digest uses.
+;; To avoid running its main block, we load only the function defs.
+(def schema (edn/read-string (slurp "bark-schema.edn")))
+
+;; Load bark-digest.clj but strip the main block at the bottom.
+;; The main block starts with (let [args  *command-line-args*
+(let [src       (slurp "scripts/bark-digest.clj")
+      main-idx  (str/last-index-of src "\n(let [args")
+      defs-only (if main-idx (subs src 0 main-idx) src)]
+  (load-string defs-only))
+
+;; ---------------------------------------------------------------------------
+;; Test setup
+;; ---------------------------------------------------------------------------
+
+(defn setup-db!
+  "Create a temp datalevin DB, insert roles and test emails."
+  []
+  (let [db-path (str "/tmp/bark-test-" (System/currentTimeMillis))
+        conn    (d/get-conn db-path schema)]
+    ;; Setup roles: admin and initial empty roles entity
+    (d/transact! conn [{:roles/mailbox-email "inbox@test.org"
+                        :roles/admin         "admin@test.org"}])
+    ;; Insert test emails
+    (let [emails (edn/read-string (slurp "test/emails.edn"))]
+      (doseq [email emails]
+        (d/transact! conn [email])))
+    {:conn conn :db-path db-path}))
+
+(defn teardown! [{:keys [conn db-path]}]
+  (d/close conn)
+  ;; Clean up temp dir
+  (let [dir (io/file db-path)]
+    (when (.exists dir)
+      (doseq [f (reverse (file-seq dir))]
+        (.delete f)))))
+
+(defn get-report [db message-id]
+  (d/pull db
+          '[:report/type :report/version :report/topic
+            :report/patch-seq :report/patch-source :report/message-id
+            :report/acked :report/owned :report/closed
+            :report/urgent :report/important
+            :report/votes-up :report/votes-down :report/voters
+            {:report/descendants [:email/message-id]}
+            {:report/email [:email/subject :email/from-address
+                            :email/headers-edn]}]
+          [:report/message-id message-id]))
+
+(defn report-exists? [db message-id]
+  (some? (d/q '[:find ?r .
+                :in $ ?mid
+                :where [?r :report/message-id ?mid]]
+              db message-id)))
+
+;; ---------------------------------------------------------------------------
+;; Run digest
+;; ---------------------------------------------------------------------------
+
+(def mailbox-map {"test-mb" {:email "inbox@test.org"}})
+
+;; ---------------------------------------------------------------------------
+;; Tests
+;; ---------------------------------------------------------------------------
+
+(defn run-tests []
+  (let [{:keys [conn] :as ctx} (setup-db!)]
+    (try
+      ;; Run digest over all emails
+      (println "\n=== Running cmd-digest! ===\n")
+      (cmd-digest! conn mailbox-map true)
+
+      (let [db (d/db conn)]
+
+        ;; --- Role commands (email 01) ---
+        (println "\n--- Roles ---")
+        (let [roles (d/pull db '[:roles/admin :roles/maintainers :roles/ignored]
+                            [:roles/mailbox-email "inbox@test.org"])]
+          (assert= "Admin is admin@test.org"
+                   "admin@test.org" (:roles/admin roles))
+          (assert-test "maint@test.org is maintainer"
+                       (contains? (set (:roles/maintainers roles)) "maint@test.org"))
+          (assert-test "spam@test.org is ignored"
+                       (contains? (set (:roles/ignored roles)) "spam@test.org")))
+
+        ;; --- Bug 02: full lifecycle ---
+        (println "\n--- Bug 02: [BUG 9.7] lifecycle ---")
+        (let [r (get-report db "<02@test.org>")]
+          (assert= "Type is :bug" :bug (:report/type r))
+          (assert= "Version is 9.7" "9.7" (:report/version r))
+          (assert-test "Acked (Confirmed)" (some? (:report/acked r)))
+          (assert-test "Owned (Handled)" (some? (:report/owned r)))
+          (assert-test "Closed (Fixed)" (some? (:report/closed r)))
+          (assert-test "Urgent unset (Not urgent)" (nil? (:report/urgent r)))
+          (assert= "3 descendants" 3
+                   (count (:report/descendants r))))
+
+        ;; --- Bug 03: mailing list prefix ---
+        (println "\n--- Bug 03: mailing list prefix ---")
+        (let [r (get-report db "<03@test.org>")]
+          (assert= "Type is :bug" :bug (:report/type r))
+          (assert= "No version" nil (:report/version r)))
+
+        ;; --- Patch 07: subject detection ---
+        (println "\n--- Patch 07: [PATCH subject] ---")
+        (let [r (get-report db "<07@test.org>")]
+          (assert= "Type is :patch" :patch (:report/type r))
+          (assert= "Topic" "org-agenda" (:report/topic r))
+          (assert= "Seq" "1/2" (:report/patch-seq r))
+          (assert-test ":subject in patch-source"
+                       (contains? (set (:report/patch-source r)) :subject))
+          (assert-test "Acked (Reviewed)" (some? (:report/acked r)))
+          (assert-test "Closed (Applied)" (some? (:report/closed r))))
+
+        ;; --- Patch 08: attachment detection ---
+        (println "\n--- Patch 08: attachment detection ---")
+        (let [r (get-report db "<08@test.org>")]
+          (assert= "Type is :patch" :patch (:report/type r))
+          (assert-test ":attachment in patch-source"
+                       (contains? (set (:report/patch-source r)) :attachment)))
+
+        ;; --- Patch 09: inline diff detection ---
+        (println "\n--- Patch 09: inline diff detection ---")
+        (let [r (get-report db "<09@test.org>")]
+          (assert= "Type is :patch" :patch (:report/type r))
+          (assert-test ":inline in patch-source"
+                       (contains? (set (:report/patch-source r)) :inline)))
+
+        ;; --- POLL 11: votes ---
+        (println "\n--- POLL 11: votes ---")
+        (let [r (get-report db "<11@test.org>")]
+          (assert= "Type is :request" :request (:report/type r))
+          (assert= "1 vote up" 1 (:report/votes-up r))
+          (assert= "1 vote down" 1 (:report/votes-down r))
+          (assert= "2 voters (dedup)" 2 (count (:report/voters r)))
+          (assert= "3 descendants (incl. dup vote)" 3
+                   (count (:report/descendants r))))
+
+        ;; --- RFC 15: closed ---
+        (println "\n--- RFC 15: request lifecycle ---")
+        (let [r (get-report db "<15@test.org>")]
+          (assert= "Type is :request" :request (:report/type r))
+          (assert-test "Closed (Done)" (some? (:report/closed r))))
+
+        ;; --- ANN 17: canceled ---
+        (println "\n--- ANN 17: announcement canceled ---")
+        (let [r (get-report db "<17@test.org>")]
+          (assert= "Type is :announcement" :announcement (:report/type r))
+          (assert-test "Closed (Canceled)" (some? (:report/closed r))))
+
+        ;; --- ANN 18: denied (user cannot create announcements) ---
+        (println "\n--- ANN 18: permission denied ---")
+        (assert-test "No report for unauthorized announcement"
+                     (not (report-exists? db "<18@test.org>")))
+
+        ;; --- CHG 19 auto-closed by REL 20 ---
+        (println "\n--- CHG 19 / REL 20: release closes change ---")
+        (let [chg (get-report db "<19@test.org>")
+              rel (get-report db "<20@test.org>")]
+          (assert= "CHG type" :change (:report/type chg))
+          (assert= "CHG version" "9.8" (:report/version chg))
+          (assert-test "CHG auto-closed" (some? (:report/closed chg)))
+          (assert= "REL type" :release (:report/type rel))
+          (assert= "REL version" "9.8" (:report/version rel)))
+
+        ;; --- Email 21: ignored ---
+        (println "\n--- Email 21: ignored user ---")
+        (assert-test "No report from ignored user"
+                     (not (report-exists? db "<21@test.org>")))
+
+        ;; --- Bug 23: important flag set then unset ---
+        (println "\n--- Bug 23: important set then unset ---")
+        (let [r (get-report db "<23@test.org>")]
+          (assert= "Type is :bug" :bug (:report/type r))
+          (assert-test "Important unset" (nil? (:report/important r)))
+          (assert= "2 descendants" 2
+                   (count (:report/descendants r))))
+
+        ;; --- TASK 26: synonym for request ---
+        (println "\n--- TASK 26: request synonym ---")
+        (let [r (get-report db "<26@test.org>")]
+          (assert= "Type is :request" :request (:report/type r)))
+
+        ;; --- ANN 27: mailing list prefix + Archived-At header ---
+        (println "\n--- ANN 27: mailing list prefix + headers ---")
+        (let [r (get-report db "<27@test.org>")]
+          (assert= "Type is :announcement" :announcement (:report/type r))
+          (let [edn-str (get-in r [:report/email :email/headers-edn])
+                headers (when edn-str (edn/read-string edn-str))]
+            (assert= "Archived-At header preserved"
+                     "https://list.example.org/archive/27"
+                     (get headers "Archived-At"))))
+
+        ;; --- Patch 28: mailing list prefix + seq + topic ---
+        (println "\n--- Patch 28: mailing list prefix with seq/topic ---")
+        (let [r (get-report db "<28@test.org>")]
+          (assert= "Type is :patch" :patch (:report/type r))
+          (assert= "Topic" "refactor" (:report/topic r))
+          (assert= "Seq" "2/3" (:report/patch-seq r)))
+
+        ;; --- Summary ---
+        (println "\n=== Summary ===")
+        (let [{:keys [pass fail]} @*test-counts*]
+          (println (str pass " passed, " fail " failed"))
+          (when (pos? fail) (System/exit 1))))
+
+      (finally
+        (teardown! ctx)))))
+
+(run-tests)
