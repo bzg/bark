@@ -6,6 +6,7 @@
   "Transform parsed email maps into Datalevin transactions and store them."
   (:require [bark-ingest.db :as db]
             [datalevin.core :as d]
+            [clojure.string :as str]
             [clojure.tools.logging :as log])
   (:import [java.util Date]
            [org.jsoup Jsoup]))
@@ -24,6 +25,16 @@
   (when html
     (.text (Jsoup/parse html))))
 
+(defn- parse-message-ids
+  "Parse a space-separated list of message-ids (as in References header).
+  Returns a set of message-id strings, or nil if empty."
+  [s]
+  (when s
+    (let [ids (->> (re-seq #"<[^>]+>" s)
+                   (map str)
+                   set)]
+      (when (seq ids) ids))))
+
 (defn email->txdata
   "Convert a fetch-imap message map to Datalevin transaction data.
   Returns a map suitable for d/transact!."
@@ -33,6 +44,12 @@
         html-body (:html body)
         text-from-html (strip-tags html-body)
         from      (first (:from msg))
+        headers   (:headers msg)
+        in-reply-to (when-let [v (get headers "In-Reply-To")]
+                      (let [s (str/trim (if (vector? v) (first v) v))]
+                        (when-not (str/blank? s) s)))
+        references  (when-let [v (get headers "References")]
+                      (parse-message-ids (if (vector? v) (str/join " " v) v)))
         attachments (mapv (fn [att]
                             {:attachment/filename     (or (:filename att) "unnamed")
                              :attachment/content-type (:content-type att)
@@ -86,7 +103,14 @@
 
       ;; Attachments (metadata only, no binary data)
       (seq attachments)
-      (assoc :email/attachments attachments))))
+      (assoc :email/attachments attachments)
+
+      ;; Threading headers
+      in-reply-to
+      (assoc :email/in-reply-to in-reply-to)
+
+      references
+      (assoc :email/references references))))
 
 (defn store-email!
   "Store a single parsed email in Datalevin. Skips if UID already exists."
