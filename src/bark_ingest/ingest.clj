@@ -140,28 +140,36 @@
 ;; Store
 ;; ---------------------------------------------------------------------------
 
+(defn- truncate
+  "Truncate string s to at most n characters."
+  [s n]
+  (let [s (or s "")]
+    (subs s 0 (min n (count s)))))
+
 (defn store-email!
   "Store a single parsed email in Datalevin.
-  Skips if uid hash or Message-ID already exists."
+  Skips if uid hash or Message-ID already exists.
+  Returns true if the email was stored, false/nil otherwise."
   [conn mailbox-id msg]
   (let [imap-uid (:uid msg)]
     (cond
       (nil? imap-uid)
-      (log/warn "Skipping email with nil UID")
+      (do (log/warn "Skipping email with nil UID") false)
 
       (db/email-exists? conn (uid-hash mailbox-id imap-uid))
-      (log/debug "Skipping already stored email UID:" imap-uid "(uid-hash)")
+      (do (log/debug "Skipping already stored email UID:" imap-uid "(uid-hash)") false)
 
       (db/message-id-exists? conn (:message-id msg))
-      (log/debug "Skipping already stored email UID:" imap-uid
-                 "Message-ID:" (:message-id msg) "(from another mailbox)")
+      (do (log/debug "Skipping already stored email UID:" imap-uid
+                     "Message-ID:" (:message-id msg) "(from another mailbox)")
+          false)
 
       :else
       (let [txdata (email->txdata mailbox-id msg)]
         (d/transact! conn [txdata])
         (log/info "Stored email UID:" imap-uid
-                  "Subject:" (subs (or (:email/subject txdata) "") 0
-                                   (min 60 (count (or (:email/subject txdata) "")))))))))
+                  "Subject:" (truncate (:email/subject txdata) 60))
+        true))))
 
 (defn store-emails!
   "Store a batch of parsed emails. Returns the count of newly stored emails."
@@ -169,8 +177,8 @@
   (let [stored (volatile! 0)]
     (doseq [msg msgs]
       (try
-        (store-email! conn mailbox-id msg)
-        (vswap! stored inc)
+        (when (store-email! conn mailbox-id msg)
+          (vswap! stored inc))
         (catch Exception e
           (log/error "Failed to store email UID:" (:uid msg) (.getMessage e)))))
     (log/info "Batch complete. Stored" @stored "of" (count msgs) "emails.")))

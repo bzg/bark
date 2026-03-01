@@ -95,12 +95,12 @@
 ;; Formatting helpers
 ;; ---------------------------------------------------------------------------
 
+(def ^:private flag-defs
+  [[:report/acked "A"] [:report/owned "O"] [:report/closed "C"]
+   [:report/urgent "U"] [:report/important "I"]])
+
 (defn- flags-str [report]
-  (str (if (:report/acked report)     "A" "-")
-       (if (:report/owned report)     "O" "-")
-       (if (:report/closed report)    "C" "-")
-       (if (:report/urgent report)    "U" "-")
-       (if (:report/important report) "I" "-")))
+  (apply str (map (fn [[k c]] (if (get report k) c "-")) flag-defs)))
 
 (defn- descendant-count [report]
   (let [d (:report/descendants report)]
@@ -149,20 +149,22 @@
     (get-header (edn/read-string edn-str) "Archived-At")))
 
 (defn- report->map [report]
-  (let [email (:report/email report)]
+  (let [email (:report/email report)
+        arch  (archived-at email)
+        votes (votes-str report)]
     (cond-> {:type    (name (:report/type report))
              :subject (or (:email/subject email) "")
              :from    (or (:email/from-address email) "")
              :date    (format-date (:email/date-sent email))
              :flags   (flags-str report)
              :replies (descendant-count report)}
-      (:report/message-id report)  (assoc :message-id (:report/message-id report))
-      (:report/version report)     (assoc :version (:report/version report))
-      (:report/topic report)       (assoc :topic (:report/topic report))
-      (:report/patch-seq report)   (assoc :patch-seq (:report/patch-seq report))
+      (:report/message-id report)   (assoc :message-id (:report/message-id report))
+      (:report/version report)      (assoc :version (:report/version report))
+      (:report/topic report)        (assoc :topic (:report/topic report))
+      (:report/patch-seq report)    (assoc :patch-seq (:report/patch-seq report))
       (:report/patch-source report) (assoc :patch-source (mapv name (:report/patch-source report)))
-      (archived-at email)           (assoc :archived-at (archived-at email))
-      (votes-str report)            (assoc :votes (votes-str report)))))
+      arch                          (assoc :archived-at arch)
+      votes                         (assoc :votes votes))))
 
 ;; ---------------------------------------------------------------------------
 ;; Display: gum table

@@ -67,13 +67,11 @@
                             :in $ ?mbe
                             :where [?e :roles/mailbox-email ?mbe]]
                           (d/db conn) mb-email)]
-        (if existing
-          (d/transact! conn [{:roles/mailbox-email mb-email
-                              :roles/admin         admin}])
-          (do (d/transact! conn [{:roles/mailbox-email mb-email
-                                  :roles/admin         admin}])
-              (println (str "  Initialized roles for " mb-email
-                            " (admin: " admin ")"))))))))
+        (d/transact! conn [{:roles/mailbox-email mb-email
+                            :roles/admin         admin}])
+        (when-not existing
+          (println (str "  Initialized roles for " mb-email
+                        " (admin: " admin ")")))))))
 
 (defn- roles-set [roles attr]
   (let [v (get roles attr)]
@@ -127,47 +125,36 @@
   (let [commands (parse-role-commands body-text)
         is-admin (admin? roles from-addr)
         is-maint (admin-or-maintainer? roles from-addr)]
-    (reduce
-     (fn [n {:keys [command addresses]}]
-       (let [applied
-             (cond
-               (and is-admin (= command "Add admin"))
-               (when-let [new-admin (first addresses)]
-                 (d/transact! conn [{:roles/mailbox-email mailbox-email
-                                     :roles/admin         new-admin}])
-                 (println (str "    → set admin: " new-admin " (for " mailbox-email ")"))
-                 true)
+    (doseq [{:keys [command addresses]} commands]
+      (cond
+        (and is-admin (= command "Add admin"))
+        (when-let [new-admin (first addresses)]
+          (d/transact! conn [{:roles/mailbox-email mailbox-email
+                              :roles/admin         new-admin}])
+          (println (str "    → set admin: " new-admin " (for " mailbox-email ")")))
 
-               (and is-admin (= command "Remove admin"))
-               (do (println "    → cannot remove admin (use Add admin to replace)") false)
+        (and is-admin (= command "Remove admin"))
+        (println "    → cannot remove admin (use Add admin to replace)")
 
-               (and is-admin (= command "Remove maintainer"))
-               (do (remove-role! conn mailbox-email :roles/maintainers addresses)
-                   (println (str "    → remove maintainer: " (str/join " " addresses)
-                                 " (for " mailbox-email ")"))
-                   true)
+        (and is-admin (= command "Remove maintainer"))
+        (do (remove-role! conn mailbox-email :roles/maintainers addresses)
+            (println (str "    → remove maintainer: " (str/join " " addresses)
+                          " (for " mailbox-email ")")))
 
-               (and is-admin (= command "Unignore"))
-               (do (remove-role! conn mailbox-email :roles/ignored addresses)
-                   (println (str "    → unignore: " (str/join " " addresses)
-                                 " (for " mailbox-email ")"))
-                   true)
+        (and is-admin (= command "Unignore"))
+        (do (remove-role! conn mailbox-email :roles/ignored addresses)
+            (println (str "    → unignore: " (str/join " " addresses)
+                          " (for " mailbox-email ")")))
 
-               (and is-maint (= command "Add maintainer"))
-               (do (add-role! conn mailbox-email :roles/maintainers addresses)
-                   (println (str "    → add maintainer: " (str/join " " addresses)
-                                 " (for " mailbox-email ")"))
-                   true)
+        (and is-maint (= command "Add maintainer"))
+        (do (add-role! conn mailbox-email :roles/maintainers addresses)
+            (println (str "    → add maintainer: " (str/join " " addresses)
+                          " (for " mailbox-email ")")))
 
-               (and is-maint (= command "Ignore"))
-               (do (add-role! conn mailbox-email :roles/ignored addresses)
-                   (println (str "    → ignore: " (str/join " " addresses)
-                                 " (for " mailbox-email ")"))
-                   true)
-
-               :else false)]
-         (if applied (inc n) n)))
-     0 commands)))
+        (and is-maint (= command "Ignore"))
+        (do (add-role! conn mailbox-email :roles/ignored addresses)
+            (println (str "    → ignore: " (str/join " " addresses)
+                          " (for " mailbox-email ")")))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Report detection
@@ -301,12 +288,14 @@
 
 (def report-types-with-priority #{:bug :patch :request})
 
-(def vote-pattern #"(?m)^\s*(?:\+1|1\+)\s*$|(?m)^\s*(?:-1|1-)\s*$")
-(def vote-up-pattern #"(?m)^\s*(?:\+1|1\+)\s*$")
+(def vote-up-pattern   #"(?m)^\s*(?:\+1|1\+)\s*$")
+(def vote-down-pattern #"(?m)^\s*(?:-1|1-)\s*$")
 
 (defn- detect-vote [body-text]
-  (when (and body-text (re-find vote-pattern body-text))
-    (if (re-find vote-up-pattern body-text) :up :down)))
+  (when body-text
+    (cond
+      (re-find vote-up-pattern body-text)   :up
+      (re-find vote-down-pattern body-text) :down)))
 
 (defn apply-vote! [conn report-eid from-addr body-text]
   (when-let [vote (detect-vote body-text)]
@@ -418,7 +407,7 @@
   (d/transact! conn
                [(into {:report/type (:type report-info) :report/email email-eid
                        :report/message-id message-id :report/digested-at (java.util.Date.)}
-                      (filter val)
+                      (remove (comp nil? val))
                       {:report/version (:version report-info) :report/topic (:topic report-info)
                        :report/patch-seq (:patch-seq report-info) :report/patch-source (:patch-source report-info)})]))
 
@@ -473,9 +462,9 @@
                  (do (println (str "  [ignored] " from-addr " — " (:email/subject email)))
                      {:created created :threaded threaded :skipped (inc skipped)
                       :thread-index thread-index :type-index type-index})
-                 (let [_ (when (and from-addr body-text mailbox-email)
-                           (apply-role-commands! conn roles mailbox-email from-addr body-text))
-                       report-info (detect-report email)
+                 (do (when (and from-addr body-text mailbox-email)
+                       (apply-role-commands! conn roles mailbox-email from-addr body-text))
+                   (let [report-info (detect-report email)
                        permitted?  (and report-info from-addr
                                         (can-create-report? roles from-addr report-info))
                        new-report? (and permitted? (not (report-exists? (d/db conn) message-id)))
@@ -503,7 +492,7 @@
                               (reduce #(index-assoc %1 message-id %2) thread-index parent-report-eids)])
                          [threaded thread-index])]
                    {:created created :threaded threaded :skipped skipped
-                    :thread-index thread-index :type-index type-index}))))
+                    :thread-index thread-index :type-index type-index})))))
            {:created 0 :threaded 0 :skipped 0
             :thread-index thread-index :type-index type-index}
            sorted)]
