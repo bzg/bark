@@ -114,7 +114,7 @@
 (def change-pattern
   #"(?i)^\[(CHG|CHANGE)(?:\s+([^\]]*))?\]")
 
-;; --- Detectors (subject-only) ---
+;; --- Detectors ---
 
 (defn detect-bug [subject]
   (when-let [m (re-find bug-pattern subject)]
@@ -146,19 +146,20 @@
   (when (re-find announcement-pattern subject)
     {:type :announcement}))
 
-(defn detect-release [subject]
-  (when-let [m (re-find release-pattern subject)]
+(defn- detect-versioned-tag
+  "Detect a subject tag with an optional version. Returns {:type type} or nil."
+  [pattern type subject]
+  (when-let [m (re-find pattern subject)]
     (let [ver (nth m 2 nil)]
-      (cond-> {:type :release}
+      (cond-> {:type type}
         (and ver (not (str/blank? ver)))
         (assoc :version (str/trim ver))))))
 
+(defn detect-release [subject]
+  (detect-versioned-tag release-pattern :release subject))
+
 (defn detect-change [subject]
-  (when-let [m (re-find change-pattern subject)]
-    (let [ver (nth m 2 nil)]
-      (cond-> {:type :change}
-        (and ver (not (str/blank? ver)))
-        (assoc :version (str/trim ver))))))
+  (detect-versioned-tag change-pattern :change subject))
 
 ;; ---------------------------------------------------------------------------
 ;; Attachment & inline patch detection
@@ -185,6 +186,27 @@
     (>= (count (filter #(re-find % body-text) inline-patch-indicators)) 2)))
 
 ;; ---------------------------------------------------------------------------
+;; Combined patch detection
+;; ---------------------------------------------------------------------------
+
+(defn detect-patch
+  "Detect patch from subject, attachments, and/or inline content.
+  Returns {:type :patch :patch-source #{...} ...} or nil."
+  [subject attachments body-text]
+  (let [from-subject    (detect-patch-subject subject)
+        from-attachment (when (has-patch-attachment? attachments) :attachment)
+        from-inline     (when (has-inline-patch? body-text) :inline)
+        sources         (cond-> #{}
+                          from-subject    (into (:patch-source from-subject))
+                          from-attachment (conj :attachment)
+                          from-inline     (conj :inline))]
+    (when (seq sources)
+      (cond-> {:type         :patch
+               :patch-source sources}
+        (:patch-seq from-subject) (assoc :patch-seq (:patch-seq from-subject))
+        (:topic from-subject)     (assoc :topic (:topic from-subject))))))
+
+;; ---------------------------------------------------------------------------
 ;; Combined report detection
 ;; ---------------------------------------------------------------------------
 
@@ -192,27 +214,16 @@
   "Detect report type from email data. Returns report-info map or nil.
   Priority order: bug > patch > request > announcement > release > change."
   [email]
-  (let [subject     (:email/subject email)
-        attachments (:email/attachments email)
-        body-text   (or (:email/body-text email)
-                        (:email/body-text-from-html email))]
-    (or (detect-bug subject)
-        (let [from-subject    (detect-patch-subject subject)
-              from-attachment (when (has-patch-attachment? attachments) :attachment)
-              from-inline     (when (has-inline-patch? body-text) :inline)
-              sources         (cond-> #{}
-                                from-subject    (into (:patch-source from-subject))
-                                from-attachment (conj :attachment)
-                                from-inline     (conj :inline))]
-          (when (seq sources)
-            (cond-> {:type         :patch
-                     :patch-source sources}
-              (:patch-seq from-subject) (assoc :patch-seq (:patch-seq from-subject))
-              (:topic from-subject)     (assoc :topic (:topic from-subject)))))
-        (detect-request subject)
-        (detect-announcement subject)
-        (detect-release subject)
-        (detect-change subject))))
+  (when-let [subject (:email/subject email)]
+    (let [attachments (:email/attachments email)
+          body-text   (or (:email/body-text email)
+                          (:email/body-text-from-html email))]
+      (or (detect-bug subject)
+          (detect-patch subject attachments body-text)
+          (detect-request subject)
+          (detect-announcement subject)
+          (detect-release subject)
+          (detect-change subject)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Threading: ancestor message-ids from an email
@@ -225,10 +236,8 @@
   (let [irt  (:email/in-reply-to email)
         refs (:email/references email)]
     (cond-> #{}
-      irt               (conj irt)
-      (string? refs)    (conj refs)
-      (set? refs)       (into refs)
-      (sequential? refs) (into refs))))
+      irt       (conj irt)
+      (coll? refs) (into refs))))
 
 ;; ---------------------------------------------------------------------------
 ;; Thread index: message-id → report entity id
@@ -240,29 +249,23 @@
 (defn build-thread-index
   "Build the initial thread index from existing reports and their descendants."
   [db]
-  (let [;; Get report message-ids and their entity ids
-        reports (d/q '[:find ?rid ?mid
-                       :where
-                       [?rid :report/message-id ?mid]]
-                     db)
-        ;; Get descendants: for each report, find message-ids of descendant emails
+  (let [reports     (d/q '[:find ?rid ?mid
+                            :where [?rid :report/message-id ?mid]]
+                         db)
         descendants (d/q '[:find ?rid ?dmid
-                           :where
-                           [?rid :report/descendants ?de]
-                           [?de :email/message-id ?dmid]]
+                            :where
+                            [?rid :report/descendants ?de]
+                            [?de :email/message-id ?dmid]]
                          db)]
-    (merge
-     ;; report originating message-id → report eid
-     (into {} (map (fn [[rid mid]] [mid rid]) reports))
-     ;; descendant message-id → report eid
-     (into {} (map (fn [[rid dmid]] [dmid rid]) descendants)))))
+    (into (into {} (map (fn [[rid mid]] [mid rid])) reports)
+          (map (fn [[rid dmid]] [dmid rid]))
+          descendants)))
 
 (defn find-report-for-email
   "Given an email and the thread index, return the report entity id
   this email is a descendant of, or nil."
   [email thread-index]
-  (let [ancestors (ancestor-mids email)]
-    (some thread-index ancestors)))
+  (some thread-index (ancestor-mids email)))
 
 ;; ---------------------------------------------------------------------------
 ;; Database operations
@@ -309,18 +312,15 @@
 
 (defn create-report! [conn email-eid message-id report-info]
   (d/transact! conn
-               [(cond-> {:report/type        (:type report-info)
-                         :report/email       email-eid
-                         :report/message-id  message-id
-                         :report/digested-at (java.util.Date.)}
-                  (:version report-info)
-                  (assoc :report/version (:version report-info))
-                  (:topic report-info)
-                  (assoc :report/topic (:topic report-info))
-                  (:patch-seq report-info)
-                  (assoc :report/patch-seq (:patch-seq report-info))
-                  (:patch-source report-info)
-                  (assoc :report/patch-source (:patch-source report-info)))]))
+               [(into {:report/type        (:type report-info)
+                       :report/email       email-eid
+                       :report/message-id  message-id
+                       :report/digested-at (java.util.Date.)}
+                      (filter val)
+                      {:report/version      (:version report-info)
+                       :report/topic        (:topic report-info)
+                       :report/patch-seq    (:patch-seq report-info)
+                       :report/patch-source (:patch-source report-info)})]))
 
 (defn add-descendant! [conn report-eid email-eid]
   (d/transact! conn [[:db/add report-eid :report/descendants email-eid]]))
@@ -367,33 +367,26 @@
 
 (defn- descendant-count [report]
   (let [d (:report/descendants report)]
-    (cond
-      (nil? d)        0
-      (map? d)        1
-      (sequential? d) (count d)
-      :else           0)))
+    (if (coll? d) (count d) 0)))
 
 (defn- format-report-line [report]
   (let [email    (:report/email report)
-        subject  (:email/subject email)
-        from     (:email/from-address email)
-        date     (str (:email/date-sent email))
-        date-str (subs date 0 (min 19 (count date)))
-        desc-n   (descendant-count report)]
+        date     (str (or (:email/date-sent email) ""))
+        date-str (if (>= (count date) 19) (subs date 0 19) date)]
     (format "  %-5s %3d %-25s %s  %s"
-            (format-flags report) desc-n from date-str subject)))
+            (format-flags report)
+            (descendant-count report)
+            (or (:email/from-address email) "?")
+            date-str
+            (or (:email/subject email) "(no subject)"))))
 
 (defn- format-extra [report]
-  (let [version (:report/version report)
-        topic   (:report/topic report)
-        seq-str (:report/patch-seq report)
-        sources (:report/patch-source report)
-        parts   (remove nil?
-                        [(when version (str "(" version ")"))
-                         (when topic (str "[" topic "]"))
-                         (when seq-str (str "(" seq-str ")"))
-                         (when sources
-                           (str "{" (str/join "," (map name sources)) "}"))])]
+  (let [parts (remove nil?
+                      [(when-let [v (:report/version report)]   (str "(" v ")"))
+                       (when-let [t (:report/topic report)]     (str "[" t "]"))
+                       (when-let [s (:report/patch-seq report)] (str "(" s ")"))
+                       (when-let [sources (:report/patch-source report)]
+                         (str "{" (str/join "," (map name sources)) "}"))])]
     (when (seq parts)
       (str " " (str/join " " parts)))))
 
@@ -411,48 +404,50 @@
                    (do (println (str "Processing emails since UID " last-uid "..."))
                        (emails-since db last-uid)))
         sorted   (sort-by :email/uid emails)
-        ;; Build thread index from existing reports
-        thread-index (atom (build-thread-index db))
-        created  (atom 0)
-        threaded (atom 0)
-        max-uid  (atom last-uid)]
-    (println (str "Found " (count sorted) " email(s) to scan."
-                  " Thread index: " (count @thread-index) " entries."))
-    (doseq [email sorted]
-      (let [uid        (:email/uid email)
-            message-id (:email/message-id email)
-            eid        (:db/id email)]
-        (when (> uid @max-uid)
-          (reset! max-uid uid))
-        ;; 1. Does it trigger a new report?
-        (let [report-info (detect-report email)
-              new-report? (and report-info
-                               (not (report-exists? (d/db conn) message-id)))]
-          (when new-report?
-            (println (str "  [" (name (:type report-info)) "] "
-                          (:email/subject email)))
-            (create-report! conn eid message-id report-info)
-            ;; Find the report eid we just created
-            (let [report-eid (d/q '[:find ?r .
-                                    :in $ ?mid
-                                    :where [?r :report/message-id ?mid]]
-                                  (d/db conn) message-id)]
-              ;; Register in thread index
-              (swap! thread-index assoc message-id report-eid))
-            (swap! created inc))
-          ;; 2. Is it a descendant of an existing report?
-          ;; (can be both: trigger a new report AND be a descendant of another)
-          (when-let [parent-report-eid (find-report-for-email email @thread-index)]
-            (add-descendant! conn parent-report-eid eid)
-            ;; Register this email in the thread index so its replies
-            ;; will also be linked to the same report
-            (swap! thread-index assoc message-id parent-report-eid)
-            (swap! threaded inc)))))
-    (when (> @max-uid last-uid)
-      (save-last-uid! conn @max-uid))
-    (println (str "Created " @created " report(s), "
-                  "threaded " @threaded " email(s). "
-                  "Last UID: " @max-uid))))
+        init-idx (build-thread-index db)
+        {:keys [created threaded max-uid]}
+        (reduce
+         (fn [{:keys [created threaded max-uid thread-index] :as acc} email]
+           (let [uid        (:email/uid email)
+                 message-id (:email/message-id email)
+                 eid        (:db/id email)
+                 max-uid    (max max-uid uid)
+                 ;; 1. Does it trigger a new report?
+                 report-info (detect-report email)
+                 new-report? (and report-info
+                                  (not (report-exists? (d/db conn) message-id)))
+                 ;; Create report and update index
+                 [created thread-index]
+                 (if new-report?
+                   (do (println (str "  [" (name (:type report-info)) "] "
+                                     (:email/subject email)))
+                       (create-report! conn eid message-id report-info)
+                       (let [report-eid (d/q '[:find ?r .
+                                               :in $ ?mid
+                                               :where [?r :report/message-id ?mid]]
+                                             (d/db conn) message-id)]
+                         [(inc created)
+                          (assoc thread-index message-id report-eid)]))
+                   [created thread-index])
+                 ;; 2. Is it a descendant of an existing report?
+                 parent-report-eid (find-report-for-email email thread-index)
+                 [threaded thread-index]
+                 (if parent-report-eid
+                   (do (add-descendant! conn parent-report-eid eid)
+                       [(inc threaded)
+                        (assoc thread-index message-id parent-report-eid)])
+                   [threaded thread-index])]
+             {:created created :threaded threaded
+              :max-uid max-uid :thread-index thread-index}))
+         {:created 0 :threaded 0 :max-uid last-uid :thread-index init-idx}
+         sorted)]
+    (println (str "Found " (count sorted) " email(s). "
+                  "Thread index: " (count init-idx) " entries."))
+    (when (> max-uid last-uid)
+      (save-last-uid! conn max-uid))
+    (println (str "Created " created " report(s), "
+                  "threaded " threaded " email(s). "
+                  "Last UID: " max-uid))))
 
 (defn cmd-list
   "List reports, optionally filtered by type."
