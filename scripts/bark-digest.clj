@@ -238,35 +238,55 @@
   [& words]
   (re-pattern (str "(?m)^(" (str/join "|" words) ")[.,;:]")))
 
+(defn- match-triggers
+  "Match a map of {key pattern} against body-text.
+  Returns a map of {qualified-attr true} for each match."
+  [triggers body-text]
+  (into {}
+        (keep (fn [[state-key pattern]]
+                (when (re-find pattern body-text)
+                  [(keyword "report" (name state-key)) true])))
+        triggers))
+
+(defn- match-unset-triggers
+  "Match a map of {key pattern} against body-text.
+  Returns a set of qualified attrs for each match."
+  [triggers body-text]
+  (into #{}
+        (keep (fn [[state-key pattern]]
+                (when (re-find pattern body-text)
+                  (keyword "report" (name state-key)))))
+        triggers))
+
 ;; --- Set triggers: match → set :report/<state> to email ref ---
 
 (def bug-triggers
-  {:acked (trigger-pattern "Approved" "Confirmed")
-   :owned (trigger-pattern "Handled")
+  {:acked  (trigger-pattern "Approved" "Confirmed")
+   :owned  (trigger-pattern "Handled")
    :closed (trigger-pattern "Canceled" "Fixed")})
 
 (def patch-triggers
-  {:acked (trigger-pattern "Approved" "Reviewed")
-   :owned (trigger-pattern "Handled")
+  {:acked  (trigger-pattern "Approved" "Reviewed")
+   :owned  (trigger-pattern "Handled")
    :closed (trigger-pattern "Canceled" "Applied")})
 
 (def request-triggers
-  {:acked (trigger-pattern "Approved")
-   :owned (trigger-pattern "Handled")
+  {:acked  (trigger-pattern "Approved")
+   :owned  (trigger-pattern "Handled")
    :closed (trigger-pattern "Canceled" "Done" "Closed")})
 
 (def announcement-triggers
   {:closed (trigger-pattern "Canceled")})
 
 ;; --- Unset triggers: match → retract :report/<state> ---
+;; "Not urgent" is anchored to ^, so it cannot match "Urgent" alone.
 
 (def report-unset-triggers
-  {:urgent    (trigger-pattern "Not Urgent")
-   :important (trigger-pattern "Unimportant")})
+  {:urgent    (trigger-pattern "Not urgent")
+   :important (trigger-pattern "Not important")})
 
 ;; --- Priority triggers: match → set :report/<state> to email ref ---
-;; These apply to reports (bug, patch, request) only.
-;; "Not Urgent" must be checked before "Urgent" to avoid false match.
+;; Apply to reports (bug, patch, request) only.
 
 (def report-priority-triggers
   {:urgent    (trigger-pattern "Urgent")
@@ -292,36 +312,28 @@
   and :unset attrs should be retracted."
   [report-type body-text]
   (when body-text
-    (let [set-triggers (set-triggers-by-type report-type)
-          ;; Detect state-setting triggers
-          sets (when set-triggers
-                 (into {}
-                       (keep (fn [[state-key pattern]]
-                               (when (re-find pattern body-text)
-                                 [(keyword "report" (name state-key)) true])))
-                       set-triggers))
-          ;; Detect priority triggers (reports only)
-          priority-sets (when (report-types-with-priority report-type)
-                          (into {}
-                                (keep (fn [[state-key pattern]]
-                                        (when (re-find pattern body-text)
-                                          [(keyword "report" (name state-key)) true])))
-                                report-priority-triggers))
-          ;; Detect unset triggers (reports only)
-          ;; Check unset BEFORE merging priority sets, since "Not Urgent"
-          ;; would also match "Urgent" — unset takes precedence.
-          unsets (when (report-types-with-priority report-type)
-                  (into #{}
-                        (keep (fn [[state-key pattern]]
-                                (when (re-find pattern body-text)
-                                  (keyword "report" (name state-key)))))
-                        report-unset-triggers))
-          ;; Merge sets, removing any that are also in unsets
+    (let [sets     (when-let [trigs (set-triggers-by-type report-type)]
+                     (match-triggers trigs body-text))
+          priority (when (report-types-with-priority report-type)
+                     (match-triggers report-priority-triggers body-text))
+          unsets   (when (report-types-with-priority report-type)
+                     (match-unset-triggers report-unset-triggers body-text))
+          ;; Unset wins over set when both match (e.g. body has both
+          ;; "Not urgent." and "Urgent." — only the unset applies)
           all-sets (into {} (remove (fn [[k _]] (contains? unsets k)))
-                         (merge sets priority-sets))]
+                         (merge sets priority))]
       (when (or (seq all-sets) (seq unsets))
         {:set   all-sets
          :unset unsets}))))
+
+(defn- ref-eid
+  "Extract entity id from a pulled ref value (could be {:db/id N} or N)."
+  [v]
+  (if (map? v) (:db/id v) v))
+
+(def state-attrs
+  [:report/acked :report/owned :report/closed
+   :report/urgent :report/important])
 
 (defn apply-triggers!
   "Check if an email triggers state changes on a report.
@@ -332,10 +344,7 @@
         result    (detect-triggers report-type body-text)]
     (when result
       (let [eid     (:db/id email)
-            current (d/pull (d/db conn)
-                            [:report/acked :report/owned :report/closed
-                             :report/urgent :report/important]
-                            report-eid)
+            current (d/pull (d/db conn) state-attrs report-eid)
             ;; Only set attrs that are not already set
             new-sets (into {}
                           (remove (fn [[k _]] (get current k)))
@@ -345,15 +354,15 @@
                             (filter (fn [k] (get current k)))
                             (:unset result))
             set-tx   (when (seq new-sets)
-                       [(assoc (into {} (map (fn [[k _]] [k eid])) new-sets)
-                               :db/id report-eid)])
+                       [(into {:db/id report-eid}
+                              (map (fn [[k _]] [k eid]))
+                              new-sets)])
             unset-tx (when (seq new-unsets)
                        (mapv (fn [attr]
-                               (let [ref-val (get current attr)
-                                     ref-eid (if (map? ref-val) (:db/id ref-val) ref-val)]
-                                 [:db/retract report-eid attr ref-eid]))
+                               [:db/retract report-eid attr
+                                (ref-eid (get current attr))])
                              new-unsets))
-            all-tx   (into (or set-tx []) unset-tx)]
+            all-tx   (vec (concat set-tx unset-tx))]
         (when (seq all-tx)
           (d/transact! conn all-tx)
           (let [labels (concat
@@ -361,6 +370,10 @@
                         (map (fn [k] (str "un-" (name k))) new-unsets))]
             (println (str "    → " (str/join ", " labels)
                           " (by " (:email/message-id email) ")"))))))))
+
+;; ---------------------------------------------------------------------------
+;; Threading: ancestor message-ids from an email
+;; ---------------------------------------------------------------------------
 
 (defn ancestor-mids
   "Return the set of message-ids this email references as ancestors.
@@ -431,7 +444,7 @@
 (def email-pull-pattern
   '[:db/id :email/uid :email/subject :email/message-id
     :email/in-reply-to :email/references
-    :email/date-sent
+    :email/from-address :email/date-sent
     :email/body-text :email/body-text-from-html
     {:email/attachments [:attachment/filename
                          :attachment/content-type]}])
@@ -517,15 +530,17 @@
   (let [d (:report/descendants report)]
     (if (coll? d) (count d) 0)))
 
+(defn- format-date [date]
+  (let [s (str (or date ""))]
+    (subs s 0 (min 16 (count s)))))
+
 (defn- format-report-line [report]
-  (let [email    (:report/email report)
-        date     (str (or (:email/date-sent email) ""))
-        date-str (if (>= (count date) 19) (subs date 0 19) date)]
+  (let [email (:report/email report)]
     (format "  %-5s %3d %-25s %s  %s"
             (format-flags report)
             (descendant-count report)
             (or (:email/from-address email) "?")
-            date-str
+            (format-date (:email/date-sent email))
             (or (:email/subject email) "(no subject)"))))
 
 (defn- format-extra [report]
@@ -534,7 +549,7 @@
                        (when-let [t (:report/topic report)]     (str "[" t "]"))
                        (when-let [s (:report/patch-seq report)] (str "(" s ")"))
                        (when-let [sources (:report/patch-source report)]
-                         (str "{" (str/join "," (map name sources)) "}"))])]
+                         (str "src:" (str/join "," (map name sources))))])]
     (when (seq parts)
       (str " " (str/join " " parts)))))
 
@@ -552,57 +567,57 @@
                    (do (println (str "Processing emails since UID " last-uid "..."))
                        (emails-since db last-uid)))
         sorted   (sort-by :email/uid emails)
-        {:keys [thread-index type-index]} (build-indexes db)
-        {:keys [created threaded max-uid]}
-        (reduce
-         (fn [{:keys [created threaded max-uid thread-index type-index]} email]
-           (let [uid        (:email/uid email)
-                 message-id (:email/message-id email)
-                 eid        (:db/id email)
-                 max-uid    (max max-uid uid)
-                 ;; 1. Does it trigger a new report?
-                 report-info (detect-report email)
-                 new-report? (and report-info
-                                  (not (report-exists? (d/db conn) message-id)))
-                 [created thread-index type-index]
-                 (if new-report?
-                   (do (println (str "  [" (name (:type report-info)) "] "
-                                     (:email/subject email)))
-                       (create-report! conn eid message-id report-info)
-                       (let [report-eid (d/q '[:find ?r .
-                                               :in $ ?mid
-                                               :where [?r :report/message-id ?mid]]
-                                             (d/db conn) message-id)]
-                         [(inc created)
-                          (index-assoc thread-index message-id report-eid)
-                          (assoc type-index report-eid (:type report-info))]))
-                   [created thread-index type-index])
-                 ;; 2. Is it a descendant of existing report(s)?
-                 parent-report-eids (find-reports-for-email email thread-index)
-                 [threaded thread-index]
-                 (if (seq parent-report-eids)
-                   (do (doseq [rid parent-report-eids]
-                         (add-descendant! conn rid eid)
-                         ;; 3. Check for triggers that update report state
-                         (when-let [rtype (type-index rid)]
-                           (apply-triggers! conn rid rtype email)))
-                       [(+ threaded (count parent-report-eids))
-                        (reduce #(index-assoc %1 message-id %2)
-                                thread-index parent-report-eids)])
-                   [threaded thread-index])]
-             {:created created :threaded threaded
-              :max-uid max-uid :thread-index thread-index
-              :type-index type-index}))
-         {:created 0 :threaded 0 :max-uid last-uid
-          :thread-index thread-index :type-index type-index}
-         sorted)]
-    (println (str "Found " (count sorted) " email(s). "
+        {:keys [thread-index type-index]} (build-indexes db)]
+    (println (str "Found " (count sorted) " email(s) to scan. "
                   "Thread index: " (count thread-index) " entries."))
-    (when (> max-uid last-uid)
-      (save-last-uid! conn max-uid))
-    (println (str "Created " created " report(s), "
-                  "threaded " threaded " email(s). "
-                  "Last UID: " max-uid))))
+    (let [{:keys [created threaded max-uid]}
+          (reduce
+           (fn [{:keys [created threaded max-uid thread-index type-index]} email]
+             (let [uid        (:email/uid email)
+                   message-id (:email/message-id email)
+                   eid        (:db/id email)
+                   max-uid    (max max-uid uid)
+                   ;; 1. Does it trigger a new report?
+                   report-info (detect-report email)
+                   new-report? (and report-info
+                                    (not (report-exists? (d/db conn) message-id)))
+                   [created thread-index type-index]
+                   (if new-report?
+                     (do (println (str "  [" (name (:type report-info)) "] "
+                                       (:email/subject email)))
+                         (create-report! conn eid message-id report-info)
+                         (let [report-eid (d/q '[:find ?r .
+                                                 :in $ ?mid
+                                                 :where [?r :report/message-id ?mid]]
+                                               (d/db conn) message-id)]
+                           [(inc created)
+                            (index-assoc thread-index message-id report-eid)
+                            (assoc type-index report-eid (:type report-info))]))
+                     [created thread-index type-index])
+                   ;; 2. Is it a descendant of existing report(s)?
+                   parent-report-eids (find-reports-for-email email thread-index)
+                   [threaded thread-index]
+                   (if (seq parent-report-eids)
+                     (do (doseq [rid parent-report-eids]
+                           (add-descendant! conn rid eid)
+                           ;; 3. Check for triggers that update report state
+                           (when-let [rtype (type-index rid)]
+                             (apply-triggers! conn rid rtype email)))
+                         [(+ threaded (count parent-report-eids))
+                          (reduce #(index-assoc %1 message-id %2)
+                                  thread-index parent-report-eids)])
+                     [threaded thread-index])]
+               {:created created :threaded threaded
+                :max-uid max-uid :thread-index thread-index
+                :type-index type-index}))
+           {:created 0 :threaded 0 :max-uid last-uid
+            :thread-index thread-index :type-index type-index}
+           sorted)]
+      (when (> max-uid last-uid)
+        (save-last-uid! conn max-uid))
+      (println (str "Created " created " report(s), "
+                    "threaded " threaded " email(s). "
+                    "Last UID: " max-uid)))))
 
 (defn cmd-list
   "List reports, optionally filtered by type."
