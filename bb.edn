@@ -2,4 +2,6 @@
  {digest {:doc  "Digest emails into reports (use --all to rescan everything)"
           :task (apply shell "bb scripts/bark-digest.clj digest" *command-line-args*)}
   bugs   {:doc  "List all bug reports"
-          :task (shell "bb scripts/bark-digest.clj bugs")}}}
+          :task (shell "bb scripts/bark-digest.clj bugs")}
+  patches   {:doc  "List all patches"
+             :task (shell "bb scripts/bark-digest.clj patches")}}}
