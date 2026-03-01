@@ -398,4 +398,72 @@
   :email/date-sent  #inst "2026-01-12T10:00:00"
   :email/ingested-at #inst "2026-01-12T10:00:00"
   :email/body-text  "Refactor patch.\n"}
+
+ ;; =========================================================================
+ ;; 29 — Role command sent via mailing list (has List-Id → ignored)
+ ;; =========================================================================
+ {:email/uid        "uid-29"
+  :email/imap-uid   29
+  :email/mailbox    "test-mb"
+  :email/message-id "<29@test.org>"
+  :email/subject    "Role change"
+  :email/from-address "admin@test.org"
+  :email/date-sent  #inst "2026-01-13T10:00:00"
+  :email/ingested-at #inst "2026-01-13T10:00:00"
+  :email/body-text  "Add maintainer: evil@hacker.org\n"
+  :email/headers-edn "{\"List-Id\" \"<emacs-orgmode.gnu.org>\"}"}
+
+ ;; =========================================================================
+ ;; 30 — Bug on list-backed mailbox, correct List-Post (allowed)
+ ;; =========================================================================
+ {:email/uid        "uid-30"
+  :email/imap-uid   30
+  :email/mailbox    "list-mb"
+  :email/message-id "<30@test.org>"
+  :email/subject    "[BUG] List bug via list"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-14T10:00:00"
+  :email/ingested-at #inst "2026-01-14T10:00:00"
+  :email/body-text  "Bug sent through the list.\n"
+  :email/headers-edn "{\"List-Post\" \"<mailto:list@test.org>\", \"List-Id\" \"<list.test.org>\"}"}
+
+ ;; =========================================================================
+ ;; 31 — Bug on list-backed mailbox, no List-Post (denied)
+ ;; =========================================================================
+ {:email/uid        "uid-31"
+  :email/imap-uid   31
+  :email/mailbox    "list-mb"
+  :email/message-id "<31@test.org>"
+  :email/subject    "[BUG] Direct bug bypassing list"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-14T11:00:00"
+  :email/ingested-at #inst "2026-01-14T11:00:00"
+  :email/body-text  "Bug sent directly, no List-Post.\n"}
+
+ ;; =========================================================================
+ ;; 32 — Bug on list-backed mailbox, wrong List-Post (denied)
+ ;; =========================================================================
+ {:email/uid        "uid-32"
+  :email/imap-uid   32
+  :email/mailbox    "list-mb"
+  :email/message-id "<32@test.org>"
+  :email/subject    "[BUG] Bug via wrong list"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-14T12:00:00"
+  :email/ingested-at #inst "2026-01-14T12:00:00"
+  :email/body-text  "Bug from another list.\n"
+  :email/headers-edn "{\"List-Post\" \"<mailto:other@elsewhere.org>\", \"List-Id\" \"<other.elsewhere.org>\"}"}
+
+ ;; =========================================================================
+ ;; 33 — Bug on list-backed mailbox from admin, no List-Post (allowed)
+ ;; =========================================================================
+ {:email/uid        "uid-33"
+  :email/imap-uid   33
+  :email/mailbox    "list-mb"
+  :email/message-id "<33@test.org>"
+  :email/subject    "[BUG] Admin direct bug"
+  :email/from-address "admin@test.org"
+  :email/date-sent  #inst "2026-01-14T13:00:00"
+  :email/ingested-at #inst "2026-01-14T13:00:00"
+  :email/body-text  "Admin can bypass list check.\n"}
 ]

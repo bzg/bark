@@ -60,8 +60,11 @@
   []
   (let [db-path (str "/tmp/bark-test-" (System/currentTimeMillis))
         conn    (d/get-conn db-path schema)]
-    ;; Setup roles: admin and initial empty roles entity
+    ;; Setup roles for test-mb
     (d/transact! conn [{:roles/mailbox-email "inbox@test.org"
+                        :roles/admin         "admin@test.org"}])
+    ;; Setup roles for list-mb (list-backed mailbox)
+    (d/transact! conn [{:roles/mailbox-email "list-inbox@test.org"
                         :roles/admin         "admin@test.org"}])
     ;; Insert test emails
     (let [emails (edn/read-string (slurp "test/emails.edn"))]
@@ -99,7 +102,9 @@
 ;; Run digest
 ;; ---------------------------------------------------------------------------
 
-(def mailbox-map {"test-mb" {:email "inbox@test.org"}})
+(def mailbox-map {"test-mb" {:email "inbox@test.org"}
+                  "list-mb" {:email              "list-inbox@test.org"
+                             :mailing-list-email "list@test.org"}})
 
 ;; ---------------------------------------------------------------------------
 ;; Tests
@@ -239,6 +244,34 @@
           (assert= "Type is :patch" :patch (:report/type r))
           (assert= "Topic" "refactor" (:report/topic r))
           (assert= "Seq" "2/3" (:report/patch-seq r)))
+
+        ;; --- Email 29: role command via mailing list (List-Id blocks it) ---
+        (println "\n--- Email 29: role command via mailing list ---")
+        (let [roles (d/pull db '[:roles/maintainers]
+                            [:roles/mailbox-email "inbox@test.org"])]
+          (assert-test "evil@hacker.org NOT added as maintainer"
+                       (not (contains? (set (:roles/maintainers roles))
+                                       "evil@hacker.org"))))
+
+        ;; --- Email 30: bug via list with correct List-Post (allowed) ---
+        (println "\n--- Email 30: bug via list with correct List-Post ---")
+        (let [r (get-report db "<30@test.org>")]
+          (assert= "Type is :bug" :bug (:report/type r)))
+
+        ;; --- Email 31: bug direct to list mailbox, no List-Post (denied) ---
+        (println "\n--- Email 31: bug bypassing list (no List-Post) ---")
+        (assert-test "No report for direct email to list mailbox"
+                     (not (report-exists? db "<31@test.org>")))
+
+        ;; --- Email 32: bug via wrong list (denied) ---
+        (println "\n--- Email 32: bug via wrong List-Post ---")
+        (assert-test "No report for wrong List-Post"
+                     (not (report-exists? db "<32@test.org>")))
+
+        ;; --- Email 33: admin direct to list mailbox (allowed, admin bypass) ---
+        (println "\n--- Email 33: admin bypasses List-Post check ---")
+        (let [r (get-report db "<33@test.org>")]
+          (assert= "Type is :bug" :bug (:report/type r)))
 
         ;; --- Summary ---
         (println "\n=== Summary ===")

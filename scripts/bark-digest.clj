@@ -106,6 +106,31 @@
       (d/transact! conn [[:db/retract eid attr addr]]))))
 
 ;; ---------------------------------------------------------------------------
+;; Email header helpers
+;; ---------------------------------------------------------------------------
+
+(defn- get-header
+  "Case-insensitive header lookup from a parsed headers EDN string."
+  [headers-edn header-name]
+  (when headers-edn
+    (let [headers (edn/read-string headers-edn)]
+      (some (fn [[k v]]
+              (when (= (str/lower-case k) (str/lower-case header-name)) v))
+            headers))))
+
+(defn- from-mailing-list?
+  "True if the email was delivered through a mailing list (has List-Id header)."
+  [email]
+  (some? (get-header (:email/headers-edn email) "List-Id")))
+
+(defn- list-post-address
+  "Extract the email address from the List-Post header, e.g.
+  \"<mailto:list@example.org>\" → \"list@example.org\".  Returns nil if absent."
+  [email]
+  (when-let [lp (get-header (:email/headers-edn email) "List-Post")]
+    (second (re-find #"<mailto:([^>]+)>" lp))))
+
+;; ---------------------------------------------------------------------------
 ;; Role commands
 ;; ---------------------------------------------------------------------------
 
@@ -244,10 +269,33 @@
           (detect-release subject)
           (detect-change subject)))))
 
-(defn can-create-report? [roles from-addr report-info]
-  (if (announcement-types (:type report-info))
+(defn can-create-report?
+  "Check if from-addr is allowed to create this report.
+  Announcements require admin/maintainer.
+  On list-backed mailboxes, non-privileged users must send through
+  the list (List-Post header matches :mailing-list-email)."
+  [roles from-addr report-info email mailbox-cfg]
+  (cond
+    ;; Announcements, releases, changes: admin/maintainer only
+    (announcement-types (:type report-info))
     (admin-or-maintainer? roles from-addr)
-    true))
+
+    ;; Admin/maintainer: always allowed
+    (admin-or-maintainer? roles from-addr)
+    true
+
+    ;; List-backed mailbox: verify email came through the list
+    :else
+    (let [ml-email (:mailing-list-email mailbox-cfg)]
+      (if ml-email
+        (let [lp (list-post-address email)]
+          (if (= lp ml-email)
+            true
+            (do (when lp
+                  (println (str "    [list-post mismatch] expected " ml-email " got " lp)))
+                false)))
+        ;; No mailing list configured: anyone can create reports
+        true))))
 
 ;; ---------------------------------------------------------------------------
 ;; Triggers
@@ -387,7 +435,7 @@
   '[:db/id :email/uid :email/imap-uid :email/mailbox :email/subject :email/message-id
     :email/in-reply-to :email/references
     :email/from-address :email/date-sent :email/ingested-at
-    :email/body-text :email/body-text-from-html
+    :email/body-text :email/body-text-from-html :email/headers-edn
     {:email/attachments [:attachment/filename :attachment/content-type]}])
 
 (defn emails-since [db since-ts]
@@ -462,11 +510,14 @@
                  (do (println (str "  [ignored] " from-addr " — " (:email/subject email)))
                      {:created created :threaded threaded :skipped (inc skipped)
                       :thread-index thread-index :type-index type-index})
-                 (do (when (and from-addr body-text mailbox-email)
+                 (do (when (and from-addr body-text mailbox-email
+                                (not (from-mailing-list? email)))
                        (apply-role-commands! conn roles mailbox-email from-addr body-text))
                    (let [report-info (detect-report email)
+                       mailbox-cfg (get mailbox-map mb-id)
                        permitted?  (and report-info from-addr
-                                        (can-create-report? roles from-addr report-info))
+                                        (can-create-report? roles from-addr report-info
+                                                            email mailbox-cfg))
                        new-report? (and permitted? (not (report-exists? (d/db conn) message-id)))
                        [created thread-index type-index]
                        (if new-report?
