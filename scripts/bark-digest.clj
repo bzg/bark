@@ -240,11 +240,18 @@
       (coll? refs) (into refs))))
 
 ;; ---------------------------------------------------------------------------
-;; Thread index: message-id → report entity id
+;; Thread index: message-id → #{set of report entity ids}
 ;;
 ;; Maps every message-id that belongs to a report (either the originating
-;; email or a descendant) to the report's entity id.
+;; email or a descendant) to the set of report entity ids it belongs to.
+;; An email can belong to multiple reports (e.g. a patch reply in a bug thread).
 ;; ---------------------------------------------------------------------------
+
+(defn- index-assoc
+  "Associate a message-id with a report eid in the thread index.
+  Accumulates into a set."
+  [idx mid rid]
+  (update idx mid (fnil conj #{}) rid))
 
 (defn build-thread-index
   "Build the initial thread index from existing reports and their descendants."
@@ -257,15 +264,16 @@
                             [?rid :report/descendants ?de]
                             [?de :email/message-id ?dmid]]
                          db)]
-    (into (into {} (map (fn [[rid mid]] [mid rid])) reports)
-          (map (fn [[rid dmid]] [dmid rid]))
-          descendants)))
+    (as-> {} idx
+      (reduce (fn [m [rid mid]]  (index-assoc m mid rid))  idx reports)
+      (reduce (fn [m [rid dmid]] (index-assoc m dmid rid)) idx descendants))))
 
-(defn find-report-for-email
-  "Given an email and the thread index, return the report entity id
-  this email is a descendant of, or nil."
+(defn find-reports-for-email
+  "Given an email and the thread index, return the set of report entity ids
+  this email is a descendant of, or empty set."
   [email thread-index]
-  (some thread-index (ancestor-mids email)))
+  (let [ancestors (ancestor-mids email)]
+    (reduce into #{} (keep thread-index ancestors))))
 
 ;; ---------------------------------------------------------------------------
 ;; Database operations
@@ -407,7 +415,7 @@
         init-idx (build-thread-index db)
         {:keys [created threaded max-uid]}
         (reduce
-         (fn [{:keys [created threaded max-uid thread-index] :as acc} email]
+         (fn [{:keys [created threaded max-uid thread-index]} email]
            (let [uid        (:email/uid email)
                  message-id (:email/message-id email)
                  eid        (:db/id email)
@@ -416,7 +424,6 @@
                  report-info (detect-report email)
                  new-report? (and report-info
                                   (not (report-exists? (d/db conn) message-id)))
-                 ;; Create report and update index
                  [created thread-index]
                  (if new-report?
                    (do (println (str "  [" (name (:type report-info)) "] "
@@ -427,15 +434,17 @@
                                                :where [?r :report/message-id ?mid]]
                                              (d/db conn) message-id)]
                          [(inc created)
-                          (assoc thread-index message-id report-eid)]))
+                          (index-assoc thread-index message-id report-eid)]))
                    [created thread-index])
-                 ;; 2. Is it a descendant of an existing report?
-                 parent-report-eid (find-report-for-email email thread-index)
+                 ;; 2. Is it a descendant of existing report(s)?
+                 parent-report-eids (find-reports-for-email email thread-index)
                  [threaded thread-index]
-                 (if parent-report-eid
-                   (do (add-descendant! conn parent-report-eid eid)
-                       [(inc threaded)
-                        (assoc thread-index message-id parent-report-eid)])
+                 (if (seq parent-report-eids)
+                   (do (doseq [rid parent-report-eids]
+                         (add-descendant! conn rid eid))
+                       [(+ threaded (count parent-report-eids))
+                        (reduce #(index-assoc %1 message-id %2)
+                                thread-index parent-report-eids)])
                    [threaded thread-index])]
              {:created created :threaded threaded
               :max-uid max-uid :thread-index thread-index}))
