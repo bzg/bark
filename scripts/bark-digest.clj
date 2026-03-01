@@ -301,6 +301,27 @@
 
 (def report-types-with-priority #{:bug :patch :request})
 
+(def vote-pattern #"(?m)^\s*(?:\+1|1\+)\s*$|(?m)^\s*(?:-1|1-)\s*$")
+(def vote-up-pattern #"(?m)^\s*(?:\+1|1\+)\s*$")
+
+(defn- detect-vote [body-text]
+  (when (and body-text (re-find vote-pattern body-text))
+    (if (re-find vote-up-pattern body-text) :up :down)))
+
+(defn apply-vote! [conn report-eid from-addr body-text]
+  (when-let [vote (detect-vote body-text)]
+    (let [db      (d/db conn)
+          current (d/pull db [:report/voters :report/votes-up :report/votes-down] report-eid)
+          voters  (set (:report/voters current))]
+      (when-not (contains? voters from-addr)
+        (let [attr (if (= vote :up) :report/votes-up :report/votes-down)
+              n    (or (get current attr) 0)]
+          (d/transact! conn [{:db/id report-eid
+                              attr (inc n)
+                              :report/voters from-addr}])
+          (println (str "    → vote " (if (= vote :up) "+1" "-1")
+                        " by " from-addr)))))))
+
 (defn detect-triggers [report-type body-text]
   (when body-text
     (let [sets     (when-let [t (set-triggers-by-type report-type)] (match-triggers t body-text))
@@ -315,8 +336,13 @@
 (def state-attrs [:report/acked :report/owned :report/closed :report/urgent :report/important])
 
 (defn apply-triggers! [conn report-eid report-type email]
-  (let [body-text (or (:email/body-text email) (:email/body-text-from-html email))
-        result    (detect-triggers report-type body-text)]
+  (let [body-text  (or (:email/body-text email) (:email/body-text-from-html email))
+        from-addr  (:email/from-address email)
+        result     (detect-triggers report-type body-text)]
+    ;; Votes on POLL requests
+    (when (and (= :request report-type) from-addr body-text)
+      (apply-vote! conn report-eid from-addr body-text))
+    ;; Standard triggers
     (when result
       (let [eid      (:db/id email)
             current  (d/pull (d/db conn) state-attrs report-eid)

@@ -68,6 +68,7 @@
     :report/patch-seq :report/patch-source :report/message-id
     :report/acked :report/owned :report/closed
     :report/urgent :report/important
+    :report/votes-up :report/votes-down
     :report/descendants :report/digested-at
     {:report/email [:email/subject :email/from-address
                     :email/date-sent :email/imap-uid
@@ -109,13 +110,21 @@
   (let [s (str (or date ""))]
     (subs s 0 (min 16 (count s)))))
 
+(defn- votes-str [report]
+  (let [up   (or (:report/votes-up report) 0)
+        down (or (:report/votes-down report) 0)
+        total (+ up down)]
+    (when (pos? total)
+      (str up "/" total))))
+
 (defn- extra-str [report]
   (let [parts (remove nil?
                 [(when-let [v (:report/version report)] v)
                  (when-let [t (:report/topic report)] t)
                  (when-let [s (:report/patch-seq report)] s)
                  (when-let [sources (:report/patch-source report)]
-                   (str "src:" (str/join "," (map name sources))))])]
+                   (str "src:" (str/join "," (map name sources))))
+                 (when-let [v (votes-str report)] (str "votes:" v))])]
     (when (seq parts) (str/join " " parts))))
 
 ;; ---------------------------------------------------------------------------
@@ -152,7 +161,8 @@
       (:report/topic report)       (assoc :topic (:report/topic report))
       (:report/patch-seq report)   (assoc :patch-seq (:report/patch-seq report))
       (:report/patch-source report) (assoc :patch-source (mapv name (:report/patch-source report)))
-      (archived-at email)           (assoc :archived-at (archived-at email)))))
+      (archived-at email)           (assoc :archived-at (archived-at email))
+      (votes-str report)            (assoc :votes (votes-str report)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Display: gum table
