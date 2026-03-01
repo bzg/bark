@@ -1,7 +1,17 @@
 {:tasks
- {digest {:doc  "Digest emails into reports (use --all to rescan everything)"
-          :task (apply shell "bb scripts/bark-digest.clj digest" *command-line-args*)}
-  bugs   {:doc  "List all bug reports"
-          :task (shell "bb scripts/bark-digest.clj bugs")}
-  patches   {:doc  "List all patches"
-             :task (shell "bb scripts/bark-digest.clj patches")}}}
+ {digest        {:doc  "Digest emails into reports (use --all to rescan everything)"
+                 :task (apply shell "bb scripts/bark-digest.clj digest" *command-line-args*)}
+  bugs          {:doc  "List bug reports"
+                 :task (shell "bb scripts/bark-digest.clj bugs")}
+  patches       {:doc  "List patch reports"
+                 :task (shell "bb scripts/bark-digest.clj patches")}
+  requests      {:doc  "List requests"
+                 :task (shell "bb scripts/bark-digest.clj requests")}
+  announcements {:doc  "List announcements"
+                 :task (shell "bb scripts/bark-digest.clj announcements")}
+  releases      {:doc  "List releases"
+                 :task (shell "bb scripts/bark-digest.clj releases")}
+  changes       {:doc  "List changes"
+                 :task (shell "bb scripts/bark-digest.clj changes")}
+  reports       {:doc  "List all reports"
+                 :task (shell "bb scripts/bark-digest.clj reports")}}}

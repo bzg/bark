@@ -10,11 +10,16 @@
 ;;   bb bark-digest.clj digest [--all]    — scan new emails (or all with --all)
 ;;   bb bark-digest.clj bugs              — list all bug reports
 ;;   bb bark-digest.clj patches           — list all patch reports
+;;   bb bark-digest.clj requests          — list all requests
+;;   bb bark-digest.clj announcements     — list all announcements
+;;   bb bark-digest.clj releases          — list all releases
+;;   bb bark-digest.clj changes           — list all changes
+;;   bb bark-digest.clj reports           — list all reports
 ;;
 ;; Or via bb tasks:
 ;;   bb digest [--all]
-;;   bb bugs
-;;   bb patches
+;;   bb bugs / bb patches / bb requests / bb announcements / bb releases
+;;   bb changes / bb reports
 ;;
 ;; Environment / defaults:
 ;;   BARK_DB — path to db (default: ./data/bark-db)
@@ -50,7 +55,7 @@
    ;; Patch sequence, e.g. "3/5" from [PATCH 3/5]
    :report/patch-seq   {:db/valueType :db.type/string}
 
-   ;; How the patch was detected: :subject, :attachment, :inline, or combination
+   ;; How the patch was detected: :subject, :attachment, :inline
    :report/patch-source {:db/valueType :db.type/keyword
                          :db/cardinality :db.cardinality/many}
 
@@ -79,12 +84,29 @@
   #"(?i)^\[BUG(?:\s+([^\]]*))?\]")
 
 ;; [PATCH] or [PATCH n/m] or [PATCH topic] or [PATCH topic n/m]
-;; The n/m sequence pattern is matched greedily at the end.
 (def patch-subject-pattern
   #"(?i)^\[PATCH(?:\s+([^\]]*))?\]")
 
 (def patch-seq-pattern
   #"(\d+/\d+)\s*$")
+
+;; [POLL] or [FR] or [FP] or [RFC] or [RFE] or [TASK]
+(def request-pattern
+  #"(?i)^\[(POLL|FR|FP|RFC|RFE|TASK)\]")
+
+;; [ANN] or [ANNOUNCEMENT]
+(def announcement-pattern
+  #"(?i)^\[(ANN|ANNOUNCEMENT)\]")
+
+;; [REL] or [RELEASE] optionally followed by version
+(def release-pattern
+  #"(?i)^\[(REL|RELEASE)(?:\s+([^\]]*))?\]")
+
+;; [CHG] or [CHANGE] optionally followed by version
+(def change-pattern
+  #"(?i)^\[(CHG|CHANGE)(?:\s+([^\]]*))?\]")
+
+;; --- Detectors (subject-only) ---
 
 (defn detect-bug [subject]
   (when-let [m (re-find bug-pattern subject)]
@@ -107,6 +129,28 @@
                :patch-source #{:subject}}
         seq-str (assoc :patch-seq seq-str)
         topic   (assoc :topic topic)))))
+
+(defn detect-request [subject]
+  (when (re-find request-pattern subject)
+    {:type :request}))
+
+(defn detect-announcement [subject]
+  (when (re-find announcement-pattern subject)
+    {:type :announcement}))
+
+(defn detect-release [subject]
+  (when-let [m (re-find release-pattern subject)]
+    (let [ver (nth m 2 nil)]
+      (cond-> {:type :release}
+        (and ver (not (str/blank? ver)))
+        (assoc :version (str/trim ver))))))
+
+(defn detect-change [subject]
+  (when-let [m (re-find change-pattern subject)]
+    (let [ver (nth m 2 nil)]
+      (cond-> {:type :change}
+        (and ver (not (str/blank? ver)))
+        (assoc :version (str/trim ver))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Attachment & inline patch detection
@@ -147,27 +191,32 @@
 
 (defn detect-report
   "Detect report type from email data. Returns report-info map or nil.
-  Takes the full email pull map."
+  Takes the full email pull map.
+  Priority order: bug > patch > request > announcement > release > change."
   [email]
   (let [subject     (:email/subject email)
         attachments (:email/attachments email)
         body-text   (or (:email/body-text email)
                         (:email/body-text-from-html email))]
-    ;; Bug takes precedence (subject-only)
+    ;; Subject-only detectors, in priority order
     (or (detect-bug subject)
-        ;; Patch: subject OR attachment OR inline
+        ;; Patch: subject OR attachment OR inline (or combination)
         (let [from-subject    (detect-patch-subject subject)
               from-attachment (when (has-patch-attachment? attachments) :attachment)
-              from-inline    (when (has-inline-patch? body-text) :inline)
-              sources        (cond-> #{}
-                               from-subject    (into (:patch-source from-subject))
-                               from-attachment (conj :attachment)
-                               from-inline    (conj :inline))]
+              from-inline     (when (has-inline-patch? body-text) :inline)
+              sources         (cond-> #{}
+                                from-subject    (into (:patch-source from-subject))
+                                from-attachment (conj :attachment)
+                                from-inline     (conj :inline))]
           (when (seq sources)
             (cond-> {:type         :patch
                      :patch-source sources}
               (:patch-seq from-subject) (assoc :patch-seq (:patch-seq from-subject))
-              (:topic from-subject)     (assoc :topic (:topic from-subject))))))))
+              (:topic from-subject)     (assoc :topic (:topic from-subject)))))
+        (detect-request subject)
+        (detect-announcement subject)
+        (detect-release subject)
+        (detect-change subject))))
 
 ;; ---------------------------------------------------------------------------
 ;; Database operations
@@ -182,29 +231,29 @@
 (defn save-last-uid! [conn uid]
   (d/transact! conn [{:digest/last-uid uid}]))
 
+(def email-pull-pattern
+  '[:db/id :email/uid :email/subject :email/message-id
+    :email/body-text :email/body-text-from-html
+    {:email/attachments [:attachment/filename
+                         :attachment/content-type]}])
+
 (defn emails-since
   "Return full email entities with UID > since-uid."
   [db since-uid]
-  (->> (d/q '[:find (pull ?e [:db/id :email/uid :email/subject :email/message-id
-                               :email/body-text :email/body-text-from-html
-                               {:email/attachments [:attachment/filename
-                                                    :attachment/content-type]}])
-              :in $ ?since
-              :where
-              [?e :email/uid ?uid]
-              [(> ?uid ?since)]]
+  (->> (d/q (list :find (list 'pull '?e email-pull-pattern)
+                  :in '$ '?since
+                  :where
+                  ['?e :email/uid '?uid]
+                  '[(> ?uid ?since)])
             db since-uid)
        (map first)))
 
 (defn all-emails
   "Return all email entities."
   [db]
-  (->> (d/q '[:find (pull ?e [:db/id :email/uid :email/subject :email/message-id
-                               :email/body-text :email/body-text-from-html
-                               {:email/attachments [:attachment/filename
-                                                    :attachment/content-type]}])
-              :where
-              [?e :email/uid _]]
+  (->> (d/q (list :find (list 'pull '?e email-pull-pattern)
+                  :where
+                  ['?e :email/uid '_])
             db)
        (map first)))
 
@@ -229,22 +278,71 @@
                   (:patch-source report-info)
                   (assoc :report/patch-source (:patch-source report-info)))]))
 
+(def report-pull-pattern
+  '[:db/id :report/type :report/version :report/topic
+    :report/patch-seq :report/patch-source
+    :report/acked :report/owned :report/closed
+    :report/urgent :report/important
+    {:report/email [:email/subject :email/from-address
+                    :email/date-sent :email/uid]}])
+
 (defn all-reports-by-type
   "Return all reports of a given type, with email details, sorted by date desc."
   [db report-type]
-  (->> (d/q '[:find (pull ?r [:db/id :report/version :report/topic
-                               :report/patch-seq :report/patch-source
-                               :report/acked :report/owned :report/closed
-                               :report/urgent :report/important
-                               {:report/email [:email/subject :email/from-address
-                                               :email/date-sent :email/uid]}])
-              :in $ ?type
-              :where
-              [?r :report/type ?type]]
+  (->> (d/q (list :find (list 'pull '?r report-pull-pattern)
+                  :in '$ '?type
+                  :where
+                  ['?r :report/type '?type])
             db report-type)
        (map first)
        (sort-by #(get-in % [:report/email :email/date-sent])
                 #(compare %2 %1))))
+
+(defn all-reports
+  "Return all reports, with email details, sorted by date desc."
+  [db]
+  (->> (d/q (list :find (list 'pull '?r report-pull-pattern)
+                  :where
+                  ['?r :report/type '_])
+            db)
+       (map first)
+       (sort-by #(get-in % [:report/email :email/date-sent])
+                #(compare %2 %1))))
+
+;; ---------------------------------------------------------------------------
+;; Display helpers
+;; ---------------------------------------------------------------------------
+
+(defn- format-flags [report]
+  (let [flags (str (when (:report/acked report) "A")
+                   (when (:report/owned report) "O")
+                   (when (:report/closed report) "C")
+                   (when (:report/urgent report) "U")
+                   (when (:report/important report) "I"))]
+    (if (empty? flags) "-----" flags)))
+
+(defn- format-report-line [report]
+  (let [email    (:report/email report)
+        subject  (:email/subject email)
+        from     (:email/from-address email)
+        date     (str (:email/date-sent email))
+        date-str (subs date 0 (min 19 (count date)))]
+    (format "  %-5s %-25s %s  %s"
+            (format-flags report) from date-str subject)))
+
+(defn- format-extra [report]
+  (let [version (:report/version report)
+        topic   (:report/topic report)
+        seq-str (:report/patch-seq report)
+        sources (:report/patch-source report)
+        parts   (remove nil?
+                        [(when version (str "(" version ")"))
+                         (when topic (str "[" topic "]"))
+                         (when seq-str (str "(" seq-str ")"))
+                         (when sources
+                           (str "{" (str/join "," (map name sources)) "}"))])]
+    (when (seq parts)
+      (str " " (str/join " " parts)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Commands
@@ -272,63 +370,31 @@
           (when-let [report-info (detect-report email)]
             (when-not (report-exists? (d/db conn) message-id)
               (println (str "  [" (name (:type report-info)) "] "
-                            (:email/subject email)
-                            (when-let [src (:patch-source report-info)]
-                              (str " {" (str/join "," (map name src)) "}"))))
+                            (:email/subject email)))
               (create-report! conn eid message-id report-info)
               (swap! created inc)))))
       (when (> @max-uid last-uid)
         (save-last-uid! conn @max-uid))
       (println (str "Created " @created " new report(s). Last UID: " @max-uid)))))
 
-(defn- format-flags [report]
-  (let [flags (str (when (:report/acked report) "A")
-                   (when (:report/owned report) "O")
-                   (when (:report/closed report) "C")
-                   (when (:report/urgent report) "U")
-                   (when (:report/important report) "I"))]
-    (if (empty? flags) "-----" flags)))
-
-(defn- format-report-line [report]
-  (let [email    (:report/email report)
-        subject  (:email/subject email)
-        from     (:email/from-address email)
-        date     (str (:email/date-sent email))
-        date-str (subs date 0 (min 19 (count date)))]
-    (format "  %-5s %-25s %s  %s"
-            (format-flags report) from date-str subject)))
-
-(defn cmd-bugs [conn]
-  (let [bugs (all-reports-by-type (d/db conn) :bug)]
-    (if (empty? bugs)
-      (println "No bug reports found.")
+(defn cmd-list
+  "List reports, optionally filtered by type."
+  [conn report-type]
+  (let [db      (d/db conn)
+        reports (if report-type
+                  (all-reports-by-type db report-type)
+                  (all-reports db))
+        label   (if report-type (name report-type) "report")]
+    (if (empty? reports)
+      (println (str "No " label "s found."))
       (do
-        (println (str (count bugs) " bug report(s):\n"))
-        (doseq [report bugs]
-          (let [version (:report/version report)]
+        (println (str (count reports) " " label "(s):\n"))
+        (doseq [report reports]
+          (let [type-tag (when-not report-type
+                           (str "[" (name (:report/type report)) "] "))]
             (println (str (format-report-line report)
-                          (when version (str " (" version ")"))))))))))
-
-(defn cmd-patches [conn]
-  (let [patches (all-reports-by-type (d/db conn) :patch)]
-    (if (empty? patches)
-      (println "No patch reports found.")
-      (do
-        (println (str (count patches) " patch report(s):\n"))
-        (doseq [report patches]
-          (let [topic   (:report/topic report)
-                seq-str (:report/patch-seq report)
-                sources (:report/patch-source report)
-                extra   (str/join " "
-                                  (remove nil?
-                                          [(when topic (str "[" topic "]"))
-                                           (when seq-str (str "(" seq-str ")"))
-                                           (when sources
-                                             (str "{" (str/join ","
-                                                       (map name sources)) "}"))]))]
-            (println (str (format-report-line report)
-                          (when-not (str/blank? extra)
-                            (str " " extra))))))))))
+                          (when type-tag (str " " type-tag))
+                          (format-extra report)))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Main
@@ -337,17 +403,36 @@
 (let [args    *command-line-args*
       all?    (some #{"--all"} args)
       clean   (remove #{"--all"} args)
-      ;; When called via bb tasks, command is passed as first arg
       command (or (first clean) "digest")
       db-path (or (System/getenv "BARK_DB") "data/bark-db")
       conn    (d/get-conn db-path report-schema)]
   (try
     (case command
-      "digest"  (cmd-digest! conn all?)
-      "bugs"    (cmd-bugs conn)
-      "patches" (cmd-patches conn)
+      "digest"        (cmd-digest! conn all?)
+      "bugs"          (cmd-list conn :bug)
+      "patches"       (cmd-list conn :patch)
+      "requests"      (cmd-list conn :request)
+      "announcements" (cmd-list conn :announcement)
+      "releases"      (cmd-list conn :release)
+      "changes"       (cmd-list conn :change)
+      "reports"       (cmd-list conn nil)
       (do (println (str "Unknown command: " command))
-          (println "Usage: bb bark-digest.clj [digest|bugs|patches] [--all]")
-          (println "  BARK_DB — db path (default: ./data/bark-db)")))
+          (println "Usage: bb bark-digest.clj <command> [--all]")
+          (println "")
+          (println "Commands:")
+          (println "  digest        Scan new emails and create reports")
+          (println "  bugs          List bug reports")
+          (println "  patches       List patch reports")
+          (println "  requests      List requests")
+          (println "  announcements List announcements")
+          (println "  releases      List releases")
+          (println "  changes       List changes")
+          (println "  reports       List all reports")
+          (println "")
+          (println "Options:")
+          (println "  --all         Rescan all emails (with digest)")
+          (println "")
+          (println "Environment:")
+          (println "  BARK_DB       db path (default: ./data/bark-db)")))
     (finally
       (d/close conn))))
