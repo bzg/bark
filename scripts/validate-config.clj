@@ -4,7 +4,7 @@
 ;;
 ;; Usage:
 ;;   bb scripts/validate-config.clj [path]
-;;   bb validate [path]
+;;   bb validate-config [path]
 ;;
 ;; Defaults to ./config.edn if no path given.
 
@@ -69,7 +69,7 @@
 ;; Validation
 ;; ---------------------------------------------------------------------------
 
-(defn validate [config]
+(defn validate-config [config]
   (if (s/valid? ::config config)
     {:valid? true}
     {:valid? false
@@ -89,7 +89,7 @@
                    (catch Exception e
                      (println (str "Error: invalid EDN: " (.getMessage e)))
                      (System/exit 1)))
-          result (validate config)]
+          result (validate-config config)]
       (if (:valid? result)
         (do (println (str "✓ " path " is valid."))
             (println (str "  Default admin: " (:admin config)))

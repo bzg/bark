@@ -1,23 +1,23 @@
 {:tasks
- {digest        {:doc  "Digest emails into reports (use --all to rescan everything)"
-                 :task (apply shell "bb scripts/bark-digest.clj" *command-line-args*)}
-  bugs          {:doc  "List bug reports (append 'json' to dump as bugs.json)"
-                 :task (apply shell "bb scripts/bark-egest.clj bugs" *command-line-args*)}
-  patches       {:doc  "List patch reports (append 'json' to dump)"
-                 :task (apply shell "bb scripts/bark-egest.clj patches" *command-line-args*)}
-  requests      {:doc  "List requests (append 'json' to dump)"
-                 :task (apply shell "bb scripts/bark-egest.clj requests" *command-line-args*)}
-  announcements {:doc  "List announcements (append 'json' to dump)"
-                 :task (apply shell "bb scripts/bark-egest.clj announcements" *command-line-args*)}
-  releases      {:doc  "List releases (append 'json' to dump)"
-                 :task (apply shell "bb scripts/bark-egest.clj releases" *command-line-args*)}
-  changes       {:doc  "List changes (append 'json' to dump)"
-                 :task (apply shell "bb scripts/bark-egest.clj changes" *command-line-args*)}
-  reports       {:doc  "List all reports (append 'json' to dump)"
-                 :task (apply shell "bb scripts/bark-egest.clj reports" *command-line-args*)}
-  roles         {:doc  "Show per-mailbox admins, maintainers, ignored"
-                 :task (shell "bb scripts/bark-egest.clj roles")}
-  validate      {:doc  "Validate config.edn (pass path as arg, default: ./config.edn)"
-                 :task (apply shell "bb scripts/validate-config.clj" *command-line-args*)}
-  test          {:doc  "Run bark-digest integration tests"
-                 :task (shell "bb test/bark-digest-test.clj")}}}
+ {digest          {:doc  "Digest emails into reports (use --all to rescan everything)"
+                   :task (apply shell "bb scripts/bark-digest.clj" *command-line-args*)}
+  bugs            {:doc  "List bug reports (append 'json' to dump as bugs.json)"
+                   :task (apply shell "bb scripts/bark-egest.clj bugs" *command-line-args*)}
+  patches         {:doc  "List patch reports (append 'json' to dump)"
+                   :task (apply shell "bb scripts/bark-egest.clj patches" *command-line-args*)}
+  requests        {:doc  "List requests (append 'json' to dump)"
+                   :task (apply shell "bb scripts/bark-egest.clj requests" *command-line-args*)}
+  announcements   {:doc  "List announcements (append 'json' to dump)"
+                   :task (apply shell "bb scripts/bark-egest.clj announcements" *command-line-args*)}
+  releases        {:doc  "List releases (append 'json' to dump)"
+                   :task (apply shell "bb scripts/bark-egest.clj releases" *command-line-args*)}
+  changes         {:doc  "List changes (append 'json' to dump)"
+                   :task (apply shell "bb scripts/bark-egest.clj changes" *command-line-args*)}
+  reports         {:doc  "List all reports (append 'json' to dump)"
+                   :task (apply shell "bb scripts/bark-egest.clj reports" *command-line-args*)}
+  roles           {:doc  "Show per-mailbox admins, maintainers, ignored"
+                   :task (shell "bb scripts/bark-egest.clj roles")}
+  validate-config {:doc  "Validate config.edn (pass path as arg, default: ./config.edn)"
+                   :task (apply shell "bb scripts/validate-config.clj" *command-line-args*)}
+  test            {:doc  "Run bark-digest integration tests"
+                   :task (shell "bb test/bark-digest-test.clj")}}}
