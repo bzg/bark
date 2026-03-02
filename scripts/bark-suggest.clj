@@ -44,6 +44,10 @@
   (json/parse-string s keyword))
 
 (defn- load-from-file [path]
+  (when-not (.exists (clojure.java.io/file path))
+    (binding [*out* *err*]
+      (println (str "File not found: " path)))
+    (System/exit 1))
   (load-json-string (slurp path)))
 
 (defn- load-from-url [url]

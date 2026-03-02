@@ -2,44 +2,39 @@
  {digest          {:doc  "Digest emails into reports (use --all to rescan everything)"
                    :task (apply shell "bb scripts/bark-digest.clj" *command-line-args*)}
 
-  ;; --- Display (egest → suggest via pipe) ---
-  bugs            {:doc  "List bug reports interactively"
-                   :task (shell {:out :inherit} "bash" "-c"
-                                "bb scripts/bark-egest.clj bugs && bb scripts/bark-suggest.clj -f bugs.json bugs")}
-  patches         {:doc  "List patch reports interactively"
-                   :task (shell {:out :inherit} "bash" "-c"
-                                "bb scripts/bark-egest.clj patches && bb scripts/bark-suggest.clj -f patches.json patches")}
-  requests        {:doc  "List requests interactively"
-                   :task (shell {:out :inherit} "bash" "-c"
-                                "bb scripts/bark-egest.clj requests && bb scripts/bark-suggest.clj -f requests.json requests")}
-  announcements   {:doc  "List announcements interactively"
-                   :task (shell {:out :inherit} "bash" "-c"
-                                "bb scripts/bark-egest.clj announcements && bb scripts/bark-suggest.clj -f announcements.json announcements")}
-  releases        {:doc  "List releases interactively"
-                   :task (shell {:out :inherit} "bash" "-c"
-                                "bb scripts/bark-egest.clj releases && bb scripts/bark-suggest.clj -f releases.json releases")}
-  changes         {:doc  "List changes interactively"
-                   :task (shell {:out :inherit} "bash" "-c"
-                                "bb scripts/bark-egest.clj changes && bb scripts/bark-suggest.clj -f changes.json changes")}
-  reports         {:doc  "List all reports interactively"
-                   :task (shell {:out :inherit} "bash" "-c"
-                                "bb scripts/bark-egest.clj reports && bb scripts/bark-suggest.clj -f reports.json")}
+  ;; --- Export: bb export <type> <format> ---
+  export          {:doc  "Export reports: bb export <bugs|patches|requests|announcements|releases|changes|reports> <json|rss|org>"
+                   :task (apply shell "bb scripts/bark-egest.clj" *command-line-args*)}
 
-  ;; --- JSON export (bark-egest) ---
-  bugs-json          {:doc  "Dump bugs as bugs.json"
-                      :task (shell "bb scripts/bark-egest.clj bugs")}
-  patches-json       {:doc  "Dump patches as patches.json"
-                      :task (shell "bb scripts/bark-egest.clj patches")}
-  requests-json      {:doc  "Dump requests as requests.json"
-                      :task (shell "bb scripts/bark-egest.clj requests")}
-  announcements-json {:doc  "Dump announcements as announcements.json"
-                      :task (shell "bb scripts/bark-egest.clj announcements")}
-  releases-json      {:doc  "Dump releases as releases.json"
-                      :task (shell "bb scripts/bark-egest.clj releases")}
-  changes-json       {:doc  "Dump changes as changes.json"
-                      :task (shell "bb scripts/bark-egest.clj changes")}
-  reports-json       {:doc  "Dump all reports as reports.json"
-                      :task (shell "bb scripts/bark-egest.clj reports")}
+  ;; --- Display (export json → suggest if file was produced) ---
+  bugs            {:doc  "List bug reports interactively"
+                   :task (do (shell "bb export bugs json")
+                             (when (.exists (clojure.java.io/file "bugs.json"))
+                               (shell "bb suggest -f bugs.json bugs")))}
+  patches         {:doc  "List patch reports interactively"
+                   :task (do (shell "bb export patches json")
+                             (when (.exists (clojure.java.io/file "patches.json"))
+                               (shell "bb suggest -f patches.json patches")))}
+  requests        {:doc  "List requests interactively"
+                   :task (do (shell "bb export requests json")
+                             (when (.exists (clojure.java.io/file "requests.json"))
+                               (shell "bb suggest -f requests.json requests")))}
+  announcements   {:doc  "List announcements interactively"
+                   :task (do (shell "bb export announcements json")
+                             (when (.exists (clojure.java.io/file "announcements.json"))
+                               (shell "bb suggest -f announcements.json announcements")))}
+  releases        {:doc  "List releases interactively"
+                   :task (do (shell "bb export releases json")
+                             (when (.exists (clojure.java.io/file "releases.json"))
+                               (shell "bb suggest -f releases.json releases")))}
+  changes         {:doc  "List changes interactively"
+                   :task (do (shell "bb export changes json")
+                             (when (.exists (clojure.java.io/file "changes.json"))
+                               (shell "bb suggest -f changes.json changes")))}
+  reports         {:doc  "List all reports interactively"
+                   :task (do (shell "bb export reports json")
+                             (when (.exists (clojure.java.io/file "reports.json"))
+                               (shell "bb suggest -f reports.json")))}
 
   ;; --- Suggest (standalone, for remote JSON) ---
   suggest         {:doc  "Display reports from file/URL/stdin: bb suggest -f FILE | -u URL | -"
