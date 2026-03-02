@@ -151,7 +151,12 @@
                 (let [report (nth reports idx)
                       url    (:archived-at report)]
                   (if url
-                    (process/shell "xdg-open" url)
+                    (let [os   (str/lower-case (System/getProperty "os.name"))
+                          open (cond
+                                 (str/includes? os "mac") "open"
+                                 (str/includes? os "win") "start"
+                                 :else                    "xdg-open")]
+                      (process/shell open url))
                     (do (println "No archived-at URL for this report.")
                         (pprint/pprint report))))))))
         ;; Plain text fallback

@@ -34,7 +34,7 @@
 ;; Shutdown coordination
 ;; ---------------------------------------------------------------------------
 
-(def ^:private shutdown? (volatile! false))
+(def ^:private shutdown? (atom false))
 
 (defn shutting-down? [] @shutdown?)
 
@@ -150,7 +150,7 @@
        (Thread.
         (fn []
           (log/info "Shutting down...")
-          (vreset! shutdown? true)
+          (reset! shutdown? true)
           (doseq [ic @imap-conns]
             (try (imap/disconnect ic) (catch Exception _)))
           ;; Give IDLE threads time to return after disconnect

@@ -44,12 +44,9 @@
 ;; To avoid running its main block, we load only the function defs.
 (def schema (edn/read-string (slurp "resources/bark-schema.edn")))
 
-;; Load bark-digest.clj but strip the main block at the bottom.
-;; The main block starts with (let [args  *command-line-args*
-(let [src       (slurp "scripts/bark-digest.clj")
-      main-idx  (str/last-index-of src "\n(let [args")
-      defs-only (if main-idx (subs src 0 main-idx) src)]
-  (load-string defs-only))
+;; Load bark-digest.clj — the main block is guarded by
+;; (= (System/getProperty "babashka.file") *file*) so it won't run here.
+(load-file "scripts/bark-digest.clj")
 
 ;; ---------------------------------------------------------------------------
 ;; Test setup

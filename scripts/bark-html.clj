@@ -73,7 +73,8 @@
                        "Sep" "09" "Oct" "10" "Nov" "11" "Dec" "12"}]
            (when-let [m (months mon)]
              (str year "-" m "-" (format "%02d" (parse-long day))))))
-       ;; Truncated: "Sat Mar 01 20:40"
+       ;; Truncated: "Sat Mar 01 20:40" — no year available, assumes current year.
+       ;; NB: may be wrong for emails from December viewed in January.
        (when-let [[_ mon day]
                   (re-find #"^\w+ (\w+) (\d+) " s)]
          (let [months {"Jan" "01" "Feb" "02" "Mar" "03" "Apr" "04"
@@ -90,9 +91,9 @@
 
 (defn- status-square [flags]
   (let [f   (or flags "---")
-        a?  (= (nth f 0) \A)
-        o?  (= (nth f 1) \O)
-        c?  (= (nth f 2) \C)
+        a?  (= (nth f 0 \-) \A)
+        o?  (= (nth f 1 \-) \O)
+        c?  (= (nth f 2 \-) \C)
         [icon label] (cond
                        c?          ["🟥" "Closed"]
                        (and a? o?) ["🟩" "Acked, Owned"]
@@ -139,7 +140,7 @@
 (defn- report-row [multi-mb? {:strs [type subject from date date-raw flags status priority
                             replies archived-at message-id related role mailbox]}]
   (let [label    (get type-labels type type)
-        closed?  (and flags (>= (count flags) 3) (= (nth flags 2) \C))
+        closed?  (and flags (>= (count flags) 3) (= (nth flags 2 \-) \C))
         iso-date (parse-to-iso-date (or date-raw date ""))]
     [:tr {:data-type    type
           :data-closed  (str closed?)

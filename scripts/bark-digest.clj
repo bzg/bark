@@ -21,6 +21,8 @@
          '[clojure.string :as str]
          '[clojure.edn :as edn])
 
+(load-file "scripts/bark-common.clj")
+
 (pods/load-pod 'huahaiy/datalevin "0.10.5")
 
 (require '[pod.huahaiy.datalevin :as d])
@@ -36,18 +38,7 @@
 ;; Config
 ;; ---------------------------------------------------------------------------
 
-(defn- mailbox-id [mb]
-  (str (:host mb) ":" (:user mb)))
-
-(defn- build-mailbox-map [config]
-  (let [default-admin (:admin config)]
-    (into {}
-          (map (fn [mb]
-                 [(mailbox-id mb)
-                  {:email              (:email mb)
-                   :admin              (or (:admin mb) default-admin)
-                   :mailing-list-email (:mailing-list-email mb)}]))
-          (:mailboxes config))))
+;; mailbox-id, build-mailbox-map, get-header loaded from bark-common.clj
 
 ;; ---------------------------------------------------------------------------
 ;; Per-mailbox roles
@@ -109,14 +100,7 @@
 ;; Email header helpers
 ;; ---------------------------------------------------------------------------
 
-(defn- get-header
-  "Case-insensitive header lookup. headers-edn can be an EDN string or
-  an already-parsed map."
-  [headers-edn header-name]
-  (when headers-edn
-    (let [headers (if (string? headers-edn) (edn/read-string headers-edn) headers-edn)
-          lname   (str/lower-case header-name)]
-      (some (fn [[k v]] (when (= (str/lower-case k) lname) v)) headers))))
+;; get-header loaded from bark-common.clj
 
 (defn- from-mailing-list?
   "True if the email was delivered through a mailing list (has List-Id header)."
@@ -276,12 +260,14 @@
 
     :else
     (let [ml-email (:mailing-list-email mailbox-cfg)]
-      (or (nil? ml-email)
-          (let [lp (list-post-address email)]
-            (when-not (= lp ml-email)
-              (when lp
-                (println (str "    [list-post mismatch] expected " ml-email " got " lp))))
-            (= lp ml-email))))))
+      (if (nil? ml-email)
+        ;; No mailing list configured — anyone can create
+        true
+        ;; Must have matching List-Post header
+        (let [lp (list-post-address email)]
+          (when (and lp (not= lp ml-email))
+            (println (str "    [list-post mismatch] expected " ml-email " got " lp)))
+          (= lp ml-email))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Triggers
@@ -332,6 +318,8 @@
       (re-find vote-down-pattern body-text) :down)))
 
 (defn apply-vote! [conn report-eid from-addr body-text]
+  ;; NB: read-then-write is safe because cmd-digest! processes emails
+  ;; sequentially. If parallelized, this needs a transaction function.
   (when-let [vote (detect-vote body-text)]
     (let [db      (d/db conn)
           current (d/pull db [:report/voters :report/votes-up :report/votes-down] report-eid)
@@ -423,14 +411,17 @@
     {:email/attachments [:attachment/filename :attachment/content-type]}])
 
 (defn emails-since [db since-ts]
-  (->> (d/q (list :find (list 'pull '?e email-pull-pattern)
-                  :in '$ '?since :where ['?e :email/ingested-at '?t] '[(> ?t ?since)])
-            db since-ts)
-       (map first)))
+  (let [eids (d/q '[:find [?e ...]
+                     :in $ ?since
+                     :where [?e :email/ingested-at ?t] [(> ?t ?since)]]
+                   db since-ts)]
+    (d/pull-many db email-pull-pattern eids)))
 
 (defn all-emails [db]
-  (->> (d/q (list :find (list 'pull '?e email-pull-pattern) :where ['?e :email/uid '_]) db)
-       (map first)))
+  (let [eids (d/q '[:find [?e ...]
+                     :where [?e :email/uid _]]
+                   db)]
+    (d/pull-many db email-pull-pattern eids)))
 
 (defn report-exists? [db message-id]
   (some? (d/q '[:find ?r . :in $ ?mid :where [?r :report/message-id ?mid]] db message-id)))
@@ -629,6 +620,62 @@
 ;; Digest command
 ;; ---------------------------------------------------------------------------
 
+(defn- process-email!
+  "Process a single email during digest. Returns updated accumulator."
+  [conn mailbox-map {:keys [created threaded skipped thread-index type-index] :as acc} email]
+  (let [message-id    (:email/message-id email)
+        eid           (:db/id email)
+        from-addr     (:email/from-address email)
+        mb-id         (:email/mailbox email)
+        mailbox-email (get-in mailbox-map [mb-id :email])
+        roles         (if mailbox-email (get-roles (d/db conn) mailbox-email) {})
+        body-text     (or (:email/body-text email) (:email/body-text-from-html email))]
+    (if (and from-addr (ignored? roles from-addr))
+      (do (println (str "  [ignored] " from-addr " — " (:email/subject email)))
+          (assoc acc :skipped (inc skipped)))
+      (do (when (and from-addr body-text mailbox-email
+                     (not (from-mailing-list? email)))
+            (apply-role-commands! conn roles mailbox-email from-addr body-text))
+          (let [report-info (detect-report email)
+                mailbox-cfg (get mailbox-map mb-id)
+                permitted?  (and report-info from-addr
+                                 (can-create-report? roles from-addr report-info
+                                                     email mailbox-cfg))
+                new-report? (and permitted? (not (report-exists? (d/db conn) message-id)))
+                [created thread-index type-index report-eid]
+                (if new-report?
+                  (do (println (str "  [" (name (:type report-info)) "] " (:email/subject email)))
+                      (create-report! conn eid message-id report-info)
+                      (when (and (= :release (:type report-info)) (:version report-info))
+                        (close-changes-for-release! conn (:version report-info) eid))
+                      (let [rid (d/q '[:find ?r . :in $ ?mid :where [?r :report/message-id ?mid]]
+                                     (d/db conn) message-id)]
+                        [(inc created)
+                         (index-assoc thread-index message-id rid)
+                         (assoc type-index rid (:type report-info))
+                         rid]))
+                  (do (when (and report-info (not permitted?))
+                        (println (str "  [denied] " from-addr " cannot create " (name (:type report-info)))))
+                      [created thread-index type-index nil]))
+                parent-report-eids (find-reports-for-email email thread-index)
+                [threaded thread-index]
+                (if (seq parent-report-eids)
+                  (do (doseq [rid parent-report-eids]
+                        (add-descendant! conn rid eid)
+                        (when-let [rtype (type-index rid)] (apply-triggers! conn rid rtype email)))
+                      [(+ threaded (count parent-report-eids))
+                       (reduce #(index-assoc %1 message-id %2) thread-index parent-report-eids)])
+                  [threaded thread-index])]
+            ;; Post-creation: link related reports + manage series
+            (when (and report-eid (seq parent-report-eids))
+              (link-related-reports! conn report-eid parent-report-eids))
+            (when (and report-eid (= :patch (:type report-info))
+                       (:patch-seq report-info))
+              (manage-series! conn report-eid eid report-info
+                              from-addr parent-report-eids))
+            {:created created :threaded threaded :skipped skipped
+             :thread-index thread-index :type-index type-index})))))
+
 (defn cmd-digest! [conn mailbox-map process-all?]
   (let [db       (d/db conn)
         last-run (get-last-run db)
@@ -643,64 +690,10 @@
     (println (str "Found " (count sorted) " email(s) to scan. "
                   "Thread index: " (count thread-index) " entries."))
     (let [{:keys [created threaded skipped]}
-          (reduce
-           (fn [{:keys [created threaded skipped thread-index type-index]} email]
-             (let [message-id    (:email/message-id email)
-                   eid           (:db/id email)
-                   from-addr     (:email/from-address email)
-                   mb-id         (:email/mailbox email)
-                   mailbox-email (get-in mailbox-map [mb-id :email])
-                   roles         (if mailbox-email (get-roles (d/db conn) mailbox-email) {})
-                   body-text     (or (:email/body-text email) (:email/body-text-from-html email))]
-               (if (and from-addr (ignored? roles from-addr))
-                 (do (println (str "  [ignored] " from-addr " — " (:email/subject email)))
-                     {:created created :threaded threaded :skipped (inc skipped)
-                      :thread-index thread-index :type-index type-index})
-                 (do (when (and from-addr body-text mailbox-email
-                                (not (from-mailing-list? email)))
-                       (apply-role-commands! conn roles mailbox-email from-addr body-text))
-                   (let [report-info (detect-report email)
-                       mailbox-cfg (get mailbox-map mb-id)
-                       permitted?  (and report-info from-addr
-                                        (can-create-report? roles from-addr report-info
-                                                            email mailbox-cfg))
-                       new-report? (and permitted? (not (report-exists? (d/db conn) message-id)))
-                       [created thread-index type-index report-eid]
-                       (if new-report?
-                         (do (println (str "  [" (name (:type report-info)) "] " (:email/subject email)))
-                             (create-report! conn eid message-id report-info)
-                             (when (and (= :release (:type report-info)) (:version report-info))
-                               (close-changes-for-release! conn (:version report-info) eid))
-                             (let [rid (d/q '[:find ?r . :in $ ?mid :where [?r :report/message-id ?mid]]
-                                            (d/db conn) message-id)]
-                               [(inc created)
-                                (index-assoc thread-index message-id rid)
-                                (assoc type-index rid (:type report-info))
-                                rid]))
-                         (do (when (and report-info (not permitted?))
-                               (println (str "  [denied] " from-addr " cannot create " (name (:type report-info)))))
-                             [created thread-index type-index nil]))
-                       parent-report-eids (find-reports-for-email email thread-index)
-                       [threaded thread-index]
-                       (if (seq parent-report-eids)
-                         (do (doseq [rid parent-report-eids]
-                               (add-descendant! conn rid eid)
-                               (when-let [rtype (type-index rid)] (apply-triggers! conn rid rtype email)))
-                             [(+ threaded (count parent-report-eids))
-                              (reduce #(index-assoc %1 message-id %2) thread-index parent-report-eids)])
-                         [threaded thread-index])
-                       ;; Post-creation: link related reports + manage series
-                       _ (when (and report-eid (seq parent-report-eids))
-                           (link-related-reports! conn report-eid parent-report-eids))
-                       _ (when (and report-eid (= :patch (:type report-info))
-                                    (:patch-seq report-info))
-                           (manage-series! conn report-eid eid report-info
-                                           from-addr parent-report-eids))]
-                   {:created created :threaded threaded :skipped skipped
-                    :thread-index thread-index :type-index type-index})))))
-           {:created 0 :threaded 0 :skipped 0
-            :thread-index thread-index :type-index type-index}
-           sorted)]
+          (reduce (partial process-email! conn mailbox-map)
+                  {:created 0 :threaded 0 :skipped 0
+                   :thread-index thread-index :type-index type-index}
+                  sorted)]
       (save-last-run! conn (java.util.Date.))
       (println (str "Created " created " report(s), threaded " threaded
                     " email(s), skipped " skipped " ignored.")))))
@@ -709,15 +702,15 @@
 ;; Main
 ;; ---------------------------------------------------------------------------
 
-(let [args    *command-line-args*
-      all?    (some #{"--all"} args)
-      db-path (or (System/getenv "BARK_DB") "data/bark-db")
-      config  (let [f (clojure.java.io/file "config.edn")]
-                (when (.exists f) (edn/read-string (slurp f))))
-      conn    (d/get-conn db-path report-schema)]
-  (try
-    (when config (ensure-mailbox-roles! conn config))
-    (let [mailbox-map (if config (build-mailbox-map config) {})]
-      (cmd-digest! conn mailbox-map all?))
-    (finally
-      (d/close conn))))
+(when (= (System/getProperty "babashka.file") *file*)
+  (let [args    *command-line-args*
+        all?    (some #{"--all"} args)
+        db-path (or (System/getenv "BARK_DB") "data/bark-db")
+        config  (load-config)
+        conn    (d/get-conn db-path report-schema)]
+    (try
+      (when config (ensure-mailbox-roles! conn config))
+      (let [mailbox-map (if config (build-mailbox-map config) {})]
+        (cmd-digest! conn mailbox-map all?))
+      (finally
+        (d/close conn)))))

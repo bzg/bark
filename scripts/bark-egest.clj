@@ -15,7 +15,10 @@
 (require '[babashka.pods :as pods]
          '[cheshire.core :as json]
          '[clojure.string :as str]
-         '[clojure.edn :as edn])
+         '[clojure.edn :as edn]
+         '[clojure.java.io :as io])
+
+(load-file "scripts/bark-common.clj")
 
 (pods/load-pod 'huahaiy/datalevin "0.10.5")
 
@@ -61,13 +64,17 @@
   [[:report/acked "A"] [:report/owned "O"] [:report/closed "C"]])
 
 (defn- flags-str [report]
-  (apply str (map (fn [[k c]] (if (get report k) c "-")) flag-defs)))
+  (apply str (map (fn [[k c]] (if (get report k) c \-)) flag-defs)))
 
 (defn- priority [report]
   (+ (if (:report/urgent report) 2 0)
      (if (:report/important report) 1 0)))
 
-(defn- status [report]
+(defn- status
+  "Compute a numeric status score for filtering.
+  Higher = more active: open (4) > closed (0), +2 if owned, +1 if acked.
+  E.g. --min-status 4 filters to open reports only."
+  [report]
   (+ (if-not (:report/closed report) 4 0)
      (if (:report/owned report) 2 0)
      (if (:report/acked report) 1 0)))
@@ -88,27 +95,8 @@
       (str up "/" total))))
 
 ;; ---------------------------------------------------------------------------
-;; Config & mailbox map
+;; Config & mailbox map — loaded from bark-common.clj
 ;; ---------------------------------------------------------------------------
-
-(defn- load-config []
-  (let [f (clojure.java.io/file "config.edn")]
-    (when (.exists f) (edn/read-string (slurp f)))))
-
-(defn- mailbox-id [mb] (str (:host mb) ":" (:user mb)))
-
-(defn- build-mailbox-map
-  "Build mailbox-id → {:name :email :admin} map.
-   Per-mailbox :admin takes precedence over top-level :admin."
-  [config]
-  (let [default-admin (:admin config)]
-    (into {}
-          (map (fn [mb]
-                 [(mailbox-id mb)
-                  {:name  (:name mb)
-                   :email (:email mb)
-                   :admin (str/lower-case (or (:admin mb) default-admin ""))}]))
-          (:mailboxes config))))
 
 (defn- build-maintainers
   "Gather per-mailbox maintainer sets from DB roles.
@@ -129,15 +117,10 @@
 ;; Report → map
 ;; ---------------------------------------------------------------------------
 
-(defn- get-header
-  "Case-insensitive header lookup from a parsed headers map."
-  [headers header-name]
-  (let [lname (str/lower-case header-name)]
-    (some (fn [[k v]] (when (= (str/lower-case k) lname) v)) headers)))
+;; get-header loaded from bark-common.clj
 
 (defn- archived-at [email]
-  (when-let [edn-str (:email/headers-edn email)]
-    (get-header (edn/read-string edn-str) "Archived-At")))
+  (get-header (:email/headers-edn email) "Archived-At"))
 
 (defn- sender-role
   "Determine role of sender for a given mailbox context."
@@ -145,7 +128,7 @@
   (when (and (seq from) mb-id)
     (let [from-lc (str/lower-case from)
           mb-info (get mailbox-map mb-id)
-          admin   (:admin mb-info)]
+          admin   (some-> (:admin mb-info) str/lower-case)]
       (cond
         (= from-lc admin)                                        "admin"
         (contains? (get maintainers-map mb-id #{}) from-lc)      "maintainer"
@@ -301,7 +284,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- report->org-entry [m]
-  (let [todo    (if (= (nth (:flags m "---") 2) \C) "DONE" "TODO")
+  (let [todo    (if (= (nth (:flags m "---") 2 \-) \C) "DONE" "TODO")
         prio    (case (:priority m 0)
                   3 "[#A] " 2 "[#A] " 1 "[#B] " "")
         subject (:subject m "")

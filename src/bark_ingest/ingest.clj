@@ -143,8 +143,7 @@
 (defn- truncate
   "Truncate string s to at most n characters."
   [s n]
-  (let [s (or s "")]
-    (subs s 0 (min n (count s)))))
+  (when s (subs s 0 (min n (count s)))))
 
 (defn store-email!
   "Store a single parsed email in Datalevin.
@@ -183,4 +182,5 @@
                              (log/error "Failed to store email UID:" (:uid msg) (.getMessage e))
                              n)))
                        0 msgs)]
-    (log/info "Batch complete. Stored" stored "of" (count msgs) "emails.")))
+    (log/info "Batch complete. Stored" stored "of" (count msgs) "emails.")
+    stored))
