@@ -1,30 +1,24 @@
 # BARK — Bug And Report Keeper
 
-Email-driven bug tracking.  BARK monitors IMAP mailboxes via IDLE,
-detects report types from subject tags, tracks threads, manages
-per-mailbox roles, and applies state triggers — all stored in a
-[Datalevin](https://github.com/juji-io/datalevin) database.
+BARK is an email-driven report tracker.
 
-## Architecture
+BARK monitors IMAP mailboxes, detects report types from subject tags,
+applies state triggers from email body, and manages roles per mailbox.
 
-```
-IMAP mailbox(es) → bark-ingest (JVM) → Datalevin DB ← bark-digest (bb)
-                                                     ← bark-egest (bb)
-```
+## How it works
 
 - **bark-ingest** — JVM process, connects to IMAP via IDLE, stores
-  emails in Datalevin.  One thread per mailbox, graceful shutdown on
-  C-c.
+  emails in Datalevin.
 - **bark-digest** — Babashka script, scans new emails, creates/updates
   reports and roles in the DB.
-- **bark-egest** — Babashka script, displays reports interactively
-  (via gum) or dumps them as JSON.
+- **bark-egest** — Babashka script, displays reports interactively or
+  dumps them as JSON.
 
 ## Dependencies
 
 - [Babashka](https://babashka.org/) (bb)
-- [gum](https://github.com/charmbracelet/gum) — TUI components used
-  by bark-egest for interactive display
+- [gum](https://github.com/charmbracelet/gum) — TUI components used by
+  bark-egest for interactive display
 - Java 17+ (for bark-ingest)
 - Datalevin 0.10.5 (pod for bb, library for JVM)
 
@@ -51,55 +45,55 @@ bb roles           # per-mailbox admin/maintainer/ignored
 ## bb tasks
 
 ```
-bb digest [--all]     Digest emails into reports
-bb bugs [json]        Bug reports
-bb patches [json]     Patch reports
-bb requests [json]    Requests
+bb digest [--all]         Digest emails into reports
+bb bugs [json]            Bug reports
+bb patches [json]         Patch reports
+bb requests [json]        Requests
 bb announcements [json]
 bb releases [json]
 bb changes [json]
-bb reports [json]     All reports
-bb roles              Per-mailbox roles
-bb validate [path]    Validate config.edn
+bb reports [json]         All reports
+bb roles                  Per-mailbox roles
+bb validate-config [path] Validate config.edn
 ```
 
 ## Report types
 
 Detected from email subject tags:
 
-| Tag                         | Type           |
-|-----------------------------|----------------|
-| `[BUG]` `[BUG version]`    | bug            |
-| `[PATCH]` `[PATCH n/m]`    | patch          |
-| `[POLL]` `[FR]` `[RFC]` …  | request        |
-| `[ANN]` `[ANNOUNCEMENT]`   | announcement * |
-| `[REL]` `[RELEASE]`        | release *      |
-| `[CHG]` `[CHANGE]`         | change *       |
+| Tag                                                     | Type           |
+|---------------------------------------------------------|----------------|
+| `[BUG]` `[BUG version]`                                 | bug            |
+| `[PATCH]` `[PATCH n/m]` `[PATCH topic n/m]`             | patch          |
+| `[POLL]` `[FR]` `[RFC]`                                 | request        |
+| `[ANN]` `[ANNOUNCEMENT]` `[BLOG]`                       | announcement * |
+| `[REL]` `[RELEASE]` `[REL version]` `[RELEASE version]` | release *      |
+| `[CHG]` `[CHANGE]` `[CHG version]` `[CHANGE version]`   | change *       |
 
 \* Require admin or maintainer permission.
 
-Patches are also detected from `.patch`/`.diff` attachments and
-inline diffs (git format).
+Patches are also detected from `.patch`/`.diff` attachments and inline
+diffs (git format).
 
 ## Triggers
 
-State changes detected from body lines (at start of line, followed
-by `.` `,` `;` or `:`):
+State changes detected from body lines (at start of line, followed by
+`.` `,` `;` or `:`):
 
-| Trigger        | Effect on report     |
-|----------------|----------------------|
-| `Approved.`    | acked (bug, patch, request) |
-| `Confirmed.`   | acked (bug)          |
-| `Reviewed.`    | acked (patch)        |
-| `Handled.`     | owned                |
-| `Fixed.`       | closed (bug)         |
-| `Applied.`     | closed (patch)       |
-| `Done.`        | closed (request)     |
-| `Canceled.`    | closed (all)         |
-| `Urgent.`      | urgent               |
-| `Important.`   | important            |
-| `Not urgent.`  | un-urgent            |
-| `Not important.`| un-important        |
+| Trigger          | Effect on report            |
+|------------------|-----------------------------|
+| `Approved.`      | acked (bug, patch, request) |
+| `Confirmed.`     | acked (bug)                 |
+| `Reviewed.`      | acked (patch)               |
+| `Handled.`       | owned                       |
+| `Fixed.`         | closed (bug)                |
+| `Applied.`       | closed (patch)              |
+| `Done.`          | closed (request)            |
+| `Canceled.`      | closed (all)                |
+| `Urgent.`        | urgent                      |
+| `Important.`     | important                   |
+| `Not urgent.`    | un-urgent                   |
+| `Not important.` | un-important                |
 
 ## Roles
 
@@ -125,16 +119,18 @@ Unignore: user@example.com
 
 See `config.edn.example`.  Per-mailbox fields:
 
-| Field                | Required | Description                          |
-|----------------------|----------|--------------------------------------|
-| `:host`              | yes      | IMAP server hostname                 |
-| `:user`              | yes      | IMAP login username                  |
-| `:password`          | *        | IMAP password (* or `:oauth2-token`) |
-| `:folder`            | yes      | IMAP folder (usually `"INBOX"`)      |
-| `:email`             | yes      | Public email address for this mailbox|
-| `:mailing-list-email`| no      | Associated mailing list address      |
-| `:admin`             | no       | Admin for this mailbox (fallback: top-level `:admin`) |
+| Field                 | Required | Description                                           |
+|-----------------------|----------|-------------------------------------------------------|
+| `:host`               | yes      | IMAP server hostname                                  |
+| `:user`               | yes      | IMAP login username                                   |
+| `:password`           | *        | IMAP password (* or `:oauth2-token`)                  |
+| `:folder`             | yes      | IMAP folder (usually `"INBOX"`)                       |
+| `:email`              | yes      | Public email address for this mailbox                 |
+| `:mailing-list-email` | no       | Associated mailing list address                       |
+| `:admin`              | no       | Admin for this mailbox (fallback: top-level `:admin`) |
 
 ## License
 
-GPLv3+
+Copyright © 2026 Bastien Guerry
+
+Distributed under the Eclipse Public License 2.0.
