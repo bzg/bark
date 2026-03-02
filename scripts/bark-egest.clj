@@ -3,9 +3,9 @@
 ;; bark-egest.clj — Dump BARK reports as JSON, RSS, or Org.
 ;;
 ;; Usage:
-;;   bb bugs-json           — dump bugs as bugs.json
-;;   bb reports-rss         — dump all reports as reports.rss
-;;   bb patches-org         — dump patches as patches.org
+;;   bb export json          — dump all reports as reports.json
+;;   bb export rss           — dump all reports as reports.rss
+;;   bb export org           — dump all reports as reports.org
 ;;
 ;; Environment / defaults:
 ;;   BARK_DB — path to db (default: ./data/bark-db)
@@ -45,13 +45,6 @@
     {:report/email [:email/subject :email/from-address :email/from-name
                     :email/date-sent :email/mailbox :email/imap-uid
                     :email/headers-edn]}])
-
-(defn all-reports-by-type [db report-type]
-  (->> (d/q (list :find (list 'pull '?r report-pull-pattern)
-                  :in '$ '?type :where ['?r :report/type '?type])
-            db report-type)
-       (map first)
-       (sort-by #(get-in % [:report/email :email/date-sent]) #(compare %2 %1))))
 
 (defn all-reports [db]
   (->> (d/q (list :find (list 'pull '?r report-pull-pattern) :where ['?r :report/type '_]) db)
@@ -353,7 +346,6 @@
     (cond
       (nil? a)                    opts
       (#{"-m" "--mailbox"} a)     (recur (assoc opts :mailbox-name (first more)) (rest more))
-      (nil? (:command opts))      (recur (assoc opts :command a) more)
       (nil? (:format opts))       (recur (assoc opts :format a) more)
       :else                       opts)))
 
@@ -376,8 +368,8 @@
 
 (def formats #{"json" "rss" "org"})
 
-(let [{:keys [command format mailbox-name]
-       :or {command "reports" format "json"}}
+(let [{:keys [format mailbox-name]
+       :or {format "json"}}
       (parse-args *command-line-args*)
       db-path (or (System/getenv "BARK_DB") "data/bark-db")
       conn    (d/get-conn db-path schema)]
@@ -391,34 +383,20 @@
           mailbox-map     (if config (build-mailbox-map config) {})
           maintainers-map (if config (build-maintainers config db mailbox-map) {})
           multi-mb?       (> (count mailbox-map) 1)
-          [report-type label]
-          (case command
-            "bugs"          [:bug "bug"]
-            "patches"       [:patch "patch"]
-            "requests"      [:request "request"]
-            "announcements" [:announcement "announcement"]
-            "releases"      [:release "release"]
-            "changes"       [:change "change"]
-            "reports"       [nil "report"]
-            (do (println (str "Unknown command: " command))
-                (println "Usage: bb export <command> [json|rss|org] [-m mailbox]")
-                (println "Commands: bugs patches requests announcements releases changes reports")
-                (System/exit 1)))
-          all-reports (if report-type
-                        (all-reports-by-type db report-type)
-                        (all-reports db))
-          reports     (if mailbox-name
-                        (let [mb-ids (resolve-mailbox-ids mailbox-map mailbox-name)]
-                          (if (empty? mb-ids)
-                            (do (println (str "Error: no mailbox named '" mailbox-name "'"))
-                                (println (str "Available: "
-                                              (str/join ", " (keep :name (vals mailbox-map)))))
-                                (System/exit 1))
-                            (filter-by-mailbox all-reports mb-ids)))
-                        all-reports)
-          basename    command]
+          label           "report"
+          all-reps        (all-reports db)
+          reports         (if mailbox-name
+                           (let [mb-ids (resolve-mailbox-ids mailbox-map mailbox-name)]
+                             (if (empty? mb-ids)
+                               (do (println (str "Error: no mailbox named '" mailbox-name "'"))
+                                   (println (str "Available: "
+                                                 (str/join ", " (keep :name (vals mailbox-map)))))
+                                   (System/exit 1))
+                               (filter-by-mailbox all-reps mb-ids)))
+                           all-reps)
+          basename        "reports"]
       (if (empty? reports)
-        (println (str "No " label " reports found."
+        (println (str "No reports found."
                       (when mailbox-name (str " (mailbox: " mailbox-name ")"))))
         (case format
           "json" (dump-json! reports (str basename ".json") mailbox-map maintainers-map multi-mb?)

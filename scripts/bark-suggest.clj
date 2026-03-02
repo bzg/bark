@@ -7,22 +7,17 @@
 ;; or plain text lines when gum is not available.
 ;;
 ;; Usage:
-;;   bark-suggest.clj [options] [type]
+;;   bark-suggest.clj [options]
 ;;
 ;; Options:
 ;;   -f, --file FILE   Read reports from a JSON file
 ;;   -u, --url  URL    Fetch reports from a URL
 ;;   -                 Read JSON from stdin
 ;;
-;; Type (optional filter):
-;;   bugs | patches | requests | announcements | releases | changes
-;;
 ;; Examples:
 ;;   bb suggest -f reports.json
-;;   bb suggest -f reports.json bugs
-;;   bb suggest -u https://example.com/reports.json patches
+;;   bb suggest -u https://example.com/reports.json
 ;;   curl … | bb suggest -
-;;   bb reports-json && bb suggest -f reports.json
 
 (require '[babashka.deps :as deps]
          '[babashka.process :as process]
@@ -60,23 +55,6 @@
 
 (defn- load-from-stdin []
   (load-json-string (slurp *in*)))
-
-;; ---------------------------------------------------------------------------
-;; Filtering
-;; ---------------------------------------------------------------------------
-
-(def ^:private type-aliases
-  {"bugs"          "bug"
-   "patches"       "patch"
-   "requests"      "request"
-   "announcements" "announcement"
-   "releases"      "release"
-   "changes"       "change"})
-
-(defn- filter-by-type [reports type-str]
-  (if-let [t (type-aliases type-str)]
-    (filter #(= (:type %) t) reports)
-    reports))
 
 ;; ---------------------------------------------------------------------------
 ;; Formatting helpers
@@ -140,8 +118,9 @@
 
 (defn display-reports!
   "Display reports interactively with gum table, or as plain text lines."
-  [reports show-type?]
-  (let [show-mb? (has-mailbox? reports)]
+  [reports]
+  (let [show-type? true
+        show-mb? (has-mailbox? reports)]
     (if (empty? reports)
       (println "No reports found.")
       (if (gum-available?)
@@ -175,15 +154,13 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- usage []
-  (println "Usage: bark-suggest.clj [options] [type]")
+  (println "Usage: bark-suggest.clj [options]")
   (println "")
   (println "Options:")
   (println "  -f, --file FILE       Read reports from a JSON file")
   (println "  -u, --url  URL        Fetch reports from a URL")
   (println "  -m, --mailbox NAME    Filter by mailbox name")
-  (println "  -                     Read JSON from stdin")
-  (println "")
-  (println "Type: bugs | patches | requests | announcements | releases | changes"))
+  (println "  -                     Read JSON from stdin"))
 
 (defn- filter-by-mailbox [reports mb-name]
   (filter #(= (:mailbox %) mb-name) reports))
@@ -191,7 +168,7 @@
 (let [args *command-line-args*]
   (if (or (empty? args) (some #{"-h" "--help"} args))
     (usage)
-    (let [[opts remaining]
+    (let [[opts _remaining]
           (loop [opts {} [a & more :as remaining] args]
             (cond
               (nil? a)                       [opts nil]
@@ -200,7 +177,6 @@
               (#{"-u" "--url"} a)             (recur (assoc opts :source :url  :url  (first more)) (rest more))
               (#{"-m" "--mailbox"} a)         (recur (assoc opts :mailbox (first more)) (rest more))
               :else                          [opts remaining]))
-          type-filter (first remaining)
           reports     (case (:source opts)
                         :file  (load-from-file (:path opts))
                         :url   (load-from-url (:url opts))
@@ -209,9 +185,5 @@
                             (System/exit 1)))
           reports     (if-let [mb (:mailbox opts)]
                         (filter-by-mailbox reports mb)
-                        reports)
-          filtered    (if type-filter
-                        (filter-by-type reports type-filter)
-                        reports)
-          show-type?  (nil? type-filter)]
-      (display-reports! filtered show-type?))))
+                        reports)]
+      (display-reports! reports))))
