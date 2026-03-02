@@ -30,7 +30,7 @@
 ;; ---------------------------------------------------------------------------
 
 (def report-schema
-  (edn/read-string (slurp "bark-schema.edn")))
+  (edn/read-string (slurp "resources/bark-schema.edn")))
 
 ;; ---------------------------------------------------------------------------
 ;; Config

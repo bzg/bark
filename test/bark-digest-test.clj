@@ -8,7 +8,7 @@
 ;; Usage:
 ;;   bb test/bark-digest-test.clj
 ;;
-;; Requires: datalevin pod 0.10.5, bark-schema.edn in cwd.
+;; Requires: datalevin pod 0.10.5, resources/bark-schema.edn.
 
 (require '[babashka.pods :as pods]
          '[clojure.string :as str]
@@ -42,7 +42,7 @@
 
 ;; We load the schema and use the same functions bark-digest uses.
 ;; To avoid running its main block, we load only the function defs.
-(def schema (edn/read-string (slurp "bark-schema.edn")))
+(def schema (edn/read-string (slurp "resources/bark-schema.edn")))
 
 ;; Load bark-digest.clj but strip the main block at the bottom.
 ;; The main block starts with (let [args  *command-line-args*

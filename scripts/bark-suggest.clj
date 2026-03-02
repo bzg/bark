@@ -1,0 +1,308 @@
+#!/usr/bin/env bb
+
+;; bark-suggest.clj — Display BARK reports interactively.
+;;
+;; Shows reports as a gum table (with detail on selection) or as
+;; plain text lines when gum is not available.
+;;
+;; Usage:
+;;   bb bugs                — interactive table of bug reports
+;;   bb patches             — interactive table of patches
+;;   bb reports             — interactive table of all reports
+;;   bb roles               — show per-mailbox roles
+;;
+;; Environment / defaults:
+;;   BARK_DB — path to db (default: ./data/bark-db)
+
+(require '[babashka.pods :as pods]
+         '[babashka.deps :as deps]
+         '[babashka.process :as process]
+         '[clojure.string :as str]
+         '[clojure.edn :as edn]
+         '[clojure.pprint :as pprint])
+
+(deps/add-deps '{:deps {io.github.lispyclouds/bblgum
+                         {:git/sha "881a426d9df9df40eb305ceaeb3996ea1c7ae0d3"}}})
+
+(require '[bblgum.core :as gum])
+
+(pods/load-pod 'huahaiy/datalevin "0.10.5")
+
+(require '[pod.huahaiy.datalevin :as d])
+
+;; ---------------------------------------------------------------------------
+;; Schema — loaded from resources/bark-schema.edn
+;; ---------------------------------------------------------------------------
+
+(def schema
+  (edn/read-string (slurp "resources/bark-schema.edn")))
+
+;; ---------------------------------------------------------------------------
+;; Config
+;; ---------------------------------------------------------------------------
+
+(defn- mailbox-id [mb] (str (:host mb) ":" (:user mb)))
+
+(defn- build-mailbox-map [config]
+  (let [default-admin (:admin config)]
+    (into {}
+          (map (fn [mb]
+                 [(mailbox-id mb)
+                  {:email              (:email mb)
+                   :admin              (or (:admin mb) default-admin)
+                   :mailing-list-email (:mailing-list-email mb)}]))
+          (:mailboxes config))))
+
+;; ---------------------------------------------------------------------------
+;; DB queries
+;; ---------------------------------------------------------------------------
+
+(def report-pull-pattern
+  '[:db/id :report/type :report/version :report/topic
+    :report/patch-seq :report/patch-source :report/message-id
+    :report/acked :report/owned :report/closed
+    :report/urgent :report/important
+    :report/votes-up :report/votes-down
+    :report/descendants :report/digested-at
+    {:report/related [:report/type :report/message-id]}
+    {:report/series [:series/id :series/expected :series/closed
+                     {:series/patches [:db/id]}
+                     {:series/cover-letter [:email/message-id]}]}
+    {:report/email [:email/subject :email/from-address
+                    :email/date-sent :email/imap-uid
+                    :email/headers-edn]}])
+
+(defn all-reports-by-type [db report-type]
+  (->> (d/q (list :find (list 'pull '?r report-pull-pattern)
+                  :in '$ '?type :where ['?r :report/type '?type])
+            db report-type)
+       (map first)
+       (sort-by #(get-in % [:report/email :email/date-sent]) #(compare %2 %1))))
+
+(defn all-reports [db]
+  (->> (d/q (list :find (list 'pull '?r report-pull-pattern) :where ['?r :report/type '_]) db)
+       (map first)
+       (sort-by #(get-in % [:report/email :email/date-sent]) #(compare %2 %1))))
+
+(defn get-roles [db mailbox-email]
+  (or (d/pull db '[:roles/admin :roles/maintainers :roles/ignored]
+              [:roles/mailbox-email mailbox-email])
+      {}))
+
+;; ---------------------------------------------------------------------------
+;; Formatting helpers
+;; ---------------------------------------------------------------------------
+
+(def ^:private flag-defs
+  [[:report/acked "A"] [:report/owned "O"] [:report/closed "C"]
+   [:report/urgent "U"] [:report/important "I"]])
+
+(defn- flags-str [report]
+  (apply str (map (fn [[k c]] (if (get report k) c "-")) flag-defs)))
+
+(defn- descendant-count [report]
+  (let [d (:report/descendants report)]
+    (if (coll? d) (count d) 0)))
+
+(defn- format-date [date]
+  (let [s (str (or date ""))]
+    (subs s 0 (min 16 (count s)))))
+
+(defn- votes-str [report]
+  (let [up   (or (:report/votes-up report) 0)
+        down (or (:report/votes-down report) 0)
+        total (+ up down)]
+    (when (pos? total)
+      (str up "/" total))))
+
+(defn- series-str
+  "Format series info: received/expected, e.g. \"2/5\"."
+  [report]
+  (when-let [s (:report/series report)]
+    (let [received (count (:series/patches s))
+          expected (:series/expected s)
+          closed?  (some? (:series/closed s))]
+      (str received "/" expected (when closed? " closed")))))
+
+(defn- related-str
+  "Format related reports as compact type list, e.g. \"bug,patch\"."
+  [report]
+  (when-let [related (seq (:report/related report))]
+    (str/join "," (distinct (map #(name (:report/type %)) related)))))
+
+(defn- extra-str [report]
+  (let [parts (remove nil?
+                [(when-let [v (:report/version report)] v)
+                 (when-let [t (:report/topic report)] t)
+                 (when-let [s (:report/patch-seq report)] s)
+                 (when-let [sources (:report/patch-source report)]
+                   (str "src:" (str/join "," (map name sources))))
+                 (when-let [v (votes-str report)] (str "votes:" v))
+                 (when-let [s (series-str report)] (str "series:" s))
+                 (when-let [r (related-str report)] (str "→" r))])]
+    (when (seq parts) (str/join " " parts))))
+
+;; ---------------------------------------------------------------------------
+;; Report → map (for detail pprint on selection)
+;; ---------------------------------------------------------------------------
+
+(defn- get-header [headers header-name]
+  (let [lname (str/lower-case header-name)]
+    (some (fn [[k v]] (when (= (str/lower-case k) lname) v)) headers)))
+
+(defn- archived-at [email]
+  (when-let [edn-str (:email/headers-edn email)]
+    (get-header (edn/read-string edn-str) "Archived-At")))
+
+(defn- report->map [report]
+  (let [email   (:report/email report)
+        arch    (archived-at email)
+        votes   (votes-str report)
+        series  (:report/series report)
+        related (:report/related report)]
+    (cond-> {:type    (name (:report/type report))
+             :subject (or (:email/subject email) "")
+             :from    (or (:email/from-address email) "")
+             :date    (format-date (:email/date-sent email))
+             :flags   (flags-str report)
+             :replies (descendant-count report)}
+      (:report/message-id report)   (assoc :message-id (:report/message-id report))
+      (:report/version report)      (assoc :version (:report/version report))
+      (:report/topic report)        (assoc :topic (:report/topic report))
+      (:report/patch-seq report)    (assoc :patch-seq (:report/patch-seq report))
+      (:report/patch-source report) (assoc :patch-source (mapv name (:report/patch-source report)))
+      arch                          (assoc :archived-at arch)
+      votes                         (assoc :votes votes)
+      series                        (assoc :series
+                                           (let [patches (:series/patches series)]
+                                             {:received (count patches)
+                                              :expected (:series/expected series)
+                                              :complete (= (count patches)
+                                                           (:series/expected series))
+                                              :closed   (some? (:series/closed series))}))
+      (seq related)                 (assoc :related
+                                           (mapv (fn [r]
+                                                   {:type       (name (:report/type r))
+                                                    :message-id (:report/message-id r)})
+                                                 related)))))
+
+;; ---------------------------------------------------------------------------
+;; Roles helpers
+;; ---------------------------------------------------------------------------
+
+(defn- roles-set [roles attr]
+  (let [v (get roles attr)]
+    (cond (nil? v) #{} (string? v) #{v} :else (set v))))
+
+;; ---------------------------------------------------------------------------
+;; Display
+;; ---------------------------------------------------------------------------
+
+(defn- report->row
+  "Format a report as a tab-separated row for gum table."
+  [report show-type?]
+  (let [email (:report/email report)]
+    (str/join "\t"
+              (concat
+               (when show-type? [(name (:report/type report))])
+               [(flags-str report)
+                (str (descendant-count report))
+                (or (:email/from-address email) "?")
+                (format-date (:email/date-sent email))
+                (or (:email/subject email) "(no subject)")]))))
+
+(defn- report->line
+  "Format a report as a plain text line."
+  [report show-type?]
+  (let [email (:report/email report)]
+    (str (when show-type? (format "[%-12s] " (name (:report/type report))))
+         (format "%-5s %3d %-25s %s  %s"
+                 (flags-str report)
+                 (descendant-count report)
+                 (or (:email/from-address email) "?")
+                 (format-date (:email/date-sent email))
+                 (or (:email/subject email) "(no subject)"))
+         (when-let [e (extra-str report)] (str " " e)))))
+
+(defn- gum-available? []
+  (try
+    (zero? (:exit (process/shell {:out :string :err :string :continue true} "gum" "--version")))
+    (catch Exception _ false)))
+
+(defn display-reports!
+  "Display reports interactively with gum table, or as plain text lines."
+  [reports label show-type?]
+  (if (empty? reports)
+    (println (str "No " label "s found."))
+    (if (gum-available?)
+      (let [columns (concat
+                     (when show-type? ["Type"])
+                     ["Flags" "#" "From" "Date" "Subject"])
+            rows    (mapv #(report->row % show-type?) reports)
+            input   (str/join "\n" rows)
+            {:keys [status result]}
+            (gum/gum :table
+                     :in input
+                     :columns (str/join "," columns)
+                     :separator "\t")]
+        (when (and (zero? status) (seq result))
+          (let [selected (first result)
+                idx      (.indexOf ^java.util.List rows selected)]
+            (when (>= idx 0)
+              (let [report (nth reports idx)]
+                (pprint/pprint (report->map report)))))))
+      ;; Plain text fallback
+      (do (println (str (count reports) " " label "(s):\n"))
+          (doseq [r reports]
+            (println (str "  " (report->line r show-type?))))))))
+
+;; ---------------------------------------------------------------------------
+;; Commands
+;; ---------------------------------------------------------------------------
+
+(defn cmd-list [db report-type]
+  (let [reports (if report-type
+                  (all-reports-by-type db report-type)
+                  (all-reports db))
+        label   (if report-type (name report-type) "report")]
+    (display-reports! reports label (nil? report-type))))
+
+(defn cmd-roles [db mailbox-map]
+  (if (empty? mailbox-map)
+    (println "No mailboxes configured.")
+    (doseq [[mb-id {:keys [email]}] (sort-by key mailbox-map)]
+      (let [roles   (get-roles db email)
+            maints  (roles-set roles :roles/maintainers)
+            ignored (roles-set roles :roles/ignored)]
+        (println (str "\n" email " (" mb-id ")"))
+        (println (str "  Admin:       " (or (:roles/admin roles) "(none)")))
+        (println (str "  Maintainers: " (if (seq maints)  (str/join ", " (sort maints))  "(none)")))
+        (println (str "  Ignored:     " (if (seq ignored) (str/join ", " (sort ignored)) "(none)")))))))
+
+;; ---------------------------------------------------------------------------
+;; Main
+;; ---------------------------------------------------------------------------
+
+(let [args    *command-line-args*
+      command (or (first args) "reports")
+      db-path (or (System/getenv "BARK_DB") "data/bark-db")
+      config  (let [f (clojure.java.io/file "config.edn")]
+                (when (.exists f) (edn/read-string (slurp f))))
+      conn    (d/get-conn db-path schema)]
+  (try
+    (let [db          (d/db conn)
+          mailbox-map (if config (build-mailbox-map config) {})]
+      (case command
+        "bugs"          (cmd-list db :bug)
+        "patches"       (cmd-list db :patch)
+        "requests"      (cmd-list db :request)
+        "announcements" (cmd-list db :announcement)
+        "releases"      (cmd-list db :release)
+        "changes"       (cmd-list db :change)
+        "reports"       (cmd-list db nil)
+        "roles"         (cmd-roles db mailbox-map)
+        (do (println (str "Unknown command: " command))
+            (println "Usage: bb <command>")
+            (println "Commands: bugs patches requests announcements releases changes reports roles"))))
+    (finally
+      (d/close conn))))

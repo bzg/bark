@@ -1,22 +1,42 @@
 {:tasks
  {digest          {:doc  "Digest emails into reports (use --all to rescan everything)"
                    :task (apply shell "bb scripts/bark-digest.clj" *command-line-args*)}
-  bugs            {:doc  "List bug reports (append 'json' to dump as bugs.json)"
-                   :task (apply shell "bb scripts/bark-egest.clj bugs" *command-line-args*)}
-  patches         {:doc  "List patch reports (append 'json' to dump)"
-                   :task (apply shell "bb scripts/bark-egest.clj patches" *command-line-args*)}
-  requests        {:doc  "List requests (append 'json' to dump)"
-                   :task (apply shell "bb scripts/bark-egest.clj requests" *command-line-args*)}
-  announcements   {:doc  "List announcements (append 'json' to dump)"
-                   :task (apply shell "bb scripts/bark-egest.clj announcements" *command-line-args*)}
-  releases        {:doc  "List releases (append 'json' to dump)"
-                   :task (apply shell "bb scripts/bark-egest.clj releases" *command-line-args*)}
-  changes         {:doc  "List changes (append 'json' to dump)"
-                   :task (apply shell "bb scripts/bark-egest.clj changes" *command-line-args*)}
-  reports         {:doc  "List all reports (append 'json' to dump)"
-                   :task (apply shell "bb scripts/bark-egest.clj reports" *command-line-args*)}
+
+  ;; --- Display (bark-suggest) ---
+  bugs            {:doc  "List bug reports interactively"
+                   :task (shell "bb scripts/bark-suggest.clj bugs")}
+  patches         {:doc  "List patch reports interactively"
+                   :task (shell "bb scripts/bark-suggest.clj patches")}
+  requests        {:doc  "List requests interactively"
+                   :task (shell "bb scripts/bark-suggest.clj requests")}
+  announcements   {:doc  "List announcements interactively"
+                   :task (shell "bb scripts/bark-suggest.clj announcements")}
+  releases        {:doc  "List releases interactively"
+                   :task (shell "bb scripts/bark-suggest.clj releases")}
+  changes         {:doc  "List changes interactively"
+                   :task (shell "bb scripts/bark-suggest.clj changes")}
+  reports         {:doc  "List all reports interactively"
+                   :task (shell "bb scripts/bark-suggest.clj reports")}
   roles           {:doc  "Show per-mailbox admins, maintainers, ignored"
-                   :task (shell "bb scripts/bark-egest.clj roles")}
+                   :task (shell "bb scripts/bark-suggest.clj roles")}
+
+  ;; --- JSON export (bark-egest) ---
+  bugs-json          {:doc  "Dump bugs as bugs.json"
+                      :task (shell "bb scripts/bark-egest.clj bugs")}
+  patches-json       {:doc  "Dump patches as patches.json"
+                      :task (shell "bb scripts/bark-egest.clj patches")}
+  requests-json      {:doc  "Dump requests as requests.json"
+                      :task (shell "bb scripts/bark-egest.clj requests")}
+  announcements-json {:doc  "Dump announcements as announcements.json"
+                      :task (shell "bb scripts/bark-egest.clj announcements")}
+  releases-json      {:doc  "Dump releases as releases.json"
+                      :task (shell "bb scripts/bark-egest.clj releases")}
+  changes-json       {:doc  "Dump changes as changes.json"
+                      :task (shell "bb scripts/bark-egest.clj changes")}
+  reports-json       {:doc  "Dump all reports as reports.json"
+                      :task (shell "bb scripts/bark-egest.clj reports")}
+
+  ;; --- Other ---
   validate-config {:doc  "Validate config.edn (pass path as arg, default: ./config.edn)"
                    :task (apply shell "bb scripts/validate-config.clj" *command-line-args*)}
   html            {:doc  "Generate static HTML page from reports (use -o to set output file)"
