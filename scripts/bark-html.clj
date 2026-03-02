@@ -46,12 +46,40 @@
 ;; Hiccup rendering
 ;; ---------------------------------------------------------------------------
 
-(defn report-row [{:strs [type subject from date flags replies]}]
+(defn- status-square
+  "Colored square for acked/owned/closed status with a11y fallback."
+  [flags]
+  (let [f   (or flags "---")
+        a?  (= (nth f 0) \A)
+        o?  (= (nth f 1) \O)
+        c?  (= (nth f 2) \C)
+        [icon label] (cond
+                       c?          ["🟥" "Closed"]
+                       (and a? o?) ["🟩" "Acked, Owned"]
+                       a?          ["🟨" "Acked"]
+                       o?          ["🟦" "Owned"]
+                       :else       ["⬜" "Open"])]
+    [:span {:title (str label " (" flags ")") :aria-label label} icon]))
+
+(defn- priority-square
+  "Colored square for priority with a11y fallback."
+  [priority]
+  (let [p (or priority 0)
+        [icon label] (case p
+                       3 ["🟥" "Urgent + Important"]
+                       2 ["🟧" "Urgent"]
+                       1 ["🟨" "Important"]
+                         ["⬜" "Normal"])]
+    [:span {:title (str label " (" p ")") :aria-label label} icon]))
+
+(defn report-row [{:strs [type subject from date flags priority replies archived-at]}]
   (let [label (get type-labels type type)]
     [:tr {:data-type type
           :data-search (str/lower-case (str subject " " from " " date))}
      [:td [:mark {:data-type type} label]]
-     [:td subject]
+     [:td (status-square flags)]
+     [:td (priority-square priority)]
+     [:td (if archived-at [:a {:href archived-at} subject] subject)]
      [:td.secondary from]
      [:td [:small date]]
      [:td {:style "text-align:center"} (or replies 0)]]))
@@ -178,10 +206,12 @@
            [:thead
             [:tr
              [:th {:data-sort "type" :onclick "sortTable(0,'type')"} "Type"]
-             [:th {:data-sort "subject" :onclick "sortTable(1,'subject')"} "Subject"]
-             [:th {:data-sort "from" :onclick "sortTable(2,'from')"} "From"]
-             [:th {:data-sort "date" :onclick "sortTable(3,'date')"} "Date"]
-             [:th {:data-sort "replies" :onclick "sortTable(4,'replies')"} "↩"]]]
+             [:th "Status"]
+             [:th {:data-sort "priority" :onclick "sortTable(2,'priority')"} "Priority"]
+             [:th {:data-sort "subject" :onclick "sortTable(3,'subject')"} "Subject"]
+             [:th {:data-sort "from" :onclick "sortTable(4,'from')"} "From"]
+             [:th {:data-sort "date" :onclick "sortTable(5,'date')"} "Date"]
+             [:th {:data-sort "replies" :onclick "sortTable(6,'replies')"} "↩"]]]
            [:tbody
             (for [r reports]
               (report-row r))]]]
