@@ -186,7 +186,7 @@
 (def patch-subject-pattern (re-pattern (str "(?i)^" ml-prefix "\\[PATCH(?:\\s+([^\\]]*))?\\]")))
 (def patch-seq-pattern    #"(\d+/\d+)\s*$")
 (def request-pattern      (re-pattern (str "(?i)^" ml-prefix "\\[(POLL|FR|FP|RFC|RFE|TASK)\\]")))
-(def announcement-pattern (re-pattern (str "(?i)^" ml-prefix "\\[(ANN|ANNOUNCEMENT)\\]")))
+(def announcement-pattern (re-pattern (str "(?i)^" ml-prefix "\\[(BLOG|ANN|ANNOUNCEMENT)\\]")))
 (def release-pattern      (re-pattern (str "(?i)^" ml-prefix "\\[(REL|RELEASE)(?:\\s+([^\\]]*))?\\]")))
 (def change-pattern       (re-pattern (str "(?i)^" ml-prefix "\\[(CHG|CHANGE)(?:\\s+([^\\]]*))?\\]")))
 
