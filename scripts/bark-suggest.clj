@@ -3,8 +3,8 @@
 ;; bark-suggest.clj — Display BARK reports interactively.
 ;;
 ;; Standalone CLI tool: reads JSON produced by bark-egest from a file,
-;; a URL, or stdin.  Displays via gum table (with detail on selection)
-;; or plain text lines when gum is not available.
+;; a URL, or stdin.  Displays via fzf (with detail on selection)
+;; or plain text lines when fzf is not available.
 ;;
 ;; Usage:
 ;;   bark-suggest.clj [options]
@@ -19,17 +19,11 @@
 ;;   bb suggest -u https://example.com/reports.json
 ;;   curl … | bb suggest -
 
-(require '[babashka.deps :as deps]
-         '[babashka.process :as process]
+(require '[babashka.process :as process]
          '[babashka.http-client :as http]
          '[cheshire.core :as json]
          '[clojure.string :as str]
          '[clojure.pprint :as pprint])
-
-(deps/add-deps '{:deps {io.github.lispyclouds/bblgum
-                         {:git/sha "881a426d9df9df40eb305ceaeb3996ea1c7ae0d3"}}})
-
-(require '[bblgum.core :as gum])
 
 ;; ---------------------------------------------------------------------------
 ;; Data loading
@@ -111,33 +105,46 @@
 ;; Display
 ;; ---------------------------------------------------------------------------
 
-(defn- gum-available? []
+(defn- fzf-available? []
   (try
-    (zero? (:exit (process/shell {:out :string :err :string :continue true} "gum" "--version")))
+    (zero? (:exit (process/shell {:out :string :err :string :continue true} "fzf" "--version")))
     (catch Exception _ false)))
 
+(defn- tabulate
+  "Align tab-separated rows into fixed-width columns using column(1)."
+  [rows]
+  (-> (process/shell {:in (str/join "\n" rows) :out :string}
+                     "column" "-t" "-s" "\t")
+      :out
+      str/trim
+      str/split-lines))
+
 (defn display-reports!
-  "Display reports interactively with gum table, or as plain text lines."
+  "Display reports interactively with fzf, or as plain text lines."
   [reports]
   (let [show-type? true
-        show-mb? (has-mailbox? reports)]
+        show-mb?   (has-mailbox? reports)]
     (if (empty? reports)
       (println "No reports found.")
-      (if (gum-available?)
-        (let [columns (concat
-                       (when show-type? ["Type"])
-                       (when show-mb?   ["Mailbox"])
-                       ["P" "Flags" "#" "From" "Date" "Subject"])
-              rows    (mapv #(report->row % show-type? show-mb?) reports)
-              input   (str/join "\n" rows)
-              {:keys [status result]}
-              (gum/gum :table
-                       :in input
-                       :columns (str/join "," columns)
-                       :separator "\t")]
-          (when (and (zero? status) (seq result))
-            (let [selected (first result)
-                  idx      (.indexOf ^java.util.List rows selected)]
+      (if (fzf-available?)
+        (let [header (str/join "\t"
+                               (concat
+                                (when show-type? ["Type"])
+                                (when show-mb?   ["Mailbox"])
+                                ["P" "Flags" "#" "From" "Date" "Subject"]))
+              rows   (mapv #(report->row % show-type? show-mb?) reports)
+              aligned      (tabulate (cons header rows))
+              header-line  (first aligned)
+              aligned-rows (vec (rest aligned))
+              input        (str/join "\n" aligned-rows)
+              {:keys [exit out]}
+              (process/shell {:in input :out :string :continue true}
+                             "fzf" "--header" header-line
+                             "--no-sort" "--reverse"
+                             "--prompt" "report> ")]
+          (when (zero? exit)
+            (let [selected (str/trim out)
+                  idx      (.indexOf ^java.util.List aligned-rows selected)]
               (when (>= idx 0)
                 (let [report (nth reports idx)
                       url    (:archived-at report)]
@@ -145,10 +152,10 @@
                     (process/shell "xdg-open" url)
                     (do (println "No archived-at URL for this report.")
                         (pprint/pprint report))))))))
-      ;; Plain text fallback
-      (do (println (str (count reports) " report(s):\n"))
-          (doseq [r reports]
-            (println (str "  " (report->line r show-type? show-mb?)))))))))
+        ;; Plain text fallback
+        (do (println (str (count reports) " report(s):\n"))
+            (doseq [r reports]
+              (println (str "  " (report->line r show-type? show-mb?)))))))))
 ;; ---------------------------------------------------------------------------
 ;; CLI
 ;; ---------------------------------------------------------------------------
