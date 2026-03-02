@@ -6,6 +6,8 @@
 ;;   bb export json          — dump all reports as reports.json
 ;;   bb export rss           — dump all reports as reports.rss
 ;;   bb export org           — dump all reports as reports.org
+;;   bb export json -p 2     — only priority >= 2
+;;   bb export json -s 3     — only status >= 3 (i.e. acked+owned+closed or above)
 ;;
 ;; Environment / defaults:
 ;;   BARK_DB — path to db (default: ./data/bark-db)
@@ -64,6 +66,11 @@
 (defn- priority [report]
   (+ (if (:report/urgent report) 2 0)
      (if (:report/important report) 1 0)))
+
+(defn- status [report]
+  (+ (if-not (:report/closed report) 4 0)
+     (if (:report/owned report) 2 0)
+     (if (:report/acked report) 1 0)))
 
 (defn- descendant-count [report]
   (let [d (:report/descendants report)]
@@ -160,6 +167,7 @@
              :date     (format-date (:email/date-sent email))
              :date-raw (str (:email/date-sent email))
              :flags    (flags-str report)
+             :status   (status report)
              :priority (priority report)
              :replies  (descendant-count report)}
       (:email/from-name email)      (assoc :from-name (:email/from-name email))
@@ -304,6 +312,7 @@
                    (when-let [mid (:message-id m)] (str ":MESSAGE-ID: " mid))
                    (when-let [a (:archived-at m)]  (str ":ARCHIVED-AT: " a))
                    (str ":FLAGS: " (:flags m "---"))
+                   (str ":STATUS: " (:status m 0))
                    (str ":PRIORITY: " (:priority m 0))
                    (str ":REPLIES: " (:replies m 0))
                    (when-let [v (:version m)]      (str ":VERSION: " v))
@@ -344,10 +353,12 @@
 (defn- parse-args [args]
   (loop [opts {} [a & more] args]
     (cond
-      (nil? a)                    opts
-      (#{"-m" "--mailbox"} a)     (recur (assoc opts :mailbox-name (first more)) (rest more))
-      (nil? (:format opts))       (recur (assoc opts :format a) more)
-      :else                       opts)))
+      (nil? a)                        opts
+      (#{"-m" "--mailbox"} a)         (recur (assoc opts :mailbox-name (first more)) (rest more))
+      (#{"-p" "--min-priority"} a)    (recur (assoc opts :min-priority (parse-long (first more))) (rest more))
+      (#{"-s" "--min-status"} a)      (recur (assoc opts :min-status (parse-long (first more))) (rest more))
+      (nil? (:format opts))           (recur (assoc opts :format a) more)
+      :else                           opts)))
 
 (defn- resolve-mailbox-ids
   "Given a mailbox name, return matching mailbox-ids from mailbox-map."
@@ -362,13 +373,23 @@
   (let [id-set (set mb-ids)]
     (filter #(contains? id-set (get-in % [:report/email :email/mailbox])) reports)))
 
+(defn- filter-by-priority
+  "Keep only reports with priority >= min-p."
+  [reports min-p]
+  (filter #(>= (priority %) min-p) reports))
+
+(defn- filter-by-status
+  "Keep only reports with status >= min-s."
+  [reports min-s]
+  (filter #(>= (status %) min-s) reports))
+
 ;; ---------------------------------------------------------------------------
 ;; Main
 ;; ---------------------------------------------------------------------------
 
 (def formats #{"json" "rss" "org"})
 
-(let [{:keys [format mailbox-name]
+(let [{:keys [format mailbox-name min-priority min-status]
        :or {format "json"}}
       (parse-args *command-line-args*)
       db-path (or (System/getenv "BARK_DB") "data/bark-db")
@@ -377,6 +398,12 @@
     (when-not (formats format)
       (println (str "Unknown format: " format))
       (println "Formats: json rss org")
+      (System/exit 1))
+    (when (and min-priority (not (#{1 2 3} min-priority)))
+      (println (str "Invalid --min-priority: " min-priority " (must be 1, 2, or 3)"))
+      (System/exit 1))
+    (when (and min-status (not (<= 1 min-status 7)))
+      (println (str "Invalid --min-status: " min-status " (must be 1–7)"))
       (System/exit 1))
     (let [db              (d/db conn)
           config          (load-config)
@@ -394,6 +421,12 @@
                                    (System/exit 1))
                                (filter-by-mailbox all-reps mb-ids)))
                            all-reps)
+          reports         (if min-priority
+                           (filter-by-priority reports min-priority)
+                           reports)
+          reports         (if min-status
+                           (filter-by-status reports min-status)
+                           reports)
           basename        "reports"]
       (if (empty? reports)
         (println (str "No reports found."

@@ -59,7 +59,7 @@ bb export [json|rss|org]       Export all reports (default: json)
 bb reports                     Export JSON + interactive display via fzf
 bb suggest -f FILE | -u URL    Display reports from file, URL, or stdin
 bb html [-o file]              Static HTML page (default: index.html)
-bb validate-config [path]      Validate config.edn
+bb config [path]               Validate config.edn
 bb test                        Run integration tests
 ```
 

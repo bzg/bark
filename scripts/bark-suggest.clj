@@ -10,9 +10,11 @@
 ;;   bark-suggest.clj [options]
 ;;
 ;; Options:
-;;   -f, --file FILE   Read reports from a JSON file
-;;   -u, --url  URL    Fetch reports from a URL
-;;   -                 Read JSON from stdin
+;;   -f, --file FILE          Read reports from a JSON file
+;;   -u, --url  URL           Fetch reports from a URL
+;;   -p, --min-priority 1-3   Only show reports with priority >= N
+;;   -s, --min-status 1-7     Only show reports with status >= N
+;;   -                        Read JSON from stdin
 ;;
 ;; Examples:
 ;;   bb suggest -f reports.json
@@ -164,13 +166,21 @@
   (println "Usage: bark-suggest.clj [options]")
   (println "")
   (println "Options:")
-  (println "  -f, --file FILE       Read reports from a JSON file")
-  (println "  -u, --url  URL        Fetch reports from a URL")
-  (println "  -m, --mailbox NAME    Filter by mailbox name")
-  (println "  -                     Read JSON from stdin"))
+  (println "  -f, --file FILE            Read reports from a JSON file")
+  (println "  -u, --url  URL             Fetch reports from a URL")
+  (println "  -m, --mailbox NAME         Filter by mailbox name")
+  (println "  -p, --min-priority 1|2|3   Only show reports with priority >= N")
+  (println "  -s, --min-status 1-7       Only show reports with status >= N")
+  (println "  -                          Read JSON from stdin"))
 
 (defn- filter-by-mailbox [reports mb-name]
   (filter #(= (:mailbox %) mb-name) reports))
+
+(defn- filter-by-priority [reports min-p]
+  (filter #(>= (:priority % 0) min-p) reports))
+
+(defn- filter-by-status [reports min-s]
+  (filter #(>= (:status % 0) min-s) reports))
 
 (let [args *command-line-args*]
   (if (or (empty? args) (some #{"-h" "--help"} args))
@@ -183,14 +193,30 @@
               (#{"-f" "--file"} a)            (recur (assoc opts :source :file :path (first more)) (rest more))
               (#{"-u" "--url"} a)             (recur (assoc opts :source :url  :url  (first more)) (rest more))
               (#{"-m" "--mailbox"} a)         (recur (assoc opts :mailbox (first more)) (rest more))
+              (#{"-p" "--min-priority"} a)    (recur (assoc opts :min-priority (parse-long (first more))) (rest more))
+              (#{"-s" "--min-status"} a)      (recur (assoc opts :min-status (parse-long (first more))) (rest more))
               :else                          [opts remaining]))
-          reports     (case (:source opts)
-                        :file  (load-from-file (:path opts))
-                        :url   (load-from-url (:url opts))
-                        :stdin (load-from-stdin)
-                        (do (println "Error: specify -f FILE, -u URL, or - for stdin.")
-                            (System/exit 1)))
-          reports     (if-let [mb (:mailbox opts)]
-                        (filter-by-mailbox reports mb)
-                        reports)]
+          min-priority (:min-priority opts)
+          min-status   (:min-status opts)
+          _       (when (and min-priority (not (#{1 2 3} min-priority)))
+                    (println (str "Invalid --min-priority: " min-priority " (must be 1, 2, or 3)"))
+                    (System/exit 1))
+          _       (when (and min-status (not (<= 1 min-status 7)))
+                    (println (str "Invalid --min-status: " min-status " (must be 1–7)"))
+                    (System/exit 1))
+          reports (case (:source opts)
+                    :file  (load-from-file (:path opts))
+                    :url   (load-from-url (:url opts))
+                    :stdin (load-from-stdin)
+                    (do (println "Error: specify -f FILE, -u URL, or - for stdin.")
+                        (System/exit 1)))
+          reports (if-let [mb (:mailbox opts)]
+                    (filter-by-mailbox reports mb)
+                    reports)
+          reports (if min-priority
+                    (filter-by-priority reports min-priority)
+                    reports)
+          reports (if min-status
+                    (filter-by-status reports min-status)
+                    reports)]
       (display-reports! reports))))

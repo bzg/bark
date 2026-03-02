@@ -1,21 +1,30 @@
 {:tasks
- {digest          {:doc  "Digest emails into reports (use --all to rescan everything)"
-                   :task (apply shell "bb scripts/bark-digest.clj" *command-line-args*)}
+ {digest  {:doc  "Digest emails into reports (use --all to rescan everything)"
+           :task (apply shell "bb scripts/bark-digest.clj" *command-line-args*)}
 
-  export          {:doc  "Export all reports: bb export [json|rss|org] [-m mailbox]"
-                   :task (apply shell "bb scripts/bark-egest.clj" *command-line-args*)}
+  export  {:doc  "Export all reports: bb export [json|rss|org] [-m mailbox] [-p 1|2|3] [-s 1-7]"
+           :task (apply shell "bb scripts/bark-egest.clj" *command-line-args*)}
 
-  reports         {:doc  "Export all reports as JSON and display interactively"
-                   :task (do (shell "bb export json")
-                             (when (.exists (clojure.java.io/file "reports.json"))
-                               (shell "bb suggest -f reports.json")))}
+  reports {:doc  "Export all reports as JSON and display interactively [-p 1|2|3] [-s 1-7]"
+           :task (let [args *command-line-args*
+                       f (clojure.java.io/file "reports.json")]
+                  (when (.exists f) (.delete f))
+                  (apply shell "bb export json" args)
+                  (when (.exists f)
+                   (apply shell "bb suggest -f reports.json" args)))}
 
-  suggest         {:doc  "Display reports from file/URL/stdin: bb suggest -f FILE | -u URL | -"
-                   :task (apply shell "bb scripts/bark-suggest.clj" *command-line-args*)}
-
-  validate-config {:doc  "Validate config.edn (pass path as arg, default: ./config.edn)"
-                   :task (apply shell "bb scripts/validate-config.clj" *command-line-args*)}
-  html            {:doc  "Generate static HTML page from reports (use -o to set output file)"
-                   :task (apply shell "bb scripts/bark-html.clj" *command-line-args*)}
-  test            {:doc  "Run bark-digest integration tests"
-                   :task (shell "bb test/bark-digest-test.clj")}}}
+  suggest {:doc  "Display reports from file/URL/stdin: bb suggest -f FILE | -u URL | - [-p 1|2|3] [-s 1-7]"
+           :task (apply shell "bb scripts/bark-suggest.clj" *command-line-args*)}
+  
+  config  {:doc  "Validate config.edn (pass path as arg, default: ./config.edn)"
+           :task (apply shell "bb scripts/validate-config.clj" *command-line-args*)}
+  html    {:doc  "Generate static HTML page from reports [-o file] [-p 1|2|3] [-s 1-7]"
+           :task (apply shell "bb scripts/bark-html.clj" *command-line-args*)}
+  clean   {:doc  "Remove generated files (reports.json, reports.rss, reports.org, index.html)"
+           :task (doseq [f ["reports.json" "reports.rss" "reports.org" "index.html"]
+                         :let [file (clojure.java.io/file f)]
+                         :when (.exists file)]
+                  (.delete file)
+                  (println "Deleted" f))}
+  test    {:doc  "Run bark-digest integration tests"
+           :task (shell "bb test/bark-digest-test.clj")}}}

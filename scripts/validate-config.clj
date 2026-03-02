@@ -4,7 +4,7 @@
 ;;
 ;; Usage:
 ;;   bb scripts/validate-config.clj [path]
-;;   bb validate-config [path]
+;;   bb config [path]
 ;;
 ;; Defaults to ./config.edn if no path given.
 
