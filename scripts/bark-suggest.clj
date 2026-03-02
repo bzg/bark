@@ -88,7 +88,8 @@
   (str/join "\t"
             (concat
              (when show-type? [(:type report "")])
-             [(:flags report "-----")
+             [(str (:priority report 0))
+              (:flags report "---")
               (str (:replies report 0))
               (:from report "?")
               (:date report "")
@@ -113,8 +114,9 @@
   "Format a report as a plain text line."
   [report show-type?]
   (str (when show-type? (format "[%-12s] " (:type report "")))
-       (format "%-5s %3d %-25s %s  %s"
-               (:flags report "-----")
+       (format "%d %-3s %3d %-25s %s  %s"
+               (:priority report 0)
+               (:flags report "---")
                (:replies report 0)
                (:from report "?")
                (:date report "")
@@ -138,7 +140,7 @@
     (if (gum-available?)
       (let [columns (concat
                      (when show-type? ["Type"])
-                     ["Flags" "#" "From" "Date" "Subject"])
+                     ["P" "Flags" "#" "From" "Date" "Subject"])
             rows    (mapv #(report->row % show-type?) reports)
             input   (str/join "\n" rows)
             {:keys [status result]}

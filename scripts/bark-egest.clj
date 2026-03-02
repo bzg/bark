@@ -63,11 +63,14 @@
 ;; ---------------------------------------------------------------------------
 
 (def ^:private flag-defs
-  [[:report/acked "A"] [:report/owned "O"] [:report/closed "C"]
-   [:report/urgent "U"] [:report/important "I"]])
+  [[:report/acked "A"] [:report/owned "O"] [:report/closed "C"]])
 
 (defn- flags-str [report]
   (apply str (map (fn [[k c]] (if (get report k) c "-")) flag-defs)))
+
+(defn- priority [report]
+  (+ (if (:report/urgent report) 2 0)
+     (if (:report/important report) 1 0)))
 
 (defn- descendant-count [report]
   (let [d (:report/descendants report)]
@@ -110,6 +113,7 @@
              :date     (format-date (:email/date-sent email))
              :date-raw (str (:email/date-sent email))
              :flags    (flags-str report)
+             :priority (priority report)
              :replies  (descendant-count report)}
       (:email/from-name email)      (assoc :from-name (:email/from-name email))
       (:report/message-id report)   (assoc :message-id (:report/message-id report))
@@ -239,18 +243,10 @@
 ;; Org output
 ;; ---------------------------------------------------------------------------
 
-(defn- org-flags [m]
-  (let [f (:flags m "-----")]
-    (str/join " "
-              (remove nil?
-                      [(when (= (nth f 0) \A) "ACKED")
-                       (when (= (nth f 1) \O) "OWNED")
-                       (when (= (nth f 2) \C) "CLOSED")
-                       (when (= (nth f 3) \U) "URGENT")
-                       (when (= (nth f 4) \I) "IMPORTANT")]))))
-
 (defn- report->org-entry [m]
-  (let [todo    (if (= (nth (:flags m "-----") 2) \C) "DONE" "TODO")
+  (let [todo    (if (= (nth (:flags m "---") 2) \C) "DONE" "TODO")
+        prio    (case (:priority m 0)
+                  3 "[#A] " 2 "[#A] " 1 "[#B] " "")
         subject (:subject m "")
         tags    (when-let [t (:type m)] (str ":" t ":"))
         props   (remove nil?
@@ -258,7 +254,8 @@
                    (str ":DATE: " (:date m ""))
                    (when-let [mid (:message-id m)] (str ":MESSAGE-ID: " mid))
                    (when-let [a (:archived-at m)]  (str ":ARCHIVED-AT: " a))
-                   (str ":FLAGS: " (:flags m "-----"))
+                   (str ":FLAGS: " (:flags m "---"))
+                   (str ":PRIORITY: " (:priority m 0))
                    (str ":REPLIES: " (:replies m 0))
                    (when-let [v (:version m)]      (str ":VERSION: " v))
                    (when-let [t (:topic m)]        (str ":TOPIC: " t))
@@ -266,7 +263,7 @@
                    (when-let [s (:series m)]
                      (str ":SERIES: " (:received s) "/" (:expected s)
                           (when (:closed s) " closed")))])]
-    (str "* " todo " " subject (when tags (str "  " tags)) "\n"
+    (str "* " todo " " prio subject (when tags (str "  " tags)) "\n"
          ":PROPERTIES:\n"
          (str/join "\n" props) "\n"
          ":END:\n"
