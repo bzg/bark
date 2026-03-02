@@ -13,6 +13,8 @@ applies state triggers from email body, and manages roles per mailbox.
   reports and roles in the DB.
 - **bark-egest** — Babashka script, displays reports interactively or
   dumps them as JSON.
+- **bark-html** — Babashka script, generates a static HTML page with
+  embedded report data (Pico CSS, search, sortable columns).
 
 ## Dependencies
 
@@ -53,6 +55,7 @@ bb announcements [json]
 bb releases [json]
 bb changes [json]
 bb reports [json]         All reports
+bb html [-o file]         Static HTML page (default: index.html)
 bb roles                  Per-mailbox roles
 bb validate-config [path] Validate config.edn
 ```
