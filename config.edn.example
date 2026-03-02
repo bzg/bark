@@ -8,6 +8,8 @@
               :user     "imap-login@example.com"
               :password "secret"
               :folder   "INBOX"
+              ;; Human-readable name (mandatory when multiple mailboxes)
+              :name     "bugs"
               ;; The public email address for this mailbox (mandatory)
               :email    "bugs@example.com"
               ;; The mailing list address (optional, for mailing-list-backed mailboxes)
@@ -21,6 +23,8 @@
               :user     "patches-login@other.com"
               :password "secret2"
               :folder   "INBOX"
+              ;; Human-readable name (mandatory when multiple mailboxes)
+              :name     "patches"
               ;; :user and :email can be the same
               :email    "patches-login@other.com"}]
 

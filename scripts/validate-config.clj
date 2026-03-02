@@ -36,6 +36,7 @@
 (s/def :mailbox/folder ::non-blank-string)
 (s/def :mailbox/email ::email)
 (s/def :mailbox/mailing-list-email ::email)
+(s/def :mailbox/name ::non-blank-string)
 (s/def :mailbox/admin ::email)
 
 (s/def ::mailbox
@@ -43,12 +44,16 @@
                    :mailbox/email]
           :opt-un [:mailbox/port :mailbox/ssl
                    :mailbox/password :mailbox/oauth2-token
-                   :mailbox/admin :mailbox/mailing-list-email]))
+                   :mailbox/admin :mailbox/mailing-list-email
+                   :mailbox/name]))
 
 (s/def :bark/mailboxes
   (s/and (s/coll-of ::mailbox :kind vector? :min-count 1)
          ;; Each mailbox must have either password or oauth2-token
-         (fn [mbs] (every? #(or (:password %) (:oauth2-token %)) mbs))))
+         (fn [mbs] (every? #(or (:password %) (:oauth2-token %)) mbs))
+         ;; When multiple mailboxes, each must have a :name
+         (fn [mbs] (or (<= (count mbs) 1)
+                       (every? :name mbs)))))
 
 ;; DB
 (s/def :db/path ::non-blank-string)
@@ -95,7 +100,8 @@
             (println (str "  Default admin: " (:admin config)))
             (println (str "  Mailboxes:     " (count (:mailboxes config))))
             (doseq [mb (:mailboxes config)]
-              (println (str "    - " (:email mb)
+              (println (str "    - " (when-let [n (:name mb)] (str "[" n "] "))
+                            (:email mb)
                             (when-let [ml (:mailing-list-email mb)]
                               (str " (list: " ml ")"))
                             " (user: " (:user mb) "@" (:host mb) "/" (:folder mb)

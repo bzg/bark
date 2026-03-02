@@ -2,14 +2,15 @@
 
 ;; bark-html.clj — Generate a static HTML page from BARK reports.
 ;;
-;; Calls bark-egest to produce reports.json, then embeds the data
-;; in a standalone HTML page with Pico CSS 2.0 (light/dark mode),
-;; search, type filters, and sortable columns.
+;; Reads reports.json (produced by bark-egest) and config.edn, then
+;; builds a standalone HTML page.  Most logic is in Clojure; JS is
+;; limited to client-side filtering, sorting, theme toggle, and URL
+;; permalink state.
 ;;
 ;; Usage:
+;;   bb html                                    → via bb task
 ;;   bb scripts/bark-html.clj                   → writes index.html
 ;;   bb scripts/bark-html.clj -o reports.html   → writes reports.html
-;;   bb html                                    → via bb task
 
 (require '[babashka.process :as process]
          '[cheshire.core :as json]
@@ -23,32 +24,67 @@
 (def pico-cdn "https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css")
 (def json-file "reports.json")
 (def default-output "index.html")
+(def bark-doc-url "https://codeberg.org/bzg/bark")
 
 (def type-labels {"bug" "bug" "announcement" "ann" "request" "req"
                   "patch" "patch" "release" "rel" "change" "chg"})
 
 ;; ---------------------------------------------------------------------------
+;; Roles from config.edn
+;; ---------------------------------------------------------------------------
+
+;; ---------------------------------------------------------------------------
 ;; Generate reports.json via bark-egest
 ;; ---------------------------------------------------------------------------
 
-(defn generate-json! []
-  (let [{:keys [exit]} (process/shell "bb" "scripts/bark-egest.clj" "reports" "json")]
+(defn generate-json! [mailbox-name]
+  (let [cmd (cond-> ["bb" "scripts/bark-egest.clj" "reports" "json"]
+              mailbox-name (into ["-m" mailbox-name]))
+        {:keys [exit]} (apply process/shell {:continue true} cmd)]
     (when-not (zero? exit)
-      (binding [*out* *err*]
-        (println "Error: bark-egest exited with" exit))
       (System/exit 1))
     (when-not (.exists (clojure.java.io/file json-file))
-      (binding [*out* *err*]
-        (println (str "Error: " json-file " not found after running bark-egest")))
       (System/exit 1))))
 
 ;; ---------------------------------------------------------------------------
-;; Hiccup rendering
+;; Date normalization
 ;; ---------------------------------------------------------------------------
 
-(defn- status-square
-  "Colored square for acked/owned/closed status with a11y fallback."
-  [flags]
+(defn- parse-to-iso-date
+  "Extract a YYYY-MM-DD string from various date formats.
+   Tries java.time parsing, then falls back to regex extraction."
+  [s]
+  (when (seq s)
+    (let [s (str/trim s)]
+      (or
+       ;; ISO-ish: starts with YYYY-MM-DD
+       (when (and (>= (count s) 10)
+                  (re-matches #"\d{4}-\d{2}-\d{2}.*" s))
+         (subs s 0 10))
+       ;; java.util.Date.toString(): "Sat Mar 01 20:40:00 UTC 2025"
+       (when-let [[_ mon day year]
+                  (re-find #"^\w+ (\w+) (\d+) .* (\d{4})$" s)]
+         (let [months {"Jan" "01" "Feb" "02" "Mar" "03" "Apr" "04"
+                       "May" "05" "Jun" "06" "Jul" "07" "Aug" "08"
+                       "Sep" "09" "Oct" "10" "Nov" "11" "Dec" "12"}]
+           (when-let [m (months mon)]
+             (str year "-" m "-" (format "%02d" (parse-long day))))))
+       ;; Truncated: "Sat Mar 01 20:40"
+       (when-let [[_ mon day]
+                  (re-find #"^\w+ (\w+) (\d+) " s)]
+         (let [months {"Jan" "01" "Feb" "02" "Mar" "03" "Apr" "04"
+                       "May" "05" "Jun" "06" "Jul" "07" "Aug" "08"
+                       "Sep" "09" "Oct" "10" "Nov" "11" "Dec" "12"}
+               year (str (.getYear (java.time.LocalDate/now)))]
+           (when-let [m (months mon)]
+             (str year "-" m "-" (format "%02d" (parse-long day))))))
+       ""))))
+
+;; ---------------------------------------------------------------------------
+;; Hiccup helpers
+;; ---------------------------------------------------------------------------
+
+(defn- status-square [flags]
   (let [f   (or flags "---")
         a?  (= (nth f 0) \A)
         o?  (= (nth f 1) \O)
@@ -61,31 +97,65 @@
                        :else       ["⬜" "Open"])]
     [:span {:title (str label " (" flags ")") :aria-label label} icon]))
 
-(defn- priority-square
-  "Colored square for priority with a11y fallback."
-  [priority]
+(defn- priority-square [priority]
   (let [p (or priority 0)
-        [icon label] (case p
+        [icon label] (case (int p)
                        3 ["🟥" "Urgent + Important"]
                        2 ["🟧" "Urgent"]
                        1 ["🟨" "Important"]
                          ["⬜" "Normal"])]
     [:span {:title (str label " (" p ")") :aria-label label} icon]))
 
-(defn report-row [{:strs [type subject from date flags priority replies archived-at]}]
-  (let [label (get type-labels type type)]
-    [:tr {:data-type type
-          :data-search (str/lower-case (str subject " " from " " date))}
+(defn- subject-el
+  "Render subject with optional admin/maintainer styling and archive link."
+  [subject role archived-at]
+  (let [inner (case role
+                "admin"      [:strong subject]
+                "maintainer" [:em subject]
+                subject)]
+    (if archived-at
+      [:a {:href archived-at} inner]
+      inner)))
+
+(defn- related-mids
+  "Comma-joined message-ids of related reports, for JS search."
+  [related]
+  (when (seq related)
+    (str/join "," (keep #(get % "message-id") related))))
+
+(defn- related-link [related]
+  (when-let [mids (related-mids related)]
+    [:small.secondary
+     " "
+     [:a {:href "#"
+          :onclick (str "setSearch('m:" mids "'); return false;")
+          :title "Filter related reports"}
+      (str "↳ " (count related) " related")]]))
+
+(defn- report-row [multi-mb? {:strs [type subject from date date-raw flags priority
+                            replies archived-at message-id related role mailbox]}]
+  (let [label    (get type-labels type type)
+        closed?  (and flags (>= (count flags) 3) (= (nth flags 2) \C))
+        iso-date (parse-to-iso-date (or date-raw date ""))]
+    [:tr {:data-type    type
+          :data-closed  (str closed?)
+          :data-mid     (or message-id "")
+          :data-from    (str/lower-case (or from ""))
+          :data-subject (str/lower-case (or subject ""))
+          :data-date    iso-date
+          :data-mailbox (or mailbox "")
+          :data-search  (str/lower-case (str subject " " from " " iso-date))}
      [:td [:mark {:data-type type} label]]
      [:td (status-square flags)]
      [:td (priority-square priority)]
-     [:td (if archived-at [:a {:href archived-at} subject] subject)]
+     (when multi-mb? [:td [:small (or mailbox "")]])
+     [:td (subject-el subject role archived-at) (related-link related)]
      [:td.secondary from]
-     [:td [:small date]]
+     [:td [:small (or iso-date date "")]]
      [:td {:style "text-align:center"} (or replies 0)]]))
 
 ;; ---------------------------------------------------------------------------
-;; CSS & JS (inlined)
+;; CSS (inlined)
 ;; ---------------------------------------------------------------------------
 
 (def page-css "
@@ -101,7 +171,7 @@
   .filters { display: flex; gap: 0.4rem; flex-wrap: wrap; }
   .filters button { padding: 0.3rem 0.7rem; font-size: 0.8rem; }
   .filters button.outline { opacity: 0.5; }
-  input[type=search] { max-width: 240px; margin-bottom: 0; }
+  input[type=search] { max-width: 300px; margin-bottom: 0; }
   th[data-sort] { cursor: pointer; user-select: none; }
   th[data-sort]:hover { text-decoration: underline; }
   th[data-sort]::after { content: ' ↕'; opacity: 0.3; font-size: 0.75em; }
@@ -110,25 +180,116 @@
   tr.hidden { display: none; }
   #status { font-size: 0.8rem; margin-bottom: 0.5rem; }
   .theme-toggle { cursor: pointer; background: none; border: none; font-size: 1.2rem; padding: 0.3rem; }
+  .controls { display: flex; gap: 0.5rem; align-items: center; }
+  .controls label { font-size: 0.85rem; margin-bottom: 0; cursor: pointer; }
+  .controls input[type=checkbox] { margin: 0; }
 ")
 
-(defn page-js [types]
-  (let [active-init (str "{"
-                         (str/join "," (map #(str % ":true") (map #(str "'" % "'") types)))
-                         "}")]
-    (str "
-  var activeTypes = " active-init ";
+;; ---------------------------------------------------------------------------
+;; JS — client-side filtering, sorting, URL state, theme toggle.
+;; All data attributes are pre-computed in Clojure as YYYY-MM-DD.
+;; ---------------------------------------------------------------------------
+
+(defn page-js [types-json]
+  (str "
+  var allTypes = " types-json ";
+  var activeTypes = {};
+  allTypes.forEach(function(t) { activeTypes[t] = true; });
+  var showClosed = false;
+
+  function getSearchInput() {
+    return document.getElementById('si');
+  }
+
+  function setSearch(val) {
+    getSearchInput().value = val;
+    filterRows();
+  }
+
+  /* Format a Date as YYYY-MM-DD in local time */
+  function localDate(d) {
+    var y = d.getFullYear();
+    var m = String(d.getMonth() + 1).padStart(2, '0');
+    var day = String(d.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + day;
+  }
+
+  /* Resolve a date token: '3d' → 3 days ago, 'YYYY-MM-DD' → as-is */
+  function resolveDate(s) {
+    if (!s) return '';
+    var m = s.match(/^(\\d+)d$/);
+    if (m) {
+      var d = new Date();
+      d.setDate(d.getDate() - parseInt(m[1]));
+      return localDate(d);
+    }
+    if (/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return s;
+    return '';
+  }
+
+  /* Parse structured search query */
+  function parseQuery(q) {
+    var result = { text: '', mids: [], froms: [], subjects: [], dateFrom: '', dateTo: '' };
+    var parts = q.split(/\\s+/);
+    for (var i = 0; i < parts.length; i++) {
+      var p = parts[i];
+      if (p.indexOf('m:') === 0) {
+        result.mids = p.substring(2).toLowerCase().split(',').filter(Boolean);
+      } else if (p.indexOf('f:') === 0) {
+        result.froms = p.substring(2).toLowerCase().split(',').filter(Boolean);
+      } else if (p.indexOf('s:') === 0) {
+        result.subjects = p.substring(2).toLowerCase().split(',').filter(Boolean);
+      } else if (p.indexOf('d:') === 0) {
+        var range = p.substring(2).split('..');
+        result.dateFrom = resolveDate(range[0] || '');
+        result.dateTo = resolveDate(range[1] || '') || localDate(new Date());
+      } else {
+        result.text += (result.text ? ' ' : '') + p;
+      }
+    }
+    return result;
+  }
+
+  /* Test whether a row matches the parsed query */
+  function matchRow(tr, q) {
+    var d = tr.dataset;
+
+    if (!activeTypes[d.type]) return false;
+    if (!showClosed && d.closed === 'true') return false;
+
+    if (q.mids.length > 0) {
+      var mid = (d.mid || '').toLowerCase();
+      if (!q.mids.some(function(m) { return mid.indexOf(m) !== -1; })) return false;
+    }
+
+    if (q.froms.length > 0) {
+      if (!q.froms.some(function(f) { return d.from.indexOf(f) !== -1; })) return false;
+    }
+
+    if (q.subjects.length > 0) {
+      if (!q.subjects.some(function(s) { return d.subject.indexOf(s) !== -1; })) return false;
+    }
+
+    /* data-date is always YYYY-MM-DD, set by Clojure */
+    if (q.dateFrom && d.date < q.dateFrom) return false;
+    if (q.dateTo && d.date > q.dateTo) return false;
+
+    if (q.text && d.search.indexOf(q.text.toLowerCase()) === -1) return false;
+
+    return true;
+  }
 
   function filterRows() {
-    var q = document.querySelector('input[type=search]').value.toLowerCase();
+    var q = parseQuery(getSearchInput().value);
     var rows = document.querySelectorAll('tbody tr');
     var visible = 0;
     rows.forEach(function(tr) {
-      var show = activeTypes[tr.dataset.type] && (!q || tr.dataset.search.indexOf(q) !== -1);
+      var show = matchRow(tr, q);
       tr.classList.toggle('hidden', !show);
       if (show) visible++;
     });
     document.getElementById('status').textContent = visible + '/' + rows.length + ' reports';
+    updateURL();
   }
 
   function toggleType(type, btn) {
@@ -137,6 +298,46 @@
     filterRows();
   }
 
+  function toggleClosed() {
+    showClosed = document.getElementById('show-closed').checked;
+    filterRows();
+  }
+
+  /* Permalink: sync state to/from URL params */
+  function updateURL() {
+    var params = new URLSearchParams();
+    var q = getSearchInput().value;
+    if (q) params.set('q', q);
+    var active = allTypes.filter(function(t) { return activeTypes[t]; });
+    if (active.length !== allTypes.length) {
+      params.set('types', active.join(','));
+    }
+    if (showClosed) params.set('closed', '1');
+    var qs = params.toString();
+    history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
+  }
+
+  function restoreFromURL() {
+    var params = new URLSearchParams(location.search);
+    if (params.has('q')) {
+      getSearchInput().value = params.get('q');
+    }
+    if (params.has('types')) {
+      var allowed = params.get('types').split(',');
+      allTypes.forEach(function(t) { activeTypes[t] = allowed.indexOf(t) !== -1; });
+      document.querySelectorAll('.filters button').forEach(function(btn) {
+        var t = btn.dataset.type;
+        if (t) btn.classList.toggle('outline', !activeTypes[t]);
+      });
+    }
+    if (params.get('closed') === '1') {
+      showClosed = true;
+      document.getElementById('show-closed').checked = true;
+    }
+    filterRows();
+  }
+
+  /* Column sorting */
   var sortState = {};
   function sortTable(colIdx, key) {
     var tbody = document.querySelector('tbody');
@@ -153,9 +354,7 @@
       var bv = b.children[colIdx].textContent.trim().toLowerCase();
       var an = parseFloat(av), bn = parseFloat(bv);
       if (!isNaN(an) && !isNaN(bn)) return dir === 'asc' ? an - bn : bn - an;
-      if (av < bv) return dir === 'asc' ? -1 : 1;
-      if (av > bv) return dir === 'asc' ? 1 : -1;
-      return 0;
+      return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
     });
     rows.forEach(function(r) { tbody.appendChild(r); });
   }
@@ -167,15 +366,39 @@
     document.getElementById('theme-icon').textContent = next === 'dark' ? '☀️' : '🌙';
   }
 
-  filterRows();
-")))
+  restoreFromURL();
+"))
 
 ;; ---------------------------------------------------------------------------
 ;; Page assembly
 ;; ---------------------------------------------------------------------------
 
 (defn page [reports]
-  (let [types (vec (distinct (map #(get % "type") reports)))]
+  (let [types      (vec (distinct (map #(get % "type") reports)))
+        types-json (json/generate-string types)
+        multi-mb?  (some #(get % "mailbox") reports)
+        rss-file   "reports.rss"
+        org-file   "reports.org"
+        has-rss?   (.exists (clojure.java.io/file rss-file))
+        has-org?   (.exists (clojure.java.io/file org-file))
+        ;; Column indices depend on whether Mailbox column is present
+        ;; Type Status Priority [Mailbox] Subject From Date ↩
+        mb-off     (if multi-mb? 1 0)
+        cols       (concat
+                    [[:th {:data-sort "type" :onclick "sortTable(0,'type')"} "Type"]
+                     [:th "Status"]
+                     [:th {:data-sort "priority" :onclick "sortTable(2,'priority')"} "Priority"]]
+                    (when multi-mb?
+                      [[:th {:data-sort "mailbox"
+                             :onclick (str "sortTable(3,'mailbox')")} "Mailbox"]])
+                    [[:th {:data-sort "subject"
+                           :onclick (str "sortTable(" (+ 3 mb-off) ",'subject')")} "Subject"]
+                     [:th {:data-sort "from"
+                           :onclick (str "sortTable(" (+ 4 mb-off) ",'from')")} "From"]
+                     [:th {:data-sort "date"
+                           :onclick (str "sortTable(" (+ 5 mb-off) ",'date')")} "Date"]
+                     [:th {:data-sort "replies"
+                           :onclick (str "sortTable(" (+ 6 mb-off) ",'replies')")} "↩"]])]
     (str
      "<!DOCTYPE html>\n"
      (h/html
@@ -185,53 +408,62 @@
         [:meta {:name "viewport" :content "width=device-width, initial-scale=1"}]
         [:meta {:name "color-scheme" :content "light dark"}]
         [:link {:rel "stylesheet" :href pico-cdn}]
+        (when has-rss?
+          [:link {:rel "alternate" :type "application/rss+xml"
+                  :title "BARK Reports RSS" :href rss-file}])
         [:title "BARK — Reports"]
         [:style (h/raw page-css)]]
        [:body
         [:main.container
          [:nav
           [:ul [:li [:strong "BARK — Reports"]]]
-          [:ul [:li [:button.theme-toggle
-                     {:onclick "toggleTheme()" :aria-label "Toggle theme"}
-                     [:span#theme-icon "🌙"]]]]]
+          [:ul
+           (when has-rss?
+             [:li [:a {:href rss-file :title "RSS feed"} "RSS"]])
+           (when has-org?
+             [:li [:a {:href org-file :title "Org file"} "Org"]])
+           [:li [:a {:href bark-doc-url :title "BARK documentation"} "Docs"]]
+           [:li [:button.theme-toggle
+                 {:onclick "toggleTheme()" :aria-label "Toggle theme"}
+                 [:span#theme-icon "🌙"]]]]]
          [:div.toolbar
-          [:input {:type "search" :placeholder "Search…" :oninput "filterRows()"}]
+          [:input#si {:type "search"
+                      :placeholder "Search… m: f: s: d:3d.. d:2025-01-01..2025-03-01"
+                      :oninput "filterRows()"}]
           [:div.filters
            (for [t types]
-             [:button {:onclick (str "toggleType('" t "',this)")}
-              (get type-labels t t)])]]
+             [:button {:data-type t
+                       :onclick (str "toggleType('" t "',this)")}
+              (get type-labels t t)])]
+          [:div.controls
+           [:label
+            [:input#show-closed {:type "checkbox" :onchange "toggleClosed()"}]
+            " Show closed"]]]
          [:div#status]
          [:figure {:style "overflow-x:auto"}
           [:table.striped
-           [:thead
-            [:tr
-             [:th {:data-sort "type" :onclick "sortTable(0,'type')"} "Type"]
-             [:th "Status"]
-             [:th {:data-sort "priority" :onclick "sortTable(2,'priority')"} "Priority"]
-             [:th {:data-sort "subject" :onclick "sortTable(3,'subject')"} "Subject"]
-             [:th {:data-sort "from" :onclick "sortTable(4,'from')"} "From"]
-             [:th {:data-sort "date" :onclick "sortTable(5,'date')"} "Date"]
-             [:th {:data-sort "replies" :onclick "sortTable(6,'replies')"} "↩"]]]
+           [:thead [:tr (seq cols)]]
            [:tbody
             (for [r reports]
-              (report-row r))]]]
-         [:script (h/raw (page-js types))]]]]))))
+              (report-row multi-mb? r))]]]
+         [:script (h/raw (page-js types-json))]]]]))))
 
 ;; ---------------------------------------------------------------------------
 ;; Main
 ;; ---------------------------------------------------------------------------
 
-(let [args    (vec *command-line-args*)
-      out-idx (.indexOf args "-o")
-      out-file (if (>= out-idx 0)
-                 (nth args (inc out-idx) default-output)
-                 default-output)]
-  ;; Step 1: generate reports.json via bark-egest
+(let [args (vec *command-line-args*)
+      {:keys [out-file mailbox-name]}
+      (loop [opts {} [a & more] args]
+        (cond
+          (nil? a)                    opts
+          (#{"-o" "--output"} a)      (recur (assoc opts :out-file (first more)) (rest more))
+          (#{"-m" "--mailbox"} a)     (recur (assoc opts :mailbox-name (first more)) (rest more))
+          :else                       (recur opts more)))
+      out-file (or out-file default-output)]
   (binding [*out* *err*]
     (println "Generating" json-file "via bark-egest…"))
-  (generate-json!)
-
-  ;; Step 2: read JSON and generate HTML
+  (generate-json! mailbox-name)
   (let [reports (json/parse-string (slurp json-file))
         html    (page reports)]
     (spit out-file html)
