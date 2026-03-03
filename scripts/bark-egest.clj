@@ -38,7 +38,9 @@
 (def report-pull-pattern
   '[:db/id :report/type :report/version :report/topic
     :report/patch-seq :report/patch-source :report/message-id
-    :report/acked :report/owned :report/closed
+    {:report/acked [:email/from-address]}
+    {:report/owned [:email/from-address]}
+    {:report/closed [:email/from-address]}
     :report/urgent :report/important
     :report/votes-up :report/votes-down
     :report/descendants :report/digested-at
@@ -155,6 +157,9 @@
       (:email/from-name email)          (assoc :from-name (:email/from-name email))
       role                              (assoc :role role)
       (and multi-src? source-name)      (assoc :source source-name)
+      (:report/acked report)          (assoc :acked (:email/from-address (:report/acked report)))
+      (:report/owned report)          (assoc :owned (:email/from-address (:report/owned report)))
+      (:report/closed report)         (assoc :closed (:email/from-address (:report/closed report)))
       (:report/message-id report)   (assoc :message-id (:report/message-id report))
       (:report/version report)      (assoc :version (:report/version report))
       (:report/topic report)        (assoc :topic (:report/topic report))
@@ -300,6 +305,9 @@
                    (when-let [v (:version m)]      (str ":VERSION: " v))
                    (when-let [t (:topic m)]        (str ":TOPIC: " t))
                    (when-let [v (:votes m)]        (str ":VOTES: " v))
+                   (when-let [a (seq (:acked m))]  (str ":ACKED-BY: " a))
+                   (when-let [o (seq (:owned m))]  (str ":OWNED-BY: " o))
+                   (when-let [c (seq (:closed m))] (str ":CLOSED-BY: " c))
                    (when-let [s (:series m)]
                      (str ":SERIES: " (:received s) "/" (:expected s)
                           (when (:closed s) " closed")))])]

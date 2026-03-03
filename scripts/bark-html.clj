@@ -138,7 +138,8 @@
       (str "↳ " (count related) " related")]]))
 
 (defn- report-row [multi-src? {:strs [type subject from date date-raw flags status priority
-                            replies archived-at message-id related role source]}]
+                            replies archived-at message-id related role source
+                            acked owned closed]}]
   (let [label    (get type-labels type type)
         closed?  (and flags (>= (count flags) 3) (= (nth flags 2 \-) \C))
         iso-date (parse-to-iso-date (or date-raw date ""))]
@@ -149,6 +150,9 @@
           :data-subject (str/lower-case (or subject ""))
           :data-date    iso-date
           :data-source  (or source "")
+          :data-acked   (str/lower-case (or acked ""))
+          :data-owned   (str/lower-case (or owned ""))
+          :data-closedby (str/lower-case (or closed ""))
           :data-search  (str/lower-case (str subject " " from " " iso-date))}
      [:td [:mark {:data-type type} label]]
      [:td {:data-value (str (or status 0))} (status-square flags)]
@@ -234,7 +238,7 @@
 
   /* Parse structured search query */
   function parseQuery(q) {
-    var result = { text: '', mids: [], froms: [], subjects: [], dateFrom: '', dateTo: '' };
+    var result = { text: '', mids: [], froms: [], subjects: [], ackedBy: [], ownedBy: [], closedBy: [], dateFrom: '', dateTo: '' };
     var parts = q.split(/\\s+/);
     for (var i = 0; i < parts.length; i++) {
       var p = parts[i];
@@ -244,6 +248,12 @@
         result.froms = p.substring(2).toLowerCase().split(',').filter(Boolean);
       } else if (p.indexOf('s:') === 0) {
         result.subjects = p.substring(2).toLowerCase().split(',').filter(Boolean);
+      } else if (p.indexOf('a:') === 0) {
+        result.ackedBy = p.substring(2).toLowerCase().split(',').filter(Boolean);
+      } else if (p.indexOf('o:') === 0) {
+        result.ownedBy = p.substring(2).toLowerCase().split(',').filter(Boolean);
+      } else if (p.indexOf('c:') === 0) {
+        result.closedBy = p.substring(2).toLowerCase().split(',').filter(Boolean);
       } else if (p.indexOf('d:') === 0) {
         var range = p.substring(2).split('..');
         result.dateFrom = resolveDate(range[0] || '');
@@ -273,6 +283,18 @@
 
     if (q.subjects.length > 0) {
       if (!q.subjects.some(function(s) { return d.subject.indexOf(s) !== -1; })) return false;
+    }
+
+    if (q.ackedBy.length > 0) {
+      if (!q.ackedBy.some(function(a) { return d.acked.indexOf(a) !== -1; })) return false;
+    }
+
+    if (q.ownedBy.length > 0) {
+      if (!q.ownedBy.some(function(o) { return d.owned.indexOf(o) !== -1; })) return false;
+    }
+
+    if (q.closedBy.length > 0) {
+      if (!q.closedBy.some(function(c) { return d.closedby.indexOf(c) !== -1; })) return false;
     }
 
     /* data-date is always YYYY-MM-DD, set by Clojure */
@@ -435,7 +457,7 @@
                  [:span#theme-icon "🌙"]]]]]
          [:div.toolbar
           [:input#si {:type "search"
-                      :placeholder "Search… m: f: s: d:3d.. d:2025-01-01..2025-03-01"
+                      :placeholder "Search… m: f: s: a: o: c: d:3d.. d:2025-01-01..2025-03-01"
                       :oninput "filterRows()"}]
           [:div.filters
            (for [t types]
