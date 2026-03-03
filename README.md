@@ -13,6 +13,9 @@ applies state triggers from email body, and manages roles per source.
 - **bark-egest** — Exports all reports as JSON, RSS, or Org.
 - **bark-html** — Generates a static HTML page with report data.
 
+To browse BARK reports from the command line, you can use
+[bone](https://codeberg.org/bzg/bone).
+
 ## Dependencies
 
 - [Babashka](https://babashka.org/) (bb)
