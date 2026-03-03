@@ -8,15 +8,10 @@ applies state triggers from email body, and manages roles per source.
 
 ## How it works
 
-- **bark-ingest** — JVM process, connects to IMAP via IDLE, stores
-  emails in Datalevin.
-- **bark-digest** — Babashka script, scans new emails, classifies each
-  email into a source (by List-Id, Delivered-To, or To headers),
-  creates/updates reports and roles in the DB.
-- **bark-egest** — Babashka script, exports all reports as JSON, RSS,
-  or Org.
-- **bark-html** — Babashka script, generates a static HTML page with
-  embedded report data (Pico CSS, search, sortable columns).
+- **bark-ingest** — Connects to IMAP via IDLE, stores emails in the db.
+- **bark-digest** — Scans new emails and creates/updates reports/roles in the db.
+- **bark-egest** — Exports all reports as JSON, RSS, or Org.
+- **bark-html** — Generates a static HTML page with report data.
 
 ## Dependencies
 
