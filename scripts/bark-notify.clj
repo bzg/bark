@@ -104,23 +104,19 @@
   (let [roles (or (d/pull db '[:roles/admin :roles/maintainers]
                           [:roles/source (:notify/source notify)])
                   {})
-        addr  (:notify/email notify)
-        admin (:roles/admin roles)
-        maints (let [v (:roles/maintainers roles)]
-                 (cond (nil? v) #{} (string? v) #{v} :else (set v)))]
-    (or (= addr admin)
-        (= addr (some-> admin str/lower-case))
-        (contains? maints addr)
-        (contains? (set (map str/lower-case maints)) addr))))
+        addr-lc (str/lower-case (:notify/email notify))
+        admin-lc (some-> (:roles/admin roles) str/lower-case)
+        maints-lc (let [v (:roles/maintainers roles)]
+                    (cond (nil? v) #{} (string? v) #{(str/lower-case v)}
+                          :else (set (map str/lower-case v))))]
+    (or (= addr-lc admin-lc)
+        (contains? maints-lc addr-lc))))
 
 ;; ---------------------------------------------------------------------------
 ;; Report formatting
 ;; ---------------------------------------------------------------------------
 
-(defn- report-types
-  "The three actionable report types."
-  []
-  #{:bug :patch :request})
+(def ^:private actionable-types #{:bug :patch :request})
 
 (defn- open? [report]
   (nil? (:report/closed report)))
@@ -166,7 +162,7 @@
         source     (:notify/source notify)
         min-pri    (:notify/min-priority notify 0)
         min-sts    (:notify/min-status notify 0)
-        by-type    (filter #(contains? (report-types) (:report/type %)) reports)
+        by-type    (filter #(contains? actionable-types (:report/type %)) reports)
         by-open    (filter open? by-type)
         by-source  (filter #(= source (get-in % [:report/email :email/source])) by-open)
         by-pri     (filter #(>= (priority %) min-pri) by-source)

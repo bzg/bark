@@ -143,7 +143,7 @@
         is-maint  (admin-or-maintainer? roles from-addr)]
     (doseq [{:keys [command addresses]} commands]
       (when-let [{:keys [requires action attr msg]} (role-dispatch command)]
-        (when (case requires :admin is-admin :maint is-maint)
+        (if (case requires :admin is-admin :maint is-maint)
           (case action
             :set-admin (when-let [new-admin (first addresses)]
                          (d/transact! conn [{:roles/source source-name
@@ -155,7 +155,8 @@
             :remove    (do (remove-role! conn source-name attr addresses)
                            (println (str "    → " (str/lower-case command) ": "
                                          (str/join " " addresses) " (for " source-name ")")))
-            :noop      (println (str "    → " msg))))))))
+            :noop      (println (str "    → " msg)))
+          (println (str "    [denied] " from-addr " lacks permission for: " command)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Notify commands
@@ -408,9 +409,8 @@
       (when-not (contains? voters from-addr)
         (let [attr (if (= vote :up) :report/votes-up :report/votes-down)
               n    (or (get current attr) 0)]
-          (d/transact! conn [{:db/id report-eid
-                              attr (inc n)
-                              :report/voters from-addr}])
+          (d/transact! conn [[:db/add report-eid attr (inc n)]
+                             [:db/add report-eid :report/voters from-addr]])
           (println (str "    → vote " (if (= vote :up) "+1" "-1")
                         " by " from-addr)))))))
 
@@ -780,7 +780,12 @@
     (println (str "Found " (count sorted) " email(s) to scan. "
                   "Thread index: " (count thread-index) " entries."))
     (let [{:keys [created threaded skipped]}
-          (reduce (partial process-email! conn source-map sources)
+          (reduce (fn [acc email]
+                    (try
+                      (process-email! conn source-map sources acc email)
+                      (catch Exception e
+                        (println (str "  [error] " (:email/message-id email) ": " (.getMessage e)))
+                        (update acc :skipped inc))))
                   {:created 0 :threaded 0 :skipped 0
                    :thread-index thread-index :type-index type-index}
                   sorted)]

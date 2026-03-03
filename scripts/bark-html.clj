@@ -46,8 +46,10 @@
               min-status   (into ["-s" (str min-status)]))
         {:keys [exit]} (apply process/shell {:continue true} cmd)]
     (when-not (zero? exit)
+      (binding [*out* *err*] (println "bark-egest failed (exit" exit ")"))
       (System/exit 1))
     (when-not (.exists f)
+      (binding [*out* *err*] (println (str json-file " not produced")))
       (System/exit 1))))
 
 ;; ---------------------------------------------------------------------------
@@ -484,13 +486,13 @@
 
 (let [args (vec *command-line-args*)
       {:keys [out-file source-name min-priority min-status]}
-      (loop [opts {} [a & more] args]
+      (loop [opts {} [a & [v & r :as more]] args]
         (cond
           (nil? a)                        opts
-          (#{"-o" "--output"} a)          (recur (assoc opts :out-file (first more)) (rest more))
-          (#{"-n" "--source"} a)          (recur (assoc opts :source-name (first more)) (rest more))
-          (#{"-p" "--min-priority"} a)    (recur (assoc opts :min-priority (parse-long (first more))) (rest more))
-          (#{"-s" "--min-status"} a)      (recur (assoc opts :min-status (parse-long (first more))) (rest more))
+          (#{"-o" "--output"} a)          (if v (recur (assoc opts :out-file v) r) opts)
+          (#{"-n" "--source"} a)          (if v (recur (assoc opts :source-name v) r) opts)
+          (#{"-p" "--min-priority"} a)    (if v (recur (assoc opts :min-priority (parse-long v)) r) opts)
+          (#{"-s" "--min-status"} a)      (if v (recur (assoc opts :min-status (parse-long v)) r) opts)
           :else                           (recur opts more)))
       out-file (or out-file default-output)]
   (binding [*out* *err*]

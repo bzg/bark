@@ -56,7 +56,8 @@
 
 (s/def ::source
   (s/keys :req-un [:source/name]
-          :opt-un [:source/match :source/admin :source/mailing-list-email]))
+          :opt-un [:source/match :source/admin :source/mailing-list-email
+                   :source/triggers]))
 
 (s/def :bark/sources
   (s/and (s/coll-of ::source :kind vector? :min-count 1)
@@ -70,10 +71,29 @@
 (s/def :ingest/initial-fetch ::pos-int)
 (s/def :bark/ingest (s/keys :opt-un [:ingest/initial-fetch]))
 
+;; SMTP
+(s/def :smtp/host ::non-blank-string)
+(s/def :smtp/port ::pos-int)
+(s/def :smtp/user ::non-blank-string)
+(s/def :smtp/password ::non-blank-string)
+(s/def :smtp/from ::email)
+(s/def :smtp/tls boolean?)
+
+(s/def :notif/smtp (s/keys :req-un [:smtp/host :smtp/port :smtp/user :smtp/password :smtp/from]
+                           :opt-un [:smtp/tls]))
+(s/def :notif/enabled boolean?)
+(s/def :bark/notifications (s/keys :req-un [:notif/enabled]
+                                   :opt-un [:notif/smtp]))
+
+;; Per-source triggers (optional)
+(s/def ::trigger-words (s/coll-of ::non-blank-string :kind vector? :min-count 1))
+(s/def ::action-triggers (s/map-of #{:acked :owned :closed} ::trigger-words))
+(s/def :source/triggers (s/map-of keyword? ::action-triggers))
+
 ;; Top-level config
 (s/def ::config
   (s/keys :req-un [:bark/admin :bark/imap :bark/sources :bark/db]
-          :opt-un [:bark/ingest]))
+          :opt-un [:bark/ingest :bark/notifications]))
 
 ;; ---------------------------------------------------------------------------
 ;; Validation
@@ -118,7 +138,11 @@
             (println (str "  DB path:       " (get-in config [:db :path])))
             (when-let [ingest (:ingest config)]
               (println (str "  Initial:       "
-                            (or (:initial-fetch ingest) 50) " msgs"))))
+                            (or (:initial-fetch ingest) 50) " msgs")))
+            (when-let [notif (:notifications config)]
+              (println (str "  Notifications: " (if (:enabled notif) "enabled" "disabled")))
+              (when-let [smtp (:smtp notif)]
+                (println (str "  SMTP:          " (:user smtp) "@" (:host smtp))))))
         (do (println (str "✗ " path " is invalid:\n"))
             (println (:explanation result))
             (System/exit 1))))))

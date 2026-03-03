@@ -341,12 +341,12 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- parse-args [args]
-  (loop [opts {} [a & more] args]
+  (loop [opts {} [a & [v & r :as more]] args]
     (cond
       (nil? a)                        opts
-      (#{"-n" "--source"} a)          (recur (assoc opts :source-name (first more)) (rest more))
-      (#{"-p" "--min-priority"} a)    (recur (assoc opts :min-priority (parse-long (first more))) (rest more))
-      (#{"-s" "--min-status"} a)      (recur (assoc opts :min-status (parse-long (first more))) (rest more))
+      (#{"-n" "--source"} a)          (if v (recur (assoc opts :source-name v) r) opts)
+      (#{"-p" "--min-priority"} a)    (if v (recur (assoc opts :min-priority (parse-long v)) r) opts)
+      (#{"-s" "--min-status"} a)      (if v (recur (assoc opts :min-status (parse-long v)) r) opts)
       (nil? (:format opts))           (recur (assoc opts :format a) more)
       :else                           opts)))
 

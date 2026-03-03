@@ -20,7 +20,7 @@
 (defn- format-address
   "Format {:name \"Alice\" :address \"alice@example.com\"} as a string."
   [{addr-name :name address :address}]
-  (if addr-name
+  (if (not (str/blank? addr-name))
     (str addr-name " <" address ">")
     address))
 
@@ -110,7 +110,7 @@
 (defn- truncate
   "Truncate string s to at most n characters."
   [s n]
-  (when s (subs s 0 (min n (count s)))))
+  (when (string? s) (subs s 0 (min n (count s)))))
 
 (defn store-email!
   "Store a single parsed email in Datalevin.

@@ -117,9 +117,10 @@
                                                    :password :oauth2-token]))
                        (catch Exception e
                          (log/error "IMAP connection failed:" (.getMessage e))
-                         (db/close db-conn)
-                         (System/exit 1)
-                         nil))]
+                         nil))
+          _          (when-not imap-conn
+                       (db/close db-conn)
+                       (System/exit 1))]
       (log/info "IMAP connected:" (imap/connected? imap-conn) "folder:" folder)
       (.addShutdownHook
        (Runtime/getRuntime)
