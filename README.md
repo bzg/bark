@@ -1,4 +1,4 @@
-# BARK — Bug And Report Keeper
+# 🐕 BARK — Bug And Report Keeper
 
 BARK is an email-driven report tracker.
 
@@ -15,18 +15,14 @@ applies state triggers from email body, and manages roles per source.
   creates/updates reports and roles in the DB.
 - **bark-egest** — Babashka script, exports all reports as JSON, RSS,
   or Org.
-- **bark-suggest** — Babashka script, displays reports interactively
-  via fzf from a JSON file, URL, or stdin.
 - **bark-html** — Babashka script, generates a static HTML page with
   embedded report data (Pico CSS, search, sortable columns).
 
 ## Dependencies
 
 - [Babashka](https://babashka.org/) (bb)
-- [fzf](https://github.com/junegunn/fzf) — fuzzy finder used by
-  bark-suggest for interactive display
 - Java 17+ (for bark-ingest)
-- Datalevin 0.10.5 (pod for bb, library for JVM)
+- Datalevin (pod for bb, library for JVM)
 
 ## Quick start
 
@@ -59,7 +55,6 @@ bb html            # → index.html
 bb digest [--all]              Digest emails into reports
 bb export [json|rss|org]       Export all reports (default: json)
 bb reports                     Export JSON + interactive display via fzf
-bb suggest -f FILE | -u URL    Display reports from file, URL, or stdin
 bb html [-o file]              Static HTML page (default: index.html)
 bb config [path]               Validate config.edn
 bb test                        Run integration tests
