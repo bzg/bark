@@ -26,34 +26,41 @@
 ;; Admin
 (s/def :bark/admin ::email)
 
-;; Mailbox
-(s/def :mailbox/host ::non-blank-string)
-(s/def :mailbox/port ::pos-int)
-(s/def :mailbox/ssl boolean?)
-(s/def :mailbox/user ::non-blank-string)
-(s/def :mailbox/password ::non-blank-string)
-(s/def :mailbox/oauth2-token ::non-blank-string)
-(s/def :mailbox/folder ::non-blank-string)
-(s/def :mailbox/email ::email)
-(s/def :mailbox/mailing-list-email ::email)
-(s/def :mailbox/name ::non-blank-string)
-(s/def :mailbox/admin ::email)
+;; IMAP connection
+(s/def :imap/host ::non-blank-string)
+(s/def :imap/port ::pos-int)
+(s/def :imap/ssl boolean?)
+(s/def :imap/user ::non-blank-string)
+(s/def :imap/password ::non-blank-string)
+(s/def :imap/oauth2-token ::non-blank-string)
+(s/def :imap/folder ::non-blank-string)
 
-(s/def ::mailbox
-  (s/keys :req-un [:mailbox/host :mailbox/user :mailbox/folder
-                   :mailbox/email]
-          :opt-un [:mailbox/port :mailbox/ssl
-                   :mailbox/password :mailbox/oauth2-token
-                   :mailbox/admin :mailbox/mailing-list-email
-                   :mailbox/name]))
+(s/def :bark/imap
+  (s/and (s/keys :req-un [:imap/host :imap/user :imap/folder]
+                 :opt-un [:imap/port :imap/ssl :imap/password :imap/oauth2-token])
+         (fn [m] (or (:password m) (:oauth2-token m)))))
 
-(s/def :bark/mailboxes
-  (s/and (s/coll-of ::mailbox :kind vector? :min-count 1)
-         ;; Each mailbox must have either password or oauth2-token
-         (fn [mbs] (every? #(or (:password %) (:oauth2-token %)) mbs))
-         ;; When multiple mailboxes, each must have a :name
-         (fn [mbs] (or (<= (count mbs) 1)
-                       (every? :name mbs)))))
+;; Source match spec
+(s/def :match/list-id ::non-blank-string)
+(s/def :match/delivered-to ::non-blank-string)
+(s/def :match/to ::non-blank-string)
+
+(s/def ::match
+  (s/keys :opt-un [:match/list-id :match/delivered-to :match/to]))
+
+;; Source
+(s/def :source/name ::non-blank-string)
+(s/def :source/match ::match)
+(s/def :source/admin ::email)
+(s/def :source/mailing-list-email ::email)
+
+(s/def ::source
+  (s/keys :req-un [:source/name]
+          :opt-un [:source/match :source/admin :source/mailing-list-email]))
+
+(s/def :bark/sources
+  (s/and (s/coll-of ::source :kind vector? :min-count 1)
+         (fn [srcs] (= (count srcs) (count (distinct (map :name srcs)))))))
 
 ;; DB
 (s/def :db/path ::non-blank-string)
@@ -61,13 +68,11 @@
 
 ;; Ingest
 (s/def :ingest/initial-fetch ::pos-int)
-
-(s/def :bark/ingest
-  (s/keys :opt-un [:ingest/initial-fetch]))
+(s/def :bark/ingest (s/keys :opt-un [:ingest/initial-fetch]))
 
 ;; Top-level config
 (s/def ::config
-  (s/keys :req-un [:bark/admin :bark/mailboxes :bark/db]
+  (s/keys :req-un [:bark/admin :bark/imap :bark/sources :bark/db]
           :opt-un [:bark/ingest]))
 
 ;; ---------------------------------------------------------------------------
@@ -84,8 +89,8 @@
 ;; Main
 ;; ---------------------------------------------------------------------------
 
-(let [path   (or (first *command-line-args*) "config.edn")
-      file   (clojure.java.io/file path)]
+(let [path (or (first *command-line-args*) "config.edn")
+      file (clojure.java.io/file path)]
   (if-not (.exists file)
     (do (println (str "Error: config file not found: " path))
         (System/exit 1))
@@ -98,18 +103,22 @@
       (if (:valid? result)
         (do (println (str "✓ " path " is valid."))
             (println (str "  Default admin: " (:admin config)))
-            (println (str "  Mailboxes:     " (count (:mailboxes config))))
-            (doseq [mb (:mailboxes config)]
-              (println (str "    - " (when-let [n (:name mb)] (str "[" n "] "))
-                            (:email mb)
-                            (when-let [ml (:mailing-list-email mb)]
-                              (str " (list: " ml ")"))
-                            " (user: " (:user mb) "@" (:host mb) "/" (:folder mb)
-                            (when-let [a (:admin mb)] (str ", admin: " a))
-                            ")")))
+            (let [imap (:imap config)]
+              (println (str "  IMAP:          " (:user imap) "@" (:host imap)
+                            "/" (:folder imap))))
+            (println (str "  Sources:       " (count (:sources config))))
+            (doseq [src (:sources config)]
+              (println (str "    - " (:name src)
+                            (when-let [m (:match src)]
+                              (str " (match: " (pr-str m) ")"))
+                            (when-let [ml (:mailing-list-email src)]
+                              (str " list: " ml))
+                            (when-let [a (:admin src)]
+                              (str " admin: " a)))))
             (println (str "  DB path:       " (get-in config [:db :path])))
             (when-let [ingest (:ingest config)]
-              (println (str "  Initial:       " (or (:initial-fetch ingest) 50) " msgs"))))
+              (println (str "  Initial:       "
+                            (or (:initial-fetch ingest) 50) " msgs"))))
         (do (println (str "✗ " path " is invalid:\n"))
             (println (:explanation result))
             (System/exit 1))))))

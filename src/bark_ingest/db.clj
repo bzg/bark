@@ -30,15 +30,6 @@
   (d/close conn))
 
 ;; ---------------------------------------------------------------------------
-;; Mailbox identity
-;; ---------------------------------------------------------------------------
-
-(defn mailbox-id
-  "Compute a stable mailbox identifier from an IMAP config map."
-  [imap-cfg]
-  (str (:host imap-cfg) ":" (:user imap-cfg)))
-
-;; ---------------------------------------------------------------------------
 ;; Queries
 ;; ---------------------------------------------------------------------------
 
@@ -60,20 +51,19 @@
                 (d/db conn) message-id))))
 
 (defn max-imap-uid
-  "Return the highest IMAP UID stored for a given mailbox, or 0."
-  [conn mailbox-id]
+  "Return the highest stored IMAP UID, or 0."
+  [conn]
   (or (d/q '[:find ?uid .
-             :in $ ?mb
              :where
-             [?e :watermark/mailbox ?mb]
+             [?e :watermark/id "default"]
              [?e :watermark/imap-uid ?uid]]
-           (d/db conn) mailbox-id)
+           (d/db conn))
       0))
 
 (defn save-imap-uid!
-  "Update the per-mailbox watermark to the given IMAP UID."
-  [conn mailbox-id imap-uid]
-  (d/transact! conn [{:watermark/mailbox  mailbox-id
+  "Update the IMAP watermark to the given UID."
+  [conn imap-uid]
+  (d/transact! conn [{:watermark/id       "default"
                       :watermark/imap-uid imap-uid}]))
 
 (defn get-email

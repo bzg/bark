@@ -56,16 +56,16 @@
 ;; Formatting helpers
 ;; ---------------------------------------------------------------------------
 
-(defn- has-mailbox? [reports]
-  (some :mailbox reports))
+(defn- has-source? [reports]
+  (some :source reports))
 
 (defn- report->row
   "Format a report as a tab-separated row for gum table."
-  [report show-type? show-mb?]
+  [report show-type? show-src?]
   (str/join "\t"
             (concat
              (when show-type? [(:type report "")])
-             (when show-mb?   [(:mailbox report "")])
+             (when show-src?   [(:source report "")])
              [(str (:priority report 0))
               (:flags report "---")
               (str (:replies report 0))
@@ -75,7 +75,7 @@
 
 (defn- extra-str [report]
   (let [parts (remove nil?
-                [(:mailbox report)
+                [(:source report)
                  (:version report)
                  (:topic report)
                  (:patch-seq report)
@@ -91,9 +91,9 @@
 
 (defn- report->line
   "Format a report as a plain text line."
-  [report show-type? show-mb?]
+  [report show-type? show-src?]
   (str (when show-type? (format "[%-12s] " (:type report "")))
-       (when show-mb?   (format "[%-10s] " (:mailbox report "")))
+       (when show-src?   (format "[%-10s] " (:source report "")))
        (format "%d %-3s %3d %-25s %s  %s"
                (:priority report 0)
                (:flags report "---")
@@ -125,16 +125,16 @@
   "Display reports interactively with fzf, or as plain text lines."
   [reports]
   (let [show-type? true
-        show-mb?   (has-mailbox? reports)]
+        show-src?   (has-source? reports)]
     (if (empty? reports)
       (println "No reports found.")
       (if (fzf-available?)
         (let [header (str/join "\t"
                                (concat
                                 (when show-type? ["Type"])
-                                (when show-mb?   ["Mailbox"])
+                                (when show-src?   ["Source"])
                                 ["P" "Flags" "#" "From" "Date" "Subject"]))
-              rows   (mapv #(report->row % show-type? show-mb?) reports)
+              rows   (mapv #(report->row % show-type? show-src?) reports)
               aligned      (tabulate (cons header rows))
               header-line  (first aligned)
               aligned-rows (vec (rest aligned))
@@ -162,7 +162,7 @@
         ;; Plain text fallback
         (do (println (str (count reports) " report(s):\n"))
             (doseq [r reports]
-              (println (str "  " (report->line r show-type? show-mb?)))))))))
+              (println (str "  " (report->line r show-type? show-src?)))))))))
 ;; ---------------------------------------------------------------------------
 ;; CLI
 ;; ---------------------------------------------------------------------------
@@ -173,13 +173,13 @@
   (println "Options:")
   (println "  -f, --file FILE            Read reports from a JSON file")
   (println "  -u, --url  URL             Fetch reports from a URL")
-  (println "  -m, --mailbox NAME         Filter by mailbox name")
+  (println "  -n, --source NAME          Filter by source name")
   (println "  -p, --min-priority 1|2|3   Only show reports with priority >= N")
   (println "  -s, --min-status 1-7       Only show reports with status >= N")
   (println "  -                          Read JSON from stdin"))
 
-(defn- filter-by-mailbox [reports mb-name]
-  (filter #(= (:mailbox %) mb-name) reports))
+(defn- filter-by-source [reports src-name]
+  (filter #(= (:source %) src-name) reports))
 
 (defn- filter-by-priority [reports min-p]
   (filter #(>= (:priority % 0) min-p) reports))
@@ -197,7 +197,7 @@
               (= a "-")                      [(assoc opts :source :stdin) more]
               (#{"-f" "--file"} a)            (recur (assoc opts :source :file :path (first more)) (rest more))
               (#{"-u" "--url"} a)             (recur (assoc opts :source :url  :url  (first more)) (rest more))
-              (#{"-m" "--mailbox"} a)         (recur (assoc opts :mailbox (first more)) (rest more))
+              (#{"-n" "--source"} a)         (recur (assoc opts :source-filter (first more)) (rest more))
               (#{"-p" "--min-priority"} a)    (recur (assoc opts :min-priority (parse-long (first more))) (rest more))
               (#{"-s" "--min-status"} a)      (recur (assoc opts :min-status (parse-long (first more))) (rest more))
               :else                          [opts remaining]))
@@ -215,8 +215,8 @@
                     :stdin (load-from-stdin)
                     (do (println "Error: specify -f FILE, -u URL, or - for stdin.")
                         (System/exit 1)))
-          reports (if-let [mb (:mailbox opts)]
-                    (filter-by-mailbox reports mb)
+          reports (if-let [src (:source-filter opts)]
+                    (filter-by-source reports src)
                     reports)
           reports (if min-priority
                     (filter-by-priority reports min-priority)

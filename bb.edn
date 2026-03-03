@@ -2,7 +2,7 @@
  {digest  {:doc  "Digest emails into reports (use --all to rescan everything)"
            :task (apply shell "bb scripts/bark-digest.clj" *command-line-args*)}
 
-  export  {:doc  "Export all reports: bb export [json|rss|org] [-m mailbox] [-p 1|2|3] [-s 1-7]"
+  export  {:doc  "Export all reports: bb export [json|rss|org] [-n source] [-p 1|2|3] [-s 1-7]"
            :task (apply shell "bb scripts/bark-egest.clj" *command-line-args*)}
 
   reports {:doc  "Export all reports as JSON and display interactively [-p 1|2|3] [-s 1-7]"

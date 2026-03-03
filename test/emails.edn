@@ -11,8 +11,8 @@
 ;;   voter2@test.org    — voter
 ;;   spam@test.org      — will be ignored
 ;;
-;; Mailbox:  test-mb
-;; Mailbox email: inbox@test.org
+;; Source: direct
+;; Source: public-list (list-backed)
 
 [
  ;; =========================================================================
@@ -20,7 +20,7 @@
  ;; =========================================================================
  {:email/uid        "uid-01"
   :email/imap-uid   1
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<01@test.org>"
   :email/subject    "Admin setup"
   :email/from-address "admin@test.org"
@@ -33,7 +33,7 @@
  ;; =========================================================================
  {:email/uid        "uid-02"
   :email/imap-uid   2
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<02@test.org>"
   :email/subject    "[BUG 9.7] org-agenda crashes on startup"
   :email/from-address "user@test.org"
@@ -46,7 +46,7 @@
  ;; =========================================================================
  {:email/uid        "uid-03"
   :email/imap-uid   3
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<03@test.org>"
   :email/subject    "[Org-mode] [BUG] generic bug no version"
   :email/from-address "user@test.org"
@@ -59,7 +59,7 @@
  ;; =========================================================================
  {:email/uid        "uid-04"
   :email/imap-uid   4
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<04@test.org>"
   :email/subject    "Re: [BUG 9.7] org-agenda crashes on startup"
   :email/from-address "maint@test.org"
@@ -74,7 +74,7 @@
  ;; =========================================================================
  {:email/uid        "uid-05"
   :email/imap-uid   5
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<05@test.org>"
   :email/subject    "Re: [BUG 9.7] org-agenda crashes on startup"
   :email/from-address "maint@test.org"
@@ -89,7 +89,7 @@
  ;; =========================================================================
  {:email/uid        "uid-06"
   :email/imap-uid   6
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<06@test.org>"
   :email/subject    "Re: [BUG 9.7] org-agenda crashes on startup"
   :email/from-address "maint@test.org"
@@ -104,7 +104,7 @@
  ;; =========================================================================
  {:email/uid        "uid-07"
   :email/imap-uid   7
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<07@test.org>"
   :email/subject    "[PATCH org-agenda 1/2] Fix sorting"
   :email/from-address "user@test.org"
@@ -117,7 +117,7 @@
  ;; =========================================================================
  {:email/uid        "uid-08"
   :email/imap-uid   8
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<08@test.org>"
   :email/subject    "Fix for the display issue"
   :email/from-address "user@test.org"
@@ -133,7 +133,7 @@
  ;; =========================================================================
  {:email/uid        "uid-09"
   :email/imap-uid   9
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<09@test.org>"
   :email/subject    "Small cleanup"
   :email/from-address "user@test.org"
@@ -146,7 +146,7 @@
  ;; =========================================================================
  {:email/uid        "uid-10"
   :email/imap-uid   10
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<10@test.org>"
   :email/subject    "Re: [PATCH org-agenda 1/2] Fix sorting"
   :email/from-address "maint@test.org"
@@ -161,7 +161,7 @@
  ;; =========================================================================
  {:email/uid        "uid-11"
   :email/imap-uid   11
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<11@test.org>"
   :email/subject    "[POLL] Should we drop Emacs 27 support?"
   :email/from-address "maint@test.org"
@@ -174,7 +174,7 @@
  ;; =========================================================================
  {:email/uid        "uid-12"
   :email/imap-uid   12
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<12@test.org>"
   :email/subject    "Re: [POLL] Should we drop Emacs 27 support?"
   :email/from-address "voter1@test.org"
@@ -189,7 +189,7 @@
  ;; =========================================================================
  {:email/uid        "uid-13"
   :email/imap-uid   13
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<13@test.org>"
   :email/subject    "Re: [POLL] Should we drop Emacs 27 support?"
   :email/from-address "voter2@test.org"
@@ -204,7 +204,7 @@
  ;; =========================================================================
  {:email/uid        "uid-14"
   :email/imap-uid   14
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<14@test.org>"
   :email/subject    "Re: [POLL] Should we drop Emacs 27 support?"
   :email/from-address "voter1@test.org"
@@ -219,7 +219,7 @@
  ;; =========================================================================
  {:email/uid        "uid-15"
   :email/imap-uid   15
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<15@test.org>"
   :email/subject    "[RFC] New export backend"
   :email/from-address "maint@test.org"
@@ -232,7 +232,7 @@
  ;; =========================================================================
  {:email/uid        "uid-16"
   :email/imap-uid   16
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<16@test.org>"
   :email/subject    "Re: [RFC] New export backend"
   :email/from-address "admin@test.org"
@@ -247,7 +247,7 @@
  ;; =========================================================================
  {:email/uid        "uid-17"
   :email/imap-uid   17
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<17@test.org>"
   :email/subject    "[ANN] New contributor guidelines"
   :email/from-address "admin@test.org"
@@ -260,7 +260,7 @@
  ;; =========================================================================
  {:email/uid        "uid-18"
   :email/imap-uid   18
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<18@test.org>"
   :email/subject    "[BLOG] My cool thing"
   :email/from-address "user@test.org"
@@ -273,7 +273,7 @@
  ;; =========================================================================
  {:email/uid        "uid-19"
   :email/imap-uid   19
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<19@test.org>"
   :email/subject    "[CHG 9.8] Deprecate old export"
   :email/from-address "admin@test.org"
@@ -286,7 +286,7 @@
  ;; =========================================================================
  {:email/uid        "uid-20"
   :email/imap-uid   20
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<20@test.org>"
   :email/subject    "[REL 9.8] Org 9.8 released"
   :email/from-address "admin@test.org"
@@ -299,7 +299,7 @@
  ;; =========================================================================
  {:email/uid        "uid-21"
   :email/imap-uid   21
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<21@test.org>"
   :email/subject    "[BUG] Spam bug"
   :email/from-address "spam@test.org"
@@ -312,7 +312,7 @@
  ;; =========================================================================
  {:email/uid        "uid-22"
   :email/imap-uid   22
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<22@test.org>"
   :email/subject    "Re: [ANN] New contributor guidelines"
   :email/from-address "admin@test.org"
@@ -327,7 +327,7 @@
  ;; =========================================================================
  {:email/uid        "uid-23"
   :email/imap-uid   23
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<23@test.org>"
   :email/subject    "[BUG] Slow export"
   :email/from-address "user@test.org"
@@ -337,7 +337,7 @@
 
  {:email/uid        "uid-24"
   :email/imap-uid   24
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<24@test.org>"
   :email/subject    "Re: [BUG] Slow export"
   :email/from-address "maint@test.org"
@@ -349,7 +349,7 @@
 
  {:email/uid        "uid-25"
   :email/imap-uid   25
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<25@test.org>"
   :email/subject    "Re: [BUG] Slow export"
   :email/from-address "admin@test.org"
@@ -364,7 +364,7 @@
  ;; =========================================================================
  {:email/uid        "uid-26"
   :email/imap-uid   26
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<26@test.org>"
   :email/subject    "[TASK] Update CI pipeline"
   :email/from-address "maint@test.org"
@@ -377,7 +377,7 @@
  ;; =========================================================================
  {:email/uid        "uid-27"
   :email/imap-uid   27
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<27@test.org>"
   :email/subject    "[emacs-orgmode] [ANNOUNCEMENT] Org Meetup 2026"
   :email/from-address "admin@test.org"
@@ -391,7 +391,7 @@
  ;; =========================================================================
  {:email/uid        "uid-28"
   :email/imap-uid   28
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<28@test.org>"
   :email/subject    "[emacs-orgmode] [PATCH refactor 2/3] Simplify parser"
   :email/from-address "user@test.org"
@@ -404,7 +404,7 @@
  ;; =========================================================================
  {:email/uid        "uid-29"
   :email/imap-uid   29
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<29@test.org>"
   :email/subject    "Role change"
   :email/from-address "admin@test.org"
@@ -414,11 +414,11 @@
   :email/headers-edn "{\"List-Id\" \"<emacs-orgmode.gnu.org>\"}"}
 
  ;; =========================================================================
- ;; 30 — Bug on list-backed mailbox, correct List-Post (allowed)
+ ;; 30 — Bug on list-backed source, correct List-Post (allowed)
  ;; =========================================================================
  {:email/uid        "uid-30"
   :email/imap-uid   30
-  :email/mailbox    "list-mb"
+  :email/source     "public-list"
   :email/message-id "<30@test.org>"
   :email/subject    "[BUG] List bug via list"
   :email/from-address "user@test.org"
@@ -428,11 +428,11 @@
   :email/headers-edn "{\"List-Post\" \"<mailto:list@test.org>\", \"List-Id\" \"<list.test.org>\"}"}
 
  ;; =========================================================================
- ;; 31 — Bug on list-backed mailbox, no List-Post (denied)
+ ;; 31 — Bug on list-backed source, no List-Post (denied)
  ;; =========================================================================
  {:email/uid        "uid-31"
   :email/imap-uid   31
-  :email/mailbox    "list-mb"
+  :email/source     "public-list"
   :email/message-id "<31@test.org>"
   :email/subject    "[BUG] Direct bug bypassing list"
   :email/from-address "user@test.org"
@@ -441,11 +441,11 @@
   :email/body-text  "Bug sent directly, no List-Post.\n"}
 
  ;; =========================================================================
- ;; 32 — Bug on list-backed mailbox, wrong List-Post (denied)
+ ;; 32 — Bug on list-backed source, wrong List-Post (denied)
  ;; =========================================================================
  {:email/uid        "uid-32"
   :email/imap-uid   32
-  :email/mailbox    "list-mb"
+  :email/source     "public-list"
   :email/message-id "<32@test.org>"
   :email/subject    "[BUG] Bug via wrong list"
   :email/from-address "user@test.org"
@@ -455,11 +455,11 @@
   :email/headers-edn "{\"List-Post\" \"<mailto:other@elsewhere.org>\", \"List-Id\" \"<other.elsewhere.org>\"}"}
 
  ;; =========================================================================
- ;; 33 — Bug on list-backed mailbox from admin, no List-Post (allowed)
+ ;; 33 — Bug on list-backed source from admin, no List-Post (allowed)
  ;; =========================================================================
  {:email/uid        "uid-33"
   :email/imap-uid   33
-  :email/mailbox    "list-mb"
+  :email/source     "public-list"
   :email/message-id "<33@test.org>"
   :email/subject    "[BUG] Admin direct bug"
   :email/from-address "admin@test.org"
@@ -472,7 +472,7 @@
  ;; =========================================================================
  {:email/uid        "uid-34"
   :email/imap-uid   34
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<34@test.org>"
   :email/subject    "[PATCH parser 0/3] Rewrite the parser"
   :email/from-address "user@test.org"
@@ -485,7 +485,7 @@
  ;; =========================================================================
  {:email/uid        "uid-35"
   :email/imap-uid   35
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<35@test.org>"
   :email/subject    "[PATCH parser 1/3] Tokenizer"
   :email/from-address "user@test.org"
@@ -500,7 +500,7 @@
  ;; =========================================================================
  {:email/uid        "uid-36"
   :email/imap-uid   36
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<36@test.org>"
   :email/subject    "[PATCH parser 2/3] AST builder"
   :email/from-address "user@test.org"
@@ -515,7 +515,7 @@
  ;; =========================================================================
  {:email/uid        "uid-37"
   :email/imap-uid   37
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<37@test.org>"
   :email/subject    "[PATCH parser 3/3] Renderer"
   :email/from-address "user@test.org"
@@ -530,7 +530,7 @@
  ;; =========================================================================
  {:email/uid        "uid-38"
   :email/imap-uid   38
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<38@test.org>"
   :email/subject    "[PATCH parser 0/3] Rewrite the parser v2"
   :email/from-address "user@test.org"
@@ -545,7 +545,7 @@
  ;; =========================================================================
  {:email/uid        "uid-39"
   :email/imap-uid   39
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<39@test.org>"
   :email/subject    "[PATCH parser 1/3] Tokenizer v2"
   :email/from-address "user@test.org"
@@ -560,7 +560,7 @@
  ;; =========================================================================
  {:email/uid        "uid-40"
   :email/imap-uid   40
-  :email/mailbox    "test-mb"
+  :email/source     "direct"
   :email/message-id "<40@test.org>"
   :email/subject    "[PATCH] Fix slow export"
   :email/from-address "user@test.org"

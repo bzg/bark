@@ -2,15 +2,17 @@
 
 BARK is an email-driven report tracker.
 
-BARK monitors IMAP mailboxes, detects report types from subject tags,
-applies state triggers from email body, and manages roles per mailbox.
+BARK monitors a single IMAP mailbox, classifies incoming emails into
+sources by header matching, detects report types from subject tags,
+applies state triggers from email body, and manages roles per source.
 
 ## How it works
 
 - **bark-ingest** — JVM process, connects to IMAP via IDLE, stores
   emails in Datalevin.
-- **bark-digest** — Babashka script, scans new emails, creates/updates
-  reports and roles in the DB.
+- **bark-digest** — Babashka script, scans new emails, classifies each
+  email into a source (by List-Id, Delivered-To, or To headers),
+  creates/updates reports and roles in the DB.
 - **bark-egest** — Babashka script, exports all reports as JSON, RSS,
   or Org.
 - **bark-suggest** — Babashka script, displays reports interactively
@@ -63,12 +65,22 @@ bb config [path]               Validate config.edn
 bb test                        Run integration tests
 ```
 
+### Filtering options
+
+Most commands accept filtering flags:
+
+```
+-n, --source NAME          Filter by source name
+-p, --min-priority 1|2|3   Only show reports with priority >= N
+-s, --min-status 1-7       Only show reports with status >= N
+```
+
 ## Usage
 
 ### Creating reports and announcements
 
 **Reports** (bug, patch, request) can be created by anyone sending an
-email with the appropriate subject tag to a monitored mailbox.
+email to the monitored mailbox.
 
 **Announcements** (announcement, release, change) can only be created
 by admins or maintainers.
@@ -101,16 +113,6 @@ Priority cannot be set directly — it is computed from the combination
 of urgent and important flags.
 
 See the [Triggers](#triggers) table below for the full list.
-
-### Maintainer actions via X-Bark headers
-
-Admins and maintainers can use triggers followed by an email address
-to attribute the action to someone:
-
-```
-Owned: dev@example.com
-Acked: reviewer@example.com
-```
 
 ### Updating without notifying the list
 
@@ -151,7 +153,7 @@ State changes detected from body lines (at start of line, followed by
 `.` `,` `;` or `:`):
 
 | Trigger          | Effect on report            |
-|------------------|-----------------------------|
+|------------------|-----------------------------| 
 | `Approved.`      | acked (bug, patch, request) |
 | `Confirmed.`     | acked (bug)                 |
 | `Reviewed.`      | acked (patch)               |
@@ -179,13 +181,16 @@ Announcements, releases, and changes can only be closed.
 
 ## Roles
 
-Per-mailbox, managed via email body commands:
+Per-source, managed via email body commands:
 
-- **Admin** — one per mailbox, set in `config.edn` (`:admin` field),
+- **Admin** — one per source, set in `config.edn` (`:admin` field),
   changeable via `Add admin: new@addr`.  Can manage all roles.
 - **Maintainers** — can add maintainers, ignore addresses, create
   announcements/releases/changes.
 - **Ignored** — emails from these addresses are skipped.
+
+Role commands are only processed from direct emails (not from emails
+delivered through a mailing list, i.e. those with a `List-Id` header).
 
 Commands (admin-only unless noted):
 
@@ -199,17 +204,58 @@ Unignore: user@example.com
 
 ## Config
 
-See `config.edn.example`.  Per-mailbox fields:
+See `config.edn.example`.  The configuration has three main sections:
 
-| Field                 | Required | Description                                           |
-|-----------------------|----------|-------------------------------------------------------|
-| `:host`               | yes      | IMAP server hostname                                  |
-| `:user`               | yes      | IMAP login username                                   |
-| `:password`           | *        | IMAP password (* or `:oauth2-token`)                  |
-| `:folder`             | yes      | IMAP folder (usually `"INBOX"`)                       |
-| `:email`              | yes      | Public email address for this mailbox                 |
-| `:mailing-list-email` | no       | Associated mailing list address                       |
-| `:admin`              | no       | Admin for this mailbox (fallback: top-level `:admin`) |
+### IMAP connection (`:imap`)
+
+Single IMAP connection shared by all sources.
+
+| Field            | Required | Description                          |
+|------------------|----------|--------------------------------------|
+| `:host`          | yes      | IMAP server hostname                 |
+| `:user`          | yes      | IMAP login username                  |
+| `:password`      | *        | IMAP password (* or `:oauth2-token`) |
+| `:oauth2-token`  | *        | OAuth2 token (* or `:password`)      |
+| `:folder`        | yes      | IMAP folder (usually `"INBOX"`)      |
+
+### Sources (`:sources`)
+
+Each source classifies incoming emails by header matching.  Sources
+are checked in order; the first match wins.  A source without `:match`
+acts as a catch-all.
+
+| Field                 | Required | Description                             |
+|-----------------------|----------|-----------------------------------------|
+| `:name`               | yes      | Unique source identifier                |
+| `:match`              | no       | Header matching rules (see below)       |
+| `:mailing-list-email` | no       | Associated mailing list address         |
+| `:admin`              | no       | Admin for this source (fallback: global)|
+
+Match rules (all optional, all must match if present):
+
+| Key              | Matches against   | Example                  |
+|------------------|-------------------|--------------------------|
+| `:list-id`       | `List-Id` header  | `"bugs.example.org"`     |
+| `:delivered-to`  | `Delivered-To`    | `"bugs@example.com"`     |
+| `:to`            | `To` header       | `"inbox@example.com"`    |
+
+### Example config
+
+```clojure
+{:admin "admin@example.com"
+ :imap  {:host "imap.example.com" :port 993 :ssl true
+         :user "imap-login@example.com" :password "secret"
+         :folder "INBOX"}
+ :sources [{:name "public-list"
+            :match {:list-id "bugs.example.org"}
+            :mailing-list-email "bugs@example.org"
+            :admin "lead@example.org"}
+           {:name "private"
+            :match {:delivered-to "private@example.com"}}
+           {:name "direct"}]
+ :db {:path "data/bark-db"}
+ :ingest {:initial-fetch 50}}
+```
 
 ## License
 

@@ -57,12 +57,12 @@
   []
   (let [db-path (str "/tmp/bark-test-" (System/currentTimeMillis))
         conn    (d/get-conn db-path schema)]
-    ;; Setup roles for test-mb
-    (d/transact! conn [{:roles/mailbox-email "inbox@test.org"
-                        :roles/admin         "admin@test.org"}])
-    ;; Setup roles for list-mb (list-backed mailbox)
-    (d/transact! conn [{:roles/mailbox-email "list-inbox@test.org"
-                        :roles/admin         "admin@test.org"}])
+    ;; Setup roles for "direct" source
+    (d/transact! conn [{:roles/source "direct"
+                        :roles/admin  "admin@test.org"}])
+    ;; Setup roles for "public-list" source (list-backed)
+    (d/transact! conn [{:roles/source "public-list"
+                        :roles/admin  "admin@test.org"}])
     ;; Insert test emails
     (let [emails (edn/read-string (slurp "test/emails.edn"))]
       (doseq [email emails]
@@ -118,9 +118,13 @@
 ;; Run digest
 ;; ---------------------------------------------------------------------------
 
-(def mailbox-map {"test-mb" {:email "inbox@test.org"}
-                  "list-mb" {:email              "list-inbox@test.org"
-                             :mailing-list-email "list@test.org"}})
+(def source-map {"direct"      {:admin "admin@test.org"}
+                 "public-list" {:admin              "admin@test.org"
+                                :mailing-list-email "list@test.org"}})
+
+(def sources [{:name "direct"}
+              {:name "public-list"
+               :mailing-list-email "list@test.org"}])
 
 ;; ---------------------------------------------------------------------------
 ;; Tests
@@ -131,14 +135,14 @@
     (try
       ;; Run digest over all emails
       (println "\n=== Running cmd-digest! ===\n")
-      (cmd-digest! conn mailbox-map true)
+      (cmd-digest! conn source-map sources true)
 
       (let [db (d/db conn)]
 
         ;; --- Role commands (email 01) ---
         (println "\n--- Roles ---")
         (let [roles (d/pull db '[:roles/admin :roles/maintainers :roles/ignored]
-                            [:roles/mailbox-email "inbox@test.org"])]
+                            [:roles/source "direct"])]
           (assert= "Admin is admin@test.org"
                    "admin@test.org" (:roles/admin roles))
           (assert-test "maint@test.org is maintainer"
@@ -264,7 +268,7 @@
         ;; --- Email 29: role command via mailing list (List-Id blocks it) ---
         (println "\n--- Email 29: role command via mailing list ---")
         (let [roles (d/pull db '[:roles/maintainers]
-                            [:roles/mailbox-email "inbox@test.org"])]
+                            [:roles/source "direct"])]
           (assert-test "evil@hacker.org NOT added as maintainer"
                        (not (contains? (set (:roles/maintainers roles))
                                        "evil@hacker.org"))))
@@ -274,9 +278,9 @@
         (let [r (get-report db "<30@test.org>")]
           (assert= "Type is :bug" :bug (:report/type r)))
 
-        ;; --- Email 31: bug direct to list mailbox, no List-Post (denied) ---
+        ;; --- Email 31: bug direct to list-backed source, no List-Post (denied) ---
         (println "\n--- Email 31: bug bypassing list (no List-Post) ---")
-        (assert-test "No report for direct email to list mailbox"
+        (assert-test "No report for direct email to list-backed source"
                      (not (report-exists? db "<31@test.org>")))
 
         ;; --- Email 32: bug via wrong list (denied) ---
@@ -284,7 +288,7 @@
         (assert-test "No report for wrong List-Post"
                      (not (report-exists? db "<32@test.org>")))
 
-        ;; --- Email 33: admin direct to list mailbox (allowed, admin bypass) ---
+        ;; --- Email 33: admin direct to list-backed source (allowed, admin bypass) ---
         (println "\n--- Email 33: admin bypasses List-Post check ---")
         (let [r (get-report db "<33@test.org>")]
           (assert= "Type is :bug" :bug (:report/type r)))

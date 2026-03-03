@@ -38,30 +38,29 @@
 ;; Config
 ;; ---------------------------------------------------------------------------
 
-;; mailbox-id, build-mailbox-map, get-header loaded from bark-common.clj
+;; classify-source, build-source-map, get-header loaded from bark-common.clj
 
 ;; ---------------------------------------------------------------------------
-;; Per-mailbox roles
+;; Per-source roles
 ;; ---------------------------------------------------------------------------
 
-(defn get-roles [db mailbox-email]
+(defn get-roles [db source-name]
   (or (d/pull db '[:roles/admin :roles/maintainers :roles/ignored]
-              [:roles/mailbox-email mailbox-email])
+              [:roles/source source-name])
       {}))
 
-(defn ensure-mailbox-roles! [conn config]
+(defn ensure-source-roles! [conn config]
   (let [default-admin (:admin config)]
-    (doseq [mb (:mailboxes config)]
-      (let [mb-email (:email mb)
-            admin    (or (:admin mb) default-admin)
+    (doseq [{:keys [name admin]} (:sources config)]
+      (let [admin    (or admin default-admin)
             existing (d/q '[:find ?e .
-                            :in $ ?mbe
-                            :where [?e :roles/mailbox-email ?mbe]]
-                          (d/db conn) mb-email)]
-        (d/transact! conn [{:roles/mailbox-email mb-email
-                            :roles/admin         admin}])
+                            :in $ ?src
+                            :where [?e :roles/source ?src]]
+                          (d/db conn) name)]
+        (d/transact! conn [{:roles/source name
+                            :roles/admin  admin}])
         (when-not existing
-          (println (str "  Initialized roles for " mb-email
+          (println (str "  Initialized roles for source " name
                         " (admin: " admin ")")))))))
 
 (defn- roles-set [roles attr]
@@ -80,19 +79,19 @@
 (defn ignored? [roles addr]
   (contains? (roles-set roles :roles/ignored) addr))
 
-(defn- roles-eid [conn mailbox-email]
+(defn- roles-eid [conn source-name]
   (d/q '[:find ?e .
-         :in $ ?mbe
-         :where [?e :roles/mailbox-email ?mbe]]
-       (d/db conn) mailbox-email))
+         :in $ ?src
+         :where [?e :roles/source ?src]]
+       (d/db conn) source-name))
 
-(defn- add-role! [conn mailbox-email attr addresses]
-  (when-let [eid (roles-eid conn mailbox-email)]
+(defn- add-role! [conn source-name attr addresses]
+  (when-let [eid (roles-eid conn source-name)]
     (doseq [addr addresses]
       (d/transact! conn [[:db/add eid attr addr]]))))
 
-(defn- remove-role! [conn mailbox-email attr addresses]
-  (when-let [eid (roles-eid conn mailbox-email)]
+(defn- remove-role! [conn source-name attr addresses]
+  (when-let [eid (roles-eid conn source-name)]
     (doseq [addr addresses]
       (d/transact! conn [[:db/retract eid attr addr]]))))
 
@@ -138,7 +137,7 @@
    "Add maintainer"    {:requires :maint  :attr :roles/maintainers :action :add}
    "Ignore"            {:requires :maint  :attr :roles/ignored     :action :add}})
 
-(defn apply-role-commands! [conn roles mailbox-email from-addr body-text]
+(defn apply-role-commands! [conn roles source-name from-addr body-text]
   (let [commands  (parse-role-commands body-text)
         is-admin  (admin? roles from-addr)
         is-maint  (admin-or-maintainer? roles from-addr)]
@@ -147,15 +146,15 @@
         (when (case requires :admin is-admin :maint is-maint)
           (case action
             :set-admin (when-let [new-admin (first addresses)]
-                         (d/transact! conn [{:roles/mailbox-email mailbox-email
-                                             :roles/admin         new-admin}])
-                         (println (str "    → set admin: " new-admin " (for " mailbox-email ")")))
-            :add       (do (add-role! conn mailbox-email attr addresses)
+                         (d/transact! conn [{:roles/source source-name
+                                             :roles/admin  new-admin}])
+                         (println (str "    → set admin: " new-admin " (for " source-name ")")))
+            :add       (do (add-role! conn source-name attr addresses)
                            (println (str "    → " (str/lower-case command) ": "
-                                         (str/join " " addresses) " (for " mailbox-email ")")))
-            :remove    (do (remove-role! conn mailbox-email attr addresses)
+                                         (str/join " " addresses) " (for " source-name ")")))
+            :remove    (do (remove-role! conn source-name attr addresses)
                            (println (str "    → " (str/lower-case command) ": "
-                                         (str/join " " addresses) " (for " mailbox-email ")")))
+                                         (str/join " " addresses) " (for " source-name ")")))
             :noop      (println (str "    → " msg))))))))
 ;; ---------------------------------------------------------------------------
 ;; Report detection
@@ -248,9 +247,9 @@
 (defn can-create-report?
   "Check if from-addr is allowed to create this report.
   Announcements require admin/maintainer.
-  On list-backed mailboxes, non-privileged users must send through
+  On list-backed sources, non-privileged users must send through
   the list (List-Post header matches :mailing-list-email)."
-  [roles from-addr report-info email mailbox-cfg]
+  [roles from-addr report-info email source-cfg]
   (cond
     (announcement-types (:type report-info))
     (admin-or-maintainer? roles from-addr)
@@ -259,7 +258,7 @@
     true
 
     :else
-    (let [ml-email (:mailing-list-email mailbox-cfg)]
+    (let [ml-email (:mailing-list-email source-cfg)]
       (if (nil? ml-email)
         ;; No mailing list configured — anyone can create
         true
@@ -404,7 +403,7 @@
   (d/transact! conn [{:digest/id "watermark" :digest/last-run ts}]))
 
 (def email-pull-pattern
-  '[:db/id :email/uid :email/imap-uid :email/mailbox :email/subject :email/message-id
+  '[:db/id :email/uid :email/imap-uid :email/source :email/subject :email/message-id
     :email/in-reply-to :email/references
     :email/from-address :email/date-sent :email/ingested-at
     :email/body-text :email/body-text-from-html :email/headers-edn
@@ -621,26 +620,30 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- process-email!
-  "Process a single email during digest. Returns updated accumulator."
-  [conn mailbox-map {:keys [created threaded skipped thread-index type-index] :as acc} email]
+  "Process a single email during digest. Returns updated accumulator.
+  Resolves the source from :email/source or by classifying headers."
+  [conn source-map sources {:keys [created threaded skipped thread-index type-index] :as acc} email]
   (let [message-id    (:email/message-id email)
         eid           (:db/id email)
         from-addr     (:email/from-address email)
-        mb-id         (:email/mailbox email)
-        mailbox-email (get-in mailbox-map [mb-id :email])
-        roles         (if mailbox-email (get-roles (d/db conn) mailbox-email) {})
+        ;; Resolve source: use stored value or classify from headers
+        source-name   (or (:email/source email)
+                          (classify-source (:email/headers-edn email) sources))
+        _             (when (and source-name (not (:email/source email)))
+                        (d/transact! conn [{:db/id eid :email/source source-name}]))
+        source-cfg    (get source-map source-name)
+        roles         (if source-name (get-roles (d/db conn) source-name) {})
         body-text     (or (:email/body-text email) (:email/body-text-from-html email))]
     (if (and from-addr (ignored? roles from-addr))
       (do (println (str "  [ignored] " from-addr " — " (:email/subject email)))
           (assoc acc :skipped (inc skipped)))
-      (do (when (and from-addr body-text mailbox-email
+      (do (when (and from-addr body-text source-name
                      (not (from-mailing-list? email)))
-            (apply-role-commands! conn roles mailbox-email from-addr body-text))
+            (apply-role-commands! conn roles source-name from-addr body-text))
           (let [report-info (detect-report email)
-                mailbox-cfg (get mailbox-map mb-id)
                 permitted?  (and report-info from-addr
                                  (can-create-report? roles from-addr report-info
-                                                     email mailbox-cfg))
+                                                     email source-cfg))
                 new-report? (and permitted? (not (report-exists? (d/db conn) message-id)))
                 [created thread-index type-index report-eid]
                 (if new-report?
@@ -676,7 +679,7 @@
             {:created created :threaded threaded :skipped skipped
              :thread-index thread-index :type-index type-index})))))
 
-(defn cmd-digest! [conn mailbox-map process-all?]
+(defn cmd-digest! [conn source-map sources process-all?]
   (let [db       (d/db conn)
         last-run (get-last-run db)
         emails   (if process-all?
@@ -690,7 +693,7 @@
     (println (str "Found " (count sorted) " email(s) to scan. "
                   "Thread index: " (count thread-index) " entries."))
     (let [{:keys [created threaded skipped]}
-          (reduce (partial process-email! conn mailbox-map)
+          (reduce (partial process-email! conn source-map sources)
                   {:created 0 :threaded 0 :skipped 0
                    :thread-index thread-index :type-index type-index}
                   sorted)]
@@ -709,8 +712,9 @@
         config  (load-config)
         conn    (d/get-conn db-path report-schema)]
     (try
-      (when config (ensure-mailbox-roles! conn config))
-      (let [mailbox-map (if config (build-mailbox-map config) {})]
-        (cmd-digest! conn mailbox-map all?))
+      (when config (ensure-source-roles! conn config))
+      (let [source-map (if config (build-source-map config) {})
+            sources    (or (:sources config) [])]
+        (cmd-digest! conn source-map sources all?))
       (finally
         (d/close conn)))))

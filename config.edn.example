@@ -1,36 +1,30 @@
-{;; Default admin email — used for any mailbox that doesn't specify its own :admin
+{;; Default admin email — used for any source that doesn't specify its own :admin
  :admin "admin@example.com"
 
- ;; IMAP mailboxes to monitor (one or more)
- :mailboxes [{:host     "imap.example.com"
-              :port     993
-              :ssl      true
-              :user     "imap-login@example.com"
-              :password "secret"
-              :folder   "INBOX"
-              ;; Human-readable name (mandatory when multiple mailboxes)
-              :name     "bugs"
-              ;; The public email address for this mailbox (mandatory)
-              :email    "bugs@example.com"
-              ;; The mailing list address (optional, for mailing-list-backed mailboxes)
-              :mailing-list-email "bugs-list@example.com"
-              ;; Admin for this mailbox (optional, defaults to top-level :admin)
-              :admin    "lead@example.com"}
+ ;; Single IMAP connection
+ :imap {:host     "imap.example.com"
+        :port     993
+        :ssl      true
+        :user     "imap-login@example.com"
+        :password "secret"
+        :folder   "INBOX"}
 
-             {:host     "imap.other.com"
-              :port     993
-              :ssl      true
-              :user     "patches-login@other.com"
-              :password "secret2"
-              :folder   "INBOX"
-              ;; Human-readable name (mandatory when multiple mailboxes)
-              :name     "patches"
-              ;; :user and :email can be the same
-              :email    "patches-login@other.com"}]
+ ;; Sources: classify incoming emails by header matching at digest time.
+ ;; Checked in order; first match wins.  Omit :match for a catch-all.
+ :sources [{:name               "public-list"
+            :match              {:list-id "bugs.example.org"}
+            ;; The mailing list address (for List-Post permission check)
+            :mailing-list-email "bugs@example.org"
+            :admin              "lead@example.org"}
+
+           {:name               "private"
+            :match              {:delivered-to "private-bugs@example.com"}}
+
+           ;; Catch-all: emails that don't match any source above
+           {:name "direct"}]
 
  ;; Datalevin database path
  :db {:path "data/bark-db"}
 
  ;; Ingest settings
- :ingest {;; Fetch this many recent messages on first run
-          :initial-fetch 50}}
+ :ingest {:initial-fetch 50}}

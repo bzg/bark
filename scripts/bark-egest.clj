@@ -48,7 +48,7 @@
                      {:series/patches [:db/id]}
                      {:series/cover-letter [:email/message-id]}]}
     {:report/email [:email/subject :email/from-address :email/from-name
-                    :email/date-sent :email/mailbox :email/imap-uid
+                    :email/date-sent :email/source :email/imap-uid
                     :email/headers-edn]}])
 
 (defn all-reports [db]
@@ -95,23 +95,23 @@
       (str up "/" total))))
 
 ;; ---------------------------------------------------------------------------
-;; Config & mailbox map — loaded from bark-common.clj
+;; Config & source map — loaded from bark-common.clj
 ;; ---------------------------------------------------------------------------
 
 (defn- build-maintainers
-  "Gather per-mailbox maintainer sets from DB roles.
-   Returns mailbox-id → #{maintainer-emails}."
-  [config db mailbox-map]
+  "Gather per-source maintainer sets from DB roles.
+   Returns source-name → #{maintainer-emails}."
+  [db source-map]
   (into {}
-        (map (fn [[mb-id {:keys [email]}]]
+        (map (fn [[source-name _]]
                (let [roles (d/pull db '[:roles/maintainers]
-                                   [:roles/mailbox-email email])
+                                   [:roles/source source-name])
                      v     (:roles/maintainers roles)
                      maints (cond (nil? v) #{}
                                   (string? v) #{(str/lower-case v)}
                                   :else (set (map str/lower-case v)))]
-                 [mb-id maints])))
-        mailbox-map))
+                 [source-name maints])))
+        source-map))
 
 ;; ---------------------------------------------------------------------------
 ;; Report → map
@@ -123,27 +123,26 @@
   (get-header (:email/headers-edn email) "Archived-At"))
 
 (defn- sender-role
-  "Determine role of sender for a given mailbox context."
-  [from mb-id mailbox-map maintainers-map]
-  (when (and (seq from) mb-id)
-    (let [from-lc (str/lower-case from)
-          mb-info (get mailbox-map mb-id)
-          admin   (some-> (:admin mb-info) str/lower-case)]
+  "Determine role of sender for a given source context."
+  [from source-name source-map maintainers-map]
+  (when (and (seq from) source-name)
+    (let [from-lc  (str/lower-case from)
+          src-info (get source-map source-name)
+          admin    (some-> (:admin src-info) str/lower-case)]
       (cond
-        (= from-lc admin)                                        "admin"
-        (contains? (get maintainers-map mb-id #{}) from-lc)      "maintainer"
-        :else                                                    nil))))
+        (= from-lc admin)                                            "admin"
+        (contains? (get maintainers-map source-name #{}) from-lc)    "maintainer"
+        :else                                                        nil))))
 
-(defn report->map [report mailbox-map maintainers-map multi-mailbox?]
-  (let [email   (:report/email report)
-        mb-id   (:email/mailbox email)
-        from    (or (:email/from-address email) "")
-        arch    (archived-at email)
-        votes   (votes-str report)
-        series  (:report/series report)
-        related (:report/related report)
-        role    (sender-role from mb-id mailbox-map maintainers-map)
-        mb-name (get-in mailbox-map [mb-id :name])]
+(defn report->map [report source-map maintainers-map multi-src?]
+  (let [email       (:report/email report)
+        source-name (:email/source email)
+        from        (or (:email/from-address email) "")
+        arch        (archived-at email)
+        votes       (votes-str report)
+        series      (:report/series report)
+        related     (:report/related report)
+        role        (sender-role from source-name source-map maintainers-map)]
     (cond-> {:type     (name (:report/type report))
              :subject  (or (:email/subject email) "")
              :from     from
@@ -153,9 +152,9 @@
              :status   (status report)
              :priority (priority report)
              :replies  (descendant-count report)}
-      (:email/from-name email)      (assoc :from-name (:email/from-name email))
-      role                          (assoc :role role)
-      (and multi-mailbox? mb-name)  (assoc :mailbox mb-name)
+      (:email/from-name email)          (assoc :from-name (:email/from-name email))
+      role                              (assoc :role role)
+      (and multi-src? source-name)      (assoc :source source-name)
       (:report/message-id report)   (assoc :message-id (:report/message-id report))
       (:report/version report)      (assoc :version (:report/version report))
       (:report/topic report)        (assoc :topic (:report/topic report))
@@ -196,8 +195,8 @@
 
 (defn dump-json!
   "Dump reports as JSON to a file."
-  [reports filename mailbox-map maintainers-map multi-mb?]
-  (let [data (mapv #(report->map % mailbox-map maintainers-map multi-mb?) reports)]
+  [reports filename source-map maintainers-map multi-src?]
+  (let [data (mapv #(report->map % source-map maintainers-map multi-src?) reports)]
     (spit filename (json/generate-string data {:pretty true}))
     (println (str "Wrote " (count data) " reports to " filename))))
 
@@ -262,8 +261,8 @@
 
 (defn dump-rss!
   "Dump reports as RSS 2.0 to a file."
-  [reports filename label mailbox-map maintainers-map multi-mb?]
-  (let [data  (mapv #(report->map % mailbox-map maintainers-map multi-mb?) reports)
+  [reports filename label source-map maintainers-map multi-src?]
+  (let [data  (mapv #(report->map % source-map maintainers-map multi-src?) reports)
         items (str/join "\n" (map report->rss-item data))
         link  "https://www.softwareheritage.org"]
     (spit filename
@@ -320,8 +319,8 @@
 
 (defn dump-org!
   "Dump reports as Org to a file."
-  [reports filename label mailbox-map maintainers-map multi-mb?]
-  (let [data    (mapv #(report->map % mailbox-map maintainers-map multi-mb?) reports)
+  [reports filename label source-map maintainers-map multi-src?]
+  (let [data    (mapv #(report->map % source-map maintainers-map multi-src?) reports)
         entries (str/join "\n" (map report->org-entry data))]
     (spit filename
           (str "#+TITLE: BARK " label " reports\n"
@@ -337,24 +336,16 @@
   (loop [opts {} [a & more] args]
     (cond
       (nil? a)                        opts
-      (#{"-m" "--mailbox"} a)         (recur (assoc opts :mailbox-name (first more)) (rest more))
+      (#{"-n" "--source"} a)          (recur (assoc opts :source-name (first more)) (rest more))
       (#{"-p" "--min-priority"} a)    (recur (assoc opts :min-priority (parse-long (first more))) (rest more))
       (#{"-s" "--min-status"} a)      (recur (assoc opts :min-status (parse-long (first more))) (rest more))
       (nil? (:format opts))           (recur (assoc opts :format a) more)
       :else                           opts)))
 
-(defn- resolve-mailbox-ids
-  "Given a mailbox name, return matching mailbox-ids from mailbox-map."
-  [mailbox-map name]
-  (keep (fn [[mb-id info]]
-          (when (= (:name info) name) mb-id))
-        mailbox-map))
-
-(defn- filter-by-mailbox
-  "Filter reports to only those from the given mailbox-ids."
-  [reports mb-ids]
-  (let [id-set (set mb-ids)]
-    (filter #(contains? id-set (get-in % [:report/email :email/mailbox])) reports)))
+(defn- filter-by-source
+  "Filter reports to only those from the given source name."
+  [reports source-name]
+  (filter #(= source-name (get-in % [:report/email :email/source])) reports))
 
 (defn- filter-by-priority
   "Keep only reports with priority >= min-p."
@@ -372,7 +363,7 @@
 
 (def formats #{"json" "rss" "org"})
 
-(let [{:keys [format mailbox-name min-priority min-status]
+(let [{:keys [format source-name min-priority min-status]
        :or {format "json"}}
       (parse-args *command-line-args*)
       db-path (or (System/getenv "BARK_DB") "data/bark-db")
@@ -390,19 +381,19 @@
       (System/exit 1))
     (let [db              (d/db conn)
           config          (load-config)
-          mailbox-map     (if config (build-mailbox-map config) {})
-          maintainers-map (if config (build-maintainers config db mailbox-map) {})
-          multi-mb?       (> (count mailbox-map) 1)
+          source-map      (if config (build-source-map config) {})
+          maintainers-map (if config (build-maintainers db source-map) {})
+          multi-src?      (> (count source-map) 1)
           label           "report"
           all-reps        (all-reports db)
-          reports         (if mailbox-name
-                           (let [mb-ids (resolve-mailbox-ids mailbox-map mailbox-name)]
-                             (if (empty? mb-ids)
-                               (do (println (str "Error: no mailbox named '" mailbox-name "'"))
+          reports         (if source-name
+                           (let [matching (filter-by-source all-reps source-name)]
+                             (if (and (empty? matching) (not (contains? source-map source-name)))
+                               (do (println (str "Error: no source named '" source-name "'"))
                                    (println (str "Available: "
-                                                 (str/join ", " (keep :name (vals mailbox-map)))))
+                                                 (str/join ", " (keys source-map))))
                                    (System/exit 1))
-                               (filter-by-mailbox all-reps mb-ids)))
+                               matching))
                            all-reps)
           reports         (if min-priority
                            (filter-by-priority reports min-priority)
@@ -413,10 +404,10 @@
           basename        "reports"]
       (if (empty? reports)
         (println (str "No reports found."
-                      (when mailbox-name (str " (mailbox: " mailbox-name ")"))))
+                      (when source-name (str " (source: " source-name ")"))))
         (case format
-          "json" (dump-json! reports (str basename ".json") mailbox-map maintainers-map multi-mb?)
-          "rss"  (dump-rss!  reports (str basename ".rss") label mailbox-map maintainers-map multi-mb?)
-          "org"  (dump-org!  reports (str basename ".org") label mailbox-map maintainers-map multi-mb?))))
+          "json" (dump-json! reports (str basename ".json") source-map maintainers-map multi-src?)
+          "rss"  (dump-rss!  reports (str basename ".rss") label source-map maintainers-map multi-src?)
+          "org"  (dump-org!  reports (str basename ".org") label source-map maintainers-map multi-src?))))
     (finally
       (d/close conn))))

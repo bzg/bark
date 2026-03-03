@@ -3,7 +3,8 @@
 ;; License-Filename: LICENSES/EPL-2.0.txt
 
 (ns bark-ingest.ingest
-  "Transform parsed email maps into Datalevin transactions and store them."
+  "Transform parsed email maps into Datalevin transactions and store them.
+  Source classification is deferred to bark-digest."
   (:require [bark-ingest.db :as db]
             [datalevin.core :as d]
             [clojure.string :as str]
@@ -48,9 +49,9 @@
     (apply str (map #(format "%02x" %) bytes))))
 
 (defn uid-hash
-  "Compute a globally unique uid from mailbox-id and IMAP UID."
-  [mailbox-id imap-uid]
-  (sha256 (str mailbox-id ":" imap-uid)))
+  "Compute a unique uid hash from an IMAP UID."
+  [imap-uid]
+  (sha256 (str "bark:" imap-uid)))
 
 ;; ---------------------------------------------------------------------------
 ;; Transform
@@ -58,8 +59,8 @@
 
 (defn email->txdata
   "Convert a fetch-imap message map to Datalevin transaction data.
-  mailbox-id is a string like \"imap.example.com:user@example.com\"."
-  [mailbox-id msg]
+  No source is stamped here — that is resolved at digest time from headers."
+  [msg]
   (let [imap-uid    (:uid msg)
         body        (:body msg)
         text        (:text body)
@@ -67,6 +68,7 @@
         text-from-html (strip-tags html-body)
         from        (first (:from msg))
         headers     (:headers msg)
+        headers-edn (when (seq headers) (pr-str headers))
         in-reply-to (when-let [v (get headers "In-Reply-To")]
                       (let [s (str/trim (if (vector? v) (first v) v))]
                         (when-not (str/blank? s) s)))
@@ -79,62 +81,27 @@
                                                          (when (:data att)
                                                            (count (:data att))))})
                           (remove nil? (:attachments body)))]
-    (cond-> {:email/uid           (uid-hash mailbox-id imap-uid)
-             :email/imap-uid      imap-uid
-             :email/mailbox       mailbox-id
-             :email/message-id    (:message-id msg)
-             :email/subject       (or (:subject msg) "(no subject)")
-             :email/content-type  (:content-type msg)
-             :email/ingested-at   (Date.)}
+    (cond-> {:email/uid          (uid-hash imap-uid)
+             :email/imap-uid     imap-uid
+             :email/message-id   (:message-id msg)
+             :email/subject      (or (:subject msg) "(no subject)")
+             :email/content-type (:content-type msg)
+             :email/ingested-at  (Date.)}
 
-      ;; From
-      (:address from)
-      (assoc :email/from-address (:address from))
-
-      (:name from)
-      (assoc :email/from-name (:name from))
-
-      ;; To — store as set of formatted address strings
-      (seq (:to msg))
-      (assoc :email/to (set (map format-address (:to msg))))
-
-      ;; Cc
-      (seq (:cc msg))
-      (assoc :email/cc (set (map format-address (:cc msg))))
-
-      ;; Dates
-      (:date-sent msg)
-      (assoc :email/date-sent (:date-sent msg))
-
-      (:date-received msg)
-      (assoc :email/date-received (:date-received msg))
-
-      ;; Body text
-      text
-      (assoc :email/body-text text)
-
-      ;; Body HTML
-      html-body
-      (assoc :email/body-html html-body)
-
-      ;; Plain text extracted from HTML
-      text-from-html
-      (assoc :email/body-text-from-html text-from-html)
-
-      ;; Flags
-      (seq (:flags msg))
-      (assoc :email/flags (:flags msg))
-
-      ;; Attachments (metadata only, no binary data)
-      (seq attachments)
-      (assoc :email/attachments attachments)
-
-      ;; Threading headers
-      in-reply-to
-      (assoc :email/in-reply-to in-reply-to)
-
-      references
-      (assoc :email/references references))))
+      (:address from)      (assoc :email/from-address (:address from))
+      (:name from)         (assoc :email/from-name (:name from))
+      (seq (:to msg))      (assoc :email/to (set (map format-address (:to msg))))
+      (seq (:cc msg))      (assoc :email/cc (set (map format-address (:cc msg))))
+      (:date-sent msg)     (assoc :email/date-sent (:date-sent msg))
+      (:date-received msg) (assoc :email/date-received (:date-received msg))
+      text                 (assoc :email/body-text text)
+      html-body            (assoc :email/body-html html-body)
+      text-from-html       (assoc :email/body-text-from-html text-from-html)
+      (seq (:flags msg))   (assoc :email/flags (:flags msg))
+      (seq attachments)    (assoc :email/attachments attachments)
+      in-reply-to          (assoc :email/in-reply-to in-reply-to)
+      references           (assoc :email/references references)
+      headers-edn          (assoc :email/headers-edn headers-edn))))
 
 ;; ---------------------------------------------------------------------------
 ;; Store
@@ -149,22 +116,20 @@
   "Store a single parsed email in Datalevin.
   Skips if uid hash or Message-ID already exists.
   Returns true if the email was stored, false/nil otherwise."
-  [conn mailbox-id msg]
+  [conn msg]
   (let [imap-uid (:uid msg)]
     (cond
       (nil? imap-uid)
       (do (log/warn "Skipping email with nil UID") false)
 
-      (db/email-exists? conn (uid-hash mailbox-id imap-uid))
-      (do (log/debug "Skipping already stored email UID:" imap-uid "(uid-hash)") false)
+      (db/email-exists? conn (uid-hash imap-uid))
+      (do (log/debug "Skipping already stored email UID:" imap-uid) false)
 
       (db/message-id-exists? conn (:message-id msg))
-      (do (log/debug "Skipping already stored email UID:" imap-uid
-                     "Message-ID:" (:message-id msg) "(from another mailbox)")
-          false)
+      (do (log/debug "Skipping duplicate Message-ID:" (:message-id msg)) false)
 
       :else
-      (let [txdata (email->txdata mailbox-id msg)]
+      (let [txdata (email->txdata msg)]
         (d/transact! conn [txdata])
         (log/info "Stored email UID:" imap-uid
                   "Subject:" (truncate (:email/subject txdata) 60))
@@ -172,12 +137,10 @@
 
 (defn store-emails!
   "Store a batch of parsed emails. Returns the count of newly stored emails."
-  [conn mailbox-id msgs]
+  [conn msgs]
   (let [stored (reduce (fn [n msg]
                          (try
-                           (if (store-email! conn mailbox-id msg)
-                             (inc n)
-                             n)
+                           (if (store-email! conn msg) (inc n) n)
                            (catch Exception e
                              (log/error "Failed to store email UID:" (:uid msg) (.getMessage e))
                              n)))

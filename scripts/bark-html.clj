@@ -37,11 +37,11 @@
 ;; Generate reports.json via bark-egest
 ;; ---------------------------------------------------------------------------
 
-(defn generate-json! [mailbox-name min-priority min-status]
+(defn generate-json! [source-name min-priority min-status]
   (let [f   (clojure.java.io/file json-file)
         _   (when (.exists f) (.delete f))
         cmd (cond-> ["bb" "scripts/bark-egest.clj" "json"]
-              mailbox-name (into ["-m" mailbox-name])
+              source-name  (into ["-n" source-name])
               min-priority (into ["-p" (str min-priority)])
               min-status   (into ["-s" (str min-status)]))
         {:keys [exit]} (apply process/shell {:continue true} cmd)]
@@ -137,8 +137,8 @@
           :title "Filter related reports"}
       (str "↳ " (count related) " related")]]))
 
-(defn- report-row [multi-mb? {:strs [type subject from date date-raw flags status priority
-                            replies archived-at message-id related role mailbox]}]
+(defn- report-row [multi-src? {:strs [type subject from date date-raw flags status priority
+                            replies archived-at message-id related role source]}]
   (let [label    (get type-labels type type)
         closed?  (and flags (>= (count flags) 3) (= (nth flags 2 \-) \C))
         iso-date (parse-to-iso-date (or date-raw date ""))]
@@ -148,12 +148,12 @@
           :data-from    (str/lower-case (or from ""))
           :data-subject (str/lower-case (or subject ""))
           :data-date    iso-date
-          :data-mailbox (or mailbox "")
+          :data-source  (or source "")
           :data-search  (str/lower-case (str subject " " from " " iso-date))}
      [:td [:mark {:data-type type} label]]
      [:td {:data-value (str (or status 0))} (status-square flags)]
      [:td (priority-square priority)]
-     (when multi-mb? [:td [:small (or mailbox "")]])
+     (when multi-src? [:td [:small (or source "")]])
      [:td (subject-el subject role archived-at) (related-link related)]
      [:td.secondary from]
      [:td [:small (or iso-date date "")]]
@@ -177,7 +177,7 @@
   .filters button { padding: 0.3rem 0.7rem; font-size: 0.8rem; }
   .filters button.outline { opacity: 0.5; }
   input[type=search] { max-width: 300px; margin-bottom: 0; }
-  th[data-sort] { cursor: pointer; user-select: none; }
+  th[data-sort] { cursor: pointer; user-select: none; white-space: nowrap; }
   th[data-sort]:hover { text-decoration: underline; }
   th[data-sort]::after { content: ' ↕'; opacity: 0.3; font-size: 0.75em; }
   th[data-sort].asc::after  { content: ' ↑'; opacity: 0.7; }
@@ -382,30 +382,30 @@
 (defn page [reports min-status]
   (let [types      (vec (distinct (map #(get % "type") reports)))
         types-json (json/generate-string types)
-        multi-mb?  (some #(get % "mailbox") reports)
+        multi-src? (some #(get % "source") reports)
         all-open?  (and min-status (>= min-status 4))
         rss-file   "reports.rss"
         org-file   "reports.org"
         has-rss?   (.exists (clojure.java.io/file rss-file))
         has-org?   (.exists (clojure.java.io/file org-file))
-        ;; Column indices depend on whether Mailbox column is present
-        ;; Type Status Priority [Mailbox] Subject From Date ↩
-        mb-off     (if multi-mb? 1 0)
+        ;; Column indices depend on whether Source column is present
+        ;; Type Status Priority [Source] Subject From Date ↩
+        src-off    (if multi-src? 1 0)
         cols       (concat
                     [[:th {:data-sort "type" :onclick "sortTable(0,'type')"} "Type"]
                      [:th {:data-sort "status" :onclick "sortTable(1,'status')"} "Status"]
                      [:th {:data-sort "priority" :onclick "sortTable(2,'priority')"} "Priority"]]
-                    (when multi-mb?
-                      [[:th {:data-sort "mailbox"
-                             :onclick (str "sortTable(3,'mailbox')")} "Mailbox"]])
+                    (when multi-src?
+                      [[:th {:data-sort "source"
+                             :onclick (str "sortTable(3,'source')")} "Source"]])
                     [[:th {:data-sort "subject"
-                           :onclick (str "sortTable(" (+ 3 mb-off) ",'subject')")} "Subject"]
+                           :onclick (str "sortTable(" (+ 3 src-off) ",'subject')")} "Subject"]
                      [:th {:data-sort "from"
-                           :onclick (str "sortTable(" (+ 4 mb-off) ",'from')")} "From"]
+                           :onclick (str "sortTable(" (+ 4 src-off) ",'from')")} "From"]
                      [:th {:data-sort "date"
-                           :onclick (str "sortTable(" (+ 5 mb-off) ",'date')")} "Date"]
+                           :onclick (str "sortTable(" (+ 5 src-off) ",'date')")} "Date"]
                      [:th {:data-sort "replies"
-                           :onclick (str "sortTable(" (+ 6 mb-off) ",'replies')")} "↩"]])]
+                           :onclick (str "sortTable(" (+ 6 src-off) ",'replies')")} "↩"]])]
     (str
      "<!DOCTYPE html>\n"
      (h/html
@@ -453,7 +453,7 @@
            [:thead [:tr (seq cols)]]
            [:tbody
             (for [r reports]
-              (report-row multi-mb? r))]]]
+              (report-row multi-src? r))]]]
          [:script (h/raw (page-js types-json all-open?))]]]]))))
 
 ;; ---------------------------------------------------------------------------
@@ -461,19 +461,19 @@
 ;; ---------------------------------------------------------------------------
 
 (let [args (vec *command-line-args*)
-      {:keys [out-file mailbox-name min-priority min-status]}
+      {:keys [out-file source-name min-priority min-status]}
       (loop [opts {} [a & more] args]
         (cond
           (nil? a)                        opts
           (#{"-o" "--output"} a)          (recur (assoc opts :out-file (first more)) (rest more))
-          (#{"-m" "--mailbox"} a)         (recur (assoc opts :mailbox-name (first more)) (rest more))
+          (#{"-n" "--source"} a)          (recur (assoc opts :source-name (first more)) (rest more))
           (#{"-p" "--min-priority"} a)    (recur (assoc opts :min-priority (parse-long (first more))) (rest more))
           (#{"-s" "--min-status"} a)      (recur (assoc opts :min-status (parse-long (first more))) (rest more))
           :else                           (recur opts more)))
       out-file (or out-file default-output)]
   (binding [*out* *err*]
     (println "Generating" json-file "via bark-egest…"))
-  (generate-json! mailbox-name min-priority min-status)
+  (generate-json! source-name min-priority min-status)
   (let [reports (json/parse-string (slurp json-file))
         html    (page reports min-status)]
     (spit out-file html)
