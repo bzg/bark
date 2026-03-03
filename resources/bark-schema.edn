@@ -90,4 +90,15 @@
  :roles/maintainers      {:db/valueType   :db.type/string
                           :db/cardinality :db.cardinality/many}
  :roles/ignored          {:db/valueType   :db.type/string
-                          :db/cardinality :db.cardinality/many}}
+                          :db/cardinality :db.cardinality/many}
+
+ ;; --- Notification preferences (per subscriber per source) ---
+ :notify/key             {:db/valueType :db.type/string
+                          :db/unique    :db.unique/identity}
+ :notify/source          {:db/valueType :db.type/string}
+ :notify/email           {:db/valueType :db.type/string}
+ :notify/enabled         {:db/valueType :db.type/boolean}
+ :notify/interval-days   {:db/valueType :db.type/long}
+ :notify/min-priority    {:db/valueType :db.type/long}
+ :notify/min-status      {:db/valueType :db.type/long}
+ :notify/last-sent       {:db/valueType :db.type/instant}}

@@ -156,6 +156,75 @@
                            (println (str "    → " (str/lower-case command) ": "
                                          (str/join " " addresses) " (for " source-name ")")))
             :noop      (println (str "    → " msg))))))))
+
+;; ---------------------------------------------------------------------------
+;; Notify commands
+;; ---------------------------------------------------------------------------
+
+(def ^:private notify-pattern
+  #"(?m)^Notify:\s+(.+)$")
+
+(defn- parse-notify-params
+  "Parse 'on', 'off', or param string like 'd:7 p:2 s:4'.
+  Returns map with :enabled, :interval-days, :min-priority, :min-status."
+  [s]
+  (let [s (str/trim s)]
+    (cond
+      (= (str/lower-case s) "on")  {:enabled true}
+      (= (str/lower-case s) "off") {:enabled false}
+      :else
+      (let [params (re-seq #"([dps]):(\d+)" s)]
+        (reduce (fn [m [_ k v]]
+                  (case k
+                    "d" (assoc m :interval-days (parse-long v))
+                    "p" (assoc m :min-priority (parse-long v))
+                    "s" (assoc m :min-status (parse-long v))
+                    m))
+                {} params)))))
+
+(defn- notify-key [source-name email]
+  (str source-name ":" (str/lower-case email)))
+
+(defn ensure-notify-defaults!
+  "Create default notify prefs for admin+maintainers who don't have one yet."
+  [conn source-name roles]
+  (let [admin  (:roles/admin roles)
+        maints (let [v (:roles/maintainers roles)]
+                 (cond (nil? v) [] (string? v) [v] :else v))
+        emails (distinct (remove nil? (cons admin maints)))]
+    (doseq [email emails]
+      (let [k (notify-key source-name email)]
+        (when-not (d/q '[:find ?e .
+                         :in $ ?k
+                         :where [?e :notify/key ?k]]
+                       (d/db conn) k)
+          (d/transact! conn [{:notify/key          k
+                              :notify/source       source-name
+                              :notify/email        (str/lower-case email)
+                              :notify/enabled      true
+                              :notify/interval-days 30
+                              :notify/min-priority 1
+                              :notify/min-status   1}]))))))
+
+(defn apply-notify-commands!
+  "Parse and apply Notify: commands from email body.
+  Only admin/maintainers can set their own notification prefs."
+  [conn roles source-name from-addr body-text]
+  (when-let [[_ params-str] (re-find notify-pattern (or body-text ""))]
+    (when (admin-or-maintainer? roles from-addr)
+      (let [params (parse-notify-params params-str)
+            k      (notify-key source-name from-addr)
+            base   {:notify/key    k
+                    :notify/source source-name
+                    :notify/email  (str/lower-case from-addr)}
+            txn    (cond-> base
+                     (contains? params :enabled)       (assoc :notify/enabled (:enabled params))
+                     (contains? params :interval-days)  (assoc :notify/interval-days (:interval-days params))
+                     (contains? params :min-priority)   (assoc :notify/min-priority (:min-priority params))
+                     (contains? params :min-status)     (assoc :notify/min-status (:min-status params)))]
+        (d/transact! conn [txn])
+        (println (str "    → notify: " params-str " (for " from-addr " on " source-name ")"))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Report detection
 ;; ---------------------------------------------------------------------------
@@ -656,7 +725,8 @@
           (assoc acc :skipped (inc skipped)))
       (do (when (and from-addr body-text source-name
                      (not (from-mailing-list? email)))
-            (apply-role-commands! conn roles source-name from-addr body-text))
+            (apply-role-commands! conn roles source-name from-addr body-text)
+            (apply-notify-commands! conn roles source-name from-addr body-text))
           (let [report-info (detect-report email)
                 permitted?  (and report-info from-addr
                                  (can-create-report? roles from-addr report-info
@@ -730,6 +800,9 @@
         conn    (d/get-conn db-path report-schema)]
     (try
       (when config (ensure-source-roles! conn config))
+      (when config
+        (doseq [{:keys [name]} (:sources config)]
+          (ensure-notify-defaults! conn name (get-roles (d/db conn) name))))
       (let [source-map (if config (build-source-map config) {})
             sources    (or (:sources config) [])]
         (cmd-digest! conn source-map sources all?))

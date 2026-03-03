@@ -12,6 +12,8 @@
            :task (apply shell "bb scripts/validate-config.clj" *command-line-args*)}
   html    {:doc  "Generate static HTML page from reports [-o file] [-p 1|2|3] [-s 1-7]"
            :task (apply shell "bb scripts/bark-html.clj" *command-line-args*)}
+  notify  {:doc  "Send notification emails: bb notify [--dry-run]"
+           :task (apply shell "bb scripts/bark-notify.clj" *command-line-args*)}
   clean   {:doc  "Remove generated files (reports.json, reports.rss, reports.org, index.html)"
            :task (doseq [f ["reports.json" "reports.rss" "reports.org" "index.html"]
                          :let [file (clojure.java.io/file f)]
@@ -19,4 +21,6 @@
                   (.delete file)
                   (println "Deleted" f))}
   test    {:doc  "Run bark-digest integration tests"
-           :task (shell "bb test/bark-digest-test.clj")}}}
+           :task (shell "bb test/bark-digest-test.clj")}
+  test-smtp {:doc  "Test SMTP config: bb test-smtp [--to addr] [--dry-run]"
+             :task (apply shell "bb test/bark-email-test.clj" *command-line-args*)}}}

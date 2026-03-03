@@ -6,15 +6,16 @@ BARK monitors a single IMAP mailbox, classifies incoming emails into
 sources by header matching, detects report types from subject tags,
 applies state triggers from email body, and manages roles per source.
 
+To browse BARK reports from the command line, you can use
+[bone](https://codeberg.org/bzg/bone).
+
 ## How it works
 
 - **bark-ingest** — Connects to IMAP via IDLE, stores emails in the db.
 - **bark-digest** — Scans new emails and creates/updates reports/roles in the db.
 - **bark-egest** — Exports all reports as JSON, RSS, or Org.
 - **bark-html** — Generates a static HTML page with report data.
-
-To browse BARK reports from the command line, you can use
-[bone](https://codeberg.org/bzg/bone).
+- **bark-notify** — Sends notification emails to admin/maintainers.
 
 ## Dependencies
 
@@ -45,6 +46,13 @@ bb export org      # → reports.org
 
 # 6. Generate a static HTML page
 bb html            # → index.html
+
+# 7. Test SMTP configuration (optional)
+bb test-smtp --dry-run
+
+# 8. Send notification emails
+bb notify          # send due notifications
+bb notify --dry-run --debug  # preview without sending
 ```
 
 ## bb tasks
@@ -54,9 +62,14 @@ bb digest [--all]              Digest emails into reports
 bb export [json|rss|org]       Export all reports (default: json)
 bb reports                     Export JSON + interactive display via fzf
 bb html [-o file]              Static HTML page (default: index.html)
+bb notify [--dry-run]          Send notification emails
 bb config [path]               Validate config.edn
 bb test                        Run integration tests
+bb test-smtp [--to addr]       Test SMTP configuration
 ```
+
+The `notify` command also accepts `--force` (ignore interval, send
+now) and `--debug` (print filtering diagnostics).
 
 ### Filtering options
 
@@ -121,6 +134,57 @@ to the BARK inbox.
 
 Requests (`[POLL]`, `[FR]`, `[RFC]`, etc.) support voting: reply with
 `+1` or `-1` in the body.
+
+### Notifications
+
+BARK can send periodic email notifications to admins and maintainers
+with a summary of open reports.  Notifications are never sent to
+regular users.
+
+Notifications require SMTP configuration (see [Config](#config)) and
+are sent via `bb notify`, typically from a cron job.
+
+Each notification email contains two sections: open bugs/patches/requests
+owned by the recipient, and all unacked & unowned bugs/patches/requests.
+
+#### Subscribing and unsubscribing
+
+Admins and maintainers are subscribed by default when `bb digest` runs
+for the first time.  To unsubscribe, send an email to the BARK inbox
+with this body:
+
+```
+Notify: off
+```
+
+To re-subscribe:
+
+```
+Notify: on
+```
+
+#### Setting notification preferences
+
+Preferences are set via the same `Notify:` command.  Parameters can be
+combined on a single line:
+
+| Parameter | Description                  | Default |
+|-----------|------------------------------|---------|
+| `d:N`     | Receive notifications every N days | 30  |
+| `p:N`     | Minimum priority (0–3)       | 0       |
+| `s:N`     | Minimum status (0–7)         | 0       |
+
+Examples:
+
+```
+Notify: d:7                 — every 7 days
+Notify: d:1                 — daily
+Notify: d:3 s:4 p:2         — every 3 days, only open reports with priority >= 2
+Notify: p:1                 — only important or urgent reports
+```
+
+Like role commands, `Notify:` commands are only processed from direct
+emails (not from mailing list traffic).
 
 ## Report types
 
@@ -247,8 +311,36 @@ Match rules (all optional, all must match if present):
             :match {:delivered-to "private@example.com"}}
            {:name "direct"}]
  :db {:path "data/bark-db"}
- :ingest {:initial-fetch 50}}
+ :ingest {:initial-fetch 50}
+ :notifications {:enabled true
+                 :smtp {:host "smtp.example.com" :port 587 :tls true
+                        :user "notify@example.com" :password "secret"
+                        :from "bark@example.com"}}}
 ```
+
+### Notifications (`:notifications`)
+
+Optional.  When absent or `{:enabled false}`, `bb notify` exits
+immediately.
+
+| Field      | Required | Description                         |
+|------------|----------|-------------------------------------|
+| `:enabled` | yes      | Global kill switch (`true`/`false`) |
+| `:smtp`    | yes      | SMTP connection settings (see below)|
+
+SMTP fields:
+
+| Field       | Required | Description                |
+|-------------|----------|----------------------------|
+| `:host`     | yes      | SMTP server hostname       |
+| `:port`     | yes      | SMTP port (usually 587)    |
+| `:tls`      | no       | Enable STARTTLS (`true`)   |
+| `:user`     | yes      | SMTP login username        |
+| `:password` | yes      | SMTP password              |
+| `:from`     | yes      | Sender address for emails  |
+
+Use `bb test-smtp --dry-run` to validate the configuration without
+sending, or `bb test-smtp` to send a test email to the global admin.
 
 ## License
 

@@ -37,4 +37,13 @@
  :db {:path "data/bark-db"}
 
  ;; Ingest settings
- :ingest {:initial-fetch 50}}
+ :ingest {:initial-fetch 50}
+
+ ;; Notification settings (optional — notifications disabled if absent)
+ :notifications {:enabled true
+                 :smtp {:host     "smtp.example.com"
+                        :port     587
+                        :tls      true
+                        :user     "notify@example.com"
+                        :password "secret"
+                        :from     "bark@example.com"}}}
