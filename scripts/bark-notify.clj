@@ -21,7 +21,7 @@
 
 (load-file "scripts/bark-common.clj")
 
-(pods/load-pod 'huahaiy/datalevin "0.10.5")
+(pods/load-pod 'huahaiy/datalevin "0.10.7")
 (pods/load-pod 'tzzh/mail "0.0.3")
 
 (require '[pod.huahaiy.datalevin :as d]
