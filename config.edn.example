@@ -15,7 +15,17 @@
             :match              {:list-id "bugs.example.org"}
             ;; The mailing list address (for List-Post permission check)
             :mailing-list-email "bugs@example.org"
-            :admin              "lead@example.org"}
+            :admin              "lead@example.org"
+            ;; Per-source trigger words (optional).
+            ;; Only specified actions override defaults; others keep builtins.
+            ;; Defaults — bug:  acked=Approved,Confirmed  owned=Handled  closed=Canceled,Fixed
+            ;;            patch: acked=Approved,Reviewed   owned=Handled  closed=Canceled,Applied
+            ;;            request: acked=Approved          owned=Handled  closed=Canceled,Done,Closed
+            ;;            announcement/release/change: closed=Canceled
+            ;; :triggers {:bug   {:acked ["Approved" "Confirmed" "Verified"]
+            ;;                    :closed ["Canceled" "Fixed" "Resolved"]}
+            ;;            :patch {:acked ["Approved" "Reviewed" "LGTM"]}}
+            }
 
            {:name               "private"
             :match              {:delivered-to "private-bugs@example.com"}}

@@ -281,29 +281,42 @@
 (defn- match-unset-triggers [triggers body-text]
   (into #{} (keep (fn [[k p]] (when (re-find p body-text) (keyword "report" (name k))))) triggers))
 
-(def bug-triggers
-  {:acked (trigger-pattern "Approved" "Confirmed") :owned (trigger-pattern "Handled")
-   :closed (trigger-pattern "Canceled" "Fixed")})
+(def default-trigger-words
+  "Default trigger words per report type and action."
+  {:bug          {:acked ["Approved" "Confirmed"] :owned ["Handled"] :closed ["Canceled" "Fixed"]}
+   :patch        {:acked ["Approved" "Reviewed"]  :owned ["Handled"] :closed ["Canceled" "Applied"]}
+   :request      {:acked ["Approved"]             :owned ["Handled"] :closed ["Canceled" "Done" "Closed"]}
+   :announcement {:closed ["Canceled"]}
+   :release      {:closed ["Canceled"]}
+   :change       {:closed ["Canceled"]}})
 
-(def patch-triggers
-  {:acked (trigger-pattern "Approved" "Reviewed") :owned (trigger-pattern "Handled")
-   :closed (trigger-pattern "Canceled" "Applied")})
+(defn- compile-trigger-words
+  "Compile a map of action→word-lists into action→regex-patterns."
+  [action-map]
+  (into {} (map (fn [[action words]] [action (apply trigger-pattern words)])) action-map))
 
-(def request-triggers
-  {:acked (trigger-pattern "Approved") :owned (trigger-pattern "Handled")
-   :closed (trigger-pattern "Canceled" "Done" "Closed")})
+(defn- compile-triggers-by-type
+  "Compile a full type→action→words map into type→action→pattern."
+  [tw]
+  (into {} (map (fn [[rtype actions]] [rtype (compile-trigger-words actions)])) tw))
 
-(def announcement-triggers {:closed (trigger-pattern "Canceled")})
+(def default-triggers-by-type (compile-triggers-by-type default-trigger-words))
+
+(defn- build-source-triggers
+  "Merge source :triggers config with defaults and compile to patterns."
+  [source-cfg]
+  (if-let [custom (:triggers source-cfg)]
+    (compile-triggers-by-type
+     (reduce-kv (fn [acc rtype overrides]
+                  (assoc acc rtype (merge (get default-trigger-words rtype) overrides)))
+                default-trigger-words custom))
+    default-triggers-by-type))
 
 (def report-unset-triggers
   {:urgent (trigger-pattern "Not urgent") :important (trigger-pattern "Not important")})
 
 (def report-priority-triggers
   {:urgent (trigger-pattern "Urgent") :important (trigger-pattern "Important")})
-
-(def set-triggers-by-type
-  {:bug bug-triggers :patch patch-triggers :request request-triggers
-   :announcement announcement-triggers :release announcement-triggers :change announcement-triggers})
 
 (def report-types-with-priority #{:bug :patch :request})
 
@@ -332,9 +345,9 @@
           (println (str "    → vote " (if (= vote :up) "+1" "-1")
                         " by " from-addr)))))))
 
-(defn detect-triggers [report-type body-text]
+(defn detect-triggers [report-type body-text triggers-by-type]
   (when body-text
-    (let [sets     (when-let [t (set-triggers-by-type report-type)] (match-triggers t body-text))
+    (let [sets     (when-let [t (triggers-by-type report-type)] (match-triggers t body-text))
           priority (when (report-types-with-priority report-type) (match-triggers report-priority-triggers body-text))
           unsets   (when (report-types-with-priority report-type) (match-unset-triggers report-unset-triggers body-text))
           all-sets (into {} (remove (fn [[k _]] (contains? unsets k))) (merge sets priority))]
@@ -345,10 +358,14 @@
 
 (def state-attrs [:report/acked :report/owned :report/closed :report/urgent :report/important])
 
-(defn apply-triggers! [conn report-eid report-type email]
+(defn apply-triggers! [conn report-eid report-type email source-map]
   (let [body-text  (or (:email/body-text email) (:email/body-text-from-html email))
         from-addr  (:email/from-address email)
-        result     (detect-triggers report-type body-text)]
+        src-name   (d/q '[:find ?src . :in $ ?rid :where
+                          [?rid :report/email ?e] [?e :email/source ?src]]
+                        (d/db conn) report-eid)
+        triggers   (build-source-triggers (get source-map src-name))
+        result     (detect-triggers report-type body-text triggers)]
     (when (and (= :request report-type) from-addr body-text)
       (apply-vote! conn report-eid from-addr body-text))
     (when result
@@ -665,7 +682,7 @@
                 (if (seq parent-report-eids)
                   (do (doseq [rid parent-report-eids]
                         (add-descendant! conn rid eid)
-                        (when-let [rtype (type-index rid)] (apply-triggers! conn rid rtype email)))
+                        (when-let [rtype (type-index rid)] (apply-triggers! conn rid rtype email source-map)))
                       [(+ threaded (count parent-report-eids))
                        (reduce #(index-assoc %1 message-id %2) thread-index parent-report-eids)])
                   [threaded thread-index])]
