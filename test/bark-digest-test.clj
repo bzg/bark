@@ -8,14 +8,14 @@
 ;; Usage:
 ;;   bb test/bark-digest-test.clj
 ;;
-;; Requires: datalevin pod, resources/bark-schema.edn.
+;; Requires: datalevin pod 0.10.5, resources/bark-schema.edn.
 
 (require '[babashka.pods :as pods]
          '[clojure.string :as str]
          '[clojure.edn :as edn]
          '[clojure.java.io :as io])
 
-(pods/load-pod 'huahaiy/datalevin "0.10.7")
+(pods/load-pod 'huahaiy/datalevin "0.10.5")
 
 (require '[pod.huahaiy.datalevin :as d])
 
