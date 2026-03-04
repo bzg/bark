@@ -65,7 +65,7 @@
 
 (defn- roles-set [roles attr]
   (let [v (get roles attr)]
-    (cond (nil? v) #{} (string? v) #{v} :else (set v))))
+    (if (nil? v) #{} (set (if (string? v) [v] v)))))
 
 (defn admin? [roles addr]
   (= (:roles/admin roles) addr))
@@ -126,8 +126,8 @@
 (defn- parse-role-commands [body-text]
   (when body-text
     (->> (re-seq role-command-pattern body-text)
-         (map (fn [[_ cmd addrs]]
-                {:command cmd :addresses (parse-addresses addrs)})))))
+         (mapv (fn [[_ cmd addrs]]
+                 {:command cmd :addresses (parse-addresses addrs)})))))
 
 (def ^:private role-dispatch
   {"Add admin"         {:requires :admin  :action :set-admin}
@@ -581,7 +581,7 @@
                       db base)]
     (if (empty? existing)
       base
-      (str base "#" (inc (count existing))))))
+      (str base "#" (count existing))))))
 
 (defn find-open-series
   "Find an open series matching topic+sender+total."

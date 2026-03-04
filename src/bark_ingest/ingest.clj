@@ -46,7 +46,7 @@
   [^String s]
   (let [digest (MessageDigest/getInstance "SHA-256")
         bytes  (.digest digest (.getBytes s "UTF-8"))]
-    (apply str (map #(format "%02x" %) bytes))))
+    (apply str (map #(format "%02x" (bit-and (int %) 0xff)) bytes))))
 
 (defn uid-hash
   "Compute a unique uid hash from an IMAP UID."
