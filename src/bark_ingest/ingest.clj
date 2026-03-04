@@ -78,8 +78,8 @@
                             {:attachment/filename     (or (:filename att) "unnamed")
                              :attachment/content-type (:content-type att)
                              :attachment/size         (or (:size att)
-                                                         (when (:data att)
-                                                           (count (:data att))))})
+                                                          (when (:data att)
+                                                            (count (:data att))))})
                           (remove nil? (:attachments body)))]
     (cond-> {:email/uid          (uid-hash imap-uid)
              :email/imap-uid     imap-uid

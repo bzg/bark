@@ -466,9 +466,9 @@
 
 (defn build-indexes [db]
   (let [reports     (d/q '[:find ?rid ?mid ?type :where
-                            [?rid :report/message-id ?mid] [?rid :report/type ?type]] db)
+                           [?rid :report/message-id ?mid] [?rid :report/type ?type]] db)
         descendants (d/q '[:find ?rid ?dmid :where
-                            [?rid :report/descendants ?de] [?de :email/message-id ?dmid]] db)
+                           [?rid :report/descendants ?de] [?de :email/message-id ?dmid]] db)
         thread-idx  (as-> {} idx
                       (reduce (fn [m [rid mid _]] (index-assoc m mid rid)) idx reports)
                       (reduce (fn [m [rid dmid]]  (index-assoc m dmid rid)) idx descendants))
@@ -497,15 +497,15 @@
 
 (defn emails-since [db since-ts]
   (let [eids (d/q '[:find [?e ...]
-                     :in $ ?since
-                     :where [?e :email/ingested-at ?t] [(> ?t ?since)]]
-                   db since-ts)]
+                    :in $ ?since
+                    :where [?e :email/ingested-at ?t] [(> ?t ?since)]]
+                  db since-ts)]
     (d/pull-many db email-pull-pattern eids)))
 
 (defn all-emails [db]
   (let [eids (d/q '[:find [?e ...]
-                     :where [?e :email/uid _]]
-                   db)]
+                    :where [?e :email/uid _]]
+                  db)]
     (d/pull-many db email-pull-pattern eids)))
 
 (defn report-exists? [db message-id]
@@ -540,12 +540,12 @@
   (when (and version (not (str/blank? version)))
     (let [db      (d/db conn)
           open-chgs (d/q '[:find [?r ...]
-                            :in $ ?ver
-                            :where
-                            [?r :report/type :change]
-                            [?r :report/version ?ver]
-                            (not [?r :report/closed _])]
-                          db version)]
+                           :in $ ?ver
+                           :where
+                           [?r :report/type :change]
+                           [?r :report/version ?ver]
+                           (not [?r :report/closed _])]
+                         db version)]
       (when (seq open-chgs)
         (d/transact! conn (mapv (fn [r] {:db/id r :report/closed release-email-eid}) open-chgs))
         (println (str "    → auto-closed " (count open-chgs)
@@ -627,7 +627,7 @@
   "Link a patch report to a series and set :report/series back-ref."
   [conn series-eid report-eid]
   (d/transact! conn [[:db/add series-eid :series/patches report-eid]
-                      {:db/id report-eid :report/series series-eid}]))
+                     {:db/id report-eid :report/series series-eid}]))
 
 (defn set-cover-letter!
   "Set the cover letter (0/N email) on a series."
@@ -668,13 +668,13 @@
                                       (set (d/q '[:find [?mid ...]
                                                   :in $ [?s ...]
                                                   :where [?s :series/patches ?r]
-                                                         [?r :report/message-id ?mid]]
+                                                  [?r :report/message-id ?mid]]
                                                 db existing-series))
                                       ;; cover letter email message-ids
                                       (d/q '[:find [?mid ...]
                                              :in $ [?s ...]
                                              :where [?s :series/cover-letter ?e]
-                                                    [?e :email/message-id ?mid]]
+                                             [?e :email/message-id ?mid]]
                                            db existing-series))
                             parent-mids (set (keep (fn [rid]
                                                      (d/q '[:find ?mid .
@@ -694,8 +694,8 @@
       (let [series-eid (or (find-open-series (d/db conn) topic from-addr m)
                            (let [sid (create-series! conn topic from-addr m)]
                              (println (str "    → new series: "
-                                          (pr-str (series-id topic from-addr m))
-                                          " (expecting " m " patches)"))
+                                           (pr-str (series-id topic from-addr m))
+                                           " (expecting " m " patches)"))
                              sid))]
         (if (zero? n)
           (set-cover-letter! conn series-eid email-eid)

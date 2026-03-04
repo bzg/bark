@@ -294,23 +294,23 @@
         subject (:subject m "")
         tags    (when-let [t (:type m)] (str ":" t ":"))
         props   (remove nil?
-                  [(str ":FROM: " (:from m ""))
-                   (str ":DATE: " (:date m ""))
-                   (when-let [mid (:message-id m)] (str ":MESSAGE-ID: " mid))
-                   (when-let [a (:archived-at m)]  (str ":ARCHIVED-AT: " a))
-                   (str ":FLAGS: " (:flags m "---"))
-                   (str ":STATUS: " (:status m 0))
-                   (str ":PRIORITY: " (:priority m 0))
-                   (str ":REPLIES: " (:replies m 0))
-                   (when-let [v (:version m)]      (str ":VERSION: " v))
-                   (when-let [t (:topic m)]        (str ":TOPIC: " t))
-                   (when-let [v (:votes m)]        (str ":VOTES: " v))
-                   (when-let [a (seq (:acked m))]  (str ":ACKED-BY: " a))
-                   (when-let [o (seq (:owned m))]  (str ":OWNED-BY: " o))
-                   (when-let [c (seq (:closed m))] (str ":CLOSED-BY: " c))
-                   (when-let [s (:series m)]
-                     (str ":SERIES: " (:received s) "/" (:expected s)
-                          (when (:closed s) " closed")))])]
+                        [(str ":FROM: " (:from m ""))
+                         (str ":DATE: " (:date m ""))
+                         (when-let [mid (:message-id m)] (str ":MESSAGE-ID: " mid))
+                         (when-let [a (:archived-at m)]  (str ":ARCHIVED-AT: " a))
+                         (str ":FLAGS: " (:flags m "---"))
+                         (str ":STATUS: " (:status m 0))
+                         (str ":PRIORITY: " (:priority m 0))
+                         (str ":REPLIES: " (:replies m 0))
+                         (when-let [v (:version m)]      (str ":VERSION: " v))
+                         (when-let [t (:topic m)]        (str ":TOPIC: " t))
+                         (when-let [v (:votes m)]        (str ":VOTES: " v))
+                         (when-let [a (seq (:acked m))]  (str ":ACKED-BY: " a))
+                         (when-let [o (seq (:owned m))]  (str ":OWNED-BY: " o))
+                         (when-let [c (seq (:closed m))] (str ":CLOSED-BY: " c))
+                         (when-let [s (:series m)]
+                           (str ":SERIES: " (:received s) "/" (:expected s)
+                                (when (:closed s) " closed")))])]
     (str "* " todo " " prio subject (when tags (str "  " tags)) "\n"
          ":PROPERTIES:\n"
          (str/join "\n" props) "\n"
@@ -395,20 +395,20 @@
           label           "report"
           all-reps        (all-reports db)
           reports         (if source-name
-                           (let [matching (filter-by-source all-reps source-name)]
-                             (if (and (empty? matching) (not (contains? source-map source-name)))
-                               (do (println (str "Error: no source named '" source-name "'"))
-                                   (println (str "Available: "
-                                                 (str/join ", " (keys source-map))))
-                                   (System/exit 1))
-                               matching))
-                           all-reps)
+                            (let [matching (filter-by-source all-reps source-name)]
+                              (if (and (empty? matching) (not (contains? source-map source-name)))
+                                (do (println (str "Error: no source named '" source-name "'"))
+                                    (println (str "Available: "
+                                                  (str/join ", " (keys source-map))))
+                                    (System/exit 1))
+                                matching))
+                            all-reps)
           reports         (if min-priority
-                           (filter-by-priority reports min-priority)
-                           reports)
+                            (filter-by-priority reports min-priority)
+                            reports)
           reports         (if min-status
-                           (filter-by-status reports min-status)
-                           reports)
+                            (filter-by-status reports min-status)
+                            reports)
           basename        "reports"]
       (if (empty? reports)
         (println (str "No reports found."

@@ -83,9 +83,9 @@
 
 (defn all-notify-prefs [db]
   (->> (d/q '[:find (pull ?e [:notify/key :notify/source :notify/email
-                               :notify/enabled :notify/interval-days
-                               :notify/min-priority :notify/min-status
-                               :notify/last-sent])
+                              :notify/enabled :notify/interval-days
+                              :notify/min-priority :notify/min-status
+                              :notify/last-sent])
               :where [?e :notify/key _]]
             db)
        (map first)))

@@ -62,7 +62,7 @@
                   (db/save-imap-uid! db-conn max-uid)))))
         (do (log/info "Resuming — fetching UIDs >" watermark)
             (let [msgs (fetch/by-uid-range imap-conn folder
-                                            (inc watermark) Long/MAX_VALUE)]
+                                           (inc watermark) Long/MAX_VALUE)]
               (log/info "Fetched" (count msgs) "messages since watermark")
               (when (and (seq msgs) (not (shutting-down?)))
                 (ingest/store-emails! db-conn msgs)
