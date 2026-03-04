@@ -60,18 +60,9 @@
 ;; Report scoring (same logic as bark-egest.clj)
 ;; ---------------------------------------------------------------------------
 
-(defn- priority [report]
-  (+ (if (:report/urgent report) 2 0)
-     (if (:report/important report) 1 0)))
-
-(defn- status [report]
-  (+ (if-not (:report/closed report) 4 0)
-     (if (:report/owned report) 2 0)
-     (if (:report/acked report) 1 0)))
-
-(defn- descendant-count [report]
-  (let [d (:report/descendants report)]
-    (if (coll? d) (count d) 0)))
+(def priority          report-priority)
+(def status            report-status)
+(def descendant-count  report-descendant-count)
 
 (defn- format-date [date]
   (let [s (str (or date ""))]
