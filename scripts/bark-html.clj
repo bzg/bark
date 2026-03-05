@@ -22,8 +22,8 @@
 ;; ---------------------------------------------------------------------------
 
 (def pico-cdn "https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css")
-(def json-file "reports.json")
-(def default-output "index.html")
+(def json-file "public/reports.json")
+(def default-output "public/index.html")
 (def bark-doc-url "https://codeberg.org/bzg/bark")
 
 (def type-labels {"bug" "bug" "announcement" "ann" "request" "req"
@@ -422,11 +422,14 @@
         types-json (json/generate-string types)
         multi-src? (some #(get % "source") reports)
         all-open?  (and min-status (>= min-status 4))
-        rss-file   "reports.rss"
-        org-file   "reports.org"
+        rss-file   "public/reports.rss"
+        org-file   "public/reports.org"
         has-rss?   (.exists (clojure.java.io/file rss-file))
         has-org?   (.exists (clojure.java.io/file org-file))
         has-json?  (.exists (clojure.java.io/file json-file))
+        rss-href   "reports.rss"
+        org-href   "reports.org"
+        json-href  "reports.json"
         src-off    (if multi-src? 1 0)
         cols       (concat
                     [[:th {:data-sort "type"     :onclick "sortTable(0,'type')"}     "Type"]
@@ -454,7 +457,7 @@
         [:link {:rel "stylesheet" :href pico-cdn}]
         (when has-rss?
           [:link {:rel "alternate" :type "application/rss+xml"
-                  :title "BARK Reports RSS" :href rss-file}])
+                  :title "BARK Reports RSS" :href rss-href}])
         [:title "BARK — Reports"]
         [:style (h/raw page-css)]]
        [:body
@@ -463,11 +466,11 @@
           [:ul [:li [:strong "BARK — Reports"]]]
           [:ul
            (when has-json?
-             [:li [:a {:href json-file :title "JSON data"} "JSON"]])
+             [:li [:a {:href json-href :title "JSON data"} "JSON"]])
            (when has-rss?
-             [:li [:a {:href rss-file :title "RSS feed"} "RSS"]])
+             [:li [:a {:href rss-href :title "RSS feed"} "RSS"]])
            (when has-org?
-             [:li [:a {:href org-file :title "Org file"} "Org"]])
+             [:li [:a {:href org-href :title "Org file"} "Org"]])
            [:li [:a {:href bark-doc-url :title "BARK documentation"} "Docs"]]
            [:li [:button.theme-toggle
                  {:onclick "toggleTheme()" :aria-label "Toggle theme"}
@@ -520,6 +523,7 @@
   (binding [*out* *err*]
     (println "Generating" json-file "via bark-export…"))
   ;; (generate-json! source-name min-priority min-status)
+  (.mkdirs (clojure.java.io/file "public"))
   (let [reports (json/parse-string (slurp json-file))
         html    (page reports min-status)]
     (spit out-file html)

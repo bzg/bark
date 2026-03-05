@@ -396,7 +396,8 @@
           reports         (if min-status
                             (filter-by-status reports min-status)
                             reports)
-          basename        "reports"]
+          _               (.mkdirs (clojure.java.io/file "public"))
+          basename        "public/reports"]
       (if (empty? reports)
         (println (str "No reports found."
                       (when source-name (str " (source: " source-name ")"))))
