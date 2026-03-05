@@ -1,0 +1,178 @@
+# Usage
+
+## Creating reports and announcements
+
+**Reports** (bug, patch, request) can be created by anyone sending an
+email to the monitored mailbox.
+
+**Announcements** (announcement, release, change) can only be created
+by admins or maintainers.
+
+See the [Report types](#report-types) table below for the full list of
+subject tags.
+
+Patches are also detected from `.patch`/`.diff` attachments and inline
+diffs (git format).
+
+## Updating reports
+
+State changes happen when a reply in the same thread contains a
+trigger word at the beginning of a line, followed by a punctuation
+mark (`.` `,` `;` `:`).  For example, replying to a bug report with a
+line starting with `Confirmed.` marks the bug as acked.
+
+Multiple triggers can appear in the same email:
+
+```
+Confirmed.
+Urgent.
+Important.
+```
+
+This marks the bug as confirmed, urgent, and important (highest
+priority).
+
+Priority cannot be set directly — it is computed from the combination
+of urgent and important flags.
+
+See the [Triggers](#triggers) table below for the full list.
+
+## Updating without notifying the list
+
+Admins and maintainers can reply directly to the BARK inbox (adding it
+in the `To:` field) instead of replying to the list.  This updates the
+report without sending a message to the mailing list.
+
+This is also useful for reclassifying emails: if someone forgot the
+`[BUG]` prefix, a maintainer can edit the subject and resend the email
+to the BARK inbox.
+
+## Voting on requests
+
+Requests (`[POLL]`, `[FR]`, `[RFC]`, etc.) support voting: reply with
+`+1` or `-1` in the body.
+
+## Notifications
+
+BARK can send periodic email notifications to admins and maintainers
+with a summary of open reports.  Notifications are never sent to
+regular users.
+
+Notifications require SMTP configuration (see [Config](#config)) and
+are sent via `bb notify`, typically from a cron job.
+
+Each notification email contains two sections: open bugs/patches/requests
+owned by the recipient, and all unacked & unowned bugs/patches/requests.
+
+### Subscribing and unsubscribing
+
+Admins and maintainers are subscribed by default when `bb digest` runs
+for the first time.  To unsubscribe, send an email to the BARK inbox
+with this body:
+
+```
+Notify: off
+```
+
+To re-subscribe:
+
+```
+Notify: on
+```
+
+### Setting notification preferences
+
+Preferences are set via the same `Notify:` command.  Parameters can be
+combined on a single line:
+
+| Parameter | Description                  | Default |
+|-----------|------------------------------|---------|
+| `d:N`     | Receive notifications every N days | 30  |
+| `p:N`     | Minimum priority (0–3)       | 0       |
+| `s:N`     | Minimum status (0–7)         | 0       |
+
+Examples:
+
+```
+Notify: d:7                 — every 7 days
+Notify: d:1                 — daily
+Notify: d:3 s:4 p:2         — every 3 days, only open reports with priority >= 2
+Notify: p:1                 — only important or urgent reports
+```
+
+Like role commands, `Notify:` commands are only processed from direct
+emails (not from mailing list traffic).
+
+# Report types
+
+Detected from email subject tags:
+
+| Tag                                                     | Type           |
+|---------------------------------------------------------|----------------|
+| `[BUG]` `[BUG version]`                                 | bug            |
+| `[PATCH]` `[PATCH n/m]` `[PATCH topic n/m]`             | patch          |
+| `[POLL]` `[FR]` `[RFC]`                                 | request        |
+| `[ANN]` `[ANNOUNCEMENT]` `[BLOG]`                       | announcement * |
+| `[REL]` `[RELEASE]` `[REL version]` `[RELEASE version]` | release *      |
+| `[CHG]` `[CHANGE]` `[CHG version]` `[CHANGE version]`   | change *       |
+
+\* Require admin or maintainer permission.
+
+Patches are also detected from `.patch`/`.diff` attachments and inline
+diffs (git format).
+
+# Triggers
+
+State changes detected from body lines (at start of line, followed by
+`.` `,` `;` or `:`):
+
+| Trigger          | Effect on report            |
+|------------------|-----------------------------| 
+| `Approved.`      | acked (bug, patch, request) |
+| `Confirmed.`     | acked (bug)                 |
+| `Reviewed.`      | acked (patch)               |
+| `Handled.`       | owned                       |
+| `Fixed.`         | closed (bug)                |
+| `Applied.`       | closed (patch)              |
+| `Done.`          | closed (request)            |
+| `Canceled.`      | closed (all)                |
+| `Urgent.`        | urgent                      |
+| `Important.`     | important                   |
+| `Not urgent.`    | un-urgent                   |
+| `Not important.` | un-important                |
+
+## Report states
+
+All reports can be in a combination of three states:
+
+- **Acked** — someone took the next reasonable action (confirmed a
+  bug, reviewed a patch, approved a request).
+- **Owned** — someone claimed ownership of this report.
+- **Closed** — the report is resolved (fixed, applied, done, or
+  canceled).
+
+Announcements, releases, and changes can only be closed.
+
+# Roles
+
+Per-source, managed via email body commands:
+
+- **Admin** — one per source, set in `config.edn` (`:admin` field),
+  changeable via `Add admin: new@addr`.  Can manage all roles.
+- **Maintainers** — can add maintainers, ignore addresses, create
+  announcements/releases/changes.
+- **Ignored** — emails from these addresses are skipped.
+
+Role commands are only processed from direct emails (not from emails
+delivered through a mailing list, i.e. those with a `List-Id` header).
+
+Commands (admin-only unless noted):
+
+```
+Add admin: new-admin@example.com
+Add maintainer: dev@example.com        (admin or maintainer)
+Remove maintainer: dev@example.com
+Ignore: spammer@example.com            (admin or maintainer)
+Unignore: user@example.com
+```
+
