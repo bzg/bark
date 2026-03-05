@@ -1,4 +1,4 @@
-# BARK — Bug And Report Keeper
+# 🐕 BARK — Bug And Report Keeper
 
 BARK monitors a mailbox and turns incoming emails into a structured
 list of reports.  When an email with a recognized subject tag (e.g.
@@ -55,6 +55,11 @@ report without sending a message to the mailing list.
 This is also useful for reclassifying emails: if someone forgot the
 `[BUG]` prefix, a maintainer can edit the subject and resend the email
 to the BARK inbox.
+
+## Exploring reports
+
+The [bone](https://github.com/bzg/bone) CLI tool lets you browse and
+filter BARK reports interactively from the terminal.
 
 ## Voting on requests
 
