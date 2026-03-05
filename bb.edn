@@ -9,12 +9,10 @@
            :task (apply shell "bb scripts/bark-html.clj" *command-line-args*)}
   notify  {:doc  "Send notification emails: bb notify [--dry-run]"
            :task (apply shell "bb scripts/bark-notify.clj" *command-line-args*)}
-  clean   {:doc  "Remove generated files (reports.json, reports.rss, reports.org, index.html)"
-           :task (doseq [f ["reports.json" "reports.rss" "reports.org" "index.html"]
-                         :let [file (clojure.java.io/file f)]
-                         :when (.exists file)]
-                  (.delete file)
-                  (println "Deleted" f))}
+  clean   {:doc  "Remove all files in public/"
+           :task (doseq [f (.listFiles (clojure.java.io/file "public"))]
+                   (.delete f)
+                   (println "Deleted" (.getName f)))}
   test    {:doc  "Run bark-digest integration tests"
            :task (shell "bb test/bark-digest-test.clj")}
   test-smtp {:doc  "Test SMTP config: bb test-smtp [--to addr] [--dry-run]"

@@ -7,3 +7,4 @@ data/
 .clj-kondo/
 config.edn
 todo.org
+public
