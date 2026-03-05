@@ -1,4 +1,4 @@
-;; bark-schema.edn — Shared schema for bark-digest and bark-egest.
+;; bark-schema.edn — Shared schema for bark-digest and bark-export.
 ;;
 ;; This file is the union of the email schema (from bark-ingest) and the
 ;; report/roles schema (from bark-digest).  Both bb scripts read it so

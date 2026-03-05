@@ -13,8 +13,8 @@ To browse BARK reports from the command line, you can use
 
 - **bark-ingest** — Connects to IMAP via IDLE, stores emails in the db.
 - **bark-digest** — Scans new emails and creates/updates reports/roles in the db.
-- **bark-egest** — Exports all reports as JSON, RSS, or Org.
-- **bark-html** — Generates a static HTML page with report data.
+- **bark-export** — Exports all reports as JSON, RSS, or Org.
+- **bark-html**   — Generates a static HTML page embedding report data.
 - **bark-notify** — Sends notification emails to admin/maintainers.
 
 ## Dependencies

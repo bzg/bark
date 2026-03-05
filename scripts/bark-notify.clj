@@ -35,7 +35,7 @@
   (edn/read-string (slurp "resources/bark-schema.edn")))
 
 ;; ---------------------------------------------------------------------------
-;; Report queries (mirrors bark-egest.clj)
+;; Report queries (mirrors bark-export.clj)
 ;; ---------------------------------------------------------------------------
 
 (def report-pull-pattern
@@ -57,7 +57,7 @@
        (map first)))
 
 ;; ---------------------------------------------------------------------------
-;; Report scoring (same logic as bark-egest.clj)
+;; Report scoring (same logic as bark-export.clj)
 ;; ---------------------------------------------------------------------------
 
 (def priority          report-priority)

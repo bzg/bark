@@ -1,6 +1,6 @@
 #!/usr/bin/env bb
 
-;; bark-egest.clj — Dump BARK reports as JSON, RSS, or Org.
+;; bark-export.clj — Dump BARK reports as JSON, RSS, or Org.
 ;;
 ;; Usage:
 ;;   bb export json          — dump all reports as reports.json

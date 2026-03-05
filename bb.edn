@@ -3,7 +3,7 @@
            :task (apply shell "bb scripts/bark-digest.clj" *command-line-args*)}
 
   export  {:doc  "Export all reports: bb export [json|rss|org] [-n source] [-p 1|2|3] [-s 1-7]"
-           :task (apply shell "bb scripts/bark-egest.clj" *command-line-args*)}
+           :task (apply shell "bb scripts/bark-export.clj" *command-line-args*)}
 
   reports {:doc  "Export all reports as JSON: bb reports [-p 1|2|3] [-s 1-7]"
            :task (apply shell "bb export json" *command-line-args*)}

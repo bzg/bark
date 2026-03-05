@@ -62,7 +62,7 @@
           (:sources config))))
 
 ;; ---------------------------------------------------------------------------
-;; Report scoring (shared by bark-egest and bark-notify)
+;; Report scoring (shared by bark-export and bark-notify)
 ;; ---------------------------------------------------------------------------
 
 (defn report-priority [report]

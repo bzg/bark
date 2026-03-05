@@ -2,7 +2,7 @@
 
 ;; bark-html.clj — Generate a static HTML page from BARK reports.
 ;;
-;; Reads reports.json (produced by bark-egest) and config.edn, then
+;; Reads reports.json (produced by bark-export) and config.edn, then
 ;; builds a standalone HTML page.  Most logic is in Clojure; JS is
 ;; limited to client-side filtering, sorting, theme toggle, and URL
 ;; permalink state.
@@ -30,19 +30,19 @@
                   "patch" "patch" "release" "rel" "change" "chg"})
 
 ;; ---------------------------------------------------------------------------
-;; Generate reports.json via bark-egest
+;; Generate reports.json via bark-export
 ;; ---------------------------------------------------------------------------
 
 (defn generate-json! [source-name min-priority min-status]
   (let [f   (clojure.java.io/file json-file)
         _   (when (.exists f) (.delete f))
-        cmd (cond-> ["bb" "scripts/bark-egest.clj" "json"]
+        cmd (cond-> ["bb" "scripts/bark-export.clj" "json"]
               source-name  (into ["-n" source-name])
               min-priority (into ["-p" (str min-priority)])
               min-status   (into ["-s" (str min-status)]))
         {:keys [exit]} (apply process/shell {:continue true} cmd)]
     (when-not (zero? exit)
-      (binding [*out* *err*] (println "bark-egest failed (exit" exit ")"))
+      (binding [*out* *err*] (println "bark-export failed (exit" exit ")"))
       (System/exit 1))
     (when-not (.exists f)
       (binding [*out* *err*] (println (str json-file " not produced")))
@@ -518,7 +518,7 @@
           :else                           (recur opts more)))
       out-file (or out-file default-output)]
   (binding [*out* *err*]
-    (println "Generating" json-file "via bark-egest…"))
+    (println "Generating" json-file "via bark-export…"))
   ;; (generate-json! source-name min-priority min-status)
   (let [reports (json/parse-string (slurp json-file))
         html    (page reports min-status)]
