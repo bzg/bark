@@ -1,3 +1,12 @@
+# BARK — Bug And Report Keeper
+
+BARK monitors a mailbox and turns incoming emails into a structured
+list of reports.  When an email with a recognized subject tag (e.g.
+`[BUG]`, `[PATCH]`) arrives, BARK classifies it as a report.
+Follow-up emails in the same thread can update that report's state
+through trigger words.  Admins and maintainers manage roles and
+receive periodic digest notifications — all via email.
+
 # Usage
 
 ## Creating reports and announcements
@@ -88,8 +97,8 @@ combined on a single line:
 | Parameter | Description                  | Default |
 |-----------|------------------------------|---------|
 | `d:N`     | Receive notifications every N days | 30  |
-| `p:N`     | Minimum priority (0–3)       | 0       |
-| `s:N`     | Minimum status (0–7)         | 0       |
+| `p:N`     | Minimum priority (0–3)       | 1       |
+| `s:N`     | Minimum status (0–7)         | 1       |
 
 Examples:
 
@@ -111,7 +120,7 @@ Detected from email subject tags:
 |---------------------------------------------------------|----------------|
 | `[BUG]` `[BUG version]`                                 | bug            |
 | `[PATCH]` `[PATCH n/m]` `[PATCH topic n/m]`             | patch          |
-| `[POLL]` `[FR]` `[RFC]`                                 | request        |
+| `[POLL]` `[FR]` `[FP]` `[RFC]` `[RFE]` `[TASK]`        | request        |
 | `[ANN]` `[ANNOUNCEMENT]` `[BLOG]`                       | announcement * |
 | `[REL]` `[RELEASE]` `[REL version]` `[RELEASE version]` | release *      |
 | `[CHG]` `[CHANGE]` `[CHG version]` `[CHANGE version]`   | change *       |
@@ -120,6 +129,9 @@ Detected from email subject tags:
 
 Patches are also detected from `.patch`/`.diff` attachments and inline
 diffs (git format).
+
+When a `[REL version]` report is created, any open `[CHG version]`
+reports with the same version are automatically closed.
 
 # Triggers
 
@@ -135,6 +147,7 @@ State changes detected from body lines (at start of line, followed by
 | `Fixed.`         | closed (bug)                |
 | `Applied.`       | closed (patch)              |
 | `Done.`          | closed (request)            |
+| `Closed.`        | closed (request)            |
 | `Canceled.`      | closed (all)                |
 | `Urgent.`        | urgent                      |
 | `Important.`     | important                   |
@@ -175,4 +188,3 @@ Remove maintainer: dev@example.com
 Ignore: spammer@example.com            (admin or maintainer)
 Unignore: user@example.com
 ```
-
