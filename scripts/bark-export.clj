@@ -7,7 +7,10 @@
 ;;   bb export json          — dump all reports as reports.json
 ;;   bb export rss           — dump all reports as reports.rss
 ;;   bb export org           — dump all reports as reports.org
-;;   bb export html          — generate static HTML page (public/index.html)
+;;   bb export html          — generate public/index.html and public/stats.html
+;;   bb export stats         — generate public/stats.json
+;;   bb export all           — export to public/: reports.json, reports.rss,
+;;                             reports.org, index.html, stats.html
 ;;   bb export json -p 2     — only priority >= 2
 ;;   bb export json -s 3     — only status >= 3 (i.e. acked+owned+closed or above)
 ;;
@@ -350,7 +353,7 @@
 ;; Main
 ;; ---------------------------------------------------------------------------
 
-(def formats #{"json" "rss" "org" "html"})
+(def formats #{"json" "rss" "org" "html" "all" "stats"})
 
 (let [{:keys [format source-name min-priority min-status]
        :or {format "json"}}
@@ -360,7 +363,7 @@
   (try
     (when-not (formats format)
       (println (str "Unknown format: " format))
-      (println "Formats: json rss org html")
+      (println "Formats: json rss org html stats all")
       (System/exit 1))
     (when (and min-priority (not (#{1 2 3} min-priority)))
       (println (str "Invalid --min-priority: " min-priority " (must be 1, 2, or 3)"))
@@ -396,10 +399,16 @@
         (println (str "No reports found."
                       (when source-name (str " (source: " source-name ")"))))
         (case format
-          "json" (dump-json! reports (str basename ".json") source-map maintainers-map multi-src?)
-          "rss"  (dump-rss!  reports (str basename ".rss") label source-map maintainers-map multi-src?)
-          "org"  (dump-org!  reports (str basename ".org") label source-map maintainers-map multi-src?)
-          "html" (do (dump-json! reports "public/reports.json" source-map maintainers-map multi-src?)
-                     (apply babashka.process/shell "bb scripts/bark-html.clj" *command-line-args*)))))
+          "json"  (dump-json! reports (str basename ".json") source-map maintainers-map multi-src?)
+          "rss"   (dump-rss!  reports (str basename ".rss") label source-map maintainers-map multi-src?)
+          "org"   (dump-org!  reports (str basename ".org") label source-map maintainers-map multi-src?)
+          "html"  (do (dump-json! reports "public/reports.json" source-map maintainers-map multi-src?)
+                      (apply babashka.process/shell "bb scripts/bark-index.clj" *command-line-args*))
+          "stats" (apply babashka.process/shell "bb scripts/bark-stats.clj" *command-line-args*)
+          "all"   (do (dump-json! reports "public/reports.json" source-map maintainers-map multi-src?)
+                      (dump-rss!  reports "public/reports.rss"  label source-map maintainers-map multi-src?)
+                      (dump-org!  reports "public/reports.org"  label source-map maintainers-map multi-src?)
+                      (apply babashka.process/shell "bb scripts/bark-index.clj" *command-line-args*)
+                      (apply babashka.process/shell "bb scripts/bark-stats.clj" *command-line-args*)))))
     (finally
       (d/close conn))))

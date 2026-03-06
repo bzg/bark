@@ -17,6 +17,7 @@
          '[clojure.java.io :as io])
 
 (load-file "scripts/bark-common.clj")
+(load-file "scripts/bark-html.clj")
 
 (pods/load-pod 'huahaiy/datalevin "0.10.5")
 (require '[pod.huahaiy.datalevin :as d])
@@ -217,8 +218,6 @@
           :encoding encoding}
          extra))
 
-(def pico-cdn "https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css")
-
 (def stats-css "
   .kpis { display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 1rem; }
   .kpi  { border: 1px solid var(--pico-muted-border-color); border-radius: var(--pico-border-radius);
@@ -334,13 +333,11 @@
      "Object.entries(barkSpecs).forEach(function(kv){"
      "vegaEmbed('#'+kv[0],kv[1],{actions:false,renderer:'svg',theme:barkTheme()});});}"
      "\n"
-     "function toggleTheme(){"
-     "var h=document.documentElement;"
-     "var next=h.getAttribute('data-theme')==='dark'?'light':'dark';"
-     "h.setAttribute('data-theme',next);"
-     "document.getElementById('theme-icon').textContent=next==='dark'?'☀️':'🌙';"
-     "barkRenderAll();}\n"
-     "</script>\n"
+     ;; shared toggleTheme from bark-html.clj, patched to also re-render charts
+     (str/replace theme-toggle-js
+                  "}\n"
+                  "\n  barkRenderAll();\n}\n")
+     "\n</script>\n"
      "</head>\n<body>\n"
      "<main class=\"container\">\n"
      "<nav><ul><li><strong>BARK — Statistics</strong></li></ul>"
