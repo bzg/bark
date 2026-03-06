@@ -1,6 +1,6 @@
 * 🐕 BARK --- Bug And Report Keeper
 
-BARK is an email-driven report tracker.
+BARK is an email-driven report tracker - see the [[docs/rationale.org][rationale]].
 
 BARK monitors a single IMAP mailbox, classifies incoming emails into
 sources by header matching, detects report types from subject tags,

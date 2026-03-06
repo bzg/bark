@@ -1,0 +1,24 @@
+* Rationale
+
+- *Email-native and immutable* :: BARK has no web form, no API endpoint,
+  users don't have to create an account. Users report bugs and request
+  features by sending an email to a list. Maintainers act by replying
+  to that same thread: an =Acked:= line closes the report. Because every
+  state change is encoded in an email, the entire tracker state can be
+  reconstructed at any time by replaying the mailbox from scratch.
+
+- *Statuses and priorities are derived, not asserted* :: BARK provides a
+  short fixed vocabulary: =acked=, =owned=, =closed= for status; =urgency= and
+  =importance= for priority. You cannot invent a custom =WONTFIX-MAYBE=
+  status or manually set a report to P0.
+
+- *No catch-all inbox* :: Most trackers (GitHub Issues being the
+  canonical example) accept anything and leave triage as an exercise
+  for the maintainer. BARK only ingests messages that match explicit
+  subject- or body-trigger rules defined in =config.edn=. Most noise
+  stays out of the tracker by design, not by discipline.
+
+- *Local-first, workflow-agnostic* :: BARK exports to JSON, RSS, Org.
+  Companion tools — =bone= (a TUI browser), =gnus-bark.el= (Emacs/Gnus
+  integration) let each user consume the data in whatever environment
+  they already live in, rather than forcing a new interface on them.
