@@ -18,7 +18,7 @@ As a Bark user, you want to read the [howto](docs/howto.md).
 - **bark-ingest** — Connects to IMAP via IDLE, stores emails in the db.
 - **bark-digest** — Scans new emails and creates/updates reports/roles in the db.
 - **bark-export** — Exports all reports as JSON, RSS, or Org.
-- **bark-html**   — Generates a static HTML page embedding report data.
+- **bark-html**   — Generates a static HTML page embedding report data (via `bb export html`).
 - **bark-notify** — Sends notification emails to admin/maintainers.
 
 ## Dependencies
@@ -44,9 +44,7 @@ bb digest --all    # rescan everything
 bb export          # → public/reports.json
 bb export rss      # → public/reports.rss
 bb export org      # → public/reports.org
-
-# 6. Generate a static HTML page
-bb html            # → public/index.html
+bb export html     # → public/index.html
 
 # 7. Test SMTP configuration
 bb test-smtp --dry-run
@@ -60,8 +58,7 @@ bb notify --dry-run --debug  # preview without sending
 
 ```
 bb digest [--all]              Digest emails into reports
-bb export [json|rss|org]       Export all reports (default: json)
-bb html [-o file]              Static HTML page (default: index.html)
+bb export [json|rss|org|html]  Export all reports (default: json)
 bb notify [--dry-run]          Send notification emails
 bb config [path]               Validate config.edn
 bb test                        Run integration tests

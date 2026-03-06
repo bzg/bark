@@ -1,12 +1,12 @@
 {:tasks
  {digest  {:doc  "Digest emails into reports (use --all to rescan everything)"
            :task (apply shell "bb scripts/bark-digest.clj" *command-line-args*)}
-  export  {:doc  "Export all reports: bb export [json|rss|org] [-n source] [-p 1|2|3] [-s 1-7]"
+  export  {:doc  "Export reports: bb export [json|rss|org|html] [-n source] [-p 1|2|3] [-s 1-7]"
            :task (apply shell "bb scripts/bark-export.clj" *command-line-args*)}
   config  {:doc  "Validate config.edn (pass path as arg, default: ./config.edn)"
            :task (apply shell "bb scripts/validate-config.clj" *command-line-args*)}
-  html    {:doc  "Generate static HTML page from reports [-o file] [-p 1|2|3] [-s 1-7]"
-           :task (apply shell "bb scripts/bark-html.clj" *command-line-args*)}
+  stats   {:doc  "Compute statistics: bb stats [html] [-o file] → public/stats.{json,html}"
+           :task (apply shell "bb scripts/bark-stats.clj" *command-line-args*)}
   notify  {:doc  "Send notification emails: bb notify [--dry-run]"
            :task (apply shell "bb scripts/bark-notify.clj" *command-line-args*)}
   clean   {:doc  "Remove all files in public/"

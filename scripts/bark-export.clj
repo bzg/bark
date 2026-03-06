@@ -1,11 +1,13 @@
 #!/usr/bin/env bb
 
-;; bark-export.clj — Dump BARK reports as JSON, RSS, or Org.
+;; bark-export.clj — Dump BARK reports as JSON, RSS, Org, or HTML.
 ;;
 ;; Usage:
+;;   bb export               — dump all reports as reports.json
 ;;   bb export json          — dump all reports as reports.json
 ;;   bb export rss           — dump all reports as reports.rss
 ;;   bb export org           — dump all reports as reports.org
+;;   bb export html          — generate static HTML page (public/index.html)
 ;;   bb export json -p 2     — only priority >= 2
 ;;   bb export json -s 3     — only status >= 3 (i.e. acked+owned+closed or above)
 ;;
@@ -348,7 +350,7 @@
 ;; Main
 ;; ---------------------------------------------------------------------------
 
-(def formats #{"json" "rss" "org"})
+(def formats #{"json" "rss" "org" "html"})
 
 (let [{:keys [format source-name min-priority min-status]
        :or {format "json"}}
@@ -358,7 +360,7 @@
   (try
     (when-not (formats format)
       (println (str "Unknown format: " format))
-      (println "Formats: json rss org")
+      (println "Formats: json rss org html")
       (System/exit 1))
     (when (and min-priority (not (#{1 2 3} min-priority)))
       (println (str "Invalid --min-priority: " min-priority " (must be 1, 2, or 3)"))
@@ -396,6 +398,8 @@
         (case format
           "json" (dump-json! reports (str basename ".json") source-map maintainers-map multi-src?)
           "rss"  (dump-rss!  reports (str basename ".rss") label source-map maintainers-map multi-src?)
-          "org"  (dump-org!  reports (str basename ".org") label source-map maintainers-map multi-src?))))
+          "org"  (dump-org!  reports (str basename ".org") label source-map maintainers-map multi-src?)
+          "html" (do (dump-json! reports "public/reports.json" source-map maintainers-map multi-src?)
+                     (apply babashka.process/shell "bb scripts/bark-html.clj" *command-line-args*)))))
     (finally
       (d/close conn))))

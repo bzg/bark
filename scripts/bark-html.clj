@@ -8,7 +8,7 @@
 ;; permalink state.
 ;;
 ;; Usage:
-;;   bb html                                    → via bb task
+;;   bb export html                             → via bb task (preferred)
 ;;   bb scripts/bark-html.clj                   → writes index.html
 ;;   bb scripts/bark-html.clj -o reports.html   → writes reports.html
 
@@ -16,6 +16,8 @@
          '[cheshire.core :as json]
          '[clojure.string :as str]
          '[hiccup2.core :as h])
+
+(load-file "scripts/bark-common.clj")
 
 ;; ---------------------------------------------------------------------------
 ;; Config
@@ -426,6 +428,8 @@
         has-rss?   (.exists (clojure.java.io/file rss-file))
         has-org?   (.exists (clojure.java.io/file org-file))
         has-json?  (.exists (clojure.java.io/file json-file))
+        has-stats? (.exists (clojure.java.io/file "public/stats.html"))
+        generated-at (str (java.util.Date.))
         rss-href   "reports.rss"
         org-href   "reports.org"
         json-href  "reports.json"
@@ -471,9 +475,13 @@
            (when has-org?
              [:li [:a {:href org-href :title "Org file"} "Org"]])
            [:li [:a {:href bark-doc-url :title "BARK documentation"} "Docs"]]
+           (when has-stats?
+             [:li [:a {:href "stats.html" :title "Statistics"} "Stats"]])
            [:li [:button.theme-toggle
                  {:onclick "toggleTheme()" :aria-label "Toggle theme"}
                  [:span#theme-icon "🌙"]]]]]
+         [:p {:style "font-size:0.78rem;color:var(--pico-muted-color);margin-bottom:1rem"}
+          (str "Generated " generated-at)]
          [:div.toolbar
           [:input#si {:type        "search"
                       :placeholder "Search"
