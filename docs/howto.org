@@ -57,12 +57,12 @@ to the BARK inbox.
 
 ** Exploring reports
 
-The [[https://github.com/bzg/bone][bone]] CLI tool lets you browse and filter BARK reports
+The [[https://codeberg.org/bzg/bone][bone]] CLI tool lets you browse and filter BARK reports
 interactively from the terminal.
 
 ** Voting on requests
 
-Requests (=[POLL]=, =[FR]=, =[RFC]=, etc.) support voting: reply with =+1= or
+Requests (=[POLL]=, =[FR]=, =[TODO]=, etc.) support voting: reply with =+1= or
 =-1= in the body.
 
 ** Notifications
@@ -202,7 +202,7 @@ Per-source, managed via email body commands:
 - *Ignored* --- emails from these addresses are skipped.
 
 Role commands are only processed from direct emails (not from emails
-delivered through a mailing list, i.e. those with a =List-Id= header).
+delivered through a mailing list, i.e. those with a =List-Id= header).
 
 Commands (admin-only unless noted):
 

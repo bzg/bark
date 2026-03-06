@@ -44,11 +44,13 @@ bb export          # → public/reports.json
 bb export rss      # → public/reports.rss
 bb export org      # → public/reports.org
 bb export html     # → public/index.html
+bb export stats    # → public/stats.json
+bb export all      # → all of the above
 
-# 7. Test SMTP configuration
+# 5. Test SMTP configuration
 bb test-smtp --dry-run
 
-# 8. Send notification emails
+# 6. Send notification emails
 bb notify          # send due notifications
 bb notify --dry-run --debug  # preview without sending
 #+end_src
@@ -56,12 +58,14 @@ bb notify --dry-run --debug  # preview without sending
 ** bb tasks
 
 #+begin_example
-bb digest [--all]              Digest emails into reports
-bb export [json|rss|org|html]  Export all reports (default: json)
-bb notify [--dry-run]          Send notification emails
-bb config [path]               Validate config.edn
-bb test                        Run integration tests
-bb test-smtp [--to addr]       Test SMTP configuration
+bb digest [--all]                         Digest emails into reports
+bb export [json|rss|org|html|stats|all]   Export all reports (default: json)
+       [-n source] [-p 1|2|3] [-s 1-7]   Filter by source, priority, status
+bb notify [--dry-run] [--force] [--debug] Send notification emails
+bb test-config [path]                     Validate config.edn
+bb test-digest                            Run bark-digest integration tests
+bb test-smtp [--to addr] [--dry-run]      Test SMTP configuration
+bb clean                                  Remove all files in public/
 #+end_example
 
 The =notify= command also accepts =--force= (ignore interval, send now)

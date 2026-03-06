@@ -262,7 +262,7 @@
   :email/imap-uid   18
   :email/source     "direct"
   :email/message-id "<18@test.org>"
-  :email/subject    "[BLOG] My cool thing"
+  :email/subject    "[ANN] My cool thing"
   :email/from-address "user@test.org"
   :email/date-sent  #inst "2026-01-05T11:00:00"
   :email/ingested-at #inst "2026-01-05T11:00:00"
