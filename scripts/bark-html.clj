@@ -52,6 +52,11 @@
 ;; Date normalization
 ;; ---------------------------------------------------------------------------
 
+(def ^:private month-numbers
+  {"Jan" "01" "Feb" "02" "Mar" "03" "Apr" "04"
+   "May" "05" "Jun" "06" "Jul" "07" "Aug" "08"
+   "Sep" "09" "Oct" "10" "Nov" "11" "Dec" "12"})
+
 (defn- parse-to-iso-date [s]
   (when (seq s)
     (let [s (str/trim s)]
@@ -61,19 +66,13 @@
          (subs s 0 10))
        (when-let [[_ mon day year]
                   (re-find #"^\w+ (\w+) (\d+) .* (\d{4})$" s)]
-         (let [months {"Jan" "01" "Feb" "02" "Mar" "03" "Apr" "04"
-                       "May" "05" "Jun" "06" "Jul" "07" "Aug" "08"
-                       "Sep" "09" "Oct" "10" "Nov" "11" "Dec" "12"}]
-           (when-let [m (months mon)]
-             (str year "-" m "-" (format "%02d" (parse-long day))))))
+         (when-let [m (month-numbers mon)]
+           (str year "-" m "-" (format "%02d" (parse-long day)))))
        (when-let [[_ mon day]
                   (re-find #"^\w+ (\w+) (\d+) " s)]
-         (let [months {"Jan" "01" "Feb" "02" "Mar" "03" "Apr" "04"
-                       "May" "05" "Jun" "06" "Jul" "07" "Aug" "08"
-                       "Sep" "09" "Oct" "10" "Nov" "11" "Dec" "12"}
-               year (str (.getYear (java.time.LocalDate/now)))]
-           (when-let [m (months mon)]
-             (str year "-" m "-" (format "%02d" (parse-long day))))))
+         (when-let [m (month-numbers mon)]
+           (str (.getYear (java.time.LocalDate/now))
+                "-" m "-" (format "%02d" (parse-long day)))))
        ""))))
 
 ;; ---------------------------------------------------------------------------
@@ -509,16 +508,8 @@
 ;; Main
 ;; ---------------------------------------------------------------------------
 
-(let [args (vec *command-line-args*)
-      {:keys [out-file source-name min-priority min-status]}
-      (loop [opts {} [a & [v & r :as more]] args]
-        (cond
-          (nil? a)                        opts
-          (#{"-o" "--output"} a)          (if v (recur (assoc opts :out-file v) r) opts)
-          (#{"-n" "--source"} a)          (if v (recur (assoc opts :source-name v) r) opts)
-          (#{"-p" "--min-priority"} a)    (if v (recur (assoc opts :min-priority (parse-long v)) r) opts)
-          (#{"-s" "--min-status"} a)      (if v (recur (assoc opts :min-status (parse-long v)) r) opts)
-          :else                           (recur opts more)))
+(let [{:keys [out-file source-name min-priority min-status]}
+      (parse-cli-args *command-line-args*)
       out-file (or out-file default-output)]
   (binding [*out* *err*]
     (println "Generating" json-file "via bark-export…"))

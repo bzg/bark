@@ -211,11 +211,13 @@
 ;; Main
 ;; ---------------------------------------------------------------------------
 
+;; Guard ensures this block only runs when the script is invoked directly,
+;; not when loaded via load-file (e.g. from tests or other scripts).
 (when (= (System/getProperty "babashka.file") *file*)
-  (let [args     *command-line-args*
-        dry-run? (some #{"--dry-run"} args)
-        force?   (some #{"--force"} args)
-        debug?   (some #{"--debug"} args)
+  (let [flags    (set *command-line-args*)
+        dry-run? (flags "--dry-run")
+        force?   (flags "--force")
+        debug?   (flags "--debug")
         db-path  (or (System/getenv "BARK_DB") "data/bark-db")
         config   (load-config)
         notif    (:notifications config)]

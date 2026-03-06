@@ -20,9 +20,9 @@
 (defn- format-address
   "Format {:name \"Alice\" :address \"alice@example.com\"} as a string."
   [{addr-name :name address :address}]
-  (if (not (str/blank? addr-name))
-    (str addr-name " <" address ">")
-    address))
+  (if (str/blank? addr-name)
+    address
+    (str addr-name " <" address ">")))
 
 (defn strip-tags
   "Extract visible text from HTML using Jsoup.
@@ -46,7 +46,7 @@
   [^String s]
   (let [digest (MessageDigest/getInstance "SHA-256")
         bytes  (.digest digest (.getBytes s "UTF-8"))]
-    (apply str (map #(format "%02x" (bit-and (int %) 0xff)) bytes))))
+    (str/join (map #(format "%02x" (bit-and (int %) 0xff)) bytes))))
 
 (defn uid-hash
   "Compute a unique uid hash from an IMAP UID."

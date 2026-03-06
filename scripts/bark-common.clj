@@ -42,7 +42,7 @@
   A source with no :match acts as a catch-all."
   [headers-edn sources]
   (some (fn [{:keys [name match]}]
-          (when (or (nil? match) (empty? match)
+          (when (or (empty? match)
                     (match-source? headers-edn match))
             name))
         sources))
@@ -60,6 +60,25 @@
                     (:triggers src)
                     (assoc :triggers (:triggers src)))]))
           (:sources config))))
+
+;; ---------------------------------------------------------------------------
+;; CLI arg parsing (shared by bark-export and bark-html)
+;; ---------------------------------------------------------------------------
+
+(defn parse-cli-args
+  "Parse common CLI flags into a map.
+  Recognises: -o/--output, -n/--source, -p/--min-priority, -s/--min-status.
+  Any leading non-flag token is captured as :format."
+  [args]
+  (loop [opts {} [a & [v & r :as more]] args]
+    (cond
+      (nil? a)                        opts
+      (#{"-o" "--output"} a)          (if v (recur (assoc opts :out-file v) r) opts)
+      (#{"-n" "--source"} a)          (if v (recur (assoc opts :source-name v) r) opts)
+      (#{"-p" "--min-priority"} a)    (if v (recur (assoc opts :min-priority (parse-long v)) r) opts)
+      (#{"-s" "--min-status"} a)      (if v (recur (assoc opts :min-status (parse-long v)) r) opts)
+      (not (:format opts))            (recur (assoc opts :format a) more)
+      :else                           (recur opts more))))
 
 ;; ---------------------------------------------------------------------------
 ;; Report scoring (shared by bark-export and bark-notify)
