@@ -48,9 +48,10 @@
         sources))
 
 (defn build-source-map
-  "Build source-name → {:admin :mailing-list-email :triggers} from config."
+  "Build source-name → {:admin :mailing-list-email :triggers :labels} from config."
   [config]
-  (let [default-admin (:admin config)]
+  (let [default-admin    (:admin config)
+        global-st        (:labels config)]
     (into {}
           (map (fn [src]
                  [(:name src)
@@ -58,7 +59,11 @@
                     (:mailing-list-email src)
                     (assoc :mailing-list-email (:mailing-list-email src))
                     (:triggers src)
-                    (assoc :triggers (:triggers src)))]))
+                    (assoc :triggers (:triggers src))
+                    (:labels src)
+                    (assoc :labels (:labels src))
+                    global-st
+                    (assoc :global-labels global-st))]))
           (:sources config))))
 
 ;; ---------------------------------------------------------------------------

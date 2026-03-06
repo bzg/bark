@@ -235,21 +235,64 @@
 ;; bracketed construct, so we skip zero or more leading "[...] " groups.
 (def ^:private ml-prefix "(?:\\[[^\\]]*\\]\\s*)*")
 
-(def bug-pattern          (re-pattern (str "(?i)^" ml-prefix "\\[BUG(?:\\s+([^\\]]*))?\\]")))
-(def patch-subject-pattern (re-pattern (str "(?i)^" ml-prefix "\\[PATCH(?:\\s+([^\\]]*))?\\]")))
-(def patch-seq-pattern    #"(\d+/\d+)\s*$")
-(def request-pattern      (re-pattern (str "(?i)^" ml-prefix "\\[(POLL|FR|FP|RFC|RFE|TASK)\\]")))
-(def announcement-pattern (re-pattern (str "(?i)^" ml-prefix "\\[(BLOG|ANN|ANNOUNCEMENT)\\]")))
-(def release-pattern      (re-pattern (str "(?i)^" ml-prefix "\\[(REL|RELEASE)(?:\\s+([^\\]]*))?\\]")))
-(def change-pattern       (re-pattern (str "(?i)^" ml-prefix "\\[(CHG|CHANGE)(?:\\s+([^\\]]*))?\\]")))
+;; ---------------------------------------------------------------------------
+;; Label defaults and compilation
+;; ---------------------------------------------------------------------------
 
-(defn detect-bug [subject]
-  (when-let [m (re-find bug-pattern subject)]
-    {:type :bug :version (when (second m) (str/trim (second m)))}))
+(def default-labels
+  "Default subject tags per report type.
+  :bug/:patch/:release/:change accept a version suffix after the tag.
+  :request/:announcement match any of the listed tags exactly."
+  {:bug          ["BUG"]
+   :patch        ["PATCH"]
+   :request      ["POLL" "FR" "TODO"]
+   :announcement ["ANN" "ANNOUNCEMENT"]
+   :release      ["REL" "RELEASE"]
+   :change       ["CHG" "CHANGE"]})
 
-(defn detect-patch-subject [subject]
-  (when-let [m (re-find patch-subject-pattern subject)]
-    (let [inner   (when (second m) (str/trim (second m)))
+(defn- compile-labels
+  "Compile a labels map into a map of type → regex pattern.
+  Tags for :bug/:patch/:release/:change allow an optional version suffix.
+  Tags for :request/:announcement match the tag exactly (no suffix)."
+  [st]
+  (let [versioned? #{:bug :patch :release :change}]
+    (into {}
+          (map (fn [[rtype tags]]
+                 (let [alts (str/join "|" (map #(java.util.regex.Pattern/quote %) tags))
+                       pat  (if (versioned? rtype)
+                              (re-pattern (str "(?i)^" ml-prefix "\\[(" alts ")(?:\\s+([^\\]]*))?\\]"))
+                              (re-pattern (str "(?i)^" ml-prefix "\\[(" alts ")\\]")))]
+                   [rtype pat])))
+          st)))
+
+(def default-compiled-labels
+  (compile-labels default-labels))
+
+(defn- resolve-labels
+  "Compile labels for a source-map entry.
+  Merges global (:global-labels) and per-source (:labels)
+  overrides on top of defaults. Returns compiled patterns."
+  [source-cfg]
+  (let [global  (:global-labels source-cfg)
+        per-src (:labels source-cfg)
+        merged  (cond
+                  (and global per-src) (merge default-labels global per-src)
+                  global              (merge default-labels global)
+                  per-src             (merge default-labels per-src)
+                  :else               nil)]
+    (if merged
+      (compile-labels merged)
+      default-compiled-labels)))
+
+(def patch-seq-pattern #"(\d+/\d+)\s*$")
+
+(defn detect-bug [subject patterns]
+  (when-let [m (re-find (:bug patterns) subject)]
+    {:type :bug :version (when (nth m 2 nil) (str/trim (nth m 2)))}))
+
+(defn detect-patch-subject [subject patterns]
+  (when-let [m (re-find (:patch patterns) subject)]
+    (let [inner   (when (nth m 2 nil) (str/trim (nth m 2)))
           seq-m   (when inner (re-find patch-seq-pattern inner))
           seq-str (when seq-m (first seq-m))
           topic   (when inner
@@ -261,8 +304,8 @@
         seq-str (assoc :patch-seq seq-str)
         topic   (assoc :topic topic)))))
 
-(defn detect-request [subject] (when (re-find request-pattern subject) {:type :request}))
-(defn detect-announcement [subject] (when (re-find announcement-pattern subject) {:type :announcement}))
+(defn detect-request [subject patterns] (when (re-find (:request patterns) subject) {:type :request}))
+(defn detect-announcement [subject patterns] (when (re-find (:announcement patterns) subject) {:type :announcement}))
 
 (defn- detect-versioned-tag [pattern type subject]
   (when-let [m (re-find pattern subject)]
@@ -270,8 +313,8 @@
       (cond-> {:type type}
         (and ver (not (str/blank? ver))) (assoc :version (str/trim ver))))))
 
-(defn detect-release [subject] (detect-versioned-tag release-pattern :release subject))
-(defn detect-change [subject] (detect-versioned-tag change-pattern :change subject))
+(defn detect-release [subject patterns] (detect-versioned-tag (:release patterns) :release subject))
+(defn detect-change [subject patterns] (detect-versioned-tag (:change patterns) :change subject))
 
 ;; Attachment & inline patch detection
 
@@ -288,8 +331,8 @@
 (defn has-inline-patch? [body-text]
   (when body-text (>= (count (filter #(re-find % body-text) inline-patch-indicators)) 2)))
 
-(defn detect-patch [subject attachments body-text]
-  (let [from-subject    (detect-patch-subject subject)
+(defn detect-patch [subject attachments body-text patterns]
+  (let [from-subject    (detect-patch-subject subject patterns)
         from-attachment (when (has-patch-attachment? attachments) :attachment)
         from-inline     (when (has-inline-patch? body-text) :inline)
         sources         (cond-> #{}
@@ -303,16 +346,18 @@
 
 (def announcement-types #{:announcement :release :change})
 
-(defn detect-report [email]
-  (when-let [subject (:email/subject email)]
-    (let [attachments (:email/attachments email)
-          body-text   (or (:email/body-text email) (:email/body-text-from-html email))]
-      (or (detect-bug subject)
-          (detect-patch subject attachments body-text)
-          (detect-request subject)
-          (detect-announcement subject)
-          (detect-release subject)
-          (detect-change subject)))))
+(defn detect-report
+  ([email] (detect-report email default-compiled-labels))
+  ([email patterns]
+   (when-let [subject (:email/subject email)]
+     (let [attachments (:email/attachments email)
+           body-text   (or (:email/body-text email) (:email/body-text-from-html email))]
+       (or (detect-bug subject patterns)
+           (detect-patch subject attachments body-text patterns)
+           (detect-request subject patterns)
+           (detect-announcement subject patterns)
+           (detect-release subject patterns)
+           (detect-change subject patterns))))))
 
 (defn can-create-report?
   "Check if from-addr is allowed to create this report.
@@ -719,7 +764,8 @@
                         (d/transact! conn [{:db/id eid :email/source source-name}]))
         source-cfg    (get source-map source-name)
         roles         (if source-name (get-roles (d/db conn) source-name) {})
-        body-text     (or (:email/body-text email) (:email/body-text-from-html email))]
+        body-text     (or (:email/body-text email) (:email/body-text-from-html email))
+        subj-patterns (resolve-labels (or source-cfg {}))]
     (if (and from-addr (ignored? roles from-addr))
       (do (println (str "  [ignored] " from-addr " — " (:email/subject email)))
           (assoc acc :skipped (inc skipped)))
@@ -727,7 +773,7 @@
                      (not (from-mailing-list? email)))
             (apply-role-commands! conn roles source-name from-addr body-text)
             (apply-notify-commands! conn roles source-name from-addr body-text))
-          (let [report-info (detect-report email)
+          (let [report-info (detect-report email subj-patterns)
                 permitted?  (and report-info from-addr
                                  (can-create-report? roles from-addr report-info
                                                      email source-cfg))

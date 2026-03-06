@@ -203,8 +203,8 @@
           (assert= "3 descendants (incl. dup vote)" 3
                    (count (:report/descendants r))))
 
-        ;; --- RFC 15: closed ---
-        (println "\n--- RFC 15: request lifecycle ---")
+        ;; --- TODO 15: closed ---
+        (println "\n--- TODO 15: request lifecycle ---")
         (let [r (get-report db "<15@test.org>")]
           (assert= "Type is :request" :request (:report/type r))
           (assert-test "Closed (Done)" (some? (:report/closed r))))
@@ -243,8 +243,8 @@
           (assert= "3 descendants" 3
                    (count (:report/descendants r))))
 
-        ;; --- TASK 26: synonym for request ---
-        (println "\n--- TASK 26: request synonym ---")
+        ;; --- FR 26: request ---
+        (println "\n--- FR 26: request ---")
         (let [r (get-report db "<26@test.org>")]
           (assert= "Type is :request" :request (:report/type r)))
 

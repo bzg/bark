@@ -215,26 +215,26 @@
   :email/body-text  "+1\n"}
 
  ;; =========================================================================
- ;; 15 — RFC request (synonym for POLL-like request)
+ ;; 15 — TODO request
  ;; =========================================================================
  {:email/uid        "uid-15"
   :email/imap-uid   15
   :email/source     "direct"
   :email/message-id "<15@test.org>"
-  :email/subject    "[RFC] New export backend"
+  :email/subject    "[TODO] New export backend"
   :email/from-address "maint@test.org"
   :email/date-sent  #inst "2026-01-04T10:00:00"
   :email/ingested-at #inst "2026-01-04T10:00:00"
   :email/body-text  "Proposal for a new backend.\n"}
 
  ;; =========================================================================
- ;; 16 — Reply to RFC: close it
+ ;; 16 — Reply to TODO: close it
  ;; =========================================================================
  {:email/uid        "uid-16"
   :email/imap-uid   16
   :email/source     "direct"
   :email/message-id "<16@test.org>"
-  :email/subject    "Re: [RFC] New export backend"
+  :email/subject    "Re: [TODO] New export backend"
   :email/from-address "admin@test.org"
   :email/date-sent  #inst "2026-01-04T14:00:00"
   :email/ingested-at #inst "2026-01-04T14:00:00"
@@ -360,13 +360,13 @@
   :email/body-text  "Not important.\n"}
 
  ;; =========================================================================
- ;; 26 — TASK request (synonym)
+ ;; 26 — FR request
  ;; =========================================================================
  {:email/uid        "uid-26"
   :email/imap-uid   26
   :email/source     "direct"
   :email/message-id "<26@test.org>"
-  :email/subject    "[TASK] Update CI pipeline"
+  :email/subject    "[FR] Update CI pipeline"
   :email/from-address "maint@test.org"
   :email/date-sent  #inst "2026-01-10T10:00:00"
   :email/ingested-at #inst "2026-01-10T10:00:00"

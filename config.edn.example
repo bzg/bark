@@ -16,7 +16,7 @@
             ;; The mailing list address (for List-Post permission check)
             :mailing-list-email "bugs@example.org"
             :admin              "lead@example.org"
-            ;; Per-source trigger words (optional).
+            ;; Per-source body triggers (optional).
             ;; Only specified actions override defaults; others keep builtins.
             ;; Defaults — bug:  acked=Approved,Confirmed  owned=Handled  closed=Canceled,Fixed
             ;;            patch: acked=Approved,Reviewed   owned=Handled  closed=Canceled,Applied
@@ -25,6 +25,9 @@
             ;; :triggers {:bug   {:acked ["Approved" "Confirmed" "Verified"]
             ;;                    :closed ["Canceled" "Fixed" "Resolved"]}
             ;;            :patch {:acked ["Approved" "Reviewed" "LGTM"]}}
+            ;; Per-source labels (optional).
+            ;; Overrides global :labels for this source only.
+            ;; :labels {:request ["POLL" "FR" "TODO" "TASK"]}
             }
 
            {:name               "private"
@@ -32,6 +35,19 @@
 
            ;; Catch-all: emails that don't match any source above
            {:name "direct"}]
+
+ ;; Global labels (optional) — override built-in subject tag lists.
+ ;; Merged on top of defaults; specify only the types you want to change.
+ ;; Defaults:
+ ;;   :bug          ["BUG"]
+ ;;   :patch        ["PATCH"]
+ ;;   :request      ["POLL" "FR" "TODO"]
+ ;;   :announcement ["ANN" "ANNOUNCEMENT"]
+ ;;   :release      ["REL" "RELEASE"]
+ ;;   :change       ["CHG" "CHANGE"]
+ ;; Example:
+ ;; :labels {:bug ["BUG" "DEFECT"]
+ ;;                    :request ["POLL" "FR" "TODO" "RFE"]}
 
  ;; Datalevin database path
  :db {:path "data/bark-db"}

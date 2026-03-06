@@ -57,7 +57,7 @@
 (s/def ::source
   (s/keys :req-un [:source/name]
           :opt-un [:source/match :source/admin :source/mailing-list-email
-                   :source/triggers]))
+                   :source/triggers :source/labels]))
 
 (s/def :bark/sources
   (s/and (s/coll-of ::source :kind vector? :min-count 1)
@@ -90,10 +90,19 @@
 (s/def ::action-triggers (s/map-of #{:acked :owned :closed} ::trigger-words))
 (s/def :source/triggers (s/map-of keyword? ::action-triggers))
 
+;; Subject triggers: map of report-type keyword → vector of tag strings
+;; e.g. {:bug ["BUG" "DEFECT"] :request ["POLL" "FR" "TODO"]}
+(s/def ::label-tags (s/coll-of ::non-blank-string :kind vector? :min-count 1))
+(s/def ::labels
+  (s/map-of #{:bug :patch :request :announcement :release :change}
+            ::label-tags))
+(s/def :source/labels ::labels)
+(s/def :bark/labels ::labels)
+
 ;; Top-level config
 (s/def ::config
   (s/keys :req-un [:bark/admin :bark/imap :bark/sources :bark/db]
-          :opt-un [:bark/ingest :bark/notifications]))
+          :opt-un [:bark/ingest :bark/notifications :bark/labels]))
 
 ;; ---------------------------------------------------------------------------
 ;; Validation

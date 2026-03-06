@@ -125,8 +125,8 @@ Detected from email subject tags:
 |-------------------------------------------------+----------------|
 | =[BUG]= =[BUG version]=                             | bug            |
 | =[PATCH]= =[PATCH n/m]= =[PATCH topic n/m]=           | patch          |
-| =[POLL]= =[FR]= =[FP]= =[RFC]= =[RFE]= =[TASK]=             | request        |
-| =[ANN]= =[ANNOUNCEMENT]= =[BLOG]=                     | announcement * |
+| =[POLL]= =[FR]= =[TODO]=                              | request        |
+| =[ANN]= =[ANNOUNCEMENT]=                            | announcement * |
 | =[REL]= =[RELEASE]= =[REL version]= =[RELEASE version]= | release *      |
 | =[CHG]= =[CHANGE]= =[CHG version]= =[CHANGE version]=   | change *       |
 
@@ -137,6 +137,28 @@ diffs (git format).
 
 When a =[REL version]= report is created, any open =[CHG version]= reports
 with the same version are automatically closed.
+
+** Customising subject tags
+
+The subject tags above are the built-in defaults.  You can override
+them globally or per source in =config.edn= via =:labels=.
+Specify only the types you want to change; unspecified types keep their
+defaults.
+
+#+begin_src edn
+;; Global override (applies to all sources)
+:labels {:bug     ["BUG" "DEFECT"]
+                   :request ["POLL" "FR" "TODO" "RFE"]}
+#+end_src
+
+#+begin_src edn
+;; Per-source override (inside a source map)
+{:name "my-list"
+ :labels {:announcement ["ANN" "NEWS"]}}
+#+end_src
+
+Per-source settings take precedence over the global =:labels=,
+which in turn take precedence over the built-in defaults.
 
 * Triggers
 

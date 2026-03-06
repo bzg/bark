@@ -95,6 +95,8 @@ as a catch-all.
 | =:match=              | no       | Header matching rules (see below)        |
 | =:mailing-list-email= | no       | Associated mailing list address          |
 | =:admin=              | no       | Admin for this source (fallback: global) |
+| =:triggers=           | no       | Body-trigger word overrides (per action) |
+| =:labels=             | no       | Report label overrides (per report type) |
 
 Match rules (all optional, all must match if present):
 
@@ -124,6 +126,37 @@ Match rules (all optional, all must match if present):
                  :smtp {:host "smtp.example.com" :port 587 :tls true
                         :user "notify@example.com" :password "secret"
                         :from "bark@example.com"}}}
+#+end_src
+
+*** Report labels (=:labels=)
+
+Controls which subject tags are recognised per report type. Can be set
+globally at the top level or per source (per-source takes precedence).
+Only the types you specify are overridden; others keep their defaults.
+
+Default tags:
+
+| Type           | Default tags                        |
+|----------------+-------------------------------------|
+| =:bug=         | =BUG=                               |
+| =:patch=       | =PATCH=                             |
+| =:request=     | =POLL= =FR= =TODO=                  |
+| =:announcement= | =ANN= =ANNOUNCEMENT=               |
+| =:release=     | =REL= =RELEASE=                     |
+| =:change=      | =CHG= =CHANGE=                      |
+
+Example (global, in =config.edn=):
+
+#+begin_src clojure
+:labels {:bug     ["BUG" "DEFECT"]
+                   :request ["POLL" "FR" "TODO" "RFE"]}
+#+end_src
+
+Per-source (inside a source map):
+
+#+begin_src clojure
+{:name "my-list"
+ :labels {:announcement ["ANN" "NEWS"]}}
 #+end_src
 
 *** Notifications (=:notifications=)
