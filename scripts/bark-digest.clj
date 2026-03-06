@@ -23,7 +23,7 @@
 
 (load-file "scripts/bark-common.clj")
 
-(pods/load-pod 'huahaiy/datalevin "0.10.5")
+(pods/load-pod 'huahaiy/datalevin "0.10.7")
 
 (require '[pod.huahaiy.datalevin :as d])
 
@@ -167,21 +167,28 @@
 
 (defn- parse-notify-params
   "Parse 'on', 'off', or param string like 'd:7 p:2 s:4'.
+  Supports 'on'/'off' as prefix combined with params, e.g. 'on d:7 p:2'.
   Returns map with :enabled, :interval-days, :min-priority, :min-status."
   [s]
-  (let [s (str/trim s)]
+  (let [s (str/trim s)
+        lc (str/lower-case s)]
     (cond
-      (= (str/lower-case s) "on")  {:enabled true}
-      (= (str/lower-case s) "off") {:enabled false}
+      (= lc "on")  {:enabled true}
+      (= lc "off") {:enabled false}
       :else
-      (let [params (re-seq #"([dps]):(\d+)" s)]
+      (let [has-on?  (str/starts-with? lc "on ")
+            has-off? (str/starts-with? lc "off ")
+            params   (re-seq #"([dps]):(\d+)" s)
+            base     (cond has-on?  {:enabled true}
+                           has-off? {:enabled false}
+                           :else    {})]
         (reduce (fn [m [_ k v]]
                   (case k
                     "d" (assoc m :interval-days (parse-long v))
                     "p" (assoc m :min-priority (parse-long v))
                     "s" (assoc m :min-status (parse-long v))
                     m))
-                {} params)))))
+                base params)))))
 
 (defn- notify-key [source-name email]
   (str source-name ":" (str/lower-case email)))
@@ -504,8 +511,13 @@
 ;; ---------------------------------------------------------------------------
 
 (defn ancestor-mids [email]
-  (let [irt (:email/in-reply-to email) refs (:email/references email)]
-    (cond-> #{} irt (conj irt) (coll? refs) (into refs))))
+  (let [irt  (:email/in-reply-to email)
+        refs (:email/references email)
+        refs (cond (nil? refs)    nil
+                   (string? refs) #{refs}
+                   (coll? refs)   (set refs)
+                   :else          nil)]
+    (cond-> #{} irt (conj irt) refs (into refs))))
 
 (defn- index-assoc [idx mid rid] (update idx mid (fnil conj #{}) rid))
 

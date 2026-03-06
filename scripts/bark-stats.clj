@@ -19,7 +19,7 @@
 (load-file "scripts/bark-common.clj")
 (load-file "scripts/bark-html.clj")
 
-(pods/load-pod 'huahaiy/datalevin "0.10.5")
+(pods/load-pod 'huahaiy/datalevin "0.10.7")
 (require '[pod.huahaiy.datalevin :as d])
 
 ;; ---------------------------------------------------------------------------

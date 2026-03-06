@@ -5,11 +5,12 @@
 ;;
 ;; Actors:
 ;;   admin@test.org     — admin
-;;   maint@test.org     — maintainer (added by role command in email 02)
+;;   maint@test.org     — maintainer (added by role command in email 01)
 ;;   user@test.org      — regular user
 ;;   voter1@test.org    — voter
 ;;   voter2@test.org    — voter
 ;;   spam@test.org      — will be ignored
+;;   newadmin@test.org  — becomes admin (email 43)
 ;;
 ;; Source: direct
 ;; Source: public-list (list-backed)
@@ -569,4 +570,446 @@
   :email/in-reply-to "<23@test.org>"
   :email/references #{"<23@test.org>"}
   :email/body-text  "Here is a fix for the slow export bug.\n"}
+
+ ;; =========================================================================
+ ;; 41 — Add then remove maintainer (admin)
+ ;; =========================================================================
+ {:email/uid        "uid-41"
+  :email/imap-uid   41
+  :email/source     "direct"
+  :email/message-id "<41@test.org>"
+  :email/subject    "Add second maintainer"
+  :email/from-address "admin@test.org"
+  :email/date-sent  #inst "2026-01-18T10:00:00"
+  :email/ingested-at #inst "2026-01-18T10:00:00"
+  :email/body-text  "Add maintainer: maint2@test.org\n"}
+
+ {:email/uid        "uid-42"
+  :email/imap-uid   42
+  :email/source     "direct"
+  :email/message-id "<42@test.org>"
+  :email/subject    "Remove second maintainer"
+  :email/from-address "admin@test.org"
+  :email/date-sent  #inst "2026-01-18T11:00:00"
+  :email/ingested-at #inst "2026-01-18T11:00:00"
+  :email/body-text  "Remove maintainer: maint2@test.org\n"}
+
+ ;; =========================================================================
+ ;; 43 — Add admin (replace existing admin)
+ ;; =========================================================================
+ {:email/uid        "uid-43"
+  :email/imap-uid   43
+  :email/source     "direct"
+  :email/message-id "<43@test.org>"
+  :email/subject    "Transfer admin"
+  :email/from-address "admin@test.org"
+  :email/date-sent  #inst "2026-01-18T12:00:00"
+  :email/ingested-at #inst "2026-01-18T12:00:00"
+  :email/body-text  "Add admin: newadmin@test.org\n"}
+
+ ;; =========================================================================
+ ;; 44 — Unignore a previously ignored user
+ ;; =========================================================================
+ {:email/uid        "uid-44"
+  :email/imap-uid   44
+  :email/source     "direct"
+  :email/message-id "<44@test.org>"
+  :email/subject    "Unignore spam user"
+  :email/from-address "newadmin@test.org"
+  :email/date-sent  #inst "2026-01-18T13:00:00"
+  :email/ingested-at #inst "2026-01-18T13:00:00"
+  :email/body-text  "Unignore: spam@test.org\n"}
+
+ ;; =========================================================================
+ ;; 45 — Maintainer adds another maintainer (permitted)
+ ;; =========================================================================
+ {:email/uid        "uid-45"
+  :email/imap-uid   45
+  :email/source     "direct"
+  :email/message-id "<45@test.org>"
+  :email/subject    "Maint adds peer"
+  :email/from-address "maint@test.org"
+  :email/date-sent  #inst "2026-01-18T14:00:00"
+  :email/ingested-at #inst "2026-01-18T14:00:00"
+  :email/body-text  "Add maintainer: maint3@test.org\n"}
+
+ ;; =========================================================================
+ ;; 46 — Maintainer tries to Add admin (denied)
+ ;; =========================================================================
+ {:email/uid        "uid-46"
+  :email/imap-uid   46
+  :email/source     "direct"
+  :email/message-id "<46@test.org>"
+  :email/subject    "Maint tries admin transfer"
+  :email/from-address "maint@test.org"
+  :email/date-sent  #inst "2026-01-18T15:00:00"
+  :email/ingested-at #inst "2026-01-18T15:00:00"
+  :email/body-text  "Add admin: maint@test.org\n"}
+
+ ;; =========================================================================
+ ;; 47 — Regular user tries to add maintainer (denied)
+ ;; =========================================================================
+ {:email/uid        "uid-47"
+  :email/imap-uid   47
+  :email/source     "direct"
+  :email/message-id "<47@test.org>"
+  :email/subject    "User tries role escalation"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-18T16:00:00"
+  :email/ingested-at #inst "2026-01-18T16:00:00"
+  :email/body-text  "Add maintainer: user@test.org\n"}
+
+ ;; =========================================================================
+ ;; 48 — Trigger with semicolon punctuation
+ ;; =========================================================================
+ {:email/uid        "uid-48"
+  :email/imap-uid   48
+  :email/source     "direct"
+  :email/message-id "<48@test.org>"
+  :email/subject    "[BUG] Trigger punctuation test"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-19T10:00:00"
+  :email/ingested-at #inst "2026-01-19T10:00:00"
+  :email/body-text  "Steps to reproduce.\n"}
+
+ {:email/uid        "uid-49"
+  :email/imap-uid   49
+  :email/source     "direct"
+  :email/message-id "<49@test.org>"
+  :email/subject    "Re: [BUG] Trigger punctuation test"
+  :email/from-address "maint@test.org"
+  :email/date-sent  #inst "2026-01-19T11:00:00"
+  :email/ingested-at #inst "2026-01-19T11:00:00"
+  :email/in-reply-to "<48@test.org>"
+  :email/references #{"<48@test.org>"}
+  :email/body-text  "Approved;\n"}
+
+ ;; =========================================================================
+ ;; 50 — Trigger NOT at start of line (should be ignored)
+ ;; =========================================================================
+ {:email/uid        "uid-50"
+  :email/imap-uid   50
+  :email/source     "direct"
+  :email/message-id "<50@test.org>"
+  :email/subject    "[BUG] Inline trigger test"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-19T12:00:00"
+  :email/ingested-at #inst "2026-01-19T12:00:00"
+  :email/body-text  "The status is open.\n"}
+
+ {:email/uid        "uid-51"
+  :email/imap-uid   51
+  :email/source     "direct"
+  :email/message-id "<51@test.org>"
+  :email/subject    "Re: [BUG] Inline trigger test"
+  :email/from-address "maint@test.org"
+  :email/date-sent  #inst "2026-01-19T13:00:00"
+  :email/ingested-at #inst "2026-01-19T13:00:00"
+  :email/in-reply-to "<50@test.org>"
+  :email/references #{"<50@test.org>"}
+  :email/body-text  "I think this should be Fixed. But not yet.\n"}
+
+ ;; =========================================================================
+ ;; 52 — Closed. trigger on a request
+ ;; =========================================================================
+ {:email/uid        "uid-52"
+  :email/imap-uid   52
+  :email/source     "direct"
+  :email/message-id "<52@test.org>"
+  :email/subject    "[FR] Feature closed via Closed trigger"
+  :email/from-address "maint@test.org"
+  :email/date-sent  #inst "2026-01-19T14:00:00"
+  :email/ingested-at #inst "2026-01-19T14:00:00"
+  :email/body-text  "A feature request.\n"}
+
+ {:email/uid        "uid-53"
+  :email/imap-uid   53
+  :email/source     "direct"
+  :email/message-id "<53@test.org>"
+  :email/subject    "Re: [FR] Feature closed via Closed trigger"
+  :email/from-address "newadmin@test.org"
+  :email/date-sent  #inst "2026-01-19T15:00:00"
+  :email/ingested-at #inst "2026-01-19T15:00:00"
+  :email/in-reply-to "<52@test.org>"
+  :email/references #{"<52@test.org>"}
+  :email/body-text  "Closed.\n"}
+
+ ;; =========================================================================
+ ;; 54 — Try to ack an announcement (should have no effect)
+ ;; =========================================================================
+ {:email/uid        "uid-54"
+  :email/imap-uid   54
+  :email/source     "direct"
+  :email/message-id "<54@test.org>"
+  :email/subject    "[ANN] Ack test announcement"
+  :email/from-address "newadmin@test.org"
+  :email/date-sent  #inst "2026-01-20T10:00:00"
+  :email/ingested-at #inst "2026-01-20T10:00:00"
+  :email/body-text  "An announcement.\n"}
+
+ {:email/uid        "uid-55"
+  :email/imap-uid   55
+  :email/source     "direct"
+  :email/message-id "<55@test.org>"
+  :email/subject    "Re: [ANN] Ack test announcement"
+  :email/from-address "maint@test.org"
+  :email/date-sent  #inst "2026-01-20T11:00:00"
+  :email/ingested-at #inst "2026-01-20T11:00:00"
+  :email/in-reply-to "<54@test.org>"
+  :email/references #{"<54@test.org>"}
+  :email/body-text  "Approved.\nHandled.\nUrgent.\n"}
+
+ ;; =========================================================================
+ ;; 56 — Notify: off (unsubscribe)
+ ;; =========================================================================
+ {:email/uid        "uid-56"
+  :email/imap-uid   56
+  :email/source     "direct"
+  :email/message-id "<56@test.org>"
+  :email/subject    "Unsubscribe notifications"
+  :email/from-address "maint@test.org"
+  :email/date-sent  #inst "2026-01-20T12:00:00"
+  :email/ingested-at #inst "2026-01-20T12:00:00"
+  :email/body-text  "Notify: off\n"}
+
+ ;; =========================================================================
+ ;; 57 — Notify: on d:7 p:2 (resubscribe with prefs)
+ ;; =========================================================================
+ {:email/uid        "uid-57"
+  :email/imap-uid   57
+  :email/source     "direct"
+  :email/message-id "<57@test.org>"
+  :email/subject    "Resubscribe with prefs"
+  :email/from-address "maint@test.org"
+  :email/date-sent  #inst "2026-01-20T13:00:00"
+  :email/ingested-at #inst "2026-01-20T13:00:00"
+  :email/body-text  "Notify: on d:7 p:2\n"}
+
+ ;; =========================================================================
+ ;; 58 — Notify command from regular user (ignored)
+ ;; =========================================================================
+ {:email/uid        "uid-58"
+  :email/imap-uid   58
+  :email/source     "direct"
+  :email/message-id "<58@test.org>"
+  :email/subject    "User tries notify"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-20T14:00:00"
+  :email/ingested-at #inst "2026-01-20T14:00:00"
+  :email/body-text  "Notify: d:1\n"}
+
+ ;; =========================================================================
+ ;; 59 — Case insensitive tag: [bug] lowercase
+ ;; =========================================================================
+ {:email/uid        "uid-59"
+  :email/imap-uid   59
+  :email/source     "direct"
+  :email/message-id "<59@test.org>"
+  :email/subject    "[bug] lowercase tag test"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-21T10:00:00"
+  :email/ingested-at #inst "2026-01-21T10:00:00"
+  :email/body-text  "Lowercase tag.\n"}
+
+ ;; =========================================================================
+ ;; 60 — [ANNOUNCEMENT] long form tag
+ ;; =========================================================================
+ {:email/uid        "uid-60"
+  :email/imap-uid   60
+  :email/source     "direct"
+  :email/message-id "<60@test.org>"
+  :email/subject    "[ANNOUNCEMENT] Long form tag test"
+  :email/from-address "newadmin@test.org"
+  :email/date-sent  #inst "2026-01-21T11:00:00"
+  :email/ingested-at #inst "2026-01-21T11:00:00"
+  :email/body-text  "Long form announcement.\n"}
+
+ ;; =========================================================================
+ ;; 61 — Threading via References only (no In-Reply-To)
+ ;; =========================================================================
+ {:email/uid        "uid-61"
+  :email/imap-uid   61
+  :email/source     "direct"
+  :email/message-id "<61@test.org>"
+  :email/subject    "Re: [bug] lowercase tag test"
+  :email/from-address "maint@test.org"
+  :email/date-sent  #inst "2026-01-21T12:00:00"
+  :email/ingested-at #inst "2026-01-21T12:00:00"
+  :email/references #{"<59@test.org>"}
+  :email/body-text  "Confirmed.\n"}
+
+ ;; =========================================================================
+ ;; 62 — Deep thread: grandchild triggers on grandparent report
+ ;; =========================================================================
+ {:email/uid        "uid-62"
+  :email/imap-uid   62
+  :email/source     "direct"
+  :email/message-id "<62@test.org>"
+  :email/subject    "Re: Re: [bug] lowercase tag test"
+  :email/from-address "maint@test.org"
+  :email/date-sent  #inst "2026-01-21T13:00:00"
+  :email/ingested-at #inst "2026-01-21T13:00:00"
+  :email/in-reply-to "<61@test.org>"
+  :email/references #{"<59@test.org>" "<61@test.org>"}
+  :email/body-text  "Fixed,\n"}
+
+ ;; =========================================================================
+ ;; 63 — Orphan email (no tag, no thread parent)
+ ;; =========================================================================
+ {:email/uid        "uid-63"
+  :email/imap-uid   63
+  :email/source     "direct"
+  :email/message-id "<63@test.org>"
+  :email/subject    "Just a random email"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-21T14:00:00"
+  :email/ingested-at #inst "2026-01-21T14:00:00"
+  :email/body-text  "Nothing to see here.\n"}
+
+ ;; =========================================================================
+ ;; 64 — Duplicate report attempt (same subject tag, same thread)
+ ;; Tests that a second [bug] email in the same thread doesn't create
+ ;; a second report — it becomes a descendant instead.
+ ;; Uses its own message-id (unlike email 59) to avoid DB-level upsert.
+ ;; =========================================================================
+ {:email/uid        "uid-64"
+  :email/imap-uid   64
+  :email/source     "direct"
+  :email/message-id "<64@test.org>"
+  :email/subject    "[bug] lowercase tag test"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-21T15:00:00"
+  :email/ingested-at #inst "2026-01-21T15:00:00"
+  :email/in-reply-to "<59@test.org>"
+  :email/references #{"<59@test.org>"}
+  :email/body-text  "Duplicate.\n"}
+
+ ;; =========================================================================
+ ;; 65 — body-text-from-html fallback (no :email/body-text)
+ ;; =========================================================================
+ {:email/uid        "uid-65"
+  :email/imap-uid   65
+  :email/source     "direct"
+  :email/message-id "<65@test.org>"
+  :email/subject    "[BUG] HTML-only body"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-22T10:00:00"
+  :email/ingested-at #inst "2026-01-22T10:00:00"
+  :email/body-text-from-html "Bug from HTML email.\n"}
+
+ {:email/uid        "uid-66"
+  :email/imap-uid   66
+  :email/source     "direct"
+  :email/message-id "<66@test.org>"
+  :email/subject    "Re: [BUG] HTML-only body"
+  :email/from-address "maint@test.org"
+  :email/date-sent  #inst "2026-01-22T11:00:00"
+  :email/ingested-at #inst "2026-01-22T11:00:00"
+  :email/in-reply-to "<65@test.org>"
+  :email/references #{"<65@test.org>"}
+  :email/body-text-from-html "Confirmed.\n"}
+
+ ;; =========================================================================
+ ;; 67 — Maintainer ignores an address (permitted for maintainer)
+ ;; =========================================================================
+ {:email/uid        "uid-67"
+  :email/imap-uid   67
+  :email/source     "direct"
+  :email/message-id "<67@test.org>"
+  :email/subject    "Maint ignores nuisance"
+  :email/from-address "maint@test.org"
+  :email/date-sent  #inst "2026-01-22T12:00:00"
+  :email/ingested-at #inst "2026-01-22T12:00:00"
+  :email/body-text  "Ignore: nuisance@test.org\n"}
+
+ ;; =========================================================================
+ ;; 68 — Series without cover letter (starts at 1/2)
+ ;; =========================================================================
+ {:email/uid        "uid-68"
+  :email/imap-uid   68
+  :email/source     "direct"
+  :email/message-id "<68@test.org>"
+  :email/subject    "[PATCH cleanup 1/2] Remove dead code"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-23T10:00:00"
+  :email/ingested-at #inst "2026-01-23T10:00:00"
+  :email/body-text  "Remove dead code.\n"}
+
+ {:email/uid        "uid-69"
+  :email/imap-uid   69
+  :email/source     "direct"
+  :email/message-id "<69@test.org>"
+  :email/subject    "[PATCH cleanup 2/2] Update docs"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-23T10:01:00"
+  :email/ingested-at #inst "2026-01-23T10:01:00"
+  :email/in-reply-to "<68@test.org>"
+  :email/references #{"<68@test.org>"}
+  :email/body-text  "Doc update.\n"}
+
+ ;; =========================================================================
+ ;; 70 — Series from a different sender (same topic, separate series)
+ ;; =========================================================================
+ {:email/uid        "uid-70"
+  :email/imap-uid   70
+  :email/source     "direct"
+  :email/message-id "<70@test.org>"
+  :email/subject    "[PATCH cleanup 1/2] Alternative cleanup"
+  :email/from-address "voter1@test.org"
+  :email/date-sent  #inst "2026-01-23T11:00:00"
+  :email/ingested-at #inst "2026-01-23T11:00:00"
+  :email/body-text  "Different sender same topic.\n"}
+
+ ;; =========================================================================
+ ;; 71 — [ANN] permission denial from regular user (proper tag)
+ ;; =========================================================================
+ {:email/uid        "uid-71"
+  :email/imap-uid   71
+  :email/source     "direct"
+  :email/message-id "<71@test.org>"
+  :email/subject    "[ANN] User tries announcement"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-24T10:00:00"
+  :email/ingested-at #inst "2026-01-24T10:00:00"
+  :email/body-text  "Unauthorized announcement.\n"}
+
+ ;; =========================================================================
+ ;; 72 — [REL] permission denial from regular user
+ ;; =========================================================================
+ {:email/uid        "uid-72"
+  :email/imap-uid   72
+  :email/source     "direct"
+  :email/message-id "<72@test.org>"
+  :email/subject    "[REL 10.0] User tries release"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-24T11:00:00"
+  :email/ingested-at #inst "2026-01-24T11:00:00"
+  :email/body-text  "Unauthorized release.\n"}
+
+ ;; =========================================================================
+ ;; 73 — [CHG] permission denial from regular user
+ ;; =========================================================================
+ {:email/uid        "uid-73"
+  :email/imap-uid   73
+  :email/source     "direct"
+  :email/message-id "<73@test.org>"
+  :email/subject    "[CHG 10.0] User tries change"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-24T12:00:00"
+  :email/ingested-at #inst "2026-01-24T12:00:00"
+  :email/body-text  "Unauthorized change.\n"}
+
+ ;; =========================================================================
+ ;; 74 — Notify command via mailing list (should be ignored)
+ ;; =========================================================================
+ {:email/uid        "uid-74"
+  :email/imap-uid   74
+  :email/source     "direct"
+  :email/message-id "<74@test.org>"
+  :email/subject    "Notify via list"
+  :email/from-address "maint@test.org"
+  :email/date-sent  #inst "2026-01-24T13:00:00"
+  :email/ingested-at #inst "2026-01-24T13:00:00"
+  :email/body-text  "Notify: d:1\n"
+  :email/headers-edn "{\"List-Id\" \"<emacs-orgmode.gnu.org>\"}"}
 ]

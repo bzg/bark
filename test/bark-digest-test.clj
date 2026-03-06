@@ -8,14 +8,14 @@
 ;; Usage:
 ;;   bb test/bark-digest-test.clj
 ;;
-;; Requires: datalevin pod 0.10.5, resources/bark-schema.edn.
+;; Requires: datalevin pod 0.10.7+, resources/bark-schema.edn.
 
 (require '[babashka.pods :as pods]
          '[clojure.string :as str]
          '[clojure.edn :as edn]
          '[clojure.java.io :as io])
 
-(pods/load-pod 'huahaiy/datalevin "0.10.5")
+(pods/load-pod 'huahaiy/datalevin "0.10.7")
 
 (require '[pod.huahaiy.datalevin :as d])
 
@@ -40,12 +40,8 @@
 ;; Load bark-digest functions (everything except the main block)
 ;; ---------------------------------------------------------------------------
 
-;; We load the schema and use the same functions bark-digest uses.
-;; To avoid running its main block, we load only the function defs.
 (def schema (edn/read-string (slurp "resources/bark-schema.edn")))
 
-;; Load bark-digest.clj — the main block is guarded by
-;; (= (System/getProperty "babashka.file") *file*) so it won't run here.
 (load-file "scripts/bark-digest.clj")
 
 ;; ---------------------------------------------------------------------------
@@ -71,7 +67,6 @@
 
 (defn teardown! [{:keys [conn db-path]}]
   (d/close conn)
-  ;; Clean up temp dir
   (let [dir (io/file db-path)]
     (when (.exists dir)
       (doseq [f (reverse (file-seq dir))]
@@ -139,16 +134,18 @@
 
       (let [db (d/db conn)]
 
-        ;; --- Role commands (email 01) ---
-        (println "\n--- Roles ---")
+        ;; --- Roles (final state after all emails) ---
+        (println "\n--- Roles (final state) ---")
         (let [roles (d/pull db '[:roles/admin :roles/maintainers :roles/ignored]
                             [:roles/source "direct"])]
-          (assert= "Admin is admin@test.org"
-                   "admin@test.org" (:roles/admin roles))
+          ;; Admin changed to newadmin@test.org by email 43
+          (assert= "Admin is newadmin@test.org (changed by email 43)"
+                   "newadmin@test.org" (:roles/admin roles))
           (assert-test "maint@test.org is maintainer"
                        (contains? (set (:roles/maintainers roles)) "maint@test.org"))
-          (assert-test "spam@test.org is ignored"
-                       (contains? (set (:roles/ignored roles)) "spam@test.org")))
+          ;; spam@test.org was unignored by email 44
+          (assert-test "spam@test.org NOT ignored (unignored by email 44)"
+                       (not (contains? (set (:roles/ignored roles)) "spam@test.org"))))
 
         ;; --- Bug 02: full lifecycle ---
         (println "\n--- Bug 02: [BUG 9.7] lifecycle ---")
@@ -305,7 +302,6 @@
           (assert-test "v1 is closed (superseded by v2)"
                        (some? (:series/closed v1))))
 
-        ;; Check individual patches link back to series
         (let [r35 (get-report db "<35@test.org>")]
           (assert-test "Patch 1/3 has series ref"
                        (some? (:report/series r35)))
@@ -323,7 +319,6 @@
           (assert= "v2 has 1 patch" 1
                    (series-patch-count db "parser|user@test.org|3#2")))
 
-        ;; v2 patch 1/3 should point to v2 series
         (let [r39 (get-report db "<39@test.org>")
               s   (:report/series r39)]
           (assert-test "v2 patch has series ref" (some? s))
@@ -334,14 +329,202 @@
         (let [patch (get-report db "<40@test.org>")
               bug   (get-report db "<23@test.org>")]
           (assert= "Patch type" :patch (:report/type patch))
-          ;; Patch should be related to the bug
           (assert-test "Patch is related to bug"
                        (some #(= "<23@test.org>" (:report/message-id %))
                              (:report/related patch)))
-          ;; Bug should be related to the patch (bi-directional)
           (assert-test "Bug is related to patch"
                        (some #(= "<40@test.org>" (:report/message-id %))
                              (:report/related bug))))
+
+        ;; =================================================================
+        ;; NEW TESTS (emails 41-74)
+        ;; =================================================================
+
+        ;; --- Remove maintainer (emails 41-42) ---
+        (println "\n--- Emails 41-42: add then remove maintainer ---")
+        (let [roles (d/pull db '[:roles/maintainers]
+                            [:roles/source "direct"])]
+          (assert-test "maint2@test.org NOT in maintainers (removed)"
+                       (not (contains? (set (:roles/maintainers roles))
+                                       "maint2@test.org"))))
+
+        ;; --- Add admin (email 43) ---
+        (println "\n--- Email 43: replace admin ---")
+        (let [roles (d/pull db '[:roles/admin]
+                            [:roles/source "direct"])]
+          (assert= "Admin replaced to newadmin@test.org"
+                   "newadmin@test.org" (:roles/admin roles)))
+
+        ;; --- Unignore (email 44) ---
+        (println "\n--- Email 44: unignore spam@test.org ---")
+        (let [roles (d/pull db '[:roles/ignored]
+                            [:roles/source "direct"])]
+          (assert-test "spam@test.org NOT in ignored (unignored)"
+                       (not (contains? (set (:roles/ignored roles))
+                                       "spam@test.org"))))
+
+        ;; --- Maintainer adds maintainer (email 45) ---
+        (println "\n--- Email 45: maintainer adds peer ---")
+        (let [roles (d/pull db '[:roles/maintainers]
+                            [:roles/source "direct"])]
+          (assert-test "maint3@test.org IS maintainer"
+                       (contains? (set (:roles/maintainers roles))
+                                  "maint3@test.org")))
+
+        ;; --- Maintainer can't Add admin (email 46) ---
+        (println "\n--- Email 46: maintainer can't add admin ---")
+        (let [roles (d/pull db '[:roles/admin]
+                            [:roles/source "direct"])]
+          (assert= "Admin still newadmin (maint denied)"
+                   "newadmin@test.org" (:roles/admin roles)))
+
+        ;; --- Regular user can't add maintainer (email 47) ---
+        (println "\n--- Email 47: user can't add maintainer ---")
+        (let [roles (d/pull db '[:roles/maintainers]
+                            [:roles/source "direct"])]
+          (assert-test "user@test.org NOT in maintainers"
+                       (not (contains? (set (:roles/maintainers roles))
+                                       "user@test.org"))))
+
+        ;; --- Trigger with semicolon (emails 48-49) ---
+        (println "\n--- Emails 48-49: trigger with semicolon ---")
+        (let [r (get-report db "<48@test.org>")]
+          (assert= "Type is :bug" :bug (:report/type r))
+          (assert-test "Acked via Approved;" (some? (:report/acked r))))
+
+        ;; --- Inline trigger ignored (emails 50-51) ---
+        (println "\n--- Emails 50-51: inline trigger ignored ---")
+        (let [r (get-report db "<50@test.org>")]
+          (assert= "Type is :bug" :bug (:report/type r))
+          (assert-test "NOT closed (inline 'Fixed.' ignored)"
+                       (nil? (:report/closed r))))
+
+        ;; --- Closed. on request (emails 52-53) ---
+        (println "\n--- Emails 52-53: Closed. on request ---")
+        (let [r (get-report db "<52@test.org>")]
+          (assert= "Type is :request" :request (:report/type r))
+          (assert-test "Closed via Closed." (some? (:report/closed r))))
+
+        ;; --- Triggers on announcement (emails 54-55) ---
+        (println "\n--- Emails 54-55: triggers on announcement ---")
+        (let [r (get-report db "<54@test.org>")]
+          (assert= "Type is :announcement" :announcement (:report/type r))
+          (assert-test "NOT acked (announcements can't be acked)"
+                       (nil? (:report/acked r)))
+          (assert-test "NOT owned (announcements can't be owned)"
+                       (nil? (:report/owned r)))
+          (assert-test "NOT urgent (announcements have no priority)"
+                       (nil? (:report/urgent r))))
+
+        ;; --- Notify off then on with prefs (emails 56-57) ---
+        (println "\n--- Emails 56-57: notify off then on with prefs ---")
+        (let [k     "direct:maint@test.org"
+              pref  (d/pull db '[:notify/enabled :notify/interval-days
+                                 :notify/min-priority]
+                            [:notify/key k])]
+          (assert-test "Notify re-enabled" (:notify/enabled pref))
+          (assert= "Interval set to 7" 7 (:notify/interval-days pref))
+          (assert= "Min priority set to 2" 2 (:notify/min-priority pref)))
+
+        ;; --- Notify from regular user (email 58) ---
+        (println "\n--- Email 58: notify from regular user ---")
+        (let [k    "direct:user@test.org"
+              pref (d/q '[:find ?e .
+                          :in $ ?k
+                          :where [?e :notify/key ?k]]
+                        db k)]
+          (assert-test "No notify pref created for regular user"
+                       (nil? pref)))
+
+        ;; --- Notify via mailing list (email 74) ---
+        (println "\n--- Email 74: notify via mailing list ---")
+        (let [k    "direct:maint@test.org"
+              pref (d/pull db '[:notify/interval-days]
+                            [:notify/key k])]
+          (assert= "Interval still 7 (list notify ignored)"
+                   7 (:notify/interval-days pref)))
+
+        ;; --- Case insensitive [bug] (email 59) ---
+        (println "\n--- Email 59: case insensitive [bug] ---")
+        (let [r (get-report db "<59@test.org>")]
+          (assert= "Type is :bug" :bug (:report/type r)))
+
+        ;; --- [ANNOUNCEMENT] long form (email 60) ---
+        (println "\n--- Email 60: [ANNOUNCEMENT] long form ---")
+        (let [r (get-report db "<60@test.org>")]
+          (assert= "Type is :announcement" :announcement (:report/type r)))
+
+        ;; --- Permission denials (emails 71-73) ---
+        (println "\n--- Emails 71-73: permission denials ---")
+        (assert-test "No report for user [ANN]"
+                     (not (report-exists? db "<71@test.org>")))
+        (assert-test "No report for user [REL]"
+                     (not (report-exists? db "<72@test.org>")))
+        (assert-test "No report for user [CHG]"
+                     (not (report-exists? db "<73@test.org>")))
+
+        ;; --- References-only threading (email 61) ---
+        (println "\n--- Email 61: threading via References only ---")
+        (let [r (get-report db "<59@test.org>")]
+          (assert-test "Bug 59 acked via References-only reply"
+                       (some? (:report/acked r))))
+
+        ;; --- Deep thread (email 62) ---
+        (println "\n--- Email 62: deep thread trigger ---")
+        (let [r (get-report db "<59@test.org>")]
+          (assert-test "Bug 59 closed via grandchild reply"
+                       (some? (:report/closed r)))
+          (assert-test "Bug 59 has >= 2 descendants"
+                       (>= (count (:report/descendants r)) 2)))
+
+        ;; --- Orphan email (email 63) ---
+        (println "\n--- Email 63: orphan email ---")
+        (assert-test "No report for orphan email"
+                     (not (report-exists? db "<63@test.org>")))
+
+        ;; --- Duplicate tag in same thread (email 64) ---
+        (println "\n--- Email 64: [bug] reply in same thread ---")
+        ;; Email 64 is a [bug] reply to bug 59. Since it has its own
+        ;; [bug] tag, it creates a separate report (not just a descendant).
+        ;; It also threads as a descendant of bug 59.
+        (assert-test "Email 64 creates its own report (has [bug] tag)"
+                     (report-exists? db "<64@test.org>"))
+
+        ;; --- HTML-only body fallback (emails 65-66) ---
+        (println "\n--- Emails 65-66: body-text-from-html fallback ---")
+        (let [r (get-report db "<65@test.org>")]
+          (assert= "Type is :bug" :bug (:report/type r))
+          (assert-test "Acked via html body trigger"
+                       (some? (:report/acked r))))
+
+        ;; --- Maintainer ignores address (email 67) ---
+        (println "\n--- Email 67: maintainer ignores address ---")
+        (let [roles (d/pull db '[:roles/ignored]
+                            [:roles/source "direct"])]
+          (assert-test "nuisance@test.org IS ignored"
+                       (contains? (set (:roles/ignored roles))
+                                  "nuisance@test.org")))
+
+        ;; --- Series without cover letter (emails 68-69) ---
+        (println "\n--- Emails 68-69: series without cover letter ---")
+        (let [r68 (get-report db "<68@test.org>")
+              r69 (get-report db "<69@test.org>")]
+          (assert= "Patch 68 type" :patch (:report/type r68))
+          (assert= "Patch 68 seq" "1/2" (:report/patch-seq r68))
+          (assert= "Patch 69 seq" "2/2" (:report/patch-seq r69))
+          (assert-test "Patch 68 has series"
+                       (some? (:report/series r68)))
+          (assert-test "Patch 69 has series"
+                       (some? (:report/series r69))))
+
+        ;; --- Different sender same topic (email 70) ---
+        (println "\n--- Email 70: different sender same topic ---")
+        (let [r70 (get-report db "<70@test.org>")
+              r68 (get-report db "<68@test.org>")]
+          (assert= "Patch 70 type" :patch (:report/type r70))
+          (assert-test "Different senders → different series"
+                       (not= (get-in r68 [:report/series :series/id])
+                             (get-in r70 [:report/series :series/id]))))
 
         ;; --- Summary ---
         (println "\n=== Summary ===")
