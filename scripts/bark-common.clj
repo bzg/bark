@@ -58,14 +58,16 @@
 
 (defn get-header
   "Case-insensitive header lookup. headers-edn can be an EDN string or
-  an already-parsed map. Returns nil on parse failure."
+  an already-parsed map. Returns nil on parse failure (with warning)."
   [headers-edn header-name]
   (when headers-edn
     (try
       (let [headers (if (string? headers-edn) (edn/read-string headers-edn) headers-edn)
             lname   (str/lower-case header-name)]
         (some (fn [[k v]] (when (= (str/lower-case k) lname) v)) headers))
-      (catch Exception _ nil))))
+      (catch Exception e
+        (println (str "  [warn] Failed to parse headers-edn: " (.getMessage e)))
+        nil))))
 
 (defn extract-list-id
   "Extract the identifier from a List-Id header value.

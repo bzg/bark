@@ -127,7 +127,7 @@
                          (try
                            (if (store-email! conn msg) (inc n) n)
                            (catch Exception e
-                             (log/error "Failed to store email UID:" (:uid msg) (.getMessage e))
+                             (log/warn "Failed to store email UID:" (:uid msg) (.getMessage e))
                              n)))
                        0 msgs)]
     (log/info "Batch complete. Stored" stored "of" (count msgs) "emails.")
