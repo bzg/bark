@@ -326,7 +326,7 @@
      "</ul></nav>\n"
      "<p class=\"meta\">Generated " generated-at "</p>\n"
 
-     "<h2>Summary</h2>\n<div class=\"kpis\">\n"
+     "<div class=\"kpis\">\n"
      (kpi n-yr "Reports (last year)"
           (str open-last-year " still open"))
      (kpi (:open open-closed-ratio) "Open (all time)"
@@ -337,7 +337,7 @@
             (str "avg " (:avg-days time-to-close) "d")))
      "</div>\n"
 
-     "<h2>Charts</h2>\n<div class=\"grid\">\n"
+     "<div class=\"grid\">\n"
      (chart-box "chart-month"   (chart-by-month reports-by-month))
      (chart-box "chart-type"    (chart-per-type reports-per-type))
      (when time-to-close
