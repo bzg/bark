@@ -30,6 +30,7 @@
  :attachment/filename    {:db/valueType :db.type/string}
  :attachment/content-type {:db/valueType :db.type/string}
  :attachment/size        {:db/valueType :db.type/long}
+ :attachment/data        {:db/valueType :db.type/string}
  :email/in-reply-to      {:db/valueType :db.type/string}
  :email/references       {:db/valueType :db.type/string
                           :db/cardinality :db.cardinality/many}
@@ -64,6 +65,17 @@
  :report/series          {:db/valueType :db.type/ref}
  :report/related         {:db/valueType   :db.type/ref
                           :db/cardinality :db.cardinality/many}
+ :report/patches         {:db/valueType   :db.type/ref
+                          :db/cardinality :db.cardinality/many
+                          :db/isComponent true}
+
+ ;; --- Patch content entities ---
+ :patch/filename         {:db/valueType :db.type/string}
+ :patch/source           {:db/valueType :db.type/keyword}
+ :patch/text             {:db/valueType :db.type/string}
+ :patch/author           {:db/valueType :db.type/string}
+ :patch/subject          {:db/valueType :db.type/string}
+ :patch/date             {:db/valueType :db.type/string}
 
  ;; --- Patch series ---
  :series/id              {:db/valueType :db.type/string

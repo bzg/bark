@@ -98,10 +98,8 @@
 
 ;; Attachment & inline patch detection
 
-(def patch-filename-pattern #"(?i)\.(patch|diff)$")
-
 (defn has-patch-attachment? [attachments]
-  (some (fn [att] (when-let [f (:attachment/filename att)] (re-find patch-filename-pattern f)))
+  (some (fn [att] (patch-file? (:attachment/filename att)))
         attachments))
 
 (def inline-patch-indicators
@@ -144,3 +142,91 @@
            (detect-announcement subject patterns)
            (detect-release subject patterns)
            (detect-change subject patterns))))))
+
+;; ---------------------------------------------------------------------------
+;; Patch content extraction (pure)
+;; ---------------------------------------------------------------------------
+
+(def ^:private format-patch-start #"(?m)^From [0-9a-f]{40} ")
+
+(defn parse-format-patch-headers
+  "Extract author, subject, date from a git format-patch output.
+  Returns a map with :author, :subject, :date (all optional)."
+  [text]
+  (when (and text (re-find format-patch-start text))
+    (let [lines  (str/split-lines text)
+          ;; Skip the 'From <hash> ...' line, parse RFC 822 headers until blank line
+          header-lines (rest lines)
+          headers (loop [hs {} [line & more] header-lines]
+                    (cond
+                      (nil? line)          hs
+                      (str/blank? line)    hs
+                      ;; Continuation line (starts with whitespace)
+                      (re-matches #"^\s+.*" line)
+                      (let [last-k (:_last-key hs)]
+                        (recur (if last-k
+                                 (update hs last-k str " " (str/trim line))
+                                 hs)
+                               more))
+                      ;; Header line
+                      :else
+                      (let [[_ k v] (re-find #"^([^:]+):\s*(.*)" line)]
+                        (if k
+                          (let [lk (str/lower-case k)]
+                            (recur (-> hs
+                                       (assoc lk (str/trim v))
+                                       (assoc :_last-key lk))
+                                   more))
+                          (recur hs more)))))]
+      (cond-> {}
+        (get headers "from")    (assoc :author  (get headers "from"))
+        (get headers "subject") (assoc :subject (get headers "subject"))
+        (get headers "date")    (assoc :date    (get headers "date"))))))
+
+(defn extract-inline-patch
+  "Extract inline diff/patch text from an email body.
+  Returns the text from the first 'From <hash>' or 'diff --git' line
+  to the end, or nil if no inline patch found."
+  [body-text]
+  (when body-text
+    (let [lines (str/split-lines body-text)
+          start (some (fn [[i line]]
+                        (when (or (re-find #"^From [0-9a-f]{40} " line)
+                                  (re-find #"^diff --git " line)
+                                  (re-find #"^--- a/" line))
+                          i))
+                      (map-indexed vector lines))]
+      (when start
+        (str/join "\n" (subvec (vec lines) start))))))
+
+(defn build-patch-entities
+  "Build patch entity maps from an email's inline content and attachments.
+  Returns a vector of maps suitable for :report/patches."
+  [email]
+  (let [body-text   (or (:email/body-text email) (:email/body-text-from-html email))
+        attachments (:email/attachments email)
+        ;; Inline patch
+        inline      (when-let [text (extract-inline-patch body-text)]
+                      (let [fp-meta (parse-format-patch-headers text)]
+                        [(cond-> {:patch/filename "inline.patch"
+                                  :patch/source   :inline
+                                  :patch/text     text}
+                           (:author fp-meta)  (assoc :patch/author  (:author fp-meta))
+                           (:subject fp-meta) (assoc :patch/subject (:subject fp-meta))
+                           (:date fp-meta)    (assoc :patch/date    (:date fp-meta)))]))
+        ;; Attachment patches
+        att-patches (when (seq attachments)
+                      (->> attachments
+                           (filter (fn [att]
+                                     (and (patch-file? (:attachment/filename att))
+                                          (:attachment/data att))))
+                           (mapv (fn [att]
+                                   (let [text    (:attachment/data att)
+                                         fp-meta (parse-format-patch-headers text)]
+                                     (cond-> {:patch/filename (:attachment/filename att)
+                                              :patch/source   :attachment
+                                              :patch/text     text}
+                                       (:author fp-meta)  (assoc :patch/author  (:author fp-meta))
+                                       (:subject fp-meta) (assoc :patch/subject (:subject fp-meta))
+                                       (:date fp-meta)    (assoc :patch/date    (:date fp-meta))))))))]
+    (vec (concat inline att-patches))))

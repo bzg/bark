@@ -122,7 +122,7 @@
     :email/in-reply-to :email/references
     :email/from-address :email/date-sent :email/ingested-at
     :email/body-text :email/body-text-from-html :email/headers-edn
-    {:email/attachments [:attachment/filename :attachment/content-type]}])
+    {:email/attachments [:attachment/filename :attachment/content-type :attachment/data]}])
 
 (defn emails-since [db since-ts]
   (let [eids (d/q '[:find [?e ...]
@@ -243,13 +243,19 @@
                       [(+ threaded (count parent-report-eids))
                        (reduce #(index-assoc %1 message-id %2) thread-index parent-report-eids)])
                   [threaded thread-index])]
-            ;; Post-creation: link related reports + manage series
+            ;; Post-creation: link related reports + manage series + store patches
             (when (and report-eid (seq parent-report-eids))
               (link-related-reports! conn report-eid parent-report-eids))
             (when (and report-eid (= :patch (:type report-info))
                        (:patch-seq report-info))
               (manage-series! conn report-eid eid report-info
                               from-addr parent-report-eids))
+            (when (and report-eid (= :patch (:type report-info)))
+              (let [patches (build-patch-entities email)]
+                (when (seq patches)
+                  (d/transact! conn [{:db/id report-eid
+                                      :report/patches patches}])
+                  (println (str "    → " (count patches) " patch file(s) stored")))))
             {:created created :threaded threaded :skipped skipped
              :thread-index thread-index :type-index type-index})))))
 

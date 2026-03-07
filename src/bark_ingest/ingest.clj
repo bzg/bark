@@ -63,11 +63,19 @@
         references  (when-let [v (get headers "References")]
                       (parse-message-ids (if (vector? v) (str/join " " v) v)))
         attachments (mapv (fn [att]
-                            {:attachment/filename     (or (:filename att) "unnamed")
-                             :attachment/content-type (:content-type att)
-                             :attachment/size         (or (:size att)
-                                                          (when (:data att)
-                                                            (count (:data att))))})
+                            (let [filename (or (:filename att) "unnamed")
+                                  is-patch (boolean (re-find #"(?i)\.(patch|diff)$" filename))
+                                  data     (:data att)
+                                  text-data (when (and is-patch data)
+                                              (cond
+                                                (string? data) data
+                                                (bytes? data)  (String. ^bytes data "UTF-8")
+                                                :else          nil))]
+                              (cond-> {:attachment/filename     filename
+                                       :attachment/content-type (:content-type att)
+                                       :attachment/size         (or (:size att)
+                                                                    (when data (count data)))}
+                                text-data (assoc :attachment/data text-data))))
                           (remove nil? (:attachments body)))]
     (cond-> {:email/imap-uid     imap-uid
              :email/message-id   (:message-id msg)

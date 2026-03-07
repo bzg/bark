@@ -174,7 +174,7 @@
   .filters.status-filters button.acked-btn.outline  { background: none; color: #b8860b; opacity: 0.5; }
   .filters.status-filters button.owned-btn         { background: #1a5a8a; border-color: #1a5a8a; color: #fff; }
   .filters.status-filters button.owned-btn.outline  { background: none; color: #1a5a8a; opacity: 0.5; }
-  input[type=search] { max-width: 33vw; min-width: 200px; margin-bottom: 0; }
+  input[type=search] { max-width: 25vw; min-width: 200px; margin-bottom: 0; }
   th[data-sort] { cursor: pointer; user-select: none; white-space: nowrap; }
   th[data-sort]:hover { text-decoration: underline; }
   th[data-sort]::after { content: ' ↕'; opacity: 0.3; font-size: 0.75em; }

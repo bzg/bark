@@ -6,6 +6,29 @@
          '[clojure.edn :as edn])
 
 ;; ---------------------------------------------------------------------------
+;; Utilities
+;; ---------------------------------------------------------------------------
+
+(defn sha256
+  "Compute SHA-256 hex digest of a string."
+  [^String s]
+  (let [digest (java.security.MessageDigest/getInstance "SHA-256")
+        bytes  (.digest digest (.getBytes s "UTF-8"))]
+    (str/join (map #(format "%02x" (bit-and (int %) 0xff)) bytes))))
+
+(defn mid-hash
+  "Compute a stable directory-safe hash from a message-id."
+  [message-id]
+  (sha256 (str "bark:" message-id)))
+
+(def patch-filename-re #"(?i)\.(patch|diff)$")
+
+(defn patch-file?
+  "True if filename looks like a patch/diff file."
+  [filename]
+  (boolean (and filename (re-find patch-filename-re filename))))
+
+;; ---------------------------------------------------------------------------
 ;; Datalevin pod — single version definition
 ;; ---------------------------------------------------------------------------
 
@@ -36,6 +59,8 @@
     {:report/series [:series/id :series/expected :series/closed
                      {:series/patches [:db/id]}
                      {:series/cover-letter [:email/message-id]}]}
+    {:report/patches [:patch/filename :patch/source :patch/text
+                      :patch/author :patch/subject :patch/date]}
     {:report/email [:email/subject :email/from-address :email/from-name
                     :email/date-sent :email/source :email/imap-uid
                     :email/headers-edn]}])

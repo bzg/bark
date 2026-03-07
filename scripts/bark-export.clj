@@ -156,7 +156,17 @@
                                                      (cond-> {:type       (name (:report/type r))
                                                               :message-id (:report/message-id r)}
                                                        arch (assoc :archived-at arch))))
-                                                 related)))))
+                                                 related))
+      (seq (:report/patches report))
+      (assoc :patches
+             (let [h (mid-hash (:report/message-id report))]
+               (mapv (fn [p]
+                       (cond-> {:file   (str "patches/" h "/" (:patch/filename p))
+                                :source (name (:patch/source p))}
+                         (:patch/author p)  (assoc :author  (:patch/author p))
+                         (:patch/subject p) (assoc :subject (:patch/subject p))
+                         (:patch/date p)    (assoc :date    (:patch/date p))))
+                     (:report/patches report)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; XML helpers
@@ -312,6 +322,27 @@
     (println (str "Wrote " (count data) " reports to " filename))))
 
 ;; ---------------------------------------------------------------------------
+;; Patches output
+;; ---------------------------------------------------------------------------
+
+(defn dump-patches!
+  "Export patch files to patches/<mid-hash>/<filename> for each patch report."
+  [reports]
+  (let [patch-reports (filter #(seq (:report/patches %)) reports)
+        total         (atom 0)]
+    (doseq [report patch-reports]
+      (let [mid  (:report/message-id report)
+            h    (mid-hash mid)
+            dir  (clojure.java.io/file "public" "patches" h)]
+        (.mkdirs dir)
+        (doseq [p (:report/patches report)]
+          (let [f (clojure.java.io/file dir (:patch/filename p))]
+            (spit f (:patch/text p))
+            (swap! total inc)))))
+    (println (str "Wrote " @total " patch file(s) from "
+                  (count patch-reports) " report(s) to public/patches/"))))
+
+;; ---------------------------------------------------------------------------
 ;; CLI helpers
 ;; ---------------------------------------------------------------------------
 
@@ -336,7 +367,7 @@
 ;; Main
 ;; ---------------------------------------------------------------------------
 
-(def formats #{"json" "rss" "org" "html" "all" "stats"})
+(def formats #{"json" "rss" "org" "html" "all" "stats" "patches"})
 
 (let [{:keys [format source-name min-priority min-status]
        :or {format "json"}}
@@ -346,7 +377,7 @@
   (try
     (when-not (formats format)
       (println (str "Unknown format: " format))
-      (println "Formats: json rss org html stats all")
+      (println "Formats: json rss org html stats patches all")
       (System/exit 1))
     (when (and min-priority (not (#{1 2 3} min-priority)))
       (println (str "Invalid --min-priority: " min-priority " (must be 1, 2, or 3)"))
@@ -389,10 +420,12 @@
                       (babashka.process/shell "bb scripts/bark-howto.clj")
                       (apply babashka.process/shell "bb scripts/bark-index.clj" *command-line-args*))
           "stats" (apply babashka.process/shell "bb scripts/bark-stats.clj" *command-line-args*)
+          "patches" (dump-patches! reports)
           "all"   (let [extra (rest *command-line-args*)]
                     (dump-json! reports "public/reports.json" source-map maintainers-map multi-src?)
                     (dump-rss!  reports "public/reports.rss"  label source-map maintainers-map multi-src?)
                     (dump-org!  reports "public/reports.org"  label source-map maintainers-map multi-src?)
+                    (dump-patches! reports)
                     (babashka.process/shell "bb scripts/bark-howto.clj")
                     (apply babashka.process/shell "bb scripts/bark-index.clj" extra)
                     (apply babashka.process/shell "bb scripts/bark-stats.clj" extra)
