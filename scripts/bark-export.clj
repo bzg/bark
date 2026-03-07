@@ -249,12 +249,11 @@
         link  "https://www.softwareheritage.org"]
     (spit filename
           (str "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-               "<rss version=\"2.0\" xmlns:atom=\"http://www.w3.org/2005/Atom\">\n"
+               "<rss version=\"2.0\">\n"
                "  <channel>\n"
                "    <title>BARK " label " reports</title>\n"
                "    <link>" link "</link>\n"
                "    <description>Reports from the Bug And Report Keeper</description>\n"
-               "    <atom:link href=\"\" rel=\"self\" type=\"application/rss+xml\"/>\n"
                items "\n"
                "  </channel>\n"
                "</rss>\n"))
