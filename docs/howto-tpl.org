@@ -7,61 +7,14 @@ receive periodic digest email notifications.
 
 For the full documentation, see the [[https://codeberg.org/bzg/bark][BARK project page]].
 
-* Labels
+** Labels and triggers
 
-** bug, patch, request from any user
-
-| Tag                                         | Type    |
-|---------------------------------------------+---------|
-| =[BUG]= =[BUG version]=                     | bug     |
-| =[PATCH]= =[PATCH n/m]= =[PATCH topic n/m]= | patch   |
-| =[POLL]= =[FR]= =[TODO]=                    | request |
-
-** Announcement, release, change from admins or maintainers
-
-| Tag                                                     | Type         |
-|---------------------------------------------------------+--------------|
-| =[ANN]= =[ANNOUNCEMENT]=                                | announcement |
-| =[REL]= =[RELEASE]= =[REL version]= =[RELEASE version]= | release      |
-| =[CHG]= =[CHANGE]= =[CHG version]= =[CHANGE version]=   | change       |
-
-* User triggers
-
-| Trigger          | Effect on report                    |
-|------------------+-------------------------------------|
-| =Approved.=      | Mark as acked (bug, patch, request) |
-| =Confirmed.=     | Mark as acked (bug)                 |
-| =Reviewed.=      | Mark as acked (patch)               |
-| =Handled.=       | Mark as owned                       |
-| =Fixed.=         | Mark as closed (bug)                |
-| =Applied.=       | Mark as closed (patch)              |
-| =Done.=          | Mark as closed (request)            |
-| =Closed.=        | Mark as closed (request)            |
-| =Canceled.=      | Mark as closed (all)                |
-| =Urgent.=        | Mark as urgent                      |
-| =Important.=     | important                           |
-| =Not urgent.=    | un-urgent                           |
-| =Not important.= | un-important                        |
-
-* Admin triggers
-
-| Example trigger                    | Function                         | Permission          |
-|------------------------------------+----------------------------------+---------------------|
-| Add admin: new-admin@example.com   | Add admin                        | Admin               |
-| Remove maintainer: dev@example.com | Remove maintainer                | Admin               |
-
-* Maintainer triggers
-
-| Example trigger                 | Function                         | Permission          |
-|---------------------------------+----------------------------------+---------------------|
-| Add maintainer: dev@example.com | Add maintainer                   | Admin or maintainer |
-| Ignore: spammer@example.com     | Ignore user                      | Admin or maintainer |
-| Unignore: user@example.com      | Unignore user                    | Admin or maintainer |
-| Notify: off                     | Turn off notifications           | Admin or maintainer |
-| Notify: on                      | Turn on notifications            | Admin or maintainer |
-| Notify: d:7                     | Get notified every 7 days        | Admin or maintainer |
-| Notify: s:4                     | Get notified for open reports    | Admin or maintainer |
-| Notify: p:1                     | Get notify for important reports | Admin or maintainer |
-
-
-
+| Type         | Subject labels                                  | Acked              | Owned   | Closed               |
+|--------------+-------------------------------------------------+--------------------+---------+----------------------|
+| bug          | =[BUG]= =[BUG version]=                             | =Approved= =Confirmed= | =Handled= | =Canceled= =Fixed=       |
+| patch        | =[PATCH]= =[PATCH n/m]= =[PATCH topic n/m]=           | =Approved= =Reviewed=  | =Handled= | =Canceled= =Applied=     |
+| request      | =[POLL]= =[FR]= =[TODO]=                              | =Approved=           | =Handled= | =Canceled= =Done= =Closed= |
+|--------------+-------------------------------------------------+--------------------+---------+----------------------|
+| announcement | =[ANN]= =[ANNOUNCEMENT]=                            |                    |         | =Canceled=             |
+| release      | =[REL]= =[RELEASE]= =[REL version]= =[RELEASE version]= |                    |         | =Canceled=             |
+| change       | =[CHG]= =[CHANGE]= =[CHG version]= =[CHANGE version]=   |                    |         | =Canceled=             |
