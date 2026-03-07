@@ -7,11 +7,15 @@ receive periodic digest email notifications.
 
 For a more detailed howto, see the [[https://codeberg.org/bzg/bark/src/branch/main/docs/howto.org][BARK project page]].
 
-** Labels and triggers
+** Labels and trigger keywords
 
-Subject labels will create reports. Answers to these reports can
-update them by using trigger keywords like "Applied", etc. Here is a
-table showing available labels and triggers for this BARK instance.
+Subject labels create reports. Replies to these reports can update
+them by using trigger keywords such as =applied.=, etc. Trigger keywords
+should be placed at the beginning of the line and followed by a
+punctuation mark (=.= =,= =;= =:=).
+
+Here is a table of available labels and triggers for this BARK
+instance:
 
 | Type         | Subject labels                                  | Acked              | Owned   | Closed               |
 |--------------+-------------------------------------------------+--------------------+---------+----------------------|
@@ -23,12 +27,11 @@ table showing available labels and triggers for this BARK instance.
 | release      | =[REL]= =[RELEASE]= =[REL version]= =[RELEASE version]= |                    |         | =Canceled=             |
 | change       | =[CHG]= =[CHANGE]= =[CHG version]= =[CHANGE version]=   |                    |         | =Canceled=             |
 
-Note that every trigger keyword should be at the beginning of the line
-and followed by a punctuation mark (=.= =,= =;= =:=).
-
-* Priority triggers
+** Priority trigger keywords
 
 Users can mark reports as important/urgent with =Important.= or =Urgent.=.
+
+** Combining trigger keywords
 
 You can combine several triggers:
 

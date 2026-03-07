@@ -77,7 +77,6 @@
                           (case rtype
                             :bug   [(str "=[" t "]=") (str "=[" t " version]=")]
                             :patch [(str "=[" t "]=") (str "=[" t " n/m]=") (str "=[" t " topic n/m]=")]
-                            ;; :release, :change
                             [(str "=[" t "]=") (str "=[" t " version]=")]))
                         tags)
                 (map #(str "=[" % "]=") tags)))))
@@ -95,7 +94,6 @@
   (let [types-upper [:bug :patch :request]
         types-lower [:announcement :release :change]
         all-types   (concat types-upper types-lower)
-        ;; Compute cell contents
         rows  (mapv (fn [rtype]
                       {:type    (name rtype)
                        :labels  (fmt-label-tags (get labels rtype) rtype)
@@ -103,12 +101,11 @@
                        :owned   (fmt-trigger-words (get-in triggers [rtype :owned]))
                        :closed  (fmt-trigger-words (get-in triggers [rtype :closed]))})
                     all-types)
-        ;; Column widths (minimum = header length)
-        w-type   (apply max (count "Type")         (map #(count (:type %)) rows))
+        w-type   (apply max (count "Type")           (map #(count (:type %)) rows))
         w-labels (apply max (count "Subject labels") (map #(count (:labels %)) rows))
-        w-acked  (apply max (count "Acked")        (map #(count (:acked %)) rows))
-        w-owned  (apply max (count "Owned")        (map #(count (:owned %)) rows))
-        w-closed (apply max (count "Closed")       (map #(count (:closed %)) rows))
+        w-acked  (apply max (count "Acked")          (map #(count (:acked %)) rows))
+        w-owned  (apply max (count "Owned")          (map #(count (:owned %)) rows))
+        w-closed (apply max (count "Closed")         (map #(count (:closed %)) rows))
         pad      (fn [s w] (str s (apply str (repeat (max 0 (- w (count s))) " "))))
         hline    (str "|-" (apply str (repeat w-type "-")) "-+-"
                       (apply str (repeat w-labels "-")) "-+-"
@@ -125,21 +122,37 @@
                            :acked "Acked" :owned "Owned" :closed "Closed"})
         upper    (map row-str (take 3 rows))
         lower    (map row-str (drop 3 rows))]
-    (str/join "\n" (concat [header hline] upper [hline] lower [""]))))
+    (str/join "\n" (concat [header hline] upper [hline] lower))))
 
 ;; ---------------------------------------------------------------------------
-;; Template substitution
+;; Template substitution — detect and replace the org table block
 ;; ---------------------------------------------------------------------------
+
+(defn- table-line? [s] (str/starts-with? (str/trim s) "|"))
 
 (defn substitute-template
-  "Replace the labels-and-triggers table block in the template."
+  "Replace the first org table block in org-text with the resolved table."
   [org-text labels triggers]
-  (let [table-org (build-table-org labels triggers)]
-    ;; Replace everything between the "** Labels and triggers" heading
-    ;; and the end of file (the table is the last thing in the template)
-    (str/replace org-text
-                 #"(?s)\*\* Labels and triggers\n.*"
-                 (str "** Labels and triggers\n\n" table-org))))
+  (let [table-org (build-table-org labels triggers)
+        lines     (str/split-lines org-text)
+        ;; Find first and last indices of the table block
+        first-tl  (first (keep-indexed (fn [i l] (when (table-line? l) i)) lines))
+        last-tl   (last  (keep-indexed (fn [i l] (when (and first-tl
+                                                            (>= i first-tl)
+                                                            (table-line? l)
+                                                            ;; stop at first gap
+                                                            (every? #(or (table-line? (nth lines %))
+                                                                         false)
+                                                                    (range first-tl (inc i))))
+                                                   i))
+                                       lines))]
+    (if (and first-tl last-tl)
+      (str/join "\n"
+                (concat (take first-tl lines)
+                        [(str table-org)]
+                        (drop (inc last-tl) lines)))
+      ;; No table found — return as-is
+      org-text)))
 
 ;; ---------------------------------------------------------------------------
 ;; Minimal org → HTML conversion
@@ -267,13 +280,8 @@
   .meta { font-size: 0.78rem; color: var(--pico-muted-color); margin-bottom: 2rem; }
 ")
 
-(defn page [body-html source-name]
-  (let [dir        (if source-name (str "public/" source-name) "public")
-        has-index? (.exists (clojure.java.io/file (str dir "/index.html")))
-        has-stats? (.exists (clojure.java.io/file (str dir "/stats.html")))
-        title      (if source-name
-                     (str "BARK — How-to (" source-name ")")
-                     "BARK — How-to")
+(defn page [body-html]
+  (let [title        "BARK — How-to"
         generated-at (str (java.util.Date.))]
     (str
      "<!DOCTYPE html>\n"
@@ -291,10 +299,8 @@
          [:nav
           [:ul [:li [:strong title]]]
           [:ul
-           (when has-index?
-             [:li [:a {:href "index.html" :title "Reports"} "Reports"]])
-           (when has-stats?
-             [:li [:a {:href "stats.html" :title "Statistics"} "Stats"]])
+           [:li [:a {:href "index.html" :title "Reports"} "Reports"]]
+           [:li [:a {:href "stats.html" :title "Statistics"} "Stats"]]
            [:li (theme-toggle-btn)]]]
          [:p.meta (str "Generated " generated-at)]
          (h/raw body-html)
@@ -317,7 +323,7 @@
       org-text    (-> (slurp "docs/howto-tpl.org")
                       (substitute-template labels triggers))
       body-html   (org->html org-text)
-      html        (page body-html source-name)]
+      html        (page body-html)]
   (.mkdirs (.getParentFile (clojure.java.io/file out-file)))
   (spit out-file html)
   (binding [*out* *err*]

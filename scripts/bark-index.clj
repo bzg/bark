@@ -120,8 +120,8 @@
        [:a {:href href :title label :aria-label label} "📎"]])))
 
 (defn- report-row [{:strs [type subject from from-name date date-raw flags status priority
-                                      replies archived-at message-id related role source
-                                      acked owned closed patches]}]
+                           replies archived-at message-id related role source
+                           acked owned closed patches]}]
   (let [label    (get type-labels type type)
         closed?  (and flags (>= (count flags) 3) (= (nth flags 2 \-) \C))
         iso-date (or (parse-to-iso-date (or date-raw date "")) "")
@@ -205,8 +205,6 @@
         has-rss?   (.exists (clojure.java.io/file out-dir "reports.rss"))
         has-org?   (.exists (clojure.java.io/file out-dir "reports.org"))
         has-json?  (.exists (clojure.java.io/file out-dir "reports.json"))
-        has-stats? (.exists (clojure.java.io/file out-dir "stats.html"))
-        has-howto? (.exists (clojure.java.io/file out-dir "howto.html"))
         generated-at (str (java.util.Date.))
         rss-href   "reports.rss"
         org-href   "reports.org"
@@ -244,10 +242,8 @@
            (when has-org?
              [:li [:a {:href org-href :title "Org file"} "Org"]])
            [:li [:a {:href bark-doc-url :title "BARK documentation"} "Docs"]]
-           (when has-howto?
-             [:li [:a {:href "howto.html" :title "How-to"} "How-to"]])
-           (when has-stats?
-             [:li [:a {:href "stats.html" :title "Statistics"} "Stats"]])
+           [:li [:a {:href "howto.html" :title "How-to"} "How-to"]]
+           [:li [:a {:href "stats.html" :title "Statistics"} "Stats"]]
            [:li (theme-toggle-btn)]]]
          [:p {:style "font-size:0.78rem;color:var(--pico-muted-color);margin-bottom:1rem"}
           (str "Generated " generated-at)]

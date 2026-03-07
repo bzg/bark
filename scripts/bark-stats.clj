@@ -320,8 +320,7 @@
      "<nav><ul><li><strong>BARK — Statistics</strong></li></ul>"
      "<ul>"
      "<li><a href=\"index.html\">Reports</a></li>"
-     (when (.exists (clojure.java.io/file "public/howto.html"))
-       "<li><a href=\"howto.html\">How-to</a></li>")
+     "<li><a href=\"howto.html\">How-to</a></li>"
      "<li><button class=\"theme-toggle\" onclick=\"toggleTheme()\" aria-label=\"Toggle theme\">"
      "<span id=\"theme-icon\">🌙</span></button></li>"
      "</ul></nav>\n"
