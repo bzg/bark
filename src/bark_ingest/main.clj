@@ -70,8 +70,26 @@
                   (db/save-imap-uid! db-conn max-uid)))))))))
 
 ;; ---------------------------------------------------------------------------
-;; IDLE mode
+;; IMAP connection
 ;; ---------------------------------------------------------------------------
+
+(defn connect-imap
+  "Connect to IMAP. Returns the connection, or nil on failure."
+  [imap-cfg]
+  (try
+    (log/info "Connecting to IMAP" (:host imap-cfg) "as" (:user imap-cfg))
+    (imap/connect (select-keys imap-cfg
+                               [:host :port :ssl :user
+                                :password :oauth2-token]))
+    (catch Exception e
+      (log/error "IMAP connection failed:" (.getMessage e))
+      nil)))
+
+;; ---------------------------------------------------------------------------
+;; IDLE mode with reconnection
+;; ---------------------------------------------------------------------------
+
+(def ^:private max-backoff-ms (* 5 60 1000))  ;; cap at 5 minutes
 
 (defn start-idle!
   "Start IMAP IDLE, storing each new message as it arrives."
@@ -93,6 +111,35 @@
              {:parse-opts   {:attachments? true}
               :heartbeat-ms (* 20 60 1000)}))
 
+(defn idle-loop!
+  "Run IDLE with automatic reconnection and exponential backoff.
+  On each reconnect, performs a catch-up fetch to recover missed messages."
+  [imap-cfg db-conn ingest-cfg]
+  (let [folder (or (:folder imap-cfg) "INBOX")]
+    (loop [backoff-ms 1000]
+      (when-not (shutting-down?)
+        (let [conn (connect-imap imap-cfg)]
+          (if-not conn
+            (do (log/error "IMAP connection failed, retrying in" (/ backoff-ms 1000) "s")
+                (Thread/sleep backoff-ms)
+                (recur (min (* backoff-ms 2) max-backoff-ms)))
+            (do
+              (try
+                (log/info "IMAP connected, folder:" folder)
+                (catch-up-fetch! conn db-conn folder
+                                 (or (:initial-fetch ingest-cfg) 50))
+                (when-not (shutting-down?)
+                  (start-idle! conn db-conn folder))
+                (catch Exception e
+                  (log/error "IDLE interrupted:" (.getMessage e))))
+              ;; If we get here, IDLE exited (error or server disconnect)
+              (try (imap/disconnect conn) (catch Exception _))
+              (when-not (shutting-down?)
+                ;; Reset backoff — the connection was working
+                (log/warn "IDLE exited, reconnecting in 1s")
+                (Thread/sleep 1000)
+                (recur 1000)))))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Main
 ;; ---------------------------------------------------------------------------
@@ -106,34 +153,15 @@
       (System/exit 1))
     (let [db-cfg     (:db config)
           ingest-cfg (:ingest config)
-          folder     (or (:folder imap-cfg) "INBOX")
           db-conn    (db/connect (:path db-cfg))
-          _          (log/info "Datalevin connected.")
-          imap-conn  (try
-                       (log/info "Connecting to IMAP" (:host imap-cfg)
-                                 "as" (:user imap-cfg))
-                       (imap/connect (select-keys imap-cfg
-                                                  [:host :port :ssl :user
-                                                   :password :oauth2-token]))
-                       (catch Exception e
-                         (log/error "IMAP connection failed:" (.getMessage e))
-                         nil))
-          _          (when-not imap-conn
-                       (db/close db-conn)
-                       (System/exit 1))]
-      (log/info "IMAP connected:" (imap/connected? imap-conn) "folder:" folder)
+          _          (log/info "Datalevin connected.")]
       (.addShutdownHook
        (Runtime/getRuntime)
        (Thread.
         (fn []
           (log/info "Shutting down...")
           (reset! shutdown? true)
-          (try (imap/disconnect imap-conn) (catch Exception _))
           (Thread/sleep 1000)
           (try (db/close db-conn) (catch Exception _))
           (log/info "Goodbye."))))
-      (catch-up-fetch! imap-conn db-conn folder
-                       (or (:initial-fetch ingest-cfg) 50))
-      (when-not (shutting-down?)
-        (log/info "Entering IDLE on" folder)
-        (start-idle! imap-conn db-conn folder)))))
+      (idle-loop! imap-cfg db-conn ingest-cfg))))
