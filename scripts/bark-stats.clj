@@ -203,6 +203,7 @@
          extra))
 
 (def stats-css "
+   main.container { max-width: 1600px; }
   .kpis { display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 1rem; }
   .kpi  { border: 1px solid var(--pico-muted-border-color); border-radius: var(--pico-border-radius);
           padding: 0.9rem 1.3rem; min-width: 130px; flex: 1 1 130px; }

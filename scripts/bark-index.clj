@@ -125,9 +125,22 @@
           :title "Filter related reports"}
       (str "↳ " (count related) " related")]]))
 
+(defn- patch-link [patches]
+  (when (seq patches)
+    (let [n    (count patches)
+          href (if (= 1 n)
+                 (get (first patches) "file")
+                 (let [f (get (first patches) "file")]
+                   ;; directory: strip filename from first patch path
+                   (str/replace f #"/[^/]+$" "/")))
+          label (if (= 1 n) "1 patch file" (str n " patch files"))]
+      [:small.secondary
+       " "
+       [:a {:href href :title label :aria-label label} "📎"]])))
+
 (defn- report-row [multi-src? {:strs [type subject from from-name date date-raw flags status priority
                                       replies archived-at message-id related role source
-                                      acked owned closed]}]
+                                      acked owned closed patches]}]
   (let [label    (get type-labels type type)
         closed?  (and flags (>= (count flags) 3) (= (nth flags 2 \-) \C))
         iso-date (or (parse-to-iso-date (or date-raw date "")) "")
@@ -148,7 +161,7 @@
      [:td {:data-value (str (or status 0))} (status-square flags)]
      [:td (priority-square priority)]
      (when multi-src? [:td [:small (or source "")]])
-     [:td (subject-el subject role archived-at) (related-link related)]
+     [:td (subject-el subject role archived-at) (related-link related) (patch-link patches)]
      [:td.secondary {:title from} author]
      [:td {:data-value iso-date} [:small (or iso-date date "")]]
      [:td {:style "text-align:center"} (or replies 0)]]))
@@ -158,6 +171,7 @@
 ;; ---------------------------------------------------------------------------
 
 (def page-css "
+  main.container { max-width: 1600px; }
   mark[data-type=bug]          { --pico-mark-background-color: #c0392b22; --pico-mark-color: #c0392b; }
   mark[data-type=announcement] { --pico-mark-background-color: #1a7a8a22; --pico-mark-color: #1a7a8a; }
   mark[data-type=request]      { --pico-mark-background-color: #b8860b22; --pico-mark-color: #b8860b; }

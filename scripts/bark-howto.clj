@@ -201,6 +201,7 @@
 ;; ---------------------------------------------------------------------------
 
 (def howto-css "
+  main.container { max-width: 1600px; }
   table { font-size: 0.9rem; }
   pre { font-size: 0.85rem; padding: 1rem; }
   .theme-toggle { cursor: pointer; background: none; border: none; font-size: 1.2rem; padding: 0.3rem; }
