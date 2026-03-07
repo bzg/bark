@@ -34,14 +34,8 @@
   (edn/read-string (slurp "resources/bark-schema.edn")))
 
 ;; ---------------------------------------------------------------------------
-;; Report queries (report-pull-pattern loaded from bark-common.clj)
+;; Report queries (all-reports and report-pull-pattern loaded from bark-common.clj)
 ;; ---------------------------------------------------------------------------
-
-(defn all-reports [db]
-  (->> (d/q (list :find (list 'pull '?r report-pull-pattern)
-                  :where ['?r :report/type '_])
-            db)
-       (map first)))
 
 ;; ---------------------------------------------------------------------------
 ;; Report scoring (same logic as bark-export.clj)

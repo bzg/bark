@@ -40,6 +40,16 @@
                     :email/date-sent :email/source :email/imap-uid
                     :email/headers-edn]}])
 
+(defn all-reports
+  "Fetch all reports from the database. Returns unsorted.
+  Must be called after load-datalevin-pod!."
+  [db]
+  (let [dq (resolve 'pod.huahaiy.datalevin/q)]
+    (->> (dq (list :find (list 'pull '?r report-pull-pattern)
+                   :where ['?r :report/type '_])
+             db)
+         (map first))))
+
 (defn load-config
   "Load config.edn if it exists, or nil."
   []

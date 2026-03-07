@@ -34,13 +34,12 @@
   (edn/read-string (slurp "resources/bark-schema.edn")))
 
 ;; ---------------------------------------------------------------------------
-;; DB queries (report-pull-pattern loaded from bark-common.clj)
+;; DB queries (all-reports and report-pull-pattern loaded from bark-common.clj)
 ;; ---------------------------------------------------------------------------
 
-(defn all-reports [db]
-  (->> (d/q (list :find (list 'pull '?r report-pull-pattern) :where ['?r :report/type '_]) db)
-       (map first)
-       (sort-by #(get-in % [:report/email :email/date-sent]) #(compare %2 %1))))
+(defn all-reports-by-date [db]
+  (sort-by #(get-in % [:report/email :email/date-sent]) #(compare %2 %1)
+           (all-reports db)))
 
 ;; ---------------------------------------------------------------------------
 ;; Formatting helpers
@@ -361,7 +360,7 @@
           maintainers-map (if config (build-maintainers db source-map) {})
           multi-src?      (> (count source-map) 1)
           label           "report"
-          all-reps        (all-reports db)
+          all-reps        (all-reports-by-date db)
           reports         (if source-name
                             (let [matching (filter-by-source all-reps source-name)]
                               (if (and (empty? matching) (not (contains? source-map source-name)))

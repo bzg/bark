@@ -31,15 +31,8 @@
   (or (System/getenv "BARK_DB") "./data/bark-db"))
 
 ;; ---------------------------------------------------------------------------
-;; Queries (report-pull-pattern loaded from bark-common.clj)
+;; Queries (all-reports and report-pull-pattern loaded from bark-common.clj)
 ;; ---------------------------------------------------------------------------
-
-(defn all-reports [db]
-  (->> (d/q '[:find (pull ?r pattern)
-              :in $ pattern
-              :where [?r :report/type _]]
-            db report-pull-pattern)
-       (map first)))
 
 (defn total-emails [db]
   (-> (d/q '[:find (count ?e) :where [?e :email/message-id _]] db)
