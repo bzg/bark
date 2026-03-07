@@ -20,6 +20,11 @@
            ;; --- Use-case 1: mailing list ---
            {:name               "public-list"
             ;;
+            ;; Base URL where this source's public/ directory is served (optional).
+            ;; Used by bone to resolve patch file URLs from reports.json.
+            ;; Example:
+            ;; :bark-path "https://bark.example.org/public/public-list/"
+            ;;
             ;; :list-id expects the identifier inside angle brackets,
             ;; e.g. for a header "List-Id: Org Mode <emacs-orgmode.gnu.org>",
             ;; use "emacs-orgmode.gnu.org" (not the full header value).

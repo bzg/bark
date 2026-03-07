@@ -353,14 +353,18 @@
 ;; ---------------------------------------------------------------------------
 
 (defn -main [& args]
-  (let [opts     (parse-cli-args args)
-        html?    (= (:format opts) "html")
-        out-file (or (:out-file opts)
-                     (if html? "public/stats.html" "public/stats.json"))
-        conn     (d/get-conn db-path schema {:wal? false})
-        db       (d/db conn)
-        reports  (all-reports db)
-        stats    (compute-stats reports)]
+  (let [opts        (parse-cli-args args)
+        html?       (= (:format opts) "html")
+        source-name (:source-name opts)
+        out-file    (or (:out-file opts)
+                        (if html? "public/stats.html" "public/stats.json"))
+        conn        (d/get-conn db-path schema {:wal? false})
+        db          (d/db conn)
+        all-reps    (all-reports db)
+        reports     (if source-name
+                      (filter #(= source-name (get-in % [:report/email :email/source])) all-reps)
+                      all-reps)
+        stats       (compute-stats reports)]
     (io/make-parents out-file)
     (if html?
       (do (spit out-file (render-html stats))

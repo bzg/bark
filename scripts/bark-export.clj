@@ -1,23 +1,34 @@
 #!/usr/bin/env bb
 
-;; bark-export.clj — Dump BARK reports as JSON, RSS, Org, or HTML.
+;; bark-export.clj — Export BARK reports per source.
+;;
+;; Each source gets its own directory under public/:
+;;   public/<source-name>/reports.json
+;;   public/<source-name>/reports.rss
+;;   public/<source-name>/reports.org
+;;   public/<source-name>/index.html
+;;   public/<source-name>/stats.html
+;;   public/<source-name>/howto.html
+;;   public/<source-name>/patches/<mid-hash>/<file>
 ;;
 ;; Usage:
-;;   bb export               — dump all reports as reports.json
-;;   bb export json          — dump all reports as reports.json
-;;   bb export rss           — dump all reports as reports.rss
-;;   bb export org           — dump all reports as reports.org
-;;   bb export html          — generate public/index.html and public/stats.html
-;;   bb export stats         — generate public/stats.json
-;;   bb export all           — export to public/: reports.json, reports.rss,
-;;                             reports.org, index.html, stats.html
+;;   bb export               — export all sources, all formats
+;;   bb export json          — export reports.json for each source
+;;   bb export rss           — export reports.rss for each source
+;;   bb export org           — export reports.org for each source
+;;   bb export html          — generate index.html for each source
+;;   bb export stats         — generate stats.json for each source
+;;   bb export patches       — export patch files for each source
+;;   bb export all           — all of the above
+;;   bb export json -n src   — export only source "src"
 ;;   bb export json -p 2     — only priority >= 2
-;;   bb export json -s 3     — only status >= 3 (i.e. acked+owned+closed or above)
+;;   bb export json -s 3     — only status >= 3
 ;;
 ;; Environment / defaults:
 ;;   BARK_DB — path to db (default: ./data/bark-db)
 
-(require '[cheshire.core :as json]
+(require '[babashka.process :as process]
+         '[cheshire.core :as json]
          '[clojure.string :as str]
          '[clojure.edn :as edn]
          '[clojure.java.io :as io])
@@ -106,7 +117,7 @@
         (contains? (get maintainers-map source-name #{}) from-lc)    "maintainer"
         :else                                                        nil))))
 
-(defn report->map [report source-map maintainers-map multi-src?]
+(defn report->map [report source-map maintainers-map]
   (let [email       (:report/email report)
         source-name (:email/source email)
         from        (or (:email/from-address email) "")
@@ -130,33 +141,32 @@
              :status   (status report)
              :priority (priority report)
              :replies  (descendant-count report)}
-      (:email/from-name email)          (assoc :from-name (:email/from-name email))
-      role                              (assoc :role role)
-      (and multi-src? source-name)      (assoc :source source-name)
+      (:email/from-name email)        (assoc :from-name (:email/from-name email))
+      role                            (assoc :role role)
       (:report/acked report)          (assoc :acked (:email/from-address (:report/acked report)))
       (:report/owned report)          (assoc :owned (:email/from-address (:report/owned report)))
       (:report/closed report)         (assoc :closed (:email/from-address (:report/closed report)))
-      (:report/message-id report)   (assoc :message-id (:report/message-id report))
-      (:report/version report)      (assoc :version (:report/version report))
-      (:report/topic report)        (assoc :topic (:report/topic report))
-      (:report/patch-seq report)    (assoc :patch-seq (:report/patch-seq report))
-      (:report/patch-source report) (assoc :patch-source (mapv name (:report/patch-source report)))
-      arch                          (assoc :archived-at arch)
-      votes                         (assoc :votes votes)
-      series                        (assoc :series
-                                           (let [patches (:series/patches series)]
-                                             {:received (count patches)
-                                              :expected (:series/expected series)
-                                              :complete (= (count patches)
-                                                           (:series/expected series))
-                                              :closed   (some? (:series/closed series))}))
-      (seq related)                 (assoc :related
-                                           (mapv (fn [r]
-                                                   (let [arch (archived-at (:report/email r))]
-                                                     (cond-> {:type       (name (:report/type r))
-                                                              :message-id (:report/message-id r)}
-                                                       arch (assoc :archived-at arch))))
-                                                 related))
+      (:report/message-id report)     (assoc :message-id (:report/message-id report))
+      (:report/version report)        (assoc :version (:report/version report))
+      (:report/topic report)          (assoc :topic (:report/topic report))
+      (:report/patch-seq report)      (assoc :patch-seq (:report/patch-seq report))
+      (:report/patch-source report)   (assoc :patch-source (mapv name (:report/patch-source report)))
+      arch                            (assoc :archived-at arch)
+      votes                           (assoc :votes votes)
+      series                          (assoc :series
+                                             (let [patches (:series/patches series)]
+                                               {:received (count patches)
+                                                :expected (:series/expected series)
+                                                :complete (= (count patches)
+                                                             (:series/expected series))
+                                                :closed   (some? (:series/closed series))}))
+      (seq related)                   (assoc :related
+                                             (mapv (fn [r]
+                                                     (let [arch (archived-at (:report/email r))]
+                                                       (cond-> {:type       (name (:report/type r))
+                                                                :message-id (:report/message-id r)}
+                                                         arch (assoc :archived-at arch))))
+                                                   related))
       (seq (:report/patches report))
       (assoc :patches
              (let [h (mid-hash (:report/message-id report))]
@@ -167,6 +177,20 @@
                          (:patch/subject p) (assoc :subject (:patch/subject p))
                          (:patch/date p)    (assoc :date    (:patch/date p))))
                      (:report/patches report)))))))
+
+;; ---------------------------------------------------------------------------
+;; Source metadata for JSON envelope
+;; ---------------------------------------------------------------------------
+
+(defn- source-metadata
+  "Build metadata map for a single source."
+  [source-name source-map]
+  (let [cfg (get source-map source-name)]
+    (cond-> {}
+      (:list-id cfg)       (assoc :list-id       (:list-id cfg))
+      (:list-post cfg)     (assoc :list-post     (:list-post cfg))
+      (:list-archive cfg)  (assoc :list-archive  (:list-archive cfg))
+      (:bark-path cfg)     (assoc :bark-path     (:bark-path cfg)))))
 
 ;; ---------------------------------------------------------------------------
 ;; XML helpers
@@ -181,19 +205,19 @@
         (str/replace "\"" "&quot;"))))
 
 ;; ---------------------------------------------------------------------------
-;; JSON output
+;; Per-source export functions
 ;; ---------------------------------------------------------------------------
 
 (defn dump-json!
-  "Dump reports as JSON to a file."
-  [reports filename source-map maintainers-map multi-src?]
-  (let [data (mapv #(report->map % source-map maintainers-map multi-src?) reports)]
-    (spit filename (json/generate-string data {:pretty true}))
-    (println (str "Wrote " (count data) " reports to " filename))))
-
-;; ---------------------------------------------------------------------------
-;; RSS output
-;; ---------------------------------------------------------------------------
+  "Dump reports as JSON for a single source."
+  [reports out-dir source-name source-map maintainers-map]
+  (let [data     (mapv #(report->map % source-map maintainers-map) reports)
+        meta     (source-metadata source-name source-map)
+        envelope (cond-> {:source source-name :reports data}
+                   (seq meta) (merge meta))
+        filename (str out-dir "/reports.json")]
+    (spit filename (json/generate-string envelope {:pretty true}))
+    (println (str "  Wrote " (count data) " reports to " filename))))
 
 (defn- rfc822-date
   "RFC 822 date from an ISO-ish date string or inst."
@@ -205,18 +229,14 @@
                (java.util.Date/from inst)))
     (catch Exception _ nil)))
 
-(defn- rss-author
-  "Format author as 'email (name)' per RSS spec."
-  [m]
+(defn- rss-author [m]
   (let [email (:from m)
         name  (:from-name m)]
     (xml-escape (if (and name (not= name email))
                   (str email " (" name ")")
                   email))))
 
-(defn- rss-guid
-  "Use archived-at as guid if available, else message-id."
-  [m]
+(defn- rss-guid [m]
   (let [arch (:archived-at m)
         mid  (:message-id m)]
     (cond
@@ -251,26 +271,23 @@
          "    </item>")))
 
 (defn dump-rss!
-  "Dump reports as RSS 2.0 to a file."
-  [reports filename label source-map maintainers-map multi-src?]
-  (let [data  (mapv #(report->map % source-map maintainers-map multi-src?) reports)
-        items (str/join "\n" (map report->rss-item data))
-        link  "https://www.softwareheritage.org"]
+  "Dump reports as RSS 2.0 for a single source."
+  [reports out-dir source-name source-map maintainers-map]
+  (let [data     (mapv #(report->map % source-map maintainers-map) reports)
+        items    (str/join "\n" (map report->rss-item data))
+        list-url (get-in source-map [source-name :list-archive] "")
+        filename (str out-dir "/reports.rss")]
     (spit filename
           (str "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
                "<rss version=\"2.0\">\n"
                "  <channel>\n"
-               "    <title>BARK " label " reports</title>\n"
-               "    <link>" link "</link>\n"
+               "    <title>BARK " source-name " reports</title>\n"
+               "    <link>" list-url "</link>\n"
                "    <description>Reports from the Bug And Report Keeper</description>\n"
                items "\n"
                "  </channel>\n"
                "</rss>\n"))
-    (println (str "Wrote " (count data) " reports to " filename))))
-
-;; ---------------------------------------------------------------------------
-;; Org output
-;; ---------------------------------------------------------------------------
+    (println (str "  Wrote " (count data) " reports to " filename))))
 
 (defn- report->org-entry [m]
   (let [todo    (if (= (nth (:flags m "---") 2 \-) \C) "DONE" "TODO")
@@ -311,42 +328,63 @@
                 "\n")))))
 
 (defn dump-org!
-  "Dump reports as Org to a file."
-  [reports filename label source-map maintainers-map multi-src?]
-  (let [data    (mapv #(report->map % source-map maintainers-map multi-src?) reports)
-        entries (str/join "\n" (map report->org-entry data))]
+  "Dump reports as Org for a single source."
+  [reports out-dir source-name source-map maintainers-map]
+  (let [data     (mapv #(report->map % source-map maintainers-map) reports)
+        entries  (str/join "\n" (map report->org-entry data))
+        filename (str out-dir "/reports.org")]
     (spit filename
-          (str "#+TITLE: BARK " label " reports\n"
+          (str "#+TITLE: BARK " source-name " reports\n"
                "#+DATE: " (str (java.time.LocalDate/now)) "\n\n"
                entries))
-    (println (str "Wrote " (count data) " reports to " filename))))
-
-;; ---------------------------------------------------------------------------
-;; Patches output
-;; ---------------------------------------------------------------------------
+    (println (str "  Wrote " (count data) " reports to " filename))))
 
 (defn dump-patches!
-  "Export patch files to patches/<mid-hash>/<filename> for each patch report."
-  [reports]
+  "Export patch files for a single source."
+  [reports out-dir]
   (let [patch-reports (filter #(seq (:report/patches %)) reports)
         total         (atom 0)]
     (doseq [report patch-reports]
       (let [mid  (:report/message-id report)
             h    (mid-hash mid)
-            dir  (clojure.java.io/file "public" "patches" h)]
+            dir  (io/file out-dir "patches" h)]
         (.mkdirs dir)
         (doseq [p (:report/patches report)]
-          (let [f (clojure.java.io/file dir (:patch/filename p))]
+          (let [f (io/file dir (:patch/filename p))]
             (spit f (:patch/text p))
             (swap! total inc)))))
-    (println (str "Wrote " @total " patch file(s) from "
-                  (count patch-reports) " report(s) to public/patches/"))))
+    (when (pos? @total)
+      (println (str "  Wrote " @total " patch file(s) from "
+                    (count patch-reports) " report(s)")))))
+
+(defn dump-html!
+  "Generate index.html for a single source."
+  [out-dir source-name cli-args]
+  (let [json-file (str out-dir "/reports.json")]
+    (apply process/shell "bb" "scripts/bark-index.clj"
+           "-o" (str out-dir "/index.html")
+           "--json" json-file
+           cli-args)))
+
+(defn dump-stats!
+  "Generate stats for a single source."
+  [out-dir source-name format cli-args]
+  (let [out-file (str out-dir (if (= format "html") "/stats.html" "/stats.json"))]
+    (apply process/shell "bb" "scripts/bark-stats.clj"
+           (if (= format "html") "html" "json")
+           "-o" out-file
+           "-n" source-name
+           cli-args)))
+
+(defn dump-howto!
+  "Generate howto.html for a single source."
+  [out-dir]
+  (process/shell "bb" "scripts/bark-howto.clj"
+                 "-o" (str out-dir "/howto.html")))
 
 ;; ---------------------------------------------------------------------------
-;; CLI helpers
+;; Filtering
 ;; ---------------------------------------------------------------------------
-
-(def parse-args parse-cli-args)
 
 (defn- filter-by-source
   "Filter reports to only those from the given source name."
@@ -364,14 +402,43 @@
   (filter #(>= (status %) min-s) reports))
 
 ;; ---------------------------------------------------------------------------
+;; Per-source export orchestration
+;; ---------------------------------------------------------------------------
+
+(defn export-source!
+  "Export a single source in the given format(s)."
+  [format reports out-dir source-name source-map maintainers-map cli-extra]
+  (.mkdirs (io/file out-dir))
+  (let [do-format (fn [fmt]
+                    (case fmt
+                      "json"    (dump-json!    reports out-dir source-name source-map maintainers-map)
+                      "rss"     (dump-rss!     reports out-dir source-name source-map maintainers-map)
+                      "org"     (dump-org!     reports out-dir source-name source-map maintainers-map)
+                      "patches" (dump-patches! reports out-dir)
+                      "html"    (do (dump-json! reports out-dir source-name source-map maintainers-map)
+                                    (dump-howto! out-dir)
+                                    (dump-html!  out-dir source-name cli-extra))
+                      "stats"   (dump-stats! out-dir source-name "json" cli-extra)))]
+    (if (= format "all")
+      (do (do-format "json")
+          (do-format "rss")
+          (do-format "org")
+          (do-format "patches")
+          (dump-howto! out-dir)
+          (dump-html!  out-dir source-name cli-extra)
+          (dump-stats! out-dir source-name "json" cli-extra)
+          (dump-stats! out-dir source-name "html" cli-extra))
+      (do-format format))))
+
+;; ---------------------------------------------------------------------------
 ;; Main
 ;; ---------------------------------------------------------------------------
 
 (def formats #{"json" "rss" "org" "html" "all" "stats" "patches"})
 
 (let [{:keys [format source-name min-priority min-status]
-       :or {format "json"}}
-      (parse-args *command-line-args*)
+       :or {format "all"}}
+      (parse-cli-args *command-line-args*)
       db-path (or (System/getenv "BARK_DB") "data/bark-db")
       conn    (d/get-conn db-path schema {:wal? false})]
   (try
@@ -389,46 +456,25 @@
           config          (load-config)
           source-map      (if config (build-source-map config) {})
           maintainers-map (if config (build-maintainers db source-map) {})
-          multi-src?      (> (count source-map) 1)
-          label           "report"
           all-reps        (all-reports-by-date db)
-          reports         (if source-name
-                            (let [matching (filter-by-source all-reps source-name)]
-                              (if (and (empty? matching) (not (contains? source-map source-name)))
-                                (do (println (str "Error: no source named '" source-name "'"))
-                                    (println (str "Available: "
-                                                  (str/join ", " (keys source-map))))
-                                    (System/exit 1))
-                                matching))
-                            all-reps)
-          reports         (if min-priority
-                            (filter-by-priority reports min-priority)
-                            reports)
-          reports         (if min-status
-                            (filter-by-status reports min-status)
-                            reports)
-          _               (.mkdirs (clojure.java.io/file "public"))
-          basename        "public/reports"]
-      (if (empty? reports)
-        (println (str "No reports found."
-                      (when source-name (str " (source: " source-name ")"))))
-        (case format
-          "json"  (dump-json! reports (str basename ".json") source-map maintainers-map multi-src?)
-          "rss"   (dump-rss!  reports (str basename ".rss") label source-map maintainers-map multi-src?)
-          "org"   (dump-org!  reports (str basename ".org") label source-map maintainers-map multi-src?)
-          "html"  (do (dump-json! reports "public/reports.json" source-map maintainers-map multi-src?)
-                      (babashka.process/shell "bb scripts/bark-howto.clj")
-                      (apply babashka.process/shell "bb scripts/bark-index.clj" *command-line-args*))
-          "stats" (apply babashka.process/shell "bb scripts/bark-stats.clj" *command-line-args*)
-          "patches" (dump-patches! reports)
-          "all"   (let [extra (rest *command-line-args*)]
-                    (dump-json! reports "public/reports.json" source-map maintainers-map multi-src?)
-                    (dump-rss!  reports "public/reports.rss"  label source-map maintainers-map multi-src?)
-                    (dump-org!  reports "public/reports.org"  label source-map maintainers-map multi-src?)
-                    (dump-patches! reports)
-                    (babashka.process/shell "bb scripts/bark-howto.clj")
-                    (apply babashka.process/shell "bb scripts/bark-index.clj" extra)
-                    (apply babashka.process/shell "bb scripts/bark-stats.clj" extra)
-                    (apply babashka.process/shell "bb scripts/bark-stats.clj" "html" extra)))))
+          source-names    (if source-name
+                            (if (contains? source-map source-name)
+                              [source-name]
+                              (do (println (str "Error: no source named '" source-name "'"))
+                                  (println (str "Available: "
+                                                (str/join ", " (keys source-map))))
+                                  (System/exit 1)))
+                            (mapv :name (:sources config)))
+          cli-extra       (remove #{format "-n" source-name} (rest *command-line-args*))]
+      (doseq [src-name source-names]
+        (let [reports (filter-by-source all-reps src-name)
+              reports (if min-priority (filter-by-priority reports min-priority) reports)
+              reports (if min-status   (filter-by-status reports min-status) reports)
+              out-dir (str "public/" src-name)]
+          (println (str "[" src-name "] " (count reports) " report(s)"))
+          (if (empty? reports)
+            (println (str "  No reports for source '" src-name "', skipping."))
+            (export-source! format reports out-dir src-name
+                            source-map maintainers-map cli-extra)))))
     (finally
       (d/close conn))))

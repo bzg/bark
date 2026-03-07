@@ -52,16 +52,20 @@
   (s/keys :opt-un [:match/list-id :match/delivered-to :match/to]))
 
 ;; Source
-(s/def :source/name ::non-blank-string)
+(s/def :source/name
+  (s/and ::non-blank-string
+         #(re-matches #"[a-zA-Z0-9][a-zA-Z0-9._-]*" %)))
 (s/def :source/match ::match)
 (s/def :source/admin ::email)
 (s/def :source/list-post ::email)
 (s/def :source/list-archive (s/and ::non-blank-string #(re-find #"^https?://" %)))
+(s/def :source/bark-path ::non-blank-string)
 
 (s/def ::source
   (s/keys :req-un [:source/name]
           :opt-un [:source/match :source/admin :source/list-post
-                   :source/list-archive :source/triggers :source/labels]))
+                   :source/list-archive :source/triggers :source/labels
+                   :source/bark-path]))
 
 (s/def :bark/sources
   (s/and (s/coll-of ::source :kind vector? :min-count 1)

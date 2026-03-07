@@ -24,31 +24,12 @@
 ;; Config
 ;; ---------------------------------------------------------------------------
 
-(def json-file "public/reports.json")
+(def default-json "public/reports.json")
 (def default-output "public/index.html")
 (def bark-doc-url "https://codeberg.org/bzg/bark/src/branch/main/docs/howto.org")
 
 (def type-labels {"bug" "bug" "announcement" "ann" "request" "req"
                   "patch" "patch" "release" "rel" "change" "chg"})
-
-;; ---------------------------------------------------------------------------
-;; Generate reports.json via bark-export
-;; ---------------------------------------------------------------------------
-
-(defn generate-json! [source-name min-priority min-status]
-  (let [f   (clojure.java.io/file json-file)
-        _   (when (.exists f) (.delete f))
-        cmd (cond-> ["bb" "scripts/bark-export.clj" "json"]
-              source-name  (into ["-n" source-name])
-              min-priority (into ["-p" (str min-priority)])
-              min-status   (into ["-s" (str min-status)]))
-        {:keys [exit]} (apply process/shell {:continue true} cmd)]
-    (when-not (zero? exit)
-      (binding [*out* *err*] (println "bark-export failed (exit" exit ")"))
-      (System/exit 1))
-    (when-not (.exists f)
-      (binding [*out* *err*] (println (str json-file " not produced")))
-      (System/exit 1))))
 
 ;; ---------------------------------------------------------------------------
 ;; Date normalization
@@ -138,7 +119,7 @@
        " "
        [:a {:href href :title label :aria-label label} "📎"]])))
 
-(defn- report-row [multi-src? {:strs [type subject from from-name date date-raw flags status priority
+(defn- report-row [{:strs [type subject from from-name date date-raw flags status priority
                                       replies archived-at message-id related role source
                                       acked owned closed patches]}]
   (let [label    (get type-labels type type)
@@ -160,7 +141,6 @@
      [:td [:mark {:data-type type} label]]
      [:td {:data-value (str (or status 0))} (status-square flags)]
      [:td (priority-square priority)]
-     (when multi-src? [:td [:small (or source "")]])
      [:td (subject-el subject role archived-at) (related-link related) (patch-link patches)]
      [:td.secondary {:title from} author]
      [:td {:data-value iso-date} [:small (or iso-date date "")]]
@@ -218,38 +198,26 @@
 ;; Page assembly
 ;; ---------------------------------------------------------------------------
 
-(defn page [reports min-status]
+(defn page [reports min-status out-dir]
   (let [types      (vec (distinct (map #(get % "type") reports)))
         types-json (json/generate-string types)
-        multi-src? (some #(get % "source") reports)
         all-open?  (and min-status (>= min-status 4))
-        rss-file   "public/reports.rss"
-        org-file   "public/reports.org"
-        has-rss?   (.exists (clojure.java.io/file rss-file))
-        has-org?   (.exists (clojure.java.io/file org-file))
-        has-json?  (.exists (clojure.java.io/file json-file))
-        has-stats? (.exists (clojure.java.io/file "public/stats.html"))
-        has-howto? (.exists (clojure.java.io/file "public/howto.html"))
+        has-rss?   (.exists (clojure.java.io/file out-dir "reports.rss"))
+        has-org?   (.exists (clojure.java.io/file out-dir "reports.org"))
+        has-json?  (.exists (clojure.java.io/file out-dir "reports.json"))
+        has-stats? (.exists (clojure.java.io/file out-dir "stats.html"))
+        has-howto? (.exists (clojure.java.io/file out-dir "howto.html"))
         generated-at (str (java.util.Date.))
         rss-href   "reports.rss"
         org-href   "reports.org"
         json-href  "reports.json"
-        src-off    (if multi-src? 1 0)
-        cols       (concat
-                    [[:th {:data-sort "type"     :onclick "sortTable(0,'type')"}     "Type"]
-                     [:th {:data-sort "status"   :onclick "sortTable(1,'status')"}   "Status"]
-                     [:th {:data-sort "priority" :onclick "sortTable(2,'priority')"} "Priority"]]
-                    (when multi-src?
-                      [[:th {:data-sort "source"
-                             :onclick "sortTable(3,'source')"} "Source"]])
-                    [[:th {:data-sort "subject"
-                           :onclick (str "sortTable(" (+ 3 src-off) ",'subject')")} "Subject"]
-                     [:th {:data-sort "from"
-                           :onclick (str "sortTable(" (+ 4 src-off) ",'from')")} "Author"]
-                     [:th {:data-sort "date"
-                           :onclick (str "sortTable(" (+ 5 src-off) ",'date')")} "Date"]
-                     [:th {:data-sort "replies"
-                           :onclick (str "sortTable(" (+ 6 src-off) ",'replies')")} "↩"]])]
+        cols       [[:th {:data-sort "type"     :onclick "sortTable(0,'type')"}     "Type"]
+                    [:th {:data-sort "status"   :onclick "sortTable(1,'status')"}   "Status"]
+                    [:th {:data-sort "priority" :onclick "sortTable(2,'priority')"} "Priority"]
+                    [:th {:data-sort "subject"  :onclick "sortTable(3,'subject')"}  "Subject"]
+                    [:th {:data-sort "from"     :onclick "sortTable(4,'from')"}     "Author"]
+                    [:th {:data-sort "date"     :onclick "sortTable(5,'date')"}     "Date"]
+                    [:th {:data-sort "replies"  :onclick "sortTable(6,'replies')"}  "↩"]]]
     (str
      "<!DOCTYPE html>\n"
      (h/html
@@ -310,19 +278,22 @@
            [:thead [:tr (seq cols)]]
            [:tbody
             (for [r reports]
-              (report-row multi-src? r))]]]
+              (report-row r))]]]
          [:script (h/raw (page-js types-json all-open?))]]]]))))
 
 ;; ---------------------------------------------------------------------------
 ;; Main
 ;; ---------------------------------------------------------------------------
 
-(let [{:keys [out-file source-name min-priority min-status]}
+(let [{:keys [out-file json-file min-status]}
       (parse-cli-args *command-line-args*)
-      out-file (or out-file default-output)]
-  (.mkdirs (clojure.java.io/file "public"))
-  (let [reports (json/parse-string (slurp json-file))
-        html    (page reports min-status)]
+      json-file (or json-file default-json)
+      out-file  (or out-file default-output)
+      out-dir   (or (.getParent (clojure.java.io/file out-file)) "public")]
+  (.mkdirs (clojure.java.io/file out-dir))
+  (let [envelope (json/parse-string (slurp json-file))
+        reports  (get envelope "reports" envelope)
+        html     (page reports min-status out-dir)]
     (spit out-file html)
     (binding [*out* *err*]
       (println (str "Wrote " (count reports) " reports to " out-file)))))
