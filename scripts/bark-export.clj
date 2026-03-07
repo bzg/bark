@@ -213,7 +213,9 @@
   [reports out-dir source-name source-map maintainers-map]
   (let [data     (mapv #(report->map % source-map maintainers-map) reports)
         meta     (source-metadata source-name source-map)
-        envelope (cond-> {:source source-name :reports data}
+        envelope (cond-> {:format-version "0.1.0"
+                         :source         source-name
+                         :reports        data}
                    (seq meta) (merge meta))
         filename (str out-dir "/reports.json")]
     (spit filename (json/generate-string envelope {:pretty true}))
