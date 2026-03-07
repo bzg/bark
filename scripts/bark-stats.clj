@@ -33,19 +33,8 @@
   (or (System/getenv "BARK_DB") "./data/bark-db"))
 
 ;; ---------------------------------------------------------------------------
-;; Queries
+;; Queries (report-pull-pattern loaded from bark-common.clj)
 ;; ---------------------------------------------------------------------------
-
-(def report-pull-pattern
-  '[:db/id :report/type :report/digested-at
-    :report/urgent :report/important
-    :report/votes-up :report/votes-down
-    {:report/acked  [:email/from-address :email/date-sent]}
-    {:report/owned  [:email/from-address :email/date-sent]}
-    {:report/closed [:email/from-address :email/date-sent]}
-    {:report/series [:series/id :series/closed]}
-    {:report/email  [:email/from-address :email/from-name
-                     :email/date-sent :email/source :email/subject]}])
 
 (defn all-reports [db]
   (->> (d/q '[:find (pull ?r pattern)

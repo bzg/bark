@@ -35,20 +35,8 @@
   (edn/read-string (slurp "resources/bark-schema.edn")))
 
 ;; ---------------------------------------------------------------------------
-;; Report queries (mirrors bark-export.clj)
+;; Report queries (report-pull-pattern loaded from bark-common.clj)
 ;; ---------------------------------------------------------------------------
-
-(def report-pull-pattern
-  '[:db/id :report/type :report/version :report/topic
-    :report/patch-seq :report/message-id
-    {:report/acked [:email/from-address]}
-    {:report/owned [:email/from-address]}
-    {:report/closed [:email/from-address]}
-    :report/urgent :report/important
-    :report/votes-up :report/votes-down
-    :report/descendants
-    {:report/email [:email/subject :email/from-address :email/from-name
-                    :email/date-sent :email/source :email/headers-edn]}])
 
 (defn all-reports [db]
   (->> (d/q (list :find (list 'pull '?r report-pull-pattern)

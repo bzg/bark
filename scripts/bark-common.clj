@@ -5,6 +5,28 @@
 (require '[clojure.string :as str]
          '[clojure.edn :as edn])
 
+;; ---------------------------------------------------------------------------
+;; Canonical report pull pattern (shared by export, notify, stats)
+;; ---------------------------------------------------------------------------
+
+(def report-pull-pattern
+  '[:db/id :report/type :report/version :report/topic
+    :report/patch-seq :report/patch-source :report/message-id
+    {:report/acked [:email/from-address]}
+    {:report/owned [:email/from-address]}
+    {:report/closed [:email/from-address :email/date-sent]}
+    :report/urgent :report/important
+    :report/votes-up :report/votes-down
+    :report/descendants :report/digested-at
+    {:report/related [:report/type :report/message-id
+                      {:report/email [:email/headers-edn]}]}
+    {:report/series [:series/id :series/expected :series/closed
+                     {:series/patches [:db/id]}
+                     {:series/cover-letter [:email/message-id]}]}
+    {:report/email [:email/subject :email/from-address :email/from-name
+                    :email/date-sent :email/source :email/imap-uid
+                    :email/headers-edn]}])
+
 (defn load-config
   "Load config.edn if it exists, or nil."
   []
