@@ -512,9 +512,6 @@
 (let [{:keys [out-file source-name min-priority min-status]}
       (parse-cli-args *command-line-args*)
       out-file (or out-file default-output)]
-  (binding [*out* *err*]
-    (println "Generating" json-file "via bark-export…"))
-  ;; (generate-json! source-name min-priority min-status)
   (.mkdirs (clojure.java.io/file "public"))
   (let [reports (json/parse-string (slurp json-file))
         html    (page reports min-status)]
