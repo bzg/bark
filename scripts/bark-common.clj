@@ -62,6 +62,8 @@
                     (assoc :triggers (:triggers src))
                     (:labels src)
                     (assoc :labels (:labels src))
+                    (:archive-format-string src)
+                    (assoc :archive-format-string (:archive-format-string src))
                     global-st
                     (assoc :global-labels global-st))]))
           (:sources config))))

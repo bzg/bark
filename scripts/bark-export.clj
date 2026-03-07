@@ -132,7 +132,13 @@
   (let [email       (:report/email report)
         source-name (:email/source email)
         from        (or (:email/from-address email) "")
-        arch        (archived-at email)
+        raw-arch    (archived-at email)
+        mid         (some-> (:report/message-id report)
+                            (str/replace #"^<|>$" ""))
+        fmt-str     (get-in source-map [source-name :archive-format-string])
+        arch        (if (and fmt-str mid)
+                      (str/replace fmt-str "%s" mid)
+                      raw-arch)
         votes       (votes-str report)
         series      (:report/series report)
         related     (:report/related report)
@@ -359,7 +365,7 @@
        :or {format "json"}}
       (parse-args *command-line-args*)
       db-path (or (System/getenv "BARK_DB") "data/bark-db")
-      conn    (d/get-conn db-path schema)]
+      conn    (d/get-conn db-path schema {:wal? false})]
   (try
     (when-not (formats format)
       (println (str "Unknown format: " format))
@@ -405,10 +411,12 @@
           "html"  (do (dump-json! reports "public/reports.json" source-map maintainers-map multi-src?)
                       (apply babashka.process/shell "bb scripts/bark-index.clj" *command-line-args*))
           "stats" (apply babashka.process/shell "bb scripts/bark-stats.clj" *command-line-args*)
-          "all"   (do (dump-json! reports "public/reports.json" source-map maintainers-map multi-src?)
-                      (dump-rss!  reports "public/reports.rss"  label source-map maintainers-map multi-src?)
-                      (dump-org!  reports "public/reports.org"  label source-map maintainers-map multi-src?)
-                      (apply babashka.process/shell "bb scripts/bark-index.clj" *command-line-args*)
-                      (apply babashka.process/shell "bb scripts/bark-stats.clj" *command-line-args*)))))
+          "all"   (let [extra (rest *command-line-args*)]
+                    (dump-json! reports "public/reports.json" source-map maintainers-map multi-src?)
+                    (dump-rss!  reports "public/reports.rss"  label source-map maintainers-map multi-src?)
+                    (dump-org!  reports "public/reports.org"  label source-map maintainers-map multi-src?)
+                    (apply babashka.process/shell "bb scripts/bark-index.clj" extra)
+                    (apply babashka.process/shell "bb scripts/bark-stats.clj" extra)
+                    (apply babashka.process/shell "bb scripts/bark-stats.clj" "html" extra)))))
     (finally
       (d/close conn))))

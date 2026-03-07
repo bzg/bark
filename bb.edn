@@ -3,14 +3,14 @@
               :task (apply shell "bb scripts/bark-digest.clj" *command-line-args*)}
   export     {:doc  "Export reports: bb export [json|rss|org|html|stats|all] [-n source] [-p 1|2|3] [-s 1-7]"
               :task (apply shell "bb scripts/bark-export.clj" *command-line-args*)}
-  test-config {:doc  "Validate config.edn (pass path as arg, default: ./config.edn)"
-               :task (apply shell "bb scripts/validate-config.clj" *command-line-args*)}
   notify     {:doc  "Send notification emails: bb notify [--dry-run]"
               :task (apply shell "bb scripts/bark-notify.clj" *command-line-args*)}
   clean      {:doc  "Remove all files in public/"
               :task (doseq [f (.listFiles (clojure.java.io/file "public"))]
                      (.delete f)
                      (println "Deleted" (.getName f)))}
+  test-config {:doc  "Validate config.edn (pass path as arg, default: ./config.edn)"
+               :task (apply shell "bb scripts/validate-config.clj" *command-line-args*)}
   test-digest {:doc  "Run bark-digest integration tests"
                :task (shell "bb test/bark-digest-test.clj")}
   test-smtp  {:doc  "Test SMTP config: bb test-smtp [--to addr] [--dry-run]"

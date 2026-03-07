@@ -24,7 +24,7 @@
   "Open a Datalevin connection at the given path."
   [db-path]
   (log/info "Opening Datalevin database at" db-path)
-  (d/get-conn db-path schema))
+  (d/get-conn db-path schema {:wal? false}))
 
 (defn close [conn]
   (d/close conn))

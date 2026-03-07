@@ -192,18 +192,13 @@
                      :score      (- (or (:report/votes-up r) 0) (or (:report/votes-down r) 0))}))
        (sort-by :score >) (take n)))
 
-(defn compute-stats [reports n-emails]
+(defn compute-stats [reports]
   {:generated-at      (str (java.util.Date.))
    :reports-per-type  (reports-per-type reports)
    :reports-by-month  (reports-by-month reports)
-   :email-vs-reports  (email-vs-reports-ratio reports n-emails)
    :time-to-close     (time-to-close-stats reports)
    :open-closed-ratio (open-closed-ratio reports)
-   :source-breakdown  (source-breakdown reports)
-   :patch-series      (patch-series-stats reports)
-   :top-openers       (top-openers reports 10)
-   :top-trigger-users (top-trigger-users reports 10)
-   :vote-leaders      (vote-leaders reports 5)})
+   :top-openers       (top-openers reports 10)})
 
 ;; ---------------------------------------------------------------------------
 ;; HTML / Vega-Lite rendering
@@ -308,9 +303,7 @@
 
 (defn render-html [stats]
   (let [{:keys [generated-at reports-per-type reports-by-month
-                email-vs-reports time-to-close open-closed-ratio
-                source-breakdown patch-series top-openers
-                top-trigger-users vote-leaders]} stats
+                time-to-close open-closed-ratio top-openers]} stats
         n-yr (reduce + (vals reports-per-type))
         pct  #(when % (str (Math/round (* 100.0 %)) "%"))]
     (str
@@ -350,16 +343,12 @@
 
      "<h2>Summary</h2>\n<div class=\"kpis\">\n"
      (kpi n-yr "Reports (last year)")
-     (kpi (:total-emails email-vs-reports) "Emails (total)")
-     (kpi (or (pct (:ratio email-vs-reports)) "n/a") "Report/email ratio")
      (kpi (:open open-closed-ratio) "Currently open"
           (str (pct (:ratio open-closed-ratio)) " of all"))
      (kpi (:closed open-closed-ratio) "Closed (all time)")
      (when time-to-close
        (kpi (str (:median-days time-to-close) "d") "Median to close"
             (str "avg " (:avg-days time-to-close) "d")))
-     (kpi (:unique-series patch-series) "Patch series"
-          (str (:closed-series patch-series) " closed"))
      "</div>\n"
 
      "<h2>Charts</h2>\n<div class=\"grid\">\n"
@@ -367,24 +356,8 @@
      (chart-box "chart-type"    (chart-per-type reports-per-type))
      (when time-to-close
        (chart-box "chart-ttc"   (chart-ttc time-to-close)))
-     (when (seq source-breakdown)
-       (chart-box "chart-src"   (chart-sources source-breakdown)))
      (chart-box "chart-openers" (chart-openers top-openers))
-     (when (seq top-trigger-users)
-       (chart-box "chart-trigg" (chart-triggers top-trigger-users)))
      "</div>\n"
-
-     (when (seq vote-leaders)
-       (str "<h2>Vote leaders</h2>\n"
-            "<div class=\"box\"><figure><table>\n"
-            "<thead><tr><th>Topic</th><th>👍</th><th>👎</th><th>Score</th></tr></thead>\n"
-            "<tbody>\n"
-            (str/join "\n"
-              (map (fn [{:keys [topic votes-up votes-down score]}]
-                     (str "<tr><td>" topic "</td><td>" votes-up
-                          "</td><td>" votes-down "</td><td>" score "</td></tr>"))
-                   vote-leaders))
-            "\n</tbody></table></figure></div>\n"))
 
      "<script>document.addEventListener('DOMContentLoaded',barkRenderAll);</script>\n"
      "</main>\n</body>\n</html>\n")))
@@ -398,11 +371,10 @@
         html?    (= (:format opts) "html")
         out-file (or (:out-file opts)
                      (if html? "public/stats.html" "public/stats.json"))
-        conn     (d/get-conn db-path schema)
+        conn     (d/get-conn db-path schema {:wal? false})
         db       (d/db conn)
         reports  (all-reports db)
-        n-emails (total-emails db)
-        stats    (compute-stats reports n-emails)]
+        stats    (compute-stats reports)]
     (io/make-parents out-file)
     (if html?
       (do (spit out-file (render-html stats))

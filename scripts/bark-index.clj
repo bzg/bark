@@ -26,7 +26,7 @@
 
 (def json-file "public/reports.json")
 (def default-output "public/index.html")
-(def bark-doc-url "https://codeberg.org/bzg/bark")
+(def bark-doc-url "https://codeberg.org/bzg/bark/src/branch/main/docs/howto.org")
 
 (def type-labels {"bug" "bug" "announcement" "ann" "request" "req"
                   "patch" "patch" "release" "rel" "change" "chg"})
@@ -125,12 +125,13 @@
           :title "Filter related reports"}
       (str "↳ " (count related) " related")]]))
 
-(defn- report-row [multi-src? {:strs [type subject from date date-raw flags status priority
+(defn- report-row [multi-src? {:strs [type subject from from-name date date-raw flags status priority
                                       replies archived-at message-id related role source
                                       acked owned closed]}]
   (let [label    (get type-labels type type)
         closed?  (and flags (>= (count flags) 3) (= (nth flags 2 \-) \C))
-        iso-date (or (parse-to-iso-date (or date-raw date "")) "")]
+        iso-date (or (parse-to-iso-date (or date-raw date "")) "")
+        author   (or (when (seq from-name) from-name) from)]
     [:tr {:data-type     type
           :data-closed   (str closed?)
           :data-mid      (or message-id "")
@@ -142,13 +143,13 @@
           :data-owned    (str/lower-case (or owned ""))
           :data-closedby (str/lower-case (or closed ""))
           :data-priority (str (or priority 0))
-          :data-search   (str/lower-case (str subject " " from " " iso-date))}
+          :data-search   (str/lower-case (str subject " " from " " author " " iso-date))}
      [:td [:mark {:data-type type} label]]
      [:td {:data-value (str (or status 0))} (status-square flags)]
      [:td (priority-square priority)]
      (when multi-src? [:td [:small (or source "")]])
      [:td (subject-el subject role archived-at) (related-link related)]
-     [:td.secondary from]
+     [:td.secondary {:title from} author]
      [:td {:data-value iso-date} [:small (or iso-date date "")]]
      [:td {:style "text-align:center"} (or replies 0)]]))
 
@@ -196,9 +197,9 @@
   var allTypes = " types-json ";
   var activeTypes = {};
   allTypes.forEach(function(t) { activeTypes[t] = true; });
-  var showClosed = " (if all-open? "true" "false") ";
-  var showAcked  = true;
-  var showOwned  = true;
+  var showClosed  = false;
+  var onlyAcked   = false;
+  var onlyOwned   = false;
 
   function getSearchInput() { return document.getElementById('si'); }
 
@@ -278,9 +279,10 @@
     var d = tr.dataset;
 
     if (!activeTypes[d.type]) return false;
+    if (showClosed && d.closed !== 'true') return false;
     if (!showClosed && d.closed === 'true') return false;
-    if (!showAcked  && d.acked  !== '')     return false;
-    if (!showOwned  && d.owned  !== '')     return false;
+    if (onlyAcked  && d.acked  === '')     return false;
+    if (onlyOwned  && d.owned  === '')     return false;
 
     if (q.mids.length     > 0 && !matchField((d.mid || '').toLowerCase(), q.mids))     return false;
     if (q.froms.length    > 0 && !matchField(d.from,                      q.froms))    return false;
@@ -325,13 +327,13 @@
   }
 
   function toggleAcked(btn) {
-    showAcked = !showAcked;
+    onlyAcked = !onlyAcked;
     btn.classList.toggle('outline');
     filterRows();
   }
 
   function toggleOwned(btn) {
-    showOwned = !showOwned;
+    onlyOwned = !onlyOwned;
     btn.classList.toggle('outline');
     filterRows();
   }
@@ -348,8 +350,8 @@
     var active = allTypes.filter(function(t) { return activeTypes[t]; });
     if (active.length !== allTypes.length) params.set('types', active.join(','));
     if (showClosed)  params.set('closed', '1');
-    if (!showAcked)  params.set('acked', '0');
-    if (!showOwned)  params.set('owned', '0');
+    if (onlyAcked)   params.set('acked', '1');
+    if (onlyOwned)   params.set('owned', '1');
     var qs = params.toString();
     history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
   }
@@ -368,13 +370,13 @@
       showClosed = true;
       document.getElementById('show-closed').checked = true;
     }
-    if (params.get('acked') === '0') {
-      showAcked = false;
-      document.getElementById('btn-acked').classList.add('outline');
+    if (params.get('acked') === '1') {
+      onlyAcked = true;
+      document.getElementById('btn-acked').classList.remove('outline');
     }
-    if (params.get('owned') === '0') {
-      showOwned = false;
-      document.getElementById('btn-owned').classList.add('outline');
+    if (params.get('owned') === '1') {
+      onlyOwned = true;
+      document.getElementById('btn-owned').classList.remove('outline');
     }
     filterRows();
   }
@@ -437,7 +439,7 @@
                     [[:th {:data-sort "subject"
                            :onclick (str "sortTable(" (+ 3 src-off) ",'subject')")} "Subject"]
                      [:th {:data-sort "from"
-                           :onclick (str "sortTable(" (+ 4 src-off) ",'from')")} "From"]
+                           :onclick (str "sortTable(" (+ 4 src-off) ",'from')")} "Author"]
                      [:th {:data-sort "date"
                            :onclick (str "sortTable(" (+ 5 src-off) ",'date')")} "Date"]
                      [:th {:data-sort "replies"
@@ -483,17 +485,17 @@
                        :onclick (str "toggleType('" t "',this)")}
               (get type-labels t t)])]
           [:div.filters.status-filters
-           [:button#btn-acked.acked-btn
+           [:button#btn-acked.acked-btn.outline
             {:onclick "toggleAcked(this)" :title "Toggle visibility of acked reports"}
-            "acked"]
-           [:button#btn-owned.owned-btn
+            "Acked"]
+           [:button#btn-owned.owned-btn.outline
             {:onclick "toggleOwned(this)" :title "Toggle visibility of owned reports"}
-            "owned"]]
+            "Owned"]]
           (when-not all-open?
             [:div.controls
              [:label
               [:input#show-closed {:type "checkbox" :onchange "toggleClosed()"}]
-              " Show closed"]])]
+              " Closed"]])]
          [:div#status]
          [:figure {:style "overflow-x:auto"}
           [:table.striped

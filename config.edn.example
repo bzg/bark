@@ -1,4 +1,4 @@
-{;; Default admin email — used for any source that doesn't specify its own :admin
+{ ;; Default admin email — used for any source that doesn't specify its own :admin
  :admin "admin@example.com"
 
  ;; Single IMAP connection
@@ -16,15 +16,17 @@
             ;; The mailing list address (for List-Post permission check)
             :mailing-list-email "bugs@example.org"
             :admin              "lead@example.org"
+            ;; Build archive URLs from message-ids (%s is replaced by the message-id).
+            ;; Overrides the Archived-At header when present.  Only relevant for
+            ;; sources matched by :list-id (public/private mailing lists).
+            ;; :archive-format-string "https://list.orgmode.org/%s/T/#t"
+            ;;
             ;; Per-source body triggers (optional).
             ;; Only specified actions override defaults; others keep builtins.
-            ;; Defaults — bug:  acked=Approved,Confirmed  owned=Handled  closed=Canceled,Fixed
-            ;;            patch: acked=Approved,Reviewed   owned=Handled  closed=Canceled,Applied
-            ;;            request: acked=Approved          owned=Handled  closed=Canceled,Done,Closed
-            ;;            announcement/release/change: closed=Canceled
             ;; :triggers {:bug   {:acked ["Approved" "Confirmed" "Verified"]
             ;;                    :closed ["Canceled" "Fixed" "Resolved"]}
             ;;            :patch {:acked ["Approved" "Reviewed" "LGTM"]}}
+            ;;
             ;; Per-source labels (optional).
             ;; Overrides global :labels for this source only.
             ;; :labels {:request ["POLL" "FR" "TODO" "TASK"]}

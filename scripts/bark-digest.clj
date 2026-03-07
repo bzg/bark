@@ -860,7 +860,7 @@
         all?    (some #{"--all"} args)
         db-path (or (System/getenv "BARK_DB") "data/bark-db")
         config  (load-config)
-        conn    (d/get-conn db-path report-schema)]
+        conn    (d/get-conn db-path report-schema {:wal? false})]
     (try
       (when config (ensure-source-roles! conn config))
       (when config
