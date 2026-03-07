@@ -123,10 +123,15 @@
 
       :else
       (let [txdata (email->txdata msg)]
-        (d/transact! conn [txdata])
-        (log/info "Stored email UID:" imap-uid
-                  "Subject:" (truncate (:email/subject txdata) 60))
-        true))))
+        (try
+          (d/transact! conn [txdata])
+          (log/info "Stored email UID:" imap-uid
+                    "Subject:" (truncate (:email/subject txdata) 60))
+          true
+          (catch Exception e
+            (if (str/includes? (str (.getMessage e)) "MDB_KEYEXIST")
+              (do (log/debug "Duplicate Message-ID (race):" message-id) false)
+              (throw e))))))))
 
 (defn store-emails!
   "Store a batch of parsed emails. Returns the count of newly stored emails."
