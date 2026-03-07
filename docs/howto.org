@@ -1,19 +1,11 @@
 * 🐕 BARK --- Bug And Report Keeper
 
-BARK monitors a mailbox and turns incoming emails into a structured
-list of reports. When an email with a recognized subject tag (e.g.
-=[BUG]=, =[PATCH]=) arrives, BARK classifies it as a report. Follow-up
-emails in the same thread can update that report's state through
-trigger words. Admins and maintainers manage roles and receive
-periodic digest notifications --- all via email.
+BARK monitors a mailbox and turns incoming emails into reports.
+Follow-up emails in the same thread can update that report's state
+through trigger words. Admins and maintainers manage roles and can
+receive periodic digest email notifications.
 
 For the full documentation, see the [[https://codeberg.org/bzg/bark][BARK project page]].
-
-** This instance
-
-This BARK instance watches =sources= for incoming emails.
-
-=sources-table=
 
 * Usage
 
@@ -34,8 +26,8 @@ diffs (git format).
 
 State changes happen when a reply in the same thread contains a
 trigger word at the beginning of a line, followed by a punctuation
-mark (=.= =,= =;= =:=). For example, replying to a bug report with a
-line starting with =Confirmed.= marks the bug as acked.
+mark (=.= =,= =;= =:=). For example, replying to a bug report with a line
+starting with =Confirmed.= marks the bug as acked.
 
 Multiple triggers can appear in the same email:
 
@@ -118,8 +110,8 @@ Examples:
 #+begin_example
 Notify: d:7                 — every 7 days
 Notify: d:1                 — daily
+Notify: p:1                 — only important reports
 Notify: d:3 s:4 p:2         — every 3 days, only open reports with priority >= 2
-Notify: p:1                 — only important or urgent reports
 #+end_example
 
 Like role commands, =Notify:= commands are only processed from direct
@@ -140,7 +132,7 @@ Detected from email subject tags:
 
 ​* Require admin or maintainer permission.
 
-Patches are also detected from =.patch=/=.diff= attachments and inline
+Patches are also detected from =.patch/.diff= attachments and inline
 diffs (git format).
 
 When a =[REL version]= report is created, any open =[CHG version]= reports
@@ -148,10 +140,9 @@ with the same version are automatically closed.
 
 ** Customising subject tags
 
-The subject tags above are the built-in defaults.  You can override
-them globally or per source in =config.edn= via =:labels=.
-Specify only the types you want to change; unspecified types keep their
-defaults.
+The subject tags above are the built-in defaults. You can override
+them globally or per source in =config.edn= via =:labels=. Specify only
+the types you want to change; unspecified types keep their defaults.
 
 #+begin_src edn
 ;; Global override (applies to all sources)
