@@ -4,12 +4,15 @@
 ;;
 ;; BARK: Bug And Report Keeper
 ;;
-;; Reads emails and writes reports to the same datalevin database.
-;; For each email, either:
-;;   1. It triggers a new report (respecting permissions)
-;;   2. It is a descendant of an existing report (added to :report/descendants)
-;;   3. It contains admin/maintainer commands (role management)
-;;   4. It is unrelated or from an ignored address
+;; Orchestrates the digest pipeline:
+;;   1. Classify email source
+;;   2. Apply role/notify commands
+;;   3. Detect report type
+;;   4. Create report or thread as descendant
+;;   5. Apply triggers to nearest ancestor
+;;   6. Manage patch series
+;;
+;; Detection, triggers, roles, and series logic are in separate modules.
 ;;
 ;; Usage:
 ;;   bb digest [--all]   — scan new emails (or all with --all)
@@ -24,507 +27,17 @@
 
 (load-datalevin-pod!)
 
+(load-file "scripts/bark-roles.clj")
+(load-file "scripts/bark-detect.clj")
+(load-file "scripts/bark-triggers.clj")
+(load-file "scripts/bark-series.clj")
+
 ;; ---------------------------------------------------------------------------
 ;; Schema — loaded from shared bark-schema.edn
 ;; ---------------------------------------------------------------------------
 
 (def report-schema
   (edn/read-string (slurp "resources/bark-schema.edn")))
-
-;; ---------------------------------------------------------------------------
-;; Config
-;; ---------------------------------------------------------------------------
-
-;; classify-source, build-source-map, get-header loaded from bark-common.clj
-
-;; ---------------------------------------------------------------------------
-;; Per-source roles
-;; ---------------------------------------------------------------------------
-
-(defn get-roles [db source-name]
-  (or (d/pull db '[:roles/admin :roles/maintainers :roles/ignored]
-              [:roles/source source-name])
-      {}))
-
-(defn ensure-source-roles! [conn config]
-  (let [default-admin (:admin config)]
-    (doseq [{:keys [name admin]} (:sources config)]
-      (let [admin    (or admin default-admin)
-            existing (d/q '[:find ?e .
-                            :in $ ?src
-                            :where [?e :roles/source ?src]]
-                          (d/db conn) name)]
-        (d/transact! conn [{:roles/source name
-                            :roles/admin  admin}])
-        (when-not existing
-          (println (str "  Initialized roles for source " name
-                        " (admin: " admin ")")))))))
-
-(defn- roles-set [roles attr]
-  (let [v (get roles attr)]
-    (if (nil? v) #{} (set (if (string? v) [v] v)))))
-
-(defn admin? [roles addr]
-  (= (:roles/admin roles) addr))
-
-(defn maintainer? [roles addr]
-  (contains? (roles-set roles :roles/maintainers) addr))
-
-(defn admin-or-maintainer? [roles addr]
-  (or (admin? roles addr) (maintainer? roles addr)))
-
-(defn ignored? [roles addr]
-  (contains? (roles-set roles :roles/ignored) addr))
-
-(defn- roles-eid [conn source-name]
-  (d/q '[:find ?e .
-         :in $ ?src
-         :where [?e :roles/source ?src]]
-       (d/db conn) source-name))
-
-(defn- add-role! [conn source-name attr addresses]
-  (when-let [eid (roles-eid conn source-name)]
-    (doseq [addr addresses]
-      (d/transact! conn [[:db/add eid attr addr]]))))
-
-(defn- remove-role! [conn source-name attr addresses]
-  (when-let [eid (roles-eid conn source-name)]
-    (doseq [addr addresses]
-      (d/transact! conn [[:db/retract eid attr addr]]))))
-
-;; ---------------------------------------------------------------------------
-;; Email header helpers
-;; ---------------------------------------------------------------------------
-
-;; get-header loaded from bark-common.clj
-
-(defn- from-mailing-list?
-  "True if the email was delivered through a mailing list (has List-Id header)."
-  [email]
-  (some? (get-header (:email/headers-edn email) "List-Id")))
-
-(defn- list-post-address
-  "Extract the email address from the List-Post header, e.g.
-  \"<mailto:list@example.org>\" → \"list@example.org\".  Returns nil if absent."
-  [email]
-  (when-let [lp (get-header (:email/headers-edn email) "List-Post")]
-    (second (re-find #"<mailto:([^>]+)>" lp))))
-
-;; ---------------------------------------------------------------------------
-;; Role commands
-;; ---------------------------------------------------------------------------
-
-(def role-command-pattern
-  #"(?m)^(Add admin|Remove admin|Add maintainer|Remove maintainer|Ignore|Unignore):\s+(.+)$")
-
-(defn- parse-addresses [s]
-  (when s (remove str/blank? (str/split (str/trim s) #"\s+"))))
-
-(defn- parse-role-commands [body-text]
-  (when body-text
-    (->> (re-seq role-command-pattern body-text)
-         (mapv (fn [[_ cmd addrs]]
-                 {:command cmd :addresses (parse-addresses addrs)})))))
-
-(def ^:private role-dispatch
-  {"Add admin"         {:requires :admin  :action :set-admin}
-   "Remove admin"      {:requires :admin  :action :noop :msg "cannot remove admin (use Add admin to replace)"}
-   "Remove maintainer" {:requires :admin  :attr :roles/maintainers :action :remove}
-   "Unignore"          {:requires :admin  :attr :roles/ignored     :action :remove}
-   "Add maintainer"    {:requires :maint  :attr :roles/maintainers :action :add}
-   "Ignore"            {:requires :maint  :attr :roles/ignored     :action :add}})
-
-(defn apply-role-commands! [conn roles source-name from-addr body-text]
-  (let [commands  (parse-role-commands body-text)
-        is-admin  (admin? roles from-addr)
-        is-maint  (admin-or-maintainer? roles from-addr)]
-    (doseq [{:keys [command addresses]} commands]
-      (when-let [{:keys [requires action attr msg]} (role-dispatch command)]
-        (if (case requires :admin is-admin :maint is-maint)
-          (case action
-            :set-admin (when-let [new-admin (first addresses)]
-                         (d/transact! conn [{:roles/source source-name
-                                             :roles/admin  new-admin}])
-                         (println (str "    → set admin: " new-admin " (for " source-name ")")))
-            :add       (do (add-role! conn source-name attr addresses)
-                           (println (str "    → " (str/lower-case command) ": "
-                                         (str/join " " addresses) " (for " source-name ")")))
-            :remove    (do (remove-role! conn source-name attr addresses)
-                           (println (str "    → " (str/lower-case command) ": "
-                                         (str/join " " addresses) " (for " source-name ")")))
-            :noop      (println (str "    → " msg)))
-          (println (str "    [denied] " from-addr " lacks permission for: " command)))))))
-
-;; ---------------------------------------------------------------------------
-;; Notify commands
-;; ---------------------------------------------------------------------------
-
-(def ^:private notify-pattern
-  #"(?m)^Notify:\s+(.+)$")
-
-(defn- parse-notify-params
-  "Parse 'on', 'off', or param string like 'd:7 p:2 s:4'.
-  Supports 'on'/'off' as prefix combined with params, e.g. 'on d:7 p:2'.
-  Returns map with :enabled, :interval-days, :min-priority, :min-status."
-  [s]
-  (let [s (str/trim s)
-        lc (str/lower-case s)]
-    (cond
-      (= lc "on")  {:enabled true}
-      (= lc "off") {:enabled false}
-      :else
-      (let [has-on?  (str/starts-with? lc "on ")
-            has-off? (str/starts-with? lc "off ")
-            params   (re-seq #"([dps]):(\d+)" s)
-            base     (cond has-on?  {:enabled true}
-                           has-off? {:enabled false}
-                           :else    {})]
-        (reduce (fn [m [_ k v]]
-                  (case k
-                    "d" (assoc m :interval-days (parse-long v))
-                    "p" (assoc m :min-priority (parse-long v))
-                    "s" (assoc m :min-status (parse-long v))
-                    m))
-                base params)))))
-
-(defn- notify-key [source-name email]
-  (str source-name ":" (str/lower-case email)))
-
-(defn ensure-notify-defaults!
-  "Create default notify prefs for admin+maintainers who don't have one yet."
-  [conn source-name roles]
-  (let [admin  (:roles/admin roles)
-        maints (let [v (:roles/maintainers roles)]
-                 (cond (nil? v) [] (string? v) [v] :else v))
-        emails (distinct (remove nil? (cons admin maints)))]
-    (doseq [email emails]
-      (let [k (notify-key source-name email)]
-        (when-not (d/q '[:find ?e .
-                         :in $ ?k
-                         :where [?e :notify/key ?k]]
-                       (d/db conn) k)
-          (d/transact! conn [{:notify/key          k
-                              :notify/source       source-name
-                              :notify/email        (str/lower-case email)
-                              :notify/enabled      true
-                              :notify/interval-days 30
-                              :notify/min-priority 1
-                              :notify/min-status   1}]))))))
-
-(defn apply-notify-commands!
-  "Parse and apply Notify: commands from email body.
-  Only admin/maintainers can set their own notification prefs."
-  [conn roles source-name from-addr body-text]
-  (when-let [[_ params-str] (re-find notify-pattern (or body-text ""))]
-    (when (admin-or-maintainer? roles from-addr)
-      (let [params (parse-notify-params params-str)
-            k      (notify-key source-name from-addr)
-            base   {:notify/key    k
-                    :notify/source source-name
-                    :notify/email  (str/lower-case from-addr)}
-            txn    (cond-> base
-                     (contains? params :enabled)       (assoc :notify/enabled (:enabled params))
-                     (contains? params :interval-days)  (assoc :notify/interval-days (:interval-days params))
-                     (contains? params :min-priority)   (assoc :notify/min-priority (:min-priority params))
-                     (contains? params :min-status)     (assoc :notify/min-status (:min-status params)))]
-        (d/transact! conn [txn])
-        (println (str "    → notify: " params-str " (for " from-addr " on " source-name ")"))))))
-
-;; ---------------------------------------------------------------------------
-;; Report detection
-;; ---------------------------------------------------------------------------
-
-;; Mailing list managers may prepend "[listname] " or similar bracketed
-;; prefixes to the subject.  The bark-specific tag is always the last
-;; bracketed construct, so we skip zero or more leading "[...] " groups.
-(def ^:private ml-prefix "(?:\\[[^\\]]*\\]\\s*)*")
-
-;; ---------------------------------------------------------------------------
-;; Label defaults and compilation
-;; ---------------------------------------------------------------------------
-
-(def default-labels
-  "Default subject tags per report type.
-  :bug/:patch/:release/:change accept a version suffix after the tag.
-  :request/:announcement match any of the listed tags exactly."
-  {:bug          ["BUG"]
-   :patch        ["PATCH"]
-   :request      ["POLL" "FR" "TODO"]
-   :announcement ["ANN" "ANNOUNCEMENT"]
-   :release      ["REL" "RELEASE"]
-   :change       ["CHG" "CHANGE"]})
-
-(defn- compile-labels
-  "Compile a labels map into a map of type → regex pattern.
-  Tags for :bug/:patch/:release/:change allow an optional version suffix.
-  Tags for :request/:announcement match the tag exactly (no suffix)."
-  [st]
-  (let [versioned? #{:bug :patch :release :change}]
-    (into {}
-          (map (fn [[rtype tags]]
-                 (let [alts (str/join "|" (map #(java.util.regex.Pattern/quote %) tags))
-                       pat  (if (versioned? rtype)
-                              (re-pattern (str "(?i)^" ml-prefix "\\[(" alts ")(?:\\s+([^\\]]*))?\\]"))
-                              (re-pattern (str "(?i)^" ml-prefix "\\[(" alts ")\\]")))]
-                   [rtype pat])))
-          st)))
-
-(def default-compiled-labels
-  (compile-labels default-labels))
-
-(defn- resolve-labels
-  "Compile labels for a source-map entry.
-  Merges global (:global-labels) and per-source (:labels)
-  overrides on top of defaults. Returns compiled patterns."
-  [source-cfg]
-  (let [global  (:global-labels source-cfg)
-        per-src (:labels source-cfg)
-        merged  (cond
-                  (and global per-src) (merge default-labels global per-src)
-                  global              (merge default-labels global)
-                  per-src             (merge default-labels per-src)
-                  :else               nil)]
-    (if merged
-      (compile-labels merged)
-      default-compiled-labels)))
-
-(def patch-seq-pattern #"(\d+/\d+)\s*$")
-
-(defn detect-bug [subject patterns]
-  (when-let [m (re-find (:bug patterns) subject)]
-    {:type :bug :version (when (nth m 2 nil) (str/trim (nth m 2)))}))
-
-(defn detect-patch-subject [subject patterns]
-  (when-let [m (re-find (:patch patterns) subject)]
-    (let [inner   (when (nth m 2 nil) (str/trim (nth m 2)))
-          seq-m   (when inner (re-find patch-seq-pattern inner))
-          seq-str (when seq-m (first seq-m))
-          topic   (when inner
-                    (let [t (if seq-str
-                              (str/trim (subs inner 0 (- (count inner) (count seq-str))))
-                              inner)]
-                      (when-not (str/blank? t) t)))]
-      (cond-> {:type :patch :patch-source #{:subject}}
-        seq-str (assoc :patch-seq seq-str)
-        topic   (assoc :topic topic)))))
-
-(defn detect-request [subject patterns] (when (re-find (:request patterns) subject) {:type :request}))
-(defn detect-announcement [subject patterns] (when (re-find (:announcement patterns) subject) {:type :announcement}))
-
-(defn- detect-versioned-tag [pattern type subject]
-  (when-let [m (re-find pattern subject)]
-    (let [ver (nth m 2 nil)]
-      (cond-> {:type type}
-        (and ver (not (str/blank? ver))) (assoc :version (str/trim ver))))))
-
-(defn detect-release [subject patterns] (detect-versioned-tag (:release patterns) :release subject))
-(defn detect-change [subject patterns] (detect-versioned-tag (:change patterns) :change subject))
-
-;; Attachment & inline patch detection
-
-(def patch-filename-pattern #"(?i)\.(patch|diff)$")
-
-(defn has-patch-attachment? [attachments]
-  (some (fn [att] (when-let [f (:attachment/filename att)] (re-find patch-filename-pattern f)))
-        attachments))
-
-(def inline-patch-indicators
-  [#"(?m)^diff --git " #"(?m)^--- a/" #"(?m)^\+\+\+ b/"
-   #"(?m)^@@ [-+]\d+" #"(?m)^index [0-9a-f]+\.\.[0-9a-f]+"])
-
-(defn has-inline-patch? [body-text]
-  (when body-text (>= (count (filter #(re-find % body-text) inline-patch-indicators)) 2)))
-
-(defn detect-patch [subject attachments body-text patterns]
-  (let [from-subject    (detect-patch-subject subject patterns)
-        from-attachment (when (has-patch-attachment? attachments) :attachment)
-        from-inline     (when (has-inline-patch? body-text) :inline)
-        ;; A subject tag alone is only sufficient for cover letters (0/M).
-        ;; For all other cases, require actual patch content.
-        cover-letter?   (when-let [s (:patch-seq from-subject)]
-                          (str/starts-with? s "0/"))
-        subject-only?   (and from-subject (not from-attachment) (not from-inline))
-        sources         (cond-> #{}
-                          (and from-subject (or (not subject-only?) cover-letter?))
-                          (into (:patch-source from-subject))
-                          from-attachment (conj :attachment)
-                          from-inline     (conj :inline))]
-    (when (seq sources)
-      (cond-> {:type :patch :patch-source sources}
-        (:patch-seq from-subject) (assoc :patch-seq (:patch-seq from-subject))
-        (:topic from-subject)     (assoc :topic (:topic from-subject))))))
-
-(def announcement-types #{:announcement :release :change})
-
-(defn detect-report
-  ([email] (detect-report email default-compiled-labels))
-  ([email patterns]
-   (when-let [subject (:email/subject email)]
-     (let [attachments (:email/attachments email)
-           body-text   (or (:email/body-text email) (:email/body-text-from-html email))]
-       (or (detect-bug subject patterns)
-           (detect-patch subject attachments body-text patterns)
-           (detect-request subject patterns)
-           (detect-announcement subject patterns)
-           (detect-release subject patterns)
-           (detect-change subject patterns))))))
-
-(defn can-create-report?
-  "Check if from-addr is allowed to create this report.
-  Announcements require admin/maintainer.
-  On list-backed sources, non-privileged users must send through
-  the list (List-Post header matches :list-post)."
-  [roles from-addr report-info email source-cfg]
-  (cond
-    (announcement-types (:type report-info))
-    (admin-or-maintainer? roles from-addr)
-
-    (admin-or-maintainer? roles from-addr)
-    true
-
-    :else
-    (let [ml-email (:list-post source-cfg)]
-      (if (nil? ml-email)
-        ;; No mailing list configured — anyone can create
-        true
-        ;; Must have matching List-Post header
-        (let [lp (list-post-address email)]
-          (when (and lp (not= lp ml-email))
-            (println (str "    [list-post mismatch] expected " ml-email " got " lp)))
-          (= lp ml-email))))))
-
-;; ---------------------------------------------------------------------------
-;; Triggers
-;; ---------------------------------------------------------------------------
-
-(defn- trigger-pattern [& words]
-  (re-pattern (str "(?m)^(" (str/join "|" (map #(java.util.regex.Pattern/quote %) words)) ")[.,;:]")))
-
-(defn- match-triggers [triggers body-text]
-  (into {} (keep (fn [[k p]] (when (re-find p body-text) [(keyword "report" (name k)) true]))) triggers))
-
-(defn- match-unset-triggers [triggers body-text]
-  (into #{} (keep (fn [[k p]] (when (re-find p body-text) (keyword "report" (name k))))) triggers))
-
-(def default-trigger-words
-  "Default trigger words per report type and action."
-  {:bug          {:acked ["Approved" "Confirmed"] :owned ["Handled"] :closed ["Canceled" "Fixed"]}
-   :patch        {:acked ["Approved" "Reviewed"]  :owned ["Handled"] :closed ["Canceled" "Applied"]}
-   :request      {:acked ["Approved"]             :owned ["Handled"] :closed ["Canceled" "Done" "Closed"]}
-   :announcement {:closed ["Canceled"]}
-   :release      {:closed ["Canceled"]}
-   :change       {:closed ["Canceled"]}})
-
-(defn- compile-trigger-words
-  "Compile a map of action→word-lists into action→regex-patterns."
-  [action-map]
-  (into {} (map (fn [[action words]] [action (apply trigger-pattern words)])) action-map))
-
-(defn- compile-triggers-by-type
-  "Compile a full type→action→words map into type→action→pattern."
-  [tw]
-  (into {} (map (fn [[rtype actions]] [rtype (compile-trigger-words actions)])) tw))
-
-(def default-triggers-by-type (compile-triggers-by-type default-trigger-words))
-
-(defn- build-source-triggers
-  "Merge triggers for a source: defaults → global → per-source.
-  Returns compiled type→action→pattern map."
-  [source-cfg]
-  (let [global  (:global-triggers source-cfg)
-        per-src (:triggers source-cfg)
-        merged  (cond
-                  (and global per-src)
-                  (reduce-kv (fn [acc rtype overrides]
-                               (assoc acc rtype (merge (get acc rtype) overrides)))
-                             (reduce-kv (fn [acc rtype overrides]
-                                          (assoc acc rtype (merge (get acc rtype) overrides)))
-                                        default-trigger-words global)
-                             per-src)
-                  global
-                  (reduce-kv (fn [acc rtype overrides]
-                               (assoc acc rtype (merge (get acc rtype) overrides)))
-                             default-trigger-words global)
-                  per-src
-                  (reduce-kv (fn [acc rtype overrides]
-                               (assoc acc rtype (merge (get acc rtype) overrides)))
-                             default-trigger-words per-src)
-                  :else nil)]
-    (if merged
-      (compile-triggers-by-type merged)
-      default-triggers-by-type)))
-
-(def report-unset-triggers
-  {:urgent (trigger-pattern "Not urgent") :important (trigger-pattern "Not important")})
-
-(def report-priority-triggers
-  {:urgent (trigger-pattern "Urgent") :important (trigger-pattern "Important")})
-
-(def report-types-with-priority #{:bug :patch :request})
-
-(def vote-up-pattern   #"(?m)^\s*(?:\+1|1\+)\s*$")
-(def vote-down-pattern #"(?m)^\s*(?:-1|1-)\s*$")
-
-(defn- detect-vote [body-text]
-  (when body-text
-    (cond
-      (re-find vote-up-pattern body-text)   :up
-      (re-find vote-down-pattern body-text) :down)))
-
-(defn apply-vote! [conn report-eid from-addr body-text]
-  ;; NB: read-then-write is safe because cmd-digest! processes emails
-  ;; sequentially. If parallelized, this needs a transaction function.
-  (when-let [vote (detect-vote body-text)]
-    (let [db      (d/db conn)
-          current (d/pull db [:report/voters :report/votes-up :report/votes-down] report-eid)
-          voters  (set (:report/voters current))]
-      (when-not (contains? voters from-addr)
-        (let [attr (if (= vote :up) :report/votes-up :report/votes-down)
-              n    (or (get current attr) 0)]
-          (d/transact! conn [[:db/add report-eid attr (inc n)]
-                             [:db/add report-eid :report/voters from-addr]])
-          (println (str "    → vote " (if (= vote :up) "+1" "-1")
-                        " by " from-addr)))))))
-
-(defn detect-triggers [report-type body-text triggers-by-type]
-  (when body-text
-    (let [sets     (when-let [t (triggers-by-type report-type)] (match-triggers t body-text))
-          priority (when (report-types-with-priority report-type) (match-triggers report-priority-triggers body-text))
-          unsets   (when (report-types-with-priority report-type) (match-unset-triggers report-unset-triggers body-text))
-          all-sets (into {} (remove (fn [[k _]] (contains? unsets k))) (merge sets priority))]
-      (when (or (seq all-sets) (seq unsets))
-        {:set all-sets :unset unsets}))))
-
-(defn- ref-eid [v] (if (map? v) (:db/id v) v))
-
-(def state-attrs [:report/acked :report/owned :report/closed :report/urgent :report/important])
-
-(defn apply-triggers! [conn report-eid report-type email source-map]
-  (let [body-text  (or (:email/body-text email) (:email/body-text-from-html email))
-        from-addr  (:email/from-address email)
-        src-name   (d/q '[:find ?src . :in $ ?rid :where
-                          [?rid :report/email ?e] [?e :email/source ?src]]
-                        (d/db conn) report-eid)
-        triggers   (build-source-triggers (get source-map src-name))
-        result     (detect-triggers report-type body-text triggers)]
-    (when (and (= :request report-type) from-addr body-text)
-      (apply-vote! conn report-eid from-addr body-text))
-    (when result
-      (let [eid      (:db/id email)
-            current  (d/pull (d/db conn) state-attrs report-eid)
-            new-sets (into {} (remove (fn [[k _]] (get current k))) (:set result))
-            new-unsets (into #{} (filter current) (:unset result))
-            set-tx   (when (seq new-sets)
-                       [(into {:db/id report-eid} (map (fn [[k _]] [k eid])) new-sets)])
-            unset-tx (when (seq new-unsets)
-                       (mapv (fn [attr] [:db/retract report-eid attr (ref-eid (get current attr))]) new-unsets))
-            all-tx   (into (vec set-tx) unset-tx)]
-        (when (seq all-tx)
-          (d/transact! conn all-tx)
-          (println (str "    → "
-                        (str/join ", " (concat (map (comp name key) new-sets)
-                                               (map #(str "un-" (name %)) new-unsets)))
-                        " (by " (:email/message-id email) ")")))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Threading
@@ -541,7 +54,6 @@
                    (coll? refs)   (vec refs)
                    :else          [])
         irt  (:email/in-reply-to email)
-        ;; refs is ordered root→parent; append irt if not already present
         all  (if (and irt (not (some #{irt} refs)))
                (conj refs irt)
                refs)]
@@ -560,6 +72,20 @@
         type-idx    (into {} (map (fn [[rid _ type]] [rid type])) reports)]
     {:thread-index thread-idx :type-index type-idx}))
 
+(defn- lookup-reports-by-mid
+  "Find report eids matching a message-id, either as report root or descendant."
+  [db mid]
+  (let [as-root (d/q '[:find [?r ...]
+                       :in $ ?mid
+                       :where [?r :report/message-id ?mid]]
+                     db mid)
+        as-desc (d/q '[:find [?r ...]
+                       :in $ ?mid
+                       :where [?r :report/descendants ?e]
+                              [?e :email/message-id ?mid]]
+                     db mid)]
+    (into (set as-root) as-desc)))
+
 (defn find-reports-for-email
   "Return all report eids threaded with this email (for descendant linking).
   Checks the in-memory batch index first, then falls back to DB lookups."
@@ -568,13 +94,7 @@
     (reduce (fn [acc mid]
               (if-let [from-idx (thread-index mid)]
                 (into acc from-idx)
-                (let [from-db (d/q '[:find [?r ...]
-                                     :in $ ?mid
-                                     :where (or [?r :report/message-id ?mid]
-                                                (and [?r :report/descendants ?e]
-                                                     [?e :email/message-id ?mid]))]
-                                   db mid)]
-                  (into acc from-db))))
+                (into acc (lookup-reports-by-mid db mid))))
             #{} mids)))
 
 (defn find-nearest-report
@@ -583,13 +103,8 @@
   [email thread-index db]
   (some (fn [mid]
           (or (thread-index mid)
-              (let [from-db (d/q '[:find [?r ...]
-                                   :in $ ?mid
-                                   :where (or [?r :report/message-id ?mid]
-                                              (and [?r :report/descendants ?e]
-                                                   [?e :email/message-id ?mid]))]
-                                 db mid)]
-                (when (seq from-db) (set from-db)))))
+              (let [from-db (lookup-reports-by-mid db mid)]
+                (when (seq from-db) from-db))))
         (rseq (ancestor-mids email))))
 
 ;; ---------------------------------------------------------------------------
@@ -637,8 +152,7 @@
   (d/transact! conn [[:db/add report-eid :report/descendants email-eid]]))
 
 (defn link-related-reports!
-  "Link a newly created report to all existing reports it's threaded with.
-  The relation is bi-directional: both sides get :report/related."
+  "Link a newly created report to all existing reports it's threaded with."
   [conn new-report-eid parent-report-eids]
   (when (seq parent-report-eids)
     (let [txdata (into []
@@ -666,167 +180,16 @@
                       " [CHG " version "] (superseded by release)"))))))
 
 ;; ---------------------------------------------------------------------------
-;; Patch series
-;; ---------------------------------------------------------------------------
-
-(defn- parse-seq
-  "Parse \"2/5\" into [2 5], or nil."
-  [s]
-  (when s
-    (let [[_ n m] (re-find #"(\d+)/(\d+)" s)]
-      (when (and n m)
-        [(parse-long n) (parse-long m)]))))
-
-(defn- series-id
-  "Compute a stable series identity from topic, sender, and total count."
-  [topic sender total]
-  (str (or topic "") "|" sender "|" total))
-
-(defn- next-series-id
-  "Find the next available series-id by appending a revision suffix.
-  E.g. parser|user@test.org|3, parser|user@test.org|3#2, etc."
-  [db topic sender total]
-  (let [base (series-id topic sender total)
-        existing (d/q '[:find [?sid ...]
-                        :in $ ?prefix
-                        :where
-                        [?s :series/id ?sid]
-                        [(clojure.string/starts-with? ?sid ?prefix)]]
-                      db base)]
-    (if (empty? existing)
-      base
-      (str base "#" (inc (count existing))))))
-
-(defn find-open-series
-  "Find an open series matching topic+sender+total."
-  [db topic sender total]
-  (d/q '[:find ?s .
-         :in $ ?topic ?sender ?exp
-         :where
-         [?s :series/topic ?topic]
-         [?s :series/sender ?sender]
-         [?s :series/expected ?exp]
-         (not [?s :series/closed _])]
-       db (or topic "") sender total))
-
-(defn find-open-series-by-topic-sender
-  "Find any open series matching topic+sender (any total)."
-  [db topic sender]
-  (when (and topic sender)
-    (d/q '[:find [?s ...]
-           :in $ ?topic ?sender
-           :where
-           [?s :series/topic ?topic]
-           [?s :series/sender ?sender]
-           (not [?s :series/closed _])]
-         db topic sender)))
-
-(defn create-series!
-  "Create a new series entity. Returns the series eid."
-  [conn topic sender total]
-  (let [sid (next-series-id (d/db conn) topic sender total)]
-    (d/transact! conn [{:series/id       sid
-                        :series/topic    (or topic "")
-                        :series/sender   sender
-                        :series/expected total}])
-    (d/q '[:find ?s . :in $ ?sid :where [?s :series/id ?sid]]
-         (d/db conn) sid)))
-
-(defn close-series!
-  "Close a series, setting :series/closed to the given email eid."
-  [conn series-eid email-eid]
-  (d/transact! conn [{:db/id series-eid :series/closed email-eid}]))
-
-(defn add-patch-to-series!
-  "Link a patch report to a series and set :report/series back-ref."
-  [conn series-eid report-eid]
-  (d/transact! conn [[:db/add series-eid :series/patches report-eid]
-                     {:db/id report-eid :report/series series-eid}]))
-
-(defn set-cover-letter!
-  "Set the cover letter (0/N email) on a series."
-  [conn series-eid email-eid]
-  (d/transact! conn [{:db/id series-eid :series/cover-letter email-eid}]))
-
-(defn manage-series!
-  "After creating a patch report, manage its series membership.
-  - Finds or creates the series
-  - If this is a cover letter (0/M) or a duplicate 1/M arriving as a
-    descendant of an old series, close the old one and start fresh
-  - Adds the patch to the series (or sets cover letter for 0/M)"
-  [conn report-eid email-eid report-info from-addr parent-report-eids]
-  (when-let [[n m] (parse-seq (:patch-seq report-info))]
-    (let [topic  (:topic report-info)
-          db     (d/db conn)
-          ;; Find existing open series for this topic+sender
-          existing-series (when topic
-                            (find-open-series-by-topic-sender db topic from-addr))
-          ;; 0/M always signals a restart (new cover letter).
-          ;; 1/M signals restart only if the existing series already
-          ;; contains a 1/* patch (i.e. the sequence is truly restarting).
-          restart? (and (seq existing-series)
-                        (or (zero? n)
-                            (and (= 1 n)
-                                 (let [existing-seqs
-                                       (d/q '[:find [?seq ...]
-                                              :in $ [?s ...]
-                                              :where
-                                              [?s :series/patches ?r]
-                                              [?r :report/patch-seq ?seq]]
-                                            db existing-series)]
-                                   (some #(str/starts-with? % "1/") existing-seqs)))))
-          ;; Is this a descendant of any of those existing series' patches?
-          ancestor? (when restart?
-                      (let [old-mids (into
-                                      ;; patch report message-ids
-                                      (set (d/q '[:find [?mid ...]
-                                                  :in $ [?s ...]
-                                                  :where [?s :series/patches ?r]
-                                                  [?r :report/message-id ?mid]]
-                                                db existing-series))
-                                      ;; cover letter email message-ids
-                                      (d/q '[:find [?mid ...]
-                                             :in $ [?s ...]
-                                             :where [?s :series/cover-letter ?e]
-                                             [?e :email/message-id ?mid]]
-                                           db existing-series))
-                            parent-mids (set (keep (fn [rid]
-                                                     (d/q '[:find ?mid .
-                                                            :in $ ?r
-                                                            :where [?r :report/message-id ?mid]]
-                                                          db rid))
-                                                   parent-report-eids))]
-                        (some old-mids parent-mids)))]
-      ;; Close old series if this is a restart and a descendant
-      (when (and restart? ancestor?)
-        (doseq [sid existing-series]
-          (close-series! conn sid email-eid)
-          (println (str "    → auto-closed series "
-                        (pr-str (:series/id (d/pull (d/db conn) [:series/id] sid)))
-                        " (superseded)"))))
-      ;; Find or create the series for this patch
-      (let [series-eid (or (find-open-series (d/db conn) topic from-addr m)
-                           (let [sid (create-series! conn topic from-addr m)]
-                             (println (str "    → new series: "
-                                           (pr-str (series-id topic from-addr m))
-                                           " (expecting " m " patches)"))
-                             sid))]
-        (if (zero? n)
-          (set-cover-letter! conn series-eid email-eid)
-          (add-patch-to-series! conn series-eid report-eid))))))
-
-;; ---------------------------------------------------------------------------
-;; Digest command
+;; Digest orchestration
 ;; ---------------------------------------------------------------------------
 
 (defn- process-email!
-  "Process a single email during digest. Returns updated accumulator.
-  Resolves the source from :email/source or by classifying headers."
+  "Process a single email during digest. Returns updated accumulator."
   [conn source-map sources {:keys [created threaded skipped thread-index type-index] :as acc} email]
   (let [message-id    (:email/message-id email)
         eid           (:db/id email)
         from-addr     (:email/from-address email)
-        ;; Resolve source: use stored value or classify from headers
+        ;; Resolve source
         source-name   (or (:email/source email)
                           (classify-source (:email/headers-edn email) sources))
         _             (when (and source-name (not (:email/source email)))
@@ -838,10 +201,12 @@
     (if (and from-addr (ignored? roles from-addr))
       (do (println (str "  [ignored] " from-addr " — " (:email/subject email)))
           (assoc acc :skipped (inc skipped)))
-      (do (when (and from-addr body-text source-name
-                     (not (from-mailing-list? email)))
+      (do ;; Role and notify commands (only for direct emails, not mailing list)
+          (when (and from-addr body-text source-name
+                     (not (from-mailing-list-email? email)))
             (apply-role-commands! conn roles source-name from-addr body-text)
             (apply-notify-commands! conn roles source-name from-addr body-text))
+          ;; Detect and create report
           (let [report-info (detect-report email subj-patterns)
                 permitted?  (and report-info from-addr
                                  (can-create-report? roles from-addr report-info
@@ -862,13 +227,13 @@
                   (do (when (and report-info (not permitted?))
                         (println (str "  [denied] " from-addr " cannot create " (name (:type report-info)))))
                       [created thread-index type-index nil]))
+                ;; Threading
                 parent-report-eids (find-reports-for-email email thread-index (d/db conn))
                 nearest-report-eids (find-nearest-report email thread-index (d/db conn))
                 [threaded thread-index]
                 (if (seq parent-report-eids)
                   (do (doseq [rid parent-report-eids]
                         (add-descendant! conn rid eid))
-                      ;; Triggers apply only to the nearest ancestor report(s)
                       (doseq [rid nearest-report-eids]
                         (when-let [rtype (or (type-index rid)
                                              (d/q '[:find ?t . :in $ ?r

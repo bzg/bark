@@ -111,7 +111,7 @@
   :email/from-address "user@test.org"
   :email/date-sent  #inst "2026-01-02T10:00:00"
   :email/ingested-at #inst "2026-01-02T10:00:00"
-  :email/body-text  "Here is the patch.\n"}
+  :email/body-text  "Here is the patch.\n\ndiff --git a/agenda.el b/agenda.el\n--- a/agenda.el\n+++ b/agenda.el\n@@ -1,3 +1,3 @@\n-old\n+new\n"}
 
  ;; =========================================================================
  ;; 08 — Patch via attachment (no [PATCH] in subject)
@@ -398,7 +398,7 @@
   :email/from-address "user@test.org"
   :email/date-sent  #inst "2026-01-12T10:00:00"
   :email/ingested-at #inst "2026-01-12T10:00:00"
-  :email/body-text  "Refactor patch.\n"}
+  :email/body-text  "Refactor patch.\n\ndiff --git a/parser.el b/parser.el\n--- a/parser.el\n+++ b/parser.el\n@@ -1,3 +1,3 @@\n-old\n+new\n"}
 
  ;; =========================================================================
  ;; 29 — Role command sent via mailing list (has List-Id → ignored)
@@ -494,7 +494,7 @@
   :email/ingested-at #inst "2026-01-15T10:01:00"
   :email/in-reply-to "<34@test.org>"
   :email/references #{"<34@test.org>"}
-  :email/body-text  "Tokenizer rewrite.\n"}
+  :email/body-text  "Tokenizer rewrite.\n\ndiff --git a/tokenizer.clj b/tokenizer.clj\n--- a/tokenizer.clj\n+++ b/tokenizer.clj\n@@ -1,3 +1,3 @@\n-old\n+new\n"}
 
  ;; =========================================================================
  ;; 36 — Second patch in series (2/3)
@@ -509,7 +509,7 @@
   :email/ingested-at #inst "2026-01-15T10:02:00"
   :email/in-reply-to "<34@test.org>"
   :email/references #{"<34@test.org>"}
-  :email/body-text  "AST builder rewrite.\n"}
+  :email/body-text  "AST builder rewrite.\n\ndiff --git a/ast.clj b/ast.clj\n--- a/ast.clj\n+++ b/ast.clj\n@@ -1,3 +1,3 @@\n-old\n+new\n"}
 
  ;; =========================================================================
  ;; 37 — Third patch in series (3/3) — completes the series
@@ -524,7 +524,7 @@
   :email/ingested-at #inst "2026-01-15T10:03:00"
   :email/in-reply-to "<34@test.org>"
   :email/references #{"<34@test.org>"}
-  :email/body-text  "Renderer rewrite.\n"}
+  :email/body-text  "Renderer rewrite.\n\ndiff --git a/render.clj b/render.clj\n--- a/render.clj\n+++ b/render.clj\n@@ -1,3 +1,3 @@\n-old\n+new\n"}
 
  ;; =========================================================================
  ;; 38 — v2 cover letter, as reply to old series (closes old, starts new)
@@ -554,7 +554,7 @@
   :email/ingested-at #inst "2026-01-16T10:01:00"
   :email/in-reply-to "<38@test.org>"
   :email/references #{"<38@test.org>" "<34@test.org>"}
-  :email/body-text  "Tokenizer v2.\n"}
+  :email/body-text  "Tokenizer v2.\n\ndiff --git a/tokenizer.clj b/tokenizer.clj\n--- a/tokenizer.clj\n+++ b/tokenizer.clj\n@@ -1,3 +1,3 @@\n-old\n+new-v2\n"}
 
  ;; =========================================================================
  ;; 40 — Patch sent as reply to bug 23 (creates a relation)
@@ -569,7 +569,7 @@
   :email/ingested-at #inst "2026-01-17T10:00:00"
   :email/in-reply-to "<23@test.org>"
   :email/references #{"<23@test.org>"}
-  :email/body-text  "Here is a fix for the slow export bug.\n"}
+  :email/body-text  "Here is a fix for the slow export bug.\n\ndiff --git a/export.clj b/export.clj\n--- a/export.clj\n+++ b/export.clj\n@@ -10,3 +10,3 @@\n-(defn slow-fn [] ...)\n+(defn fast-fn [] ...)\n"}
 
  ;; =========================================================================
  ;; 41 — Add then remove maintainer (admin)
@@ -933,7 +933,7 @@
   :email/from-address "user@test.org"
   :email/date-sent  #inst "2026-01-23T10:00:00"
   :email/ingested-at #inst "2026-01-23T10:00:00"
-  :email/body-text  "Remove dead code.\n"}
+  :email/body-text  "Remove dead code.\n\ndiff --git a/core.clj b/core.clj\n--- a/core.clj\n+++ b/core.clj\n@@ -1,3 +1,3 @@\n-old\n+new\n"}
 
  {
   :email/imap-uid   69
@@ -945,7 +945,7 @@
   :email/ingested-at #inst "2026-01-23T10:01:00"
   :email/in-reply-to "<68@test.org>"
   :email/references #{"<68@test.org>"}
-  :email/body-text  "Doc update.\n"}
+  :email/body-text  "Doc update.\n\ndiff --git a/docs.md b/docs.md\n--- a/docs.md\n+++ b/docs.md\n@@ -1,3 +1,3 @@\n-old\n+new\n"}
 
  ;; =========================================================================
  ;; 70 — Series from a different sender (same topic, separate series)
@@ -958,7 +958,7 @@
   :email/from-address "voter1@test.org"
   :email/date-sent  #inst "2026-01-23T11:00:00"
   :email/ingested-at #inst "2026-01-23T11:00:00"
-  :email/body-text  "Different sender same topic.\n"}
+  :email/body-text  "Different sender same topic.\n\ndiff --git a/core.clj b/core.clj\n--- a/core.clj\n+++ b/core.clj\n@@ -1,3 +1,3 @@\n-old\n+alt\n"}
 
  ;; =========================================================================
  ;; 71 — [ANN] permission denial from regular user (proper tag)
