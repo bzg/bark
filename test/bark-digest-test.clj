@@ -8,16 +8,15 @@
 ;; Usage:
 ;;   bb test/bark-digest-test.clj
 ;;
-;; Requires: datalevin pod 0.10.7+, resources/bark-schema.edn.
+;; Requires: datalevin pod (version from bark-common.clj), resources/bark-schema.edn.
 
-(require '[babashka.pods :as pods]
-         '[clojure.string :as str]
+(require '[clojure.string :as str]
          '[clojure.edn :as edn]
          '[clojure.java.io :as io])
 
-(pods/load-pod 'huahaiy/datalevin "0.10.7")
+(load-file "scripts/bark-common.clj")
 
-(require '[pod.huahaiy.datalevin :as d])
+(load-datalevin-pod!)
 
 ;; ---------------------------------------------------------------------------
 ;; Test harness

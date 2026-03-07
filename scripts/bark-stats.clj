@@ -10,8 +10,7 @@
 ;; Environment / defaults:
 ;;   BARK_DB — path to db (default: ./data/bark-db)
 
-(require '[babashka.pods :as pods]
-         '[cheshire.core :as json]
+(require '[cheshire.core :as json]
          '[clojure.string :as str]
          '[clojure.edn :as edn]
          '[clojure.java.io :as io])
@@ -19,8 +18,7 @@
 (load-file "scripts/bark-common.clj")
 (load-file "scripts/bark-html.clj")
 
-(pods/load-pod 'huahaiy/datalevin "0.10.7")
-(require '[pod.huahaiy.datalevin :as d])
+(load-datalevin-pod!)
 
 ;; ---------------------------------------------------------------------------
 ;; Schema & DB

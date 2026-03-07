@@ -17,15 +17,12 @@
 ;; Environment / defaults:
 ;;   BARK_DB — path to db (default: ./data/bark-db)
 
-(require '[babashka.pods :as pods]
-         '[clojure.string :as str]
+(require '[clojure.string :as str]
          '[clojure.edn :as edn])
 
 (load-file "scripts/bark-common.clj")
 
-(pods/load-pod 'huahaiy/datalevin "0.10.7")
-
-(require '[pod.huahaiy.datalevin :as d])
+(load-datalevin-pod!)
 
 ;; ---------------------------------------------------------------------------
 ;; Schema — loaded from shared bark-schema.edn

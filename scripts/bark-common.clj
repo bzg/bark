@@ -6,6 +6,19 @@
          '[clojure.edn :as edn])
 
 ;; ---------------------------------------------------------------------------
+;; Datalevin pod — single version definition
+;; ---------------------------------------------------------------------------
+
+(def datalevin-version "0.10.7")
+
+(defn load-datalevin-pod!
+  "Load the datalevin pod and require its namespace as `d`."
+  []
+  (require '[babashka.pods :as pods])
+  ((resolve 'pods/load-pod) 'huahaiy/datalevin datalevin-version)
+  (require '[pod.huahaiy.datalevin :as d]))
+
+;; ---------------------------------------------------------------------------
 ;; Canonical report pull pattern (shared by export, notify, stats)
 ;; ---------------------------------------------------------------------------
 
