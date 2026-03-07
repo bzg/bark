@@ -41,7 +41,10 @@
          (fn [m] (or (:password m) (:oauth2-token m)))))
 
 ;; Source match spec
-(s/def :match/list-id ::non-blank-string)
+(s/def :match/list-id
+  (s/and ::non-blank-string
+         ;; Must be the bare identifier, not the full header with angle brackets
+         (fn [s] (not (re-find #"[<>]" s)))))
 (s/def :match/delivered-to ::non-blank-string)
 (s/def :match/to ::non-blank-string)
 
@@ -52,12 +55,13 @@
 (s/def :source/name ::non-blank-string)
 (s/def :source/match ::match)
 (s/def :source/admin ::email)
-(s/def :source/mailing-list-email ::email)
+(s/def :source/list-post ::email)
+(s/def :source/list-archive (s/and ::non-blank-string #(re-find #"^https?://" %)))
 
 (s/def ::source
   (s/keys :req-un [:source/name]
-          :opt-un [:source/match :source/admin :source/mailing-list-email
-                   :source/triggers :source/labels]))
+          :opt-un [:source/match :source/admin :source/list-post
+                   :source/list-archive :source/triggers :source/labels]))
 
 (s/def :bark/sources
   (s/and (s/coll-of ::source :kind vector? :min-count 1)
@@ -140,8 +144,10 @@
               (println (str "    - " (:name src)
                             (when-let [m (:match src)]
                               (str " (match: " (pr-str m) ")"))
-                            (when-let [ml (:mailing-list-email src)]
+                            (when-let [ml (:list-post src)]
                               (str " list: " ml))
+                            (when-let [la (:list-archive src)]
+                              (str " archive: " la))
                             (when-let [a (:admin src)]
                               (str " admin: " a)))))
             (println (str "  DB path:       " (get-in config [:db :path])))

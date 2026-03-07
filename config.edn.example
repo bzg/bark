@@ -1,7 +1,7 @@
-{ ;; Default admin email — used for any source that doesn't specify its own :admin
+{ ;; Default admin email, fall-back for source that doesn't set :admin
  :admin "admin@example.com"
 
- ;; Single IMAP connection
+ ;; IMAP connection
  :imap {:host     "imap.example.com"
         :port     993
         :ssl      true
@@ -11,15 +11,31 @@
 
  ;; Sources: classify incoming emails by header matching at digest time.
  ;; Checked in order; first match wins.  Omit :match for a catch-all.
- :sources [{:name               "public-list"
+ ;;
+ ;; Two use-cases:
+ ;;   1. Mailing list (public or private) → match on :list-id
+ ;;   2. Email address (alias or mailbox) → match on :delivered-to
+ ;;      (fallback: :to, when the MTA does not set Delivered-To)
+ :sources [
+           ;; --- Use-case 1: mailing list ---
+           {:name               "public-list"
+            ;;
+            ;; :list-id expects the identifier inside angle brackets,
+            ;; e.g. for a header "List-Id: Org Mode <emacs-orgmode.gnu.org>",
+            ;; use "emacs-orgmode.gnu.org" (not the full header value).
             :match              {:list-id "bugs.example.org"}
-            ;; The mailing list address (for List-Post permission check)
-            :mailing-list-email "bugs@example.org"
+            ;;
+            ;; The mailing list address for permission check
+            :list-post          "bugs@example.org"
+            ;;
             :admin              "lead@example.org"
+            ;;
+            ;; URL of the list archive (informational, used in HTML reports)
+            :list-archive "https://list.example.org"
+            ;;
             ;; Build archive URLs from message-ids (%s is replaced by the message-id).
-            ;; Overrides the Archived-At header when present.  Only relevant for
-            ;; sources matched by :list-id (public/private mailing lists).
-            ;; :archive-format-string "https://list.orgmode.org/%s/T/#t"
+            ;; Overrides the Archived-At header when present.
+            :archive-format-string "https://list.example.org/%s"
             ;;
             ;; Per-source body triggers (optional).
             ;; Only specified actions override defaults; others keep builtins.
@@ -32,8 +48,9 @@
             ;; :labels {:request ["POLL" "FR" "TODO" "TASK"]}
             }
 
-           {:name               "private"
-            :match              {:delivered-to "private-bugs@example.com"}}
+           ;; --- Use-case 2: email address (alias or mailbox) ---
+           {:name               "my-alias"
+            :match              {:delivered-to "security@example.com"}}
 
            ;; Catch-all: emails that don't match any source above
            {:name "direct"}]

@@ -115,11 +115,11 @@
 
 (def source-map {"direct"      {:admin "admin@test.org"}
                  "public-list" {:admin              "admin@test.org"
-                                :mailing-list-email "list@test.org"}})
+                                :list-post "list@test.org"}})
 
 (def sources [{:name "direct"}
               {:name "public-list"
-               :mailing-list-email "list@test.org"}])
+               :list-post "list@test.org"}])
 
 ;; ---------------------------------------------------------------------------
 ;; Tests

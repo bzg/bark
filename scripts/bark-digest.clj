@@ -370,7 +370,7 @@
   "Check if from-addr is allowed to create this report.
   Announcements require admin/maintainer.
   On list-backed sources, non-privileged users must send through
-  the list (List-Post header matches :mailing-list-email)."
+  the list (List-Post header matches :list-post)."
   [roles from-addr report-info email source-cfg]
   (cond
     (announcement-types (:type report-info))
@@ -380,7 +380,7 @@
     true
 
     :else
-    (let [ml-email (:mailing-list-email source-cfg)]
+    (let [ml-email (:list-post source-cfg)]
       (if (nil? ml-email)
         ;; No mailing list configured — anyone can create
         true

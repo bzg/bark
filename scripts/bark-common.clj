@@ -22,8 +22,19 @@
         (some (fn [[k v]] (when (= (str/lower-case k) lname) v)) headers))
       (catch Exception _ nil))))
 
+(defn extract-list-id
+  "Extract the identifier from a List-Id header value.
+  RFC 2919: \"Description <list-id>\" → \"list-id\".
+  Returns the content inside angle brackets, or the raw value if none found."
+  [raw]
+  (when raw
+    (if-let [[_ id] (re-find #"<([^>]+)>" (str raw))]
+      id
+      (str raw))))
+
 (defn- match-source?
-  "Check if headers match a source's :match spec (substring, case-insensitive)."
+  "Check if headers match a source's :match spec (substring, case-insensitive).
+  For :list-id, extracts the identifier from angle brackets before comparing."
   [headers-edn match-spec]
   (every? (fn [[k v]]
             (let [header-name (case k
@@ -31,7 +42,10 @@
                                 :delivered-to "Delivered-To"
                                 :to           "To"
                                 (name k))
-                  header-val  (get-header headers-edn header-name)]
+                  header-val  (get-header headers-edn header-name)
+                  header-val  (if (= k :list-id)
+                                (extract-list-id header-val)
+                                header-val)]
               (and header-val
                    (str/includes? (str/lower-case (str header-val))
                                   (str/lower-case v)))))
@@ -48,7 +62,7 @@
         sources))
 
 (defn build-source-map
-  "Build source-name → {:admin :mailing-list-email :triggers :labels} from config."
+  "Build source-name → {:admin :list-post :triggers :labels} from config."
   [config]
   (let [default-admin    (:admin config)
         global-st        (:labels config)]
@@ -56,14 +70,16 @@
           (map (fn [src]
                  [(:name src)
                   (cond-> {:admin (or (:admin src) default-admin)}
-                    (:mailing-list-email src)
-                    (assoc :mailing-list-email (:mailing-list-email src))
+                    (:list-post src)
+                    (assoc :list-post (:list-post src))
                     (:triggers src)
                     (assoc :triggers (:triggers src))
                     (:labels src)
                     (assoc :labels (:labels src))
                     (:archive-format-string src)
                     (assoc :archive-format-string (:archive-format-string src))
+                    (:list-archive src)
+                    (assoc :list-archive (:list-archive src))
                     global-st
                     (assoc :global-labels global-st))]))
           (:sources config))))

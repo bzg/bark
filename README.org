@@ -93,14 +93,14 @@ Each source classifies incoming emails by header matching. Sources are
 checked in order; the first match wins. A source without =:match= acts
 as a catch-all.
 
-| Field               | Required | Description                              |
-|---------------------+----------+------------------------------------------|
-| =:name=               | yes      | Unique source identifier                 |
-| =:match=              | no       | Header matching rules (see below)        |
-| =:mailing-list-email= | no       | Associated mailing list address          |
-| =:admin=              | no       | Admin for this source (fallback: global) |
-| =:triggers=           | no       | Body-trigger word overrides (per action) |
-| =:labels=             | no       | Report label overrides (per report type) |
+| Field      | Required | Description                              |
+|------------+----------+------------------------------------------|
+| =:name=      | yes      | Unique source identifier                 |
+| =:match=     | no       | Header matching rules (see below)        |
+| =:list-post= | no       | Associated mailing list address          |
+| =:admin=     | no       | Admin for this source (fallback: global) |
+| =:triggers=  | no       | Body-trigger word overrides (per action) |
+| =:labels=    | no       | Report label overrides (per report type) |
 
 Match rules (all optional, all must match if present):
 
@@ -119,7 +119,7 @@ Match rules (all optional, all must match if present):
          :folder "INBOX"}
  :sources [{:name "public-list"
             :match {:list-id "bugs.example.org"}
-            :mailing-list-email "bugs@example.org"
+            :list-post "bugs@example.org"
             :admin "lead@example.org"}
            {:name "private"
             :match {:delivered-to "private@example.com"}}
