@@ -507,14 +507,22 @@
 ;; Threading
 ;; ---------------------------------------------------------------------------
 
-(defn ancestor-mids [email]
-  (let [irt  (:email/in-reply-to email)
-        refs (:email/references email)
-        refs (cond (nil? refs)    nil
-                   (string? refs) #{refs}
-                   (coll? refs)   (set refs)
-                   :else          nil)]
-    (cond-> #{} irt (conj irt) refs (into refs))))
+(defn ancestor-mids
+  "Return an ordered vector of ancestor message-ids, nearest last.
+  Built from References (which is ordered root→parent per RFC 2822)
+  plus In-Reply-To.  Duplicates are removed, order preserved."
+  [email]
+  (let [refs (:email/references email)
+        refs (cond (nil? refs)    []
+                   (string? refs) [refs]
+                   (coll? refs)   (vec refs)
+                   :else          [])
+        irt  (:email/in-reply-to email)
+        ;; refs is ordered root→parent; append irt if not already present
+        all  (if (and irt (not (some #{irt} refs)))
+               (conj refs irt)
+               refs)]
+    (vec (distinct all))))
 
 (defn- index-assoc [idx mid rid] (update idx mid (fnil conj #{}) rid))
 
@@ -529,8 +537,16 @@
         type-idx    (into {} (map (fn [[rid _ type]] [rid type])) reports)]
     {:thread-index thread-idx :type-index type-idx}))
 
-(defn find-reports-for-email [email thread-index]
+(defn find-reports-for-email
+  "Return all report eids threaded with this email (for descendant linking)."
+  [email thread-index]
   (reduce into #{} (keep thread-index (ancestor-mids email))))
+
+(defn find-nearest-report
+  "Return the report eids of the nearest ancestor only (for trigger application).
+  Walks ancestor-mids from nearest (last) to oldest (first), returns the first match."
+  [email thread-index]
+  (some thread-index (rseq (ancestor-mids email))))
 
 ;; ---------------------------------------------------------------------------
 ;; DB operations
@@ -803,10 +819,13 @@
                         (println (str "  [denied] " from-addr " cannot create " (name (:type report-info)))))
                       [created thread-index type-index nil]))
                 parent-report-eids (find-reports-for-email email thread-index)
+                nearest-report-eids (find-nearest-report email thread-index)
                 [threaded thread-index]
                 (if (seq parent-report-eids)
                   (do (doseq [rid parent-report-eids]
-                        (add-descendant! conn rid eid)
+                        (add-descendant! conn rid eid))
+                      ;; Triggers apply only to the nearest ancestor report(s)
+                      (doseq [rid nearest-report-eids]
                         (when-let [rtype (type-index rid)] (apply-triggers! conn rid rtype email source-map)))
                       [(+ threaded (count parent-report-eids))
                        (reduce #(index-assoc %1 message-id %2) thread-index parent-report-eids)])
