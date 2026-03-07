@@ -178,7 +178,7 @@
   (let [with-series   (filter :report/series reports)
         series-ids    (->> with-series (map #(get-in % [:report/series :series/id])) distinct count)
         closed-series (->> with-series (filter #(get-in % [:report/series :series/closed]))
-                           (map #(get-in % [:report/series :series/id])) distinct count)]
+                                       (map #(get-in % [:report/series :series/id])) distinct count)]
     {:unique-series series-ids :closed-series closed-series
      :patch-reports (count with-series)}))
 
@@ -193,12 +193,15 @@
        (sort-by :score >) (take n)))
 
 (defn compute-stats [reports]
-  {:generated-at      (str (java.util.Date.))
-   :reports-per-type  (reports-per-type reports)
-   :reports-by-month  (reports-by-month reports)
-   :time-to-close     (time-to-close-stats reports)
-   :open-closed-ratio (open-closed-ratio reports)
-   :top-openers       (top-openers reports 10)})
+  (let [last-year (filter #(within-last-year? (report-date %)) reports)]
+    {:generated-at      (str (java.util.Date.))
+     :reports-per-type  (reports-per-type reports)
+     :reports-by-month  (reports-by-month reports)
+     :time-to-close     (time-to-close-stats reports)
+     :open-closed-ratio (open-closed-ratio reports)
+     :open-last-year    (count (remove :report/closed last-year))
+     :total-last-year   (count last-year)
+     :top-openers       (top-openers reports 10)}))
 
 ;; ---------------------------------------------------------------------------
 ;; HTML / Vega-Lite rendering
@@ -267,11 +270,12 @@
        :y {:field "count"  :type "quantitative" :title "Reports"}}))
 
 (defn chart-openers [openers]
-  (let [data (->> openers reverse
+  (let [data (->> openers
                   (map (fn [{:keys [address name count]}]
                          {"user" (or (when (seq name) name) address) "count" count})))]
-    (vl "Top openers (last year)" "bar" data
-        {:y {:field "user"  :type "ordinal" :title nil :sort nil
+    (vl "Top 10 openers (last year)" "bar" data
+        {:y {:field "user"  :type "ordinal" :title nil
+             :sort {:field "count" :order "descending"}
              :axis  {:labelLimit 180}}
          :x {:field "count" :type "quantitative" :title "Reports opened"}})))
 
@@ -303,7 +307,8 @@
 
 (defn render-html [stats]
   (let [{:keys [generated-at reports-per-type reports-by-month
-                time-to-close open-closed-ratio top-openers]} stats
+                time-to-close open-closed-ratio open-last-year
+                total-last-year top-openers]} stats
         n-yr (reduce + (vals reports-per-type))
         pct  #(when % (str (Math/round (* 100.0 %)) "%"))]
     (str
@@ -344,8 +349,9 @@
      "<p class=\"meta\">Generated " generated-at "</p>\n"
 
      "<h2>Summary</h2>\n<div class=\"kpis\">\n"
-     (kpi n-yr "Reports (last year)")
-     (kpi (:open open-closed-ratio) "Currently open"
+     (kpi n-yr "Reports (last year)"
+          (str open-last-year " still open"))
+     (kpi (:open open-closed-ratio) "Open (all time)"
           (str (pct (:ratio open-closed-ratio)) " of all"))
      (kpi (:closed open-closed-ratio) "Closed (all time)")
      (when time-to-close
