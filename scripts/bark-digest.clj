@@ -422,14 +422,31 @@
 (def default-triggers-by-type (compile-triggers-by-type default-trigger-words))
 
 (defn- build-source-triggers
-  "Merge source :triggers config with defaults and compile to patterns."
+  "Merge triggers for a source: defaults → global → per-source.
+  Returns compiled type→action→pattern map."
   [source-cfg]
-  (if-let [custom (:triggers source-cfg)]
-    (compile-triggers-by-type
-     (reduce-kv (fn [acc rtype overrides]
-                  (assoc acc rtype (merge (get default-trigger-words rtype) overrides)))
-                default-trigger-words custom))
-    default-triggers-by-type))
+  (let [global  (:global-triggers source-cfg)
+        per-src (:triggers source-cfg)
+        merged  (cond
+                  (and global per-src)
+                  (reduce-kv (fn [acc rtype overrides]
+                               (assoc acc rtype (merge (get acc rtype) overrides)))
+                             (reduce-kv (fn [acc rtype overrides]
+                                          (assoc acc rtype (merge (get acc rtype) overrides)))
+                                        default-trigger-words global)
+                             per-src)
+                  global
+                  (reduce-kv (fn [acc rtype overrides]
+                               (assoc acc rtype (merge (get acc rtype) overrides)))
+                             default-trigger-words global)
+                  per-src
+                  (reduce-kv (fn [acc rtype overrides]
+                               (assoc acc rtype (merge (get acc rtype) overrides)))
+                             default-trigger-words per-src)
+                  :else nil)]
+    (if merged
+      (compile-triggers-by-type merged)
+      default-triggers-by-type)))
 
 (def report-unset-triggers
   {:urgent (trigger-pattern "Not urgent") :important (trigger-pattern "Not important")})

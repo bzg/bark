@@ -68,6 +68,20 @@
  ;; :labels {:bug ["BUG" "DEFECT"]
  ;;                    :request ["POLL" "FR" "TODO" "RFE"]}
 
+ ;; Global triggers (optional) — override built-in body trigger words.
+ ;; Merged on top of defaults; specify only the types/actions you want to change.
+ ;; Per-source :triggers (above) override these in turn.
+ ;; Defaults:
+ ;;   :bug          {:acked ["Approved" "Confirmed"] :owned ["Handled"] :closed ["Canceled" "Fixed"]}
+ ;;   :patch        {:acked ["Approved" "Reviewed"]  :owned ["Handled"] :closed ["Canceled" "Applied"]}
+ ;;   :request      {:acked ["Approved"]             :owned ["Handled"] :closed ["Canceled" "Done" "Closed"]}
+ ;;   :announcement {:closed ["Canceled"]}
+ ;;   :release      {:closed ["Canceled"]}
+ ;;   :change       {:closed ["Canceled"]}
+ ;; Example:
+ ;; :triggers {:bug {:closed ["Canceled" "Fixed" "Resolved"]}
+ ;;            :patch {:acked ["Approved" "Reviewed" "LGTM"]}}
+
  ;; Datalevin database path
  :db {:path "data/bark-db"}
 

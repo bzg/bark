@@ -94,6 +94,9 @@
 (s/def ::action-triggers (s/map-of #{:acked :owned :closed} ::trigger-words))
 (s/def :source/triggers (s/map-of keyword? ::action-triggers))
 
+;; Global triggers (optional) — same shape as per-source triggers
+(s/def :bark/triggers (s/map-of keyword? ::action-triggers))
+
 ;; Subject triggers: map of report-type keyword → vector of tag strings
 ;; e.g. {:bug ["BUG" "DEFECT"] :request ["POLL" "FR" "TODO"]}
 (s/def ::label-tags (s/coll-of ::non-blank-string :kind vector? :min-count 1))
@@ -106,7 +109,7 @@
 ;; Top-level config
 (s/def ::config
   (s/keys :req-un [:bark/admin :bark/imap :bark/sources :bark/db]
-          :opt-un [:bark/ingest :bark/notifications :bark/labels]))
+          :opt-un [:bark/ingest :bark/notifications :bark/labels :bark/triggers]))
 
 ;; ---------------------------------------------------------------------------
 ;; Validation
