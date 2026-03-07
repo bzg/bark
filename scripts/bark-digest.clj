@@ -339,8 +339,14 @@
   (let [from-subject    (detect-patch-subject subject patterns)
         from-attachment (when (has-patch-attachment? attachments) :attachment)
         from-inline     (when (has-inline-patch? body-text) :inline)
+        ;; A subject tag alone is only sufficient for cover letters (0/M).
+        ;; For all other cases, require actual patch content.
+        cover-letter?   (when-let [s (:patch-seq from-subject)]
+                          (str/starts-with? s "0/"))
+        subject-only?   (and from-subject (not from-attachment) (not from-inline))
         sources         (cond-> #{}
-                          from-subject    (into (:patch-source from-subject))
+                          (and from-subject (or (not subject-only?) cover-letter?))
+                          (into (:patch-source from-subject))
                           from-attachment (conj :attachment)
                           from-inline     (conj :inline))]
     (when (seq sources)
