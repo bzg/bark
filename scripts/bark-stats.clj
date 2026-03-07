@@ -21,6 +21,12 @@
 (load-datalevin-pod!)
 
 ;; ---------------------------------------------------------------------------
+;; JS (loaded from resources/ at build time)
+;; ---------------------------------------------------------------------------
+
+(def ^:private stats-js (slurp "resources/bark-stats.js"))
+
+;; ---------------------------------------------------------------------------
 ;; Schema & DB
 ;; ---------------------------------------------------------------------------
 
@@ -305,17 +311,9 @@
      "<title>BARK — Statistics</title>\n"
      "<style>" stats-css "</style>\n"
      "<script>\n"
-     "var barkSpecs={};\n"
-     "function barkTheme(){return document.documentElement.getAttribute('data-theme')==='dark'?'dark':'excel';}\n"
-     "function barkRenderAll(){"
-     "Object.entries(barkSpecs).forEach(function(kv){"
-     "vegaEmbed('#'+kv[0],kv[1],{actions:false,renderer:'svg',theme:barkTheme()});});}"
-     "\n"
-     ;; shared toggleTheme from bark-html.clj, patched to also re-render charts
-     (str/replace theme-toggle-js
-                  "}\n"
-                  "\n  barkRenderAll();\n}\n")
-     "\n</script>\n"
+     theme-toggle-js "\n"
+     stats-js "\n"
+     "</script>\n"
      "</head>\n<body>\n"
      "<main class=\"container\">\n"
      "<nav><ul><li><strong>BARK — Statistics</strong></li></ul>"
@@ -347,7 +345,6 @@
      (chart-box "chart-openers" (chart-openers top-openers))
      "</div>\n"
 
-     "<script>document.addEventListener('DOMContentLoaded',barkRenderAll);</script>\n"
      "</main>\n</body>\n</html>\n")))
 
 ;; ---------------------------------------------------------------------------

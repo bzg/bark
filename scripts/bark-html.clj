@@ -12,16 +12,10 @@
 (def pico-cdn "https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css")
 
 ;; ---------------------------------------------------------------------------
-;; Shared theme-toggle JS (inlined into each page's <script> block)
+;; Shared JS (loaded from resources/ at build time)
 ;; ---------------------------------------------------------------------------
 
-(def theme-toggle-js
-  "function toggleTheme() {
-    var html = document.documentElement;
-    var next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-    html.setAttribute('data-theme', next);
-    document.getElementById('theme-icon').textContent = next === 'dark' ? '☀️' : '🌙';
-  }")
+(def theme-toggle-js (slurp "resources/bark-theme.js"))
 
 ;; ---------------------------------------------------------------------------
 ;; Shared <head> builder
