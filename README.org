@@ -12,7 +12,7 @@ To highlight BARK reports from Emacs [[https://gnus.org/][Gnus]], use [[https://
 
 ** User documentation
 
-As a Bark user, you want to read the [[file:docs/howto.org][HOWTO]].
+As a BARK user, you want to read the [[file:docs/howto.org][HOWTO]].
 
 ** How it works
 

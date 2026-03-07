@@ -56,7 +56,7 @@
         to-arg   (when to-idx (nth args (inc to-idx) nil))
         config   (load-config)]
 
-    (println "== Bark SMTP test ==\n")
+    (println "== BARK SMTP test ==\n")
 
     ;; --- Check config.edn ---
     (when-not config
@@ -96,7 +96,7 @@
               (pods/load-pod 'tzzh/mail "0.0.3")
               (require '[pod.tzzh.mail :as mail])
 
-              (let [body (str "This is a test email from Bark.\n\n"
+              (let [body (str "This is a test email from BARK.\n\n"
                               "If you received this, your SMTP configuration is working.\n\n"
                               "Timestamp: " (java.util.Date.) "\n"
                               "Host: " (:host smtp) "\n"
@@ -110,7 +110,7 @@
                     :password (:password smtp)
                     :from     (:from smtp)
                     :to       [to-addr]
-                    :subject  "[Bark] SMTP test"
+                    :subject  "[BARK] SMTP test"
                     :text     body})
                   (println (str "\n✓ Test email sent to " to-addr "."))
                   (catch Exception e
