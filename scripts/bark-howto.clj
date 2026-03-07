@@ -1,17 +1,15 @@
 #!/usr/bin/env bb
 
-;; bark-howto.clj — Generate public/howto.html from docs/howto.org.
+;; bark-howto.clj — Generate public/<source>/howto.html from docs/howto-tpl.org.
 ;;
-;; Reads the org file as a lightweight template, substitutes instance-specific
-;; placeholders from config.edn, and renders a standalone HTML page.
-;;
-;; Placeholders (on their own line, wrapped in = in org):
-;;   =sources=        — number of sources watched
-;;   =sources-table=  — table with :name and :list-archive per source
+;; Reads the org template and substitutes source-specific labels and
+;; triggers into the unified table, based on merged config
+;; (defaults → global → per-source).
 ;;
 ;; Usage:
-;;   bb scripts/bark-howto.clj              → writes public/howto.html
-;;   bb scripts/bark-howto.clj -o out.html  → writes out.html
+;;   bb scripts/bark-howto.clj -n my-source              → public/my-source/howto.html
+;;   bb scripts/bark-howto.clj -n my-source -o out.html  → writes out.html
+;;   bb scripts/bark-howto.clj                           → public/howto.html (defaults)
 
 (require '[clojure.string :as str]
          '[hiccup2.core :as h])
@@ -20,71 +18,151 @@
 (load-file "scripts/bark-html.clj")
 
 ;; ---------------------------------------------------------------------------
-;; Config
+;; Defaults (mirrors bark-detect.clj / bark-triggers.clj)
 ;; ---------------------------------------------------------------------------
 
-(def default-output "public/howto.html")
-(def org-file "docs/howto.org")
+(def default-labels
+  {:bug          ["BUG"]
+   :patch        ["PATCH"]
+   :request      ["POLL" "FR" "TODO"]
+   :announcement ["ANN" "ANNOUNCEMENT"]
+   :release      ["REL" "RELEASE"]
+   :change       ["CHG" "CHANGE"]})
+
+(def default-trigger-words
+  {:bug          {:acked ["Approved" "Confirmed"] :owned ["Handled"] :closed ["Canceled" "Fixed"]}
+   :patch        {:acked ["Approved" "Reviewed"]  :owned ["Handled"] :closed ["Canceled" "Applied"]}
+   :request      {:acked ["Approved"]             :owned ["Handled"] :closed ["Canceled" "Done" "Closed"]}
+   :announcement {:closed ["Canceled"]}
+   :release      {:closed ["Canceled"]}
+   :change       {:closed ["Canceled"]}})
 
 ;; ---------------------------------------------------------------------------
-;; Placeholder data from config.edn
+;; Resolve labels & triggers with config merge chain
 ;; ---------------------------------------------------------------------------
 
-(defn sources-table-html
-  "Build an HTML table of sources from config."
-  [sources]
-  (str "<table>\n<thead><tr><th>Source</th><th>Archive</th></tr></thead>\n<tbody>\n"
-       (str/join
-        (map (fn [src]
-               (let [n (:name src)
-                     a (:list-archive src)]
-                 (str "<tr><td>" (h/html (h/raw (str n))) "</td><td>"
-                      (if a
-                        (str "<a href=\"" a "\">" a "</a>")
-                        "—")
-                      "</td></tr>\n")))
-             sources))
-       "</tbody></table>"))
+(defn resolve-labels [source-cfg]
+  (let [global  (:global-labels source-cfg)
+        per-src (:labels source-cfg)]
+    (cond
+      (and global per-src) (merge default-labels global per-src)
+      global               (merge default-labels global)
+      per-src              (merge default-labels per-src)
+      :else                default-labels)))
 
-(defn build-placeholders
-  "Build placeholder-key → HTML-string from config."
-  [config]
-  (let [sources (:sources config)]
-    {"=sources="       (str (count sources) " source" (when (> (count sources) 1) "s"))
-     "=sources-table=" (sources-table-html sources)}))
+(defn resolve-triggers [source-cfg]
+  (let [global  (:global-triggers source-cfg)
+        per-src (:triggers source-cfg)
+        deep-merge (fn [base overrides]
+                     (reduce-kv (fn [acc rtype ov]
+                                  (assoc acc rtype (merge (get acc rtype) ov)))
+                                base overrides))]
+    (cond
+      (and global per-src) (-> default-trigger-words (deep-merge global) (deep-merge per-src))
+      global               (deep-merge default-trigger-words global)
+      per-src              (deep-merge default-trigger-words per-src)
+      :else                default-trigger-words)))
+
+;; ---------------------------------------------------------------------------
+;; Build the org table from resolved labels + triggers
+;; ---------------------------------------------------------------------------
+
+(defn- fmt-label-tags
+  "Format label tags as org =code= entries for a given report type."
+  [tags rtype]
+  (let [versioned? #{:bug :patch :release :change}]
+    (str/join " "
+              (if (versioned? rtype)
+                (mapcat (fn [t]
+                          (case rtype
+                            :bug   [(str "=[" t "]=") (str "=[" t " version]=")]
+                            :patch [(str "=[" t "]=") (str "=[" t " n/m]=") (str "=[" t " topic n/m]=")]
+                            ;; :release, :change
+                            [(str "=[" t "]=") (str "=[" t " version]=")]))
+                        tags)
+                (map #(str "=[" % "]=") tags)))))
+
+(defn- fmt-trigger-words
+  "Format trigger words as org =code= entries."
+  [words]
+  (if (seq words)
+    (str/join " " (map #(str "=" % "=") words))
+    ""))
+
+(defn build-table-org
+  "Build the unified labels+triggers org table."
+  [labels triggers]
+  (let [types-upper [:bug :patch :request]
+        types-lower [:announcement :release :change]
+        all-types   (concat types-upper types-lower)
+        ;; Compute cell contents
+        rows  (mapv (fn [rtype]
+                      {:type    (name rtype)
+                       :labels  (fmt-label-tags (get labels rtype) rtype)
+                       :acked   (fmt-trigger-words (get-in triggers [rtype :acked]))
+                       :owned   (fmt-trigger-words (get-in triggers [rtype :owned]))
+                       :closed  (fmt-trigger-words (get-in triggers [rtype :closed]))})
+                    all-types)
+        ;; Column widths (minimum = header length)
+        w-type   (apply max (count "Type")         (map #(count (:type %)) rows))
+        w-labels (apply max (count "Subject labels") (map #(count (:labels %)) rows))
+        w-acked  (apply max (count "Acked")        (map #(count (:acked %)) rows))
+        w-owned  (apply max (count "Owned")        (map #(count (:owned %)) rows))
+        w-closed (apply max (count "Closed")       (map #(count (:closed %)) rows))
+        pad      (fn [s w] (str s (apply str (repeat (max 0 (- w (count s))) " "))))
+        hline    (str "|-" (apply str (repeat w-type "-")) "-+-"
+                      (apply str (repeat w-labels "-")) "-+-"
+                      (apply str (repeat w-acked "-")) "-+-"
+                      (apply str (repeat w-owned "-")) "-+-"
+                      (apply str (repeat w-closed "-")) "-|")
+        row-str  (fn [{:keys [type labels acked owned closed]}]
+                   (str "| " (pad type w-type)
+                        " | " (pad labels w-labels)
+                        " | " (pad acked w-acked)
+                        " | " (pad owned w-owned)
+                        " | " (pad closed w-closed) " |"))
+        header   (row-str {:type "Type" :labels "Subject labels"
+                           :acked "Acked" :owned "Owned" :closed "Closed"})
+        upper    (map row-str (take 3 rows))
+        lower    (map row-str (drop 3 rows))]
+    (str/join "\n" (concat [header hline] upper [hline] lower [""]))))
+
+;; ---------------------------------------------------------------------------
+;; Template substitution
+;; ---------------------------------------------------------------------------
+
+(defn substitute-template
+  "Replace the labels-and-triggers table block in the template."
+  [org-text labels triggers]
+  (let [table-org (build-table-org labels triggers)]
+    ;; Replace everything between the "** Labels and triggers" heading
+    ;; and the end of file (the table is the last thing in the template)
+    (str/replace org-text
+                 #"(?s)\*\* Labels and triggers\n.*"
+                 (str "** Labels and triggers\n\n" table-org))))
 
 ;; ---------------------------------------------------------------------------
 ;; Minimal org → HTML conversion
 ;; ---------------------------------------------------------------------------
 
-(defn- org-inline
-  "Convert inline org markup to HTML."
-  [s]
+(defn- org-inline [s]
   (-> s
-      ;; Links: [[url][desc]] or [[url]]
       (str/replace #"\[\[([^\]]+)\]\[([^\]]+)\]\]" "<a href=\"$1\">$2</a>")
       (str/replace #"\[\[([^\]]+)\]\]" "<a href=\"$1\">$1</a>")
-      ;; Code: =code=
       (str/replace #"=([^=\n]+)=" "<code>$1</code>")
-      ;; Bold: *bold*  (word-bounded to avoid conflicts with list bullets)
       (str/replace #"(?<=\s|^)\*([^*\n]+)\*(?=[\s.,;:!?)]|$)" "<strong>$1</strong>")))
 
-(defn- heading-id
-  "Generate an anchor id from heading text."
-  [text]
+(defn- heading-id [text]
   (-> text str/lower-case str/trim
       (str/replace #"[^a-z0-9 -]" "")
       (str/replace #"\s+" "-")))
 
-(defn- parse-table
-  "Parse consecutive org table lines into an HTML table string."
-  [lines]
+(defn- parse-table [lines]
   (let [rows (->> lines
-                  (remove #(re-matches #"\s*\|[-+]+\|\s*" %))  ;; skip hlines
+                  (remove #(re-matches #"\s*\|[-+]+\|\s*" %))
                   (mapv (fn [line]
-                          (->> (str/split line #"\|")
-                               (drop 1)       ;; leading empty
-                               butlast         ;; trailing empty
+                          (->> (str/split line #"\|" -1)
+                               (drop 1) butlast
                                (mapv str/trim)))))]
     (when (seq rows)
       (let [header (first rows)
@@ -99,11 +177,7 @@
                             body))
              "</tbody></table>")))))
 
-(defn org->html
-  "Convert org text to HTML body content.
-  Handles headings, paragraphs, tables, example blocks, src blocks, and
-  inline markup.  Substitutes placeholders."
-  [org-text placeholders]
+(defn org->html [org-text]
   (let [lines (str/split-lines org-text)]
     (loop [i 0, acc (transient []), in-para? false]
       (if (>= i (count lines))
@@ -112,18 +186,10 @@
         (let [line (nth lines i)
               trimmed (str/trim line)]
           (cond
-            ;; Placeholder line (standalone =placeholder=)
-            (contains? placeholders trimmed)
-            (let [acc (if in-para? (conj! acc "</p>") acc)]
-              (recur (inc i) (conj! acc (get placeholders trimmed)) false))
-
-            ;; Heading
             (re-matches #"\*+ .+" line)
             (let [[_ stars text] (re-find #"^(\*+) (.+)" line)
                   level (min (count stars) 6)
-                  ;; Strip <<custom-id>> anchors
                   text  (str/replace text #"\s*<<[^>]+>>\s*" "")
-                  ;; Strip CUSTOM_ID properties (on next lines — already separate)
                   tag   (str "h" level)
                   id    (heading-id text)
                   acc   (if in-para? (conj! acc "</p>") acc)]
@@ -131,13 +197,11 @@
                      (conj! acc (str "<" tag " id=\"" id "\">" (org-inline text) "</" tag ">"))
                      false))
 
-            ;; Property drawer / custom-id — skip
             (or (= trimmed ":PROPERTIES:")
                 (= trimmed ":END:")
                 (re-matches #":CUSTOM_ID:.*" trimmed))
             (recur (inc i) acc in-para?)
 
-            ;; Example block
             (re-matches #"(?i)#\+begin_example" trimmed)
             (let [acc  (if in-para? (conj! acc "</p>") acc)
                   acc  (conj! acc "<pre>")
@@ -153,7 +217,6 @@
                                                    (str/replace "<" "&lt;"))))))))]
               (recur (first next) (conj! (second next) "</pre>") false))
 
-            ;; Src block
             (re-matches #"(?i)#\+begin_src.*" trimmed)
             (let [acc  (if in-para? (conj! acc "</p>") acc)
                   acc  (conj! acc "<pre><code>")
@@ -169,9 +232,8 @@
                                                    (str/replace "<" "&lt;"))))))))]
               (recur (first next) (conj! (second next) "</code></pre>") false))
 
-            ;; Table line — collect consecutive table lines
             (str/starts-with? trimmed "|")
-            (let [acc   (if in-para? (conj! acc "</p>") acc)
+            (let [acc    (if in-para? (conj! acc "</p>") acc)
                   tlines (loop [j i, tl []]
                            (if (and (< j (count lines))
                                     (str/starts-with? (str/trim (nth lines j)) "|"))
@@ -180,20 +242,17 @@
                   [next-i table-lines] tlines]
               (recur next-i (conj! acc (parse-table table-lines)) false))
 
-            ;; Blank line — close paragraph
             (str/blank? trimmed)
             (let [acc (if in-para? (conj! acc "</p>") acc)]
               (recur (inc i) acc false))
 
-            ;; Comment / keyword lines — skip
             (or (str/starts-with? trimmed "#")
                 (str/starts-with? trimmed "#+"))
             (recur (inc i) acc in-para?)
 
-            ;; Regular text — paragraph
             :else
             (if in-para?
-              (recur (inc i) (conj! acc (str (org-inline trimmed))) true)
+              (recur (inc i) (conj! acc (org-inline trimmed)) true)
               (recur (inc i) (conj! acc (str "<p>" (org-inline trimmed))) true))))))))
 
 ;; ---------------------------------------------------------------------------
@@ -208,9 +267,13 @@
   .meta { font-size: 0.78rem; color: var(--pico-muted-color); margin-bottom: 2rem; }
 ")
 
-(defn page [body-html]
-  (let [has-index? (.exists (clojure.java.io/file "public/index.html"))
-        has-stats? (.exists (clojure.java.io/file "public/stats.html"))
+(defn page [body-html source-name]
+  (let [dir        (if source-name (str "public/" source-name) "public")
+        has-index? (.exists (clojure.java.io/file (str dir "/index.html")))
+        has-stats? (.exists (clojure.java.io/file (str dir "/stats.html")))
+        title      (if source-name
+                     (str "BARK — How-to (" source-name ")")
+                     "BARK — How-to")
         generated-at (str (java.util.Date.))]
     (str
      "<!DOCTYPE html>\n"
@@ -221,12 +284,12 @@
         [:meta {:name "viewport" :content "width=device-width, initial-scale=1"}]
         [:meta {:name "color-scheme" :content "light dark"}]
         [:link {:rel "stylesheet" :href pico-cdn}]
-        [:title "BARK — How-to"]
+        [:title title]
         [:style (h/raw howto-css)]]
        [:body
         [:main.container
          [:nav
-          [:ul [:li [:strong "BARK — How-to"]]]
+          [:ul [:li [:strong title]]]
           [:ul
            (when has-index?
              [:li [:a {:href "index.html" :title "Reports"} "Reports"]])
@@ -241,14 +304,21 @@
 ;; Main
 ;; ---------------------------------------------------------------------------
 
-(let [{:keys [out-file]} (parse-cli-args *command-line-args*)
-      out-file     (or out-file default-output)
-      config       (load-config)
-      placeholders (if config (build-placeholders config) {})
-      org-text     (slurp org-file)
-      body-html    (org->html org-text placeholders)
-      html         (page body-html)]
-  (.mkdirs (clojure.java.io/file "public"))
+(let [{:keys [out-file source-name]} (parse-cli-args *command-line-args*)
+      config      (load-config)
+      source-map  (when config (build-source-map config))
+      source-cfg  (get source-map source-name)
+      labels      (if source-cfg (resolve-labels source-cfg) default-labels)
+      triggers    (if source-cfg (resolve-triggers source-cfg) default-trigger-words)
+      out-file    (or out-file
+                      (if source-name
+                        (str "public/" source-name "/howto.html")
+                        "public/howto.html"))
+      org-text    (-> (slurp "docs/howto-tpl.org")
+                      (substitute-template labels triggers))
+      body-html   (org->html org-text)
+      html        (page body-html source-name)]
+  (.mkdirs (.getParentFile (clojure.java.io/file out-file)))
   (spit out-file html)
   (binding [*out* *err*]
     (println (str "Wrote " out-file))))

@@ -5,9 +5,13 @@ Follow-up emails in the same thread can update that report's state
 through trigger words. Admins and maintainers manage roles and can
 receive periodic digest email notifications.
 
-For the full documentation, see the [[https://codeberg.org/bzg/bark][BARK project page]].
+For a more detailed howto, see the [[https://codeberg.org/bzg/bark/src/branch/main/docs/howto.org][BARK project page]].
 
 ** Labels and triggers
+
+Subject labels will create reports. Answers to these reports can
+update them by using trigger keywords like "Applied", etc. Here is a
+table showing available labels and triggers for this BARK instance.
 
 | Type         | Subject labels                                  | Acked              | Owned   | Closed               |
 |--------------+-------------------------------------------------+--------------------+---------+----------------------|
@@ -18,3 +22,18 @@ For the full documentation, see the [[https://codeberg.org/bzg/bark][BARK projec
 | announcement | =[ANN]= =[ANNOUNCEMENT]=                            |                    |         | =Canceled=             |
 | release      | =[REL]= =[RELEASE]= =[REL version]= =[RELEASE version]= |                    |         | =Canceled=             |
 | change       | =[CHG]= =[CHANGE]= =[CHG version]= =[CHANGE version]=   |                    |         | =Canceled=             |
+
+Note that every trigger keyword should be at the beginning of the line
+and followed by a punctuation mark (=.= =,= =;= =:=).
+
+* Priority triggers
+
+Users can mark reports as important/urgent with =Important.= or =Urgent.=.
+
+You can combine several triggers:
+
+#+begin_example
+Confirmed.
+Urgent.
+Important.
+#+end_example

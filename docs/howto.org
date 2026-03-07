@@ -8,7 +8,6 @@ receive periodic digest email notifications.
 For the full documentation, see the [[https://codeberg.org/bzg/bark][BARK project page]].
 
 * Usage
-
 ** Creating reports and announcements
 
 *Reports* (bug, patch, request) can be created by anyone sending an

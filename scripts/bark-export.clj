@@ -380,9 +380,10 @@
 
 (defn dump-howto!
   "Generate howto.html for a single source."
-  [out-dir]
-  (process/shell "bb" "scripts/bark-howto.clj"
-                 "-o" (str out-dir "/howto.html")))
+  [out-dir source-name]
+  (apply process/shell "bb" "scripts/bark-howto.clj"
+         "-o" (str out-dir "/howto.html")
+         (when source-name ["-n" source-name])))
 
 ;; ---------------------------------------------------------------------------
 ;; Filtering
@@ -418,7 +419,7 @@
                       "org"     (dump-org!     reports out-dir source-name source-map maintainers-map)
                       "patches" (dump-patches! reports out-dir)
                       "html"    (do (dump-json! reports out-dir source-name source-map maintainers-map)
-                                    (dump-howto! out-dir)
+                                    (dump-howto! out-dir source-name)
                                     (dump-html!  out-dir source-name cli-extra))
                       "stats"   (dump-stats! out-dir source-name "json" cli-extra)))]
     (if (= format "all")
@@ -426,7 +427,7 @@
           (do-format "rss")
           (do-format "org")
           (do-format "patches")
-          (dump-howto! out-dir)
+          (dump-howto! out-dir source-name)
           (dump-html!  out-dir source-name cli-extra)
           (dump-stats! out-dir source-name "json" cli-extra)
           (dump-stats! out-dir source-name "html" cli-extra))
