@@ -538,15 +538,36 @@
     {:thread-index thread-idx :type-index type-idx}))
 
 (defn find-reports-for-email
-  "Return all report eids threaded with this email (for descendant linking)."
-  [email thread-index]
-  (reduce into #{} (keep thread-index (ancestor-mids email))))
+  "Return all report eids threaded with this email (for descendant linking).
+  Checks the in-memory batch index first, then falls back to DB lookups."
+  [email thread-index db]
+  (let [mids (ancestor-mids email)]
+    (reduce (fn [acc mid]
+              (if-let [from-idx (thread-index mid)]
+                (into acc from-idx)
+                (let [from-db (d/q '[:find [?r ...]
+                                     :in $ ?mid
+                                     :where (or [?r :report/message-id ?mid]
+                                                (and [?r :report/descendants ?e]
+                                                     [?e :email/message-id ?mid]))]
+                                   db mid)]
+                  (into acc from-db))))
+            #{} mids)))
 
 (defn find-nearest-report
   "Return the report eids of the nearest ancestor only (for trigger application).
-  Walks ancestor-mids from nearest (last) to oldest (first), returns the first match."
-  [email thread-index]
-  (some thread-index (rseq (ancestor-mids email))))
+  Walks ancestor-mids from nearest to oldest, checks batch index then DB."
+  [email thread-index db]
+  (some (fn [mid]
+          (or (thread-index mid)
+              (let [from-db (d/q '[:find [?r ...]
+                                   :in $ ?mid
+                                   :where (or [?r :report/message-id ?mid]
+                                              (and [?r :report/descendants ?e]
+                                                   [?e :email/message-id ?mid]))]
+                                 db mid)]
+                (when (seq from-db) (set from-db)))))
+        (rseq (ancestor-mids email))))
 
 ;; ---------------------------------------------------------------------------
 ;; DB operations
@@ -818,15 +839,19 @@
                   (do (when (and report-info (not permitted?))
                         (println (str "  [denied] " from-addr " cannot create " (name (:type report-info)))))
                       [created thread-index type-index nil]))
-                parent-report-eids (find-reports-for-email email thread-index)
-                nearest-report-eids (find-nearest-report email thread-index)
+                parent-report-eids (find-reports-for-email email thread-index (d/db conn))
+                nearest-report-eids (find-nearest-report email thread-index (d/db conn))
                 [threaded thread-index]
                 (if (seq parent-report-eids)
                   (do (doseq [rid parent-report-eids]
                         (add-descendant! conn rid eid))
                       ;; Triggers apply only to the nearest ancestor report(s)
                       (doseq [rid nearest-report-eids]
-                        (when-let [rtype (type-index rid)] (apply-triggers! conn rid rtype email source-map)))
+                        (when-let [rtype (or (type-index rid)
+                                             (d/q '[:find ?t . :in $ ?r
+                                                    :where [?r :report/type ?t]]
+                                                  (d/db conn) rid))]
+                          (apply-triggers! conn rid rtype email source-map)))
                       [(+ threaded (count parent-report-eids))
                        (reduce #(index-assoc %1 message-id %2) thread-index parent-report-eids)])
                   [threaded thread-index])]
@@ -843,6 +868,7 @@
 (defn cmd-digest! [conn source-map sources process-all?]
   (let [db       (d/db conn)
         last-run (get-last-run db)
+        full?    (or process-all? (nil? last-run))
         emails   (if process-all?
                    (do (println "Processing ALL emails...") (all-emails db))
                    (if last-run
@@ -850,9 +876,13 @@
                          (emails-since db last-run))
                      (do (println "First run — processing ALL emails...") (all-emails db))))
         sorted   (sort-by (fn [e] (or (:email/ingested-at e) (:email/date-sent e) (java.util.Date. 0))) emails)
-        {:keys [thread-index type-index]} (build-indexes db)]
-    (println (str "Found " (count sorted) " email(s) to scan. "
-                  "Thread index: " (count thread-index) " entries."))
+        {:keys [thread-index type-index]}
+        (if full?
+          (do (println "Building full thread index...")
+              (build-indexes db))
+          {:thread-index {} :type-index {}})]
+    (println (str "Found " (count sorted) " email(s) to scan."
+                  (when full? (str " Thread index: " (count thread-index) " entries."))))
     (let [{:keys [created threaded skipped]}
           (reduce (fn [acc email]
                     (try
