@@ -424,6 +424,7 @@
         has-org?   (.exists (clojure.java.io/file org-file))
         has-json?  (.exists (clojure.java.io/file json-file))
         has-stats? (.exists (clojure.java.io/file "public/stats.html"))
+        has-howto? (.exists (clojure.java.io/file "public/howto.html"))
         generated-at (str (java.util.Date.))
         rss-href   "reports.rss"
         org-href   "reports.org"
@@ -470,6 +471,8 @@
            (when has-org?
              [:li [:a {:href org-href :title "Org file"} "Org"]])
            [:li [:a {:href bark-doc-url :title "BARK documentation"} "Docs"]]
+           (when has-howto?
+             [:li [:a {:href "howto.html" :title "How-to"} "How-to"]])
            (when has-stats?
              [:li [:a {:href "stats.html" :title "Statistics"} "Stats"]])
            [:li (theme-toggle-btn)]]]
@@ -495,7 +498,7 @@
             [:div.controls
              [:label
               [:input#show-closed {:type "checkbox" :onchange "toggleClosed()"}]
-              " Closed"]])]
+              " Only closed"]])]
          [:div#status]
          [:figure {:style "overflow-x:auto"}
           [:table.striped

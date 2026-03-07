@@ -7,6 +7,14 @@ emails in the same thread can update that report's state through
 trigger words. Admins and maintainers manage roles and receive
 periodic digest notifications --- all via email.
 
+For the full documentation, see the [[https://codeberg.org/bzg/bark][BARK project page]].
+
+** This instance
+
+This BARK instance watches =sources= for incoming emails.
+
+=sources-table=
+
 * Usage
 
 ** Creating reports and announcements
