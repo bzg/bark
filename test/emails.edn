@@ -19,7 +19,7 @@
  ;; =========================================================================
  ;; 01 — Admin adds a maintainer via role command
  ;; =========================================================================
- {:email/uid        "uid-01"
+ {
   :email/imap-uid   1
   :email/source     "direct"
   :email/message-id "<01@test.org>"
@@ -32,7 +32,7 @@
  ;; =========================================================================
  ;; 02 — Bug report (from regular user)
  ;; =========================================================================
- {:email/uid        "uid-02"
+ {
   :email/imap-uid   2
   :email/source     "direct"
   :email/message-id "<02@test.org>"
@@ -45,7 +45,7 @@
  ;; =========================================================================
  ;; 03 — Bug report with mailing list prefix
  ;; =========================================================================
- {:email/uid        "uid-03"
+ {
   :email/imap-uid   3
   :email/source     "direct"
   :email/message-id "<03@test.org>"
@@ -58,7 +58,7 @@
  ;; =========================================================================
  ;; 04 — Reply to bug 02: mark urgent + confirm
  ;; =========================================================================
- {:email/uid        "uid-04"
+ {
   :email/imap-uid   4
   :email/source     "direct"
   :email/message-id "<04@test.org>"
@@ -73,7 +73,7 @@
  ;; =========================================================================
  ;; 05 — Reply to bug 02: mark handled
  ;; =========================================================================
- {:email/uid        "uid-05"
+ {
   :email/imap-uid   5
   :email/source     "direct"
   :email/message-id "<05@test.org>"
@@ -88,7 +88,7 @@
  ;; =========================================================================
  ;; 06 — Reply to bug 02: mark fixed (closes the bug)
  ;; =========================================================================
- {:email/uid        "uid-06"
+ {
   :email/imap-uid   6
   :email/source     "direct"
   :email/message-id "<06@test.org>"
@@ -103,7 +103,7 @@
  ;; =========================================================================
  ;; 07 — Patch via subject tag
  ;; =========================================================================
- {:email/uid        "uid-07"
+ {
   :email/imap-uid   7
   :email/source     "direct"
   :email/message-id "<07@test.org>"
@@ -116,7 +116,7 @@
  ;; =========================================================================
  ;; 08 — Patch via attachment (no [PATCH] in subject)
  ;; =========================================================================
- {:email/uid        "uid-08"
+ {
   :email/imap-uid   8
   :email/source     "direct"
   :email/message-id "<08@test.org>"
@@ -132,7 +132,7 @@
  ;; =========================================================================
  ;; 09 — Patch via inline diff (no subject tag, no attachment)
  ;; =========================================================================
- {:email/uid        "uid-09"
+ {
   :email/imap-uid   9
   :email/source     "direct"
   :email/message-id "<09@test.org>"
@@ -145,7 +145,7 @@
  ;; =========================================================================
  ;; 10 — Reply to patch 07: review and apply
  ;; =========================================================================
- {:email/uid        "uid-10"
+ {
   :email/imap-uid   10
   :email/source     "direct"
   :email/message-id "<10@test.org>"
@@ -160,7 +160,7 @@
  ;; =========================================================================
  ;; 11 — POLL request
  ;; =========================================================================
- {:email/uid        "uid-11"
+ {
   :email/imap-uid   11
   :email/source     "direct"
   :email/message-id "<11@test.org>"
@@ -173,7 +173,7 @@
  ;; =========================================================================
  ;; 12 — Vote +1 on POLL
  ;; =========================================================================
- {:email/uid        "uid-12"
+ {
   :email/imap-uid   12
   :email/source     "direct"
   :email/message-id "<12@test.org>"
@@ -188,7 +188,7 @@
  ;; =========================================================================
  ;; 13 — Vote -1 on POLL
  ;; =========================================================================
- {:email/uid        "uid-13"
+ {
   :email/imap-uid   13
   :email/source     "direct"
   :email/message-id "<13@test.org>"
@@ -203,7 +203,7 @@
  ;; =========================================================================
  ;; 14 — Duplicate vote by voter1 (should be ignored)
  ;; =========================================================================
- {:email/uid        "uid-14"
+ {
   :email/imap-uid   14
   :email/source     "direct"
   :email/message-id "<14@test.org>"
@@ -218,7 +218,7 @@
  ;; =========================================================================
  ;; 15 — TODO request
  ;; =========================================================================
- {:email/uid        "uid-15"
+ {
   :email/imap-uid   15
   :email/source     "direct"
   :email/message-id "<15@test.org>"
@@ -231,7 +231,7 @@
  ;; =========================================================================
  ;; 16 — Reply to TODO: close it
  ;; =========================================================================
- {:email/uid        "uid-16"
+ {
   :email/imap-uid   16
   :email/source     "direct"
   :email/message-id "<16@test.org>"
@@ -246,7 +246,7 @@
  ;; =========================================================================
  ;; 17 — Announcement (admin only)
  ;; =========================================================================
- {:email/uid        "uid-17"
+ {
   :email/imap-uid   17
   :email/source     "direct"
   :email/message-id "<17@test.org>"
@@ -259,7 +259,7 @@
  ;; =========================================================================
  ;; 18 — Announcement attempt by regular user (should be denied)
  ;; =========================================================================
- {:email/uid        "uid-18"
+ {
   :email/imap-uid   18
   :email/source     "direct"
   :email/message-id "<18@test.org>"
@@ -272,7 +272,7 @@
  ;; =========================================================================
  ;; 19 — Change announcement
  ;; =========================================================================
- {:email/uid        "uid-19"
+ {
   :email/imap-uid   19
   :email/source     "direct"
   :email/message-id "<19@test.org>"
@@ -285,7 +285,7 @@
  ;; =========================================================================
  ;; 20 — Release announcement (auto-closes CHG 9.8)
  ;; =========================================================================
- {:email/uid        "uid-20"
+ {
   :email/imap-uid   20
   :email/source     "direct"
   :email/message-id "<20@test.org>"
@@ -298,7 +298,7 @@
  ;; =========================================================================
  ;; 21 — Email from ignored user (should be skipped)
  ;; =========================================================================
- {:email/uid        "uid-21"
+ {
   :email/imap-uid   21
   :email/source     "direct"
   :email/message-id "<21@test.org>"
@@ -311,7 +311,7 @@
  ;; =========================================================================
  ;; 22 — Cancel announcement 17
  ;; =========================================================================
- {:email/uid        "uid-22"
+ {
   :email/imap-uid   22
   :email/source     "direct"
   :email/message-id "<22@test.org>"
@@ -326,7 +326,7 @@
  ;; =========================================================================
  ;; 23 — Bug with important flag, then unset it
  ;; =========================================================================
- {:email/uid        "uid-23"
+ {
   :email/imap-uid   23
   :email/source     "direct"
   :email/message-id "<23@test.org>"
@@ -336,7 +336,7 @@
   :email/ingested-at #inst "2026-01-09T10:00:00"
   :email/body-text  "Export is slow.\n"}
 
- {:email/uid        "uid-24"
+ {
   :email/imap-uid   24
   :email/source     "direct"
   :email/message-id "<24@test.org>"
@@ -348,7 +348,7 @@
   :email/references #{"<23@test.org>"}
   :email/body-text  "Important.\n"}
 
- {:email/uid        "uid-25"
+ {
   :email/imap-uid   25
   :email/source     "direct"
   :email/message-id "<25@test.org>"
@@ -363,7 +363,7 @@
  ;; =========================================================================
  ;; 26 — FR request
  ;; =========================================================================
- {:email/uid        "uid-26"
+ {
   :email/imap-uid   26
   :email/source     "direct"
   :email/message-id "<26@test.org>"
@@ -376,7 +376,7 @@
  ;; =========================================================================
  ;; 27 — Announcement with mailing list prefix
  ;; =========================================================================
- {:email/uid        "uid-27"
+ {
   :email/imap-uid   27
   :email/source     "direct"
   :email/message-id "<27@test.org>"
@@ -390,7 +390,7 @@
  ;; =========================================================================
  ;; 28 — Patch with mailing list prefix
  ;; =========================================================================
- {:email/uid        "uid-28"
+ {
   :email/imap-uid   28
   :email/source     "direct"
   :email/message-id "<28@test.org>"
@@ -403,7 +403,7 @@
  ;; =========================================================================
  ;; 29 — Role command sent via mailing list (has List-Id → ignored)
  ;; =========================================================================
- {:email/uid        "uid-29"
+ {
   :email/imap-uid   29
   :email/source     "direct"
   :email/message-id "<29@test.org>"
@@ -417,7 +417,7 @@
  ;; =========================================================================
  ;; 30 — Bug on list-backed source, correct List-Post (allowed)
  ;; =========================================================================
- {:email/uid        "uid-30"
+ {
   :email/imap-uid   30
   :email/source     "public-list"
   :email/message-id "<30@test.org>"
@@ -431,7 +431,7 @@
  ;; =========================================================================
  ;; 31 — Bug on list-backed source, no List-Post (denied)
  ;; =========================================================================
- {:email/uid        "uid-31"
+ {
   :email/imap-uid   31
   :email/source     "public-list"
   :email/message-id "<31@test.org>"
@@ -444,7 +444,7 @@
  ;; =========================================================================
  ;; 32 — Bug on list-backed source, wrong List-Post (denied)
  ;; =========================================================================
- {:email/uid        "uid-32"
+ {
   :email/imap-uid   32
   :email/source     "public-list"
   :email/message-id "<32@test.org>"
@@ -458,7 +458,7 @@
  ;; =========================================================================
  ;; 33 — Bug on list-backed source from admin, no List-Post (allowed)
  ;; =========================================================================
- {:email/uid        "uid-33"
+ {
   :email/imap-uid   33
   :email/source     "public-list"
   :email/message-id "<33@test.org>"
@@ -471,7 +471,7 @@
  ;; =========================================================================
  ;; 34 — Cover letter for patch series (0/3)
  ;; =========================================================================
- {:email/uid        "uid-34"
+ {
   :email/imap-uid   34
   :email/source     "direct"
   :email/message-id "<34@test.org>"
@@ -484,7 +484,7 @@
  ;; =========================================================================
  ;; 35 — First patch in series (1/3)
  ;; =========================================================================
- {:email/uid        "uid-35"
+ {
   :email/imap-uid   35
   :email/source     "direct"
   :email/message-id "<35@test.org>"
@@ -499,7 +499,7 @@
  ;; =========================================================================
  ;; 36 — Second patch in series (2/3)
  ;; =========================================================================
- {:email/uid        "uid-36"
+ {
   :email/imap-uid   36
   :email/source     "direct"
   :email/message-id "<36@test.org>"
@@ -514,7 +514,7 @@
  ;; =========================================================================
  ;; 37 — Third patch in series (3/3) — completes the series
  ;; =========================================================================
- {:email/uid        "uid-37"
+ {
   :email/imap-uid   37
   :email/source     "direct"
   :email/message-id "<37@test.org>"
@@ -529,7 +529,7 @@
  ;; =========================================================================
  ;; 38 — v2 cover letter, as reply to old series (closes old, starts new)
  ;; =========================================================================
- {:email/uid        "uid-38"
+ {
   :email/imap-uid   38
   :email/source     "direct"
   :email/message-id "<38@test.org>"
@@ -544,7 +544,7 @@
  ;; =========================================================================
  ;; 39 — v2 patch 1/3, reply to v2 cover letter
  ;; =========================================================================
- {:email/uid        "uid-39"
+ {
   :email/imap-uid   39
   :email/source     "direct"
   :email/message-id "<39@test.org>"
@@ -559,7 +559,7 @@
  ;; =========================================================================
  ;; 40 — Patch sent as reply to bug 23 (creates a relation)
  ;; =========================================================================
- {:email/uid        "uid-40"
+ {
   :email/imap-uid   40
   :email/source     "direct"
   :email/message-id "<40@test.org>"
@@ -574,7 +574,7 @@
  ;; =========================================================================
  ;; 41 — Add then remove maintainer (admin)
  ;; =========================================================================
- {:email/uid        "uid-41"
+ {
   :email/imap-uid   41
   :email/source     "direct"
   :email/message-id "<41@test.org>"
@@ -584,7 +584,7 @@
   :email/ingested-at #inst "2026-01-18T10:00:00"
   :email/body-text  "Add maintainer: maint2@test.org\n"}
 
- {:email/uid        "uid-42"
+ {
   :email/imap-uid   42
   :email/source     "direct"
   :email/message-id "<42@test.org>"
@@ -597,7 +597,7 @@
  ;; =========================================================================
  ;; 43 — Add admin (replace existing admin)
  ;; =========================================================================
- {:email/uid        "uid-43"
+ {
   :email/imap-uid   43
   :email/source     "direct"
   :email/message-id "<43@test.org>"
@@ -610,7 +610,7 @@
  ;; =========================================================================
  ;; 44 — Unignore a previously ignored user
  ;; =========================================================================
- {:email/uid        "uid-44"
+ {
   :email/imap-uid   44
   :email/source     "direct"
   :email/message-id "<44@test.org>"
@@ -623,7 +623,7 @@
  ;; =========================================================================
  ;; 45 — Maintainer adds another maintainer (permitted)
  ;; =========================================================================
- {:email/uid        "uid-45"
+ {
   :email/imap-uid   45
   :email/source     "direct"
   :email/message-id "<45@test.org>"
@@ -636,7 +636,7 @@
  ;; =========================================================================
  ;; 46 — Maintainer tries to Add admin (denied)
  ;; =========================================================================
- {:email/uid        "uid-46"
+ {
   :email/imap-uid   46
   :email/source     "direct"
   :email/message-id "<46@test.org>"
@@ -649,7 +649,7 @@
  ;; =========================================================================
  ;; 47 — Regular user tries to add maintainer (denied)
  ;; =========================================================================
- {:email/uid        "uid-47"
+ {
   :email/imap-uid   47
   :email/source     "direct"
   :email/message-id "<47@test.org>"
@@ -662,7 +662,7 @@
  ;; =========================================================================
  ;; 48 — Trigger with semicolon punctuation
  ;; =========================================================================
- {:email/uid        "uid-48"
+ {
   :email/imap-uid   48
   :email/source     "direct"
   :email/message-id "<48@test.org>"
@@ -672,7 +672,7 @@
   :email/ingested-at #inst "2026-01-19T10:00:00"
   :email/body-text  "Steps to reproduce.\n"}
 
- {:email/uid        "uid-49"
+ {
   :email/imap-uid   49
   :email/source     "direct"
   :email/message-id "<49@test.org>"
@@ -687,7 +687,7 @@
  ;; =========================================================================
  ;; 50 — Trigger NOT at start of line (should be ignored)
  ;; =========================================================================
- {:email/uid        "uid-50"
+ {
   :email/imap-uid   50
   :email/source     "direct"
   :email/message-id "<50@test.org>"
@@ -697,7 +697,7 @@
   :email/ingested-at #inst "2026-01-19T12:00:00"
   :email/body-text  "The status is open.\n"}
 
- {:email/uid        "uid-51"
+ {
   :email/imap-uid   51
   :email/source     "direct"
   :email/message-id "<51@test.org>"
@@ -712,7 +712,7 @@
  ;; =========================================================================
  ;; 52 — Closed. trigger on a request
  ;; =========================================================================
- {:email/uid        "uid-52"
+ {
   :email/imap-uid   52
   :email/source     "direct"
   :email/message-id "<52@test.org>"
@@ -722,7 +722,7 @@
   :email/ingested-at #inst "2026-01-19T14:00:00"
   :email/body-text  "A feature request.\n"}
 
- {:email/uid        "uid-53"
+ {
   :email/imap-uid   53
   :email/source     "direct"
   :email/message-id "<53@test.org>"
@@ -737,7 +737,7 @@
  ;; =========================================================================
  ;; 54 — Try to ack an announcement (should have no effect)
  ;; =========================================================================
- {:email/uid        "uid-54"
+ {
   :email/imap-uid   54
   :email/source     "direct"
   :email/message-id "<54@test.org>"
@@ -747,7 +747,7 @@
   :email/ingested-at #inst "2026-01-20T10:00:00"
   :email/body-text  "An announcement.\n"}
 
- {:email/uid        "uid-55"
+ {
   :email/imap-uid   55
   :email/source     "direct"
   :email/message-id "<55@test.org>"
@@ -762,7 +762,7 @@
  ;; =========================================================================
  ;; 56 — Notify: off (unsubscribe)
  ;; =========================================================================
- {:email/uid        "uid-56"
+ {
   :email/imap-uid   56
   :email/source     "direct"
   :email/message-id "<56@test.org>"
@@ -775,7 +775,7 @@
  ;; =========================================================================
  ;; 57 — Notify: on d:7 p:2 (resubscribe with prefs)
  ;; =========================================================================
- {:email/uid        "uid-57"
+ {
   :email/imap-uid   57
   :email/source     "direct"
   :email/message-id "<57@test.org>"
@@ -788,7 +788,7 @@
  ;; =========================================================================
  ;; 58 — Notify command from regular user (ignored)
  ;; =========================================================================
- {:email/uid        "uid-58"
+ {
   :email/imap-uid   58
   :email/source     "direct"
   :email/message-id "<58@test.org>"
@@ -801,7 +801,7 @@
  ;; =========================================================================
  ;; 59 — Case insensitive tag: [bug] lowercase
  ;; =========================================================================
- {:email/uid        "uid-59"
+ {
   :email/imap-uid   59
   :email/source     "direct"
   :email/message-id "<59@test.org>"
@@ -814,7 +814,7 @@
  ;; =========================================================================
  ;; 60 — [ANNOUNCEMENT] long form tag
  ;; =========================================================================
- {:email/uid        "uid-60"
+ {
   :email/imap-uid   60
   :email/source     "direct"
   :email/message-id "<60@test.org>"
@@ -827,7 +827,7 @@
  ;; =========================================================================
  ;; 61 — Threading via References only (no In-Reply-To)
  ;; =========================================================================
- {:email/uid        "uid-61"
+ {
   :email/imap-uid   61
   :email/source     "direct"
   :email/message-id "<61@test.org>"
@@ -841,7 +841,7 @@
  ;; =========================================================================
  ;; 62 — Deep thread: grandchild triggers on grandparent report
  ;; =========================================================================
- {:email/uid        "uid-62"
+ {
   :email/imap-uid   62
   :email/source     "direct"
   :email/message-id "<62@test.org>"
@@ -856,7 +856,7 @@
  ;; =========================================================================
  ;; 63 — Orphan email (no tag, no thread parent)
  ;; =========================================================================
- {:email/uid        "uid-63"
+ {
   :email/imap-uid   63
   :email/source     "direct"
   :email/message-id "<63@test.org>"
@@ -872,7 +872,7 @@
  ;; a second report — it becomes a descendant instead.
  ;; Uses its own message-id (unlike email 59) to avoid DB-level upsert.
  ;; =========================================================================
- {:email/uid        "uid-64"
+ {
   :email/imap-uid   64
   :email/source     "direct"
   :email/message-id "<64@test.org>"
@@ -887,7 +887,7 @@
  ;; =========================================================================
  ;; 65 — body-text-from-html fallback (no :email/body-text)
  ;; =========================================================================
- {:email/uid        "uid-65"
+ {
   :email/imap-uid   65
   :email/source     "direct"
   :email/message-id "<65@test.org>"
@@ -897,7 +897,7 @@
   :email/ingested-at #inst "2026-01-22T10:00:00"
   :email/body-text-from-html "Bug from HTML email.\n"}
 
- {:email/uid        "uid-66"
+ {
   :email/imap-uid   66
   :email/source     "direct"
   :email/message-id "<66@test.org>"
@@ -912,7 +912,7 @@
  ;; =========================================================================
  ;; 67 — Maintainer ignores an address (permitted for maintainer)
  ;; =========================================================================
- {:email/uid        "uid-67"
+ {
   :email/imap-uid   67
   :email/source     "direct"
   :email/message-id "<67@test.org>"
@@ -925,7 +925,7 @@
  ;; =========================================================================
  ;; 68 — Series without cover letter (starts at 1/2)
  ;; =========================================================================
- {:email/uid        "uid-68"
+ {
   :email/imap-uid   68
   :email/source     "direct"
   :email/message-id "<68@test.org>"
@@ -935,7 +935,7 @@
   :email/ingested-at #inst "2026-01-23T10:00:00"
   :email/body-text  "Remove dead code.\n"}
 
- {:email/uid        "uid-69"
+ {
   :email/imap-uid   69
   :email/source     "direct"
   :email/message-id "<69@test.org>"
@@ -950,7 +950,7 @@
  ;; =========================================================================
  ;; 70 — Series from a different sender (same topic, separate series)
  ;; =========================================================================
- {:email/uid        "uid-70"
+ {
   :email/imap-uid   70
   :email/source     "direct"
   :email/message-id "<70@test.org>"
@@ -963,7 +963,7 @@
  ;; =========================================================================
  ;; 71 — [ANN] permission denial from regular user (proper tag)
  ;; =========================================================================
- {:email/uid        "uid-71"
+ {
   :email/imap-uid   71
   :email/source     "direct"
   :email/message-id "<71@test.org>"
@@ -976,7 +976,7 @@
  ;; =========================================================================
  ;; 72 — [REL] permission denial from regular user
  ;; =========================================================================
- {:email/uid        "uid-72"
+ {
   :email/imap-uid   72
   :email/source     "direct"
   :email/message-id "<72@test.org>"
@@ -989,7 +989,7 @@
  ;; =========================================================================
  ;; 73 — [CHG] permission denial from regular user
  ;; =========================================================================
- {:email/uid        "uid-73"
+ {
   :email/imap-uid   73
   :email/source     "direct"
   :email/message-id "<73@test.org>"
@@ -1002,7 +1002,7 @@
  ;; =========================================================================
  ;; 74 — Notify command via mailing list (should be ignored)
  ;; =========================================================================
- {:email/uid        "uid-74"
+ {
   :email/imap-uid   74
   :email/source     "direct"
   :email/message-id "<74@test.org>"

@@ -543,7 +543,7 @@
   (d/transact! conn [{:digest/id "watermark" :digest/last-run ts}]))
 
 (def email-pull-pattern
-  '[:db/id :email/uid :email/imap-uid :email/source :email/subject :email/message-id
+  '[:db/id :email/imap-uid :email/source :email/subject :email/message-id
     :email/in-reply-to :email/references
     :email/from-address :email/date-sent :email/ingested-at
     :email/body-text :email/body-text-from-html :email/headers-edn
@@ -558,7 +558,7 @@
 
 (defn all-emails [db]
   (let [eids (d/q '[:find [?e ...]
-                    :where [?e :email/uid _]]
+                    :where [?e :email/message-id _]]
                   db)]
     (d/pull-many db email-pull-pattern eids)))
 

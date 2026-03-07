@@ -5,8 +5,6 @@
 ;; they can open the Datalevin DB with the full schema.
 
 {;; --- Email (defined by bark-ingest) ---
- :email/uid              {:db/valueType :db.type/string
-                          :db/unique    :db.unique/identity}
  :email/imap-uid         {:db/valueType :db.type/long}
  :email/source           {:db/valueType :db.type/string}
  :email/message-id       {:db/valueType :db.type/string

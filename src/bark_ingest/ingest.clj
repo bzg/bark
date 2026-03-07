@@ -10,7 +10,6 @@
             [clojure.string :as str]
             [clojure.tools.logging :as log])
   (:import [java.util Date]
-           [java.security MessageDigest]
            [org.jsoup Jsoup]))
 
 ;; ---------------------------------------------------------------------------
@@ -41,17 +40,6 @@
                    set)]
       (when (seq ids) ids))))
 
-(defn sha256
-  "Compute SHA-256 hex digest of a string."
-  [^String s]
-  (let [digest (MessageDigest/getInstance "SHA-256")
-        bytes  (.digest digest (.getBytes s "UTF-8"))]
-    (str/join (map #(format "%02x" (bit-and (int %) 0xff)) bytes))))
-
-(defn uid-hash
-  "Compute a unique uid hash from an IMAP UID."
-  [imap-uid]
-  (sha256 (str "bark:" imap-uid)))
 
 ;; ---------------------------------------------------------------------------
 ;; Transform
@@ -81,8 +69,7 @@
                                                           (when (:data att)
                                                             (count (:data att))))})
                           (remove nil? (:attachments body)))]
-    (cond-> {:email/uid          (uid-hash imap-uid)
-             :email/imap-uid     imap-uid
+    (cond-> {:email/imap-uid     imap-uid
              :email/message-id   (:message-id msg)
              :email/subject      (or (:subject msg) "(no subject)")
              :email/content-type (:content-type msg)
@@ -114,19 +101,17 @@
 
 (defn store-email!
   "Store a single parsed email in Datalevin.
-  Skips if uid hash or Message-ID already exists.
+  Skips if Message-ID is nil or already exists.
   Returns true if the email was stored, false/nil otherwise."
   [conn msg]
-  (let [imap-uid (:uid msg)]
+  (let [message-id (:message-id msg)
+        imap-uid   (:uid msg)]
     (cond
-      (nil? imap-uid)
-      (do (log/warn "Skipping email with nil UID") false)
+      (nil? message-id)
+      (do (log/warn "Skipping email with nil Message-ID, UID:" imap-uid) false)
 
-      (db/email-exists? conn (uid-hash imap-uid))
-      (do (log/debug "Skipping already stored email UID:" imap-uid) false)
-
-      (db/message-id-exists? conn (:message-id msg))
-      (do (log/debug "Skipping duplicate Message-ID:" (:message-id msg)) false)
+      (db/message-id-exists? conn message-id)
+      (do (log/debug "Skipping already stored Message-ID:" message-id) false)
 
       :else
       (let [txdata (email->txdata msg)]

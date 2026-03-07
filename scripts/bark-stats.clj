@@ -42,7 +42,7 @@
        (map first)))
 
 (defn total-emails [db]
-  (-> (d/q '[:find (count ?e) :where [?e :email/uid _]] db)
+  (-> (d/q '[:find (count ?e) :where [?e :email/message-id _]] db)
       ffirst (or 0)))
 
 ;; ---------------------------------------------------------------------------

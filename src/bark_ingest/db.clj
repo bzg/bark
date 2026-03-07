@@ -33,14 +33,6 @@
 ;; Queries
 ;; ---------------------------------------------------------------------------
 
-(defn email-exists?
-  "Check if an email with the given uid hash already exists."
-  [conn uid-hash]
-  (some? (d/q '[:find ?e .
-                :in $ ?uid
-                :where [?e :email/uid ?uid]]
-              (d/db conn) uid-hash)))
-
 (defn message-id-exists?
   "Check if an email with the given Message-ID already exists."
   [conn message-id]
