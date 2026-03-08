@@ -201,7 +201,7 @@
           (assert-test "Acked (Confirmed)" (some? (:report/acked r)))
           (assert-test "Owned (Handled)" (some? (:report/owned r)))
           (assert-test "Closed (Fixed)" (some? (:report/closed r)))
-          (assert-test "Urgent unset (Not urgent)" (nil? (:report/urgent r)))
+          (assert-test "Urgent still set (unsetting reserved to maintainer directives)" (some? (:report/urgent r)))
           (assert= "3 descendants" 3
                    (count (:report/descendants r))))
 
@@ -278,11 +278,11 @@
         (assert-test "No report from ignored user"
                      (not (report-exists? db "<21@test.org>")))
 
-        ;; --- Bug 23: important flag set then unset ---
-        (println "\n--- Bug 23: important set then unset ---")
+        ;; --- Bug 23: important flag set (unsetting now requires maintainer directive) ---
+        (println "\n--- Bug 23: important set (no user unset) ---")
         (let [r (get-report db "<23@test.org>")]
           (assert= "Type is :bug" :bug (:report/type r))
-          (assert-test "Important unset" (nil? (:report/important r)))
+          (assert-test "Important still set (unsetting reserved to maintainer directives)" (some? (:report/important r)))
           (assert= "3 descendants" 3
                    (count (:report/descendants r))))
 

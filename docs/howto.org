@@ -56,7 +56,15 @@ than to the entire list. This is also useful for reclassifying emails:
 if someone forgot the =[BUG]= prefix, a maintainer can edit the subject
 and resend the email to the BARK inbox.
 
-** Acting as a proxy for updates
+Maintainers can also "undo" an update:
+
+: Unacked.
+: Unowned.
+: Unclosed.
+: Unurgent.
+: Unimportant.
+
+** Acting as an update proxy
 
 Maintainers can also write directly to the BARK inbox to act as
 "proxies" and update a report as if they were users:
@@ -66,14 +74,6 @@ Maintainers can also write directly to the BARK inbox to act as
 : Closed-by: a-user@example.com
 : Urgent-by: a-user@example.com
 : Important-by: a-user@example.com
-
-They can also "undo" an update:
-
-: Unacked.
-: Unowned.
-: Unclosed.
-: Unurgent.
-: Unimportant.
 
 ** Managing roles and permissions
 
@@ -121,7 +121,7 @@ To re-subscribe:
 Notify: on
 #+end_example
 
-*** Preferences
+*** Setting preferences
 
 Notification preferences are set via the same =Notify:= command.
 Parameters can be combined on a single line:
@@ -204,8 +204,6 @@ punctuation mark (=.= =,= =;= =:=):
 | =Cancelled.=      | closed (all)                |
 | =Urgent.=         | urgent                      |
 | =Important.=      | important                   |
-| =Not urgent.=     | un-urgent                   |
-| =Not important.=  | un-important                |
 
 You can use multiple keywords in the same email, one per line.
 

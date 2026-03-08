@@ -82,7 +82,7 @@
   :email/ingested-at #inst "2026-01-01T13:00:00"
   :email/in-reply-to "<04@test.org>"
   :email/references #{"<02@test.org>" "<04@test.org>"}
-  :email/body-text  "Handled.\nNot urgent.\n"}
+  :email/body-text  "Handled.\n"}
 
  ;; =========================================================================
  ;; 06 — Reply to bug 02: mark fixed (closes the bug)
@@ -357,7 +357,7 @@
   :email/ingested-at #inst "2026-01-09T12:00:00"
   :email/in-reply-to "<24@test.org>"
   :email/references #{"<23@test.org>" "<24@test.org>"}
-  :email/body-text  "Not important.\n"}
+  :email/body-text  "Noted.\n"}
 
  ;; =========================================================================
  ;; 26 — FR request

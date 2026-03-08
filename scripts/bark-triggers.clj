@@ -17,9 +17,6 @@
 (defn- match-triggers [triggers body-text]
   (into {} (keep (fn [[k p]] (when (re-find p body-text) [(keyword "report" (name k)) true]))) triggers))
 
-(defn- match-unset-triggers [triggers body-text]
-  (into #{} (keep (fn [[k p]] (when (re-find p body-text) (keyword "report" (name k))))) triggers))
-
 ;; ---------------------------------------------------------------------------
 ;; Trigger defaults and compilation
 ;; ---------------------------------------------------------------------------
@@ -73,11 +70,8 @@
       default-triggers-by-type)))
 
 ;; ---------------------------------------------------------------------------
-;; Priority and unset triggers
+;; Priority triggers
 ;; ---------------------------------------------------------------------------
-
-(def report-unset-triggers
-  {:urgent (trigger-pattern "Not urgent") :important (trigger-pattern "Not important")})
 
 (def report-priority-triggers
   {:urgent (trigger-pattern "Urgent") :important (trigger-pattern "Important")})
@@ -90,15 +84,13 @@
 
 (defn detect-triggers
   "Detect trigger words in body text for a given report type.
-  Returns {:set {attr true ...} :unset #{attr ...}} or nil."
+  Returns a map of {attr true ...} or nil."
   [report-type body-text triggers-by-type]
   (when body-text
     (let [sets     (when-let [t (triggers-by-type report-type)] (match-triggers t body-text))
           priority (when (report-types-with-priority report-type) (match-triggers report-priority-triggers body-text))
-          unsets   (when (report-types-with-priority report-type) (match-unset-triggers report-unset-triggers body-text))
-          all-sets (into {} (remove (fn [[k _]] (contains? unsets k))) (merge sets priority))]
-      (when (or (seq all-sets) (seq unsets))
-        {:set all-sets :unset unsets}))))
+          all-sets (merge sets priority)]
+      (when (seq all-sets) all-sets))))
 
 ;; ---------------------------------------------------------------------------
 ;; Vote detection (pure)
@@ -281,16 +273,11 @@
     (when result
       (let [eid      (:db/id email)
             current  (d/pull (d/db conn) state-attrs report-eid)
-            new-sets (into {} (remove (fn [[k _]] (get current k))) (:set result))
-            new-unsets (into #{} (filter current) (:unset result))
+            new-sets (into {} (remove (fn [[k _]] (get current k))) result)
             set-tx   (when (seq new-sets)
-                       [(into {:db/id report-eid} (map (fn [[k _]] [k eid])) new-sets)])
-            unset-tx (when (seq new-unsets)
-                       (mapv (fn [attr] [:db/retract report-eid attr (ref-eid (get current attr))]) new-unsets))
-            all-tx   (into (vec set-tx) unset-tx)]
-        (when (seq all-tx)
-          (d/transact! conn all-tx)
+                       [(into {:db/id report-eid} (map (fn [[k _]] [k eid])) new-sets)])]
+        (when (seq set-tx)
+          (d/transact! conn set-tx)
           (println (str "    → "
-                        (str/join ", " (concat (map (comp name key) new-sets)
-                                               (map #(str "un-" (name %)) new-unsets)))
+                        (str/join ", " (map (comp name key) new-sets))
                         " (by " (:email/message-id email) ")")))))))
