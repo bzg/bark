@@ -10,7 +10,6 @@
 ;;   voter1@test.org    — voter
 ;;   voter2@test.org    — voter
 ;;   spam@test.org      — will be ignored
-;;   newadmin@test.org  — becomes admin (email 43)
 ;;
 ;; Source: direct
 ;; Source: public-list (list-backed)
@@ -595,7 +594,7 @@
   :email/body-text  "Remove maintainer: maint2@test.org\n"}
 
  ;; =========================================================================
- ;; 43 — Add admin (replace existing admin)
+ ;; 43 — Add admin attempt (no longer recognized, command is ignored)
  ;; =========================================================================
  {
   :email/imap-uid   43
@@ -615,7 +614,7 @@
   :email/source     "direct"
   :email/message-id "<44@test.org>"
   :email/subject    "Unignore spam user"
-  :email/from-address "newadmin@test.org"
+  :email/from-address "admin@test.org"
   :email/date-sent  #inst "2026-01-18T13:00:00"
   :email/ingested-at #inst "2026-01-18T13:00:00"
   :email/body-text  "Unignore: spam@test.org\n"}
@@ -742,7 +741,7 @@
   :email/source     "direct"
   :email/message-id "<54@test.org>"
   :email/subject    "[ANN] Ack test announcement"
-  :email/from-address "newadmin@test.org"
+  :email/from-address "admin@test.org"
   :email/date-sent  #inst "2026-01-20T10:00:00"
   :email/ingested-at #inst "2026-01-20T10:00:00"
   :email/body-text  "An announcement.\n"}
@@ -819,7 +818,7 @@
   :email/source     "direct"
   :email/message-id "<60@test.org>"
   :email/subject    "[ANNOUNCEMENT] Long form tag test"
-  :email/from-address "newadmin@test.org"
+  :email/from-address "admin@test.org"
   :email/date-sent  #inst "2026-01-21T11:00:00"
   :email/ingested-at #inst "2026-01-21T11:00:00"
   :email/body-text  "Long form announcement.\n"}

@@ -179,9 +179,9 @@
         (println "\n--- Roles (final state) ---")
         (let [roles (d/pull db '[:roles/admin :roles/maintainers :roles/ignored]
                             [:roles/source "direct"])]
-          ;; Admin changed to newadmin@test.org by email 43
-          (assert= "Admin is newadmin@test.org (changed by email 43)"
-                   "newadmin@test.org" (:roles/admin roles))
+          ;; Admin unchanged (Add admin is no longer a valid command)
+          (assert= "Admin is admin@test.org (unchanged)"
+                   "admin@test.org" (:roles/admin roles))
           (assert-test "maint@test.org is maintainer"
                        (contains? (set (:roles/maintainers roles)) "maint@test.org"))
           ;; spam@test.org was unignored by email 44
@@ -389,12 +389,12 @@
                        (not (contains? (set (:roles/maintainers roles))
                                        "maint2@test.org"))))
 
-        ;; --- Add admin (email 43) ---
-        (println "\n--- Email 43: replace admin ---")
+        ;; --- Email 43: Add admin is ignored (not a valid command) ---
+        (println "\n--- Email 43: Add admin ignored ---")
         (let [roles (d/pull db '[:roles/admin]
                             [:roles/source "direct"])]
-          (assert= "Admin replaced to newadmin@test.org"
-                   "newadmin@test.org" (:roles/admin roles)))
+          (assert= "Admin unchanged (Add admin not recognized)"
+                   "admin@test.org" (:roles/admin roles)))
 
         ;; --- Unignore (email 44) ---
         (println "\n--- Email 44: unignore spam@test.org ---")
@@ -412,12 +412,12 @@
                        (contains? (set (:roles/maintainers roles))
                                   "maint3@test.org")))
 
-        ;; --- Maintainer can't Add admin (email 46) ---
-        (println "\n--- Email 46: maintainer can't add admin ---")
+        ;; --- Email 46: Add admin via maint is ignored (not a valid command) ---
+        (println "\n--- Email 46: Add admin ignored (not recognized) ---")
         (let [roles (d/pull db '[:roles/admin]
                             [:roles/source "direct"])]
-          (assert= "Admin still newadmin (maint denied)"
-                   "newadmin@test.org" (:roles/admin roles)))
+          (assert= "Admin still admin@test.org"
+                   "admin@test.org" (:roles/admin roles)))
 
         ;; --- Regular user can't add maintainer (email 47) ---
         (println "\n--- Email 47: user can't add maintainer ---")

@@ -73,7 +73,7 @@
 ;; ---------------------------------------------------------------------------
 
 (def role-command-pattern
-  #"(?m)^(Add admin|Remove admin|Add maintainer|Remove maintainer|Ignore|Unignore):\s+(.+)$")
+  #"(?m)^(Add maintainer|Remove maintainer|Ignore|Unignore):\s+(.+)$")
 
 (defn- parse-addresses [s]
   (when s (remove str/blank? (str/split (str/trim s) #"\s+"))))
@@ -88,9 +88,7 @@
                  {:command cmd :addresses (parse-addresses addrs)})))))
 
 (def ^:private role-dispatch
-  {"Add admin"         {:requires :admin  :action :set-admin}
-   "Remove admin"      {:requires :admin  :action :noop :msg "cannot remove admin (use Add admin to replace)"}
-   "Remove maintainer" {:requires :admin  :attr :roles/maintainers :action :remove}
+  {"Remove maintainer" {:requires :admin  :attr :roles/maintainers :action :remove}
    "Unignore"          {:requires :admin  :attr :roles/ignored     :action :remove}
    "Add maintainer"    {:requires :maint  :attr :roles/maintainers :action :add}
    "Ignore"            {:requires :maint  :attr :roles/ignored     :action :add}})
@@ -100,20 +98,15 @@
         is-admin  (admin? roles from-addr)
         is-maint  (admin-or-maintainer? roles from-addr)]
     (doseq [{:keys [command addresses]} commands]
-      (when-let [{:keys [requires action attr msg]} (role-dispatch command)]
+      (when-let [{:keys [requires action attr]} (role-dispatch command)]
         (if (case requires :admin is-admin :maint is-maint)
           (case action
-            :set-admin (when-let [new-admin (first addresses)]
-                         (d/transact! conn [{:roles/source source-name
-                                             :roles/admin  new-admin}])
-                         (println (str "    → set admin: " new-admin " (for " source-name ")")))
             :add       (do (add-role! conn source-name attr addresses)
                            (println (str "    → " (str/lower-case command) ": "
                                          (str/join " " addresses) " (for " source-name ")")))
             :remove    (do (remove-role! conn source-name attr addresses)
                            (println (str "    → " (str/lower-case command) ": "
-                                         (str/join " " addresses) " (for " source-name ")")))
-            :noop      (println (str "    → " msg)))
+                                         (str/join " " addresses) " (for " source-name ")"))))
           (println (str "    [denied] " from-addr " lacks permission for: " command)))))))
 
 ;; ---------------------------------------------------------------------------
