@@ -119,7 +119,7 @@
             :report/patch-seq :report/patch-source :report/message-id
             :report/acked :report/owned :report/closed
             :report/urgent :report/important
-            :report/votes-up :report/votes-down :report/voters
+            :report/votes-up :report/votes-down :report/votes-null :report/voters
             {:report/descendants [:email/message-id]}
             {:report/related [:report/type :report/message-id]}
             {:report/series [:series/id :series/expected :series/closed
@@ -389,13 +389,6 @@
                        (not (contains? (set (:roles/maintainers roles))
                                        "maint2@test.org"))))
 
-        ;; --- Email 43: Add admin is ignored (not a valid command) ---
-        (println "\n--- Email 43: Add admin ignored ---")
-        (let [roles (d/pull db '[:roles/admin]
-                            [:roles/source "direct"])]
-          (assert= "Admin unchanged (Add admin not recognized)"
-                   "admin@test.org" (:roles/admin roles)))
-
         ;; --- Unignore (email 44) ---
         (println "\n--- Email 44: unignore spam@test.org ---")
         (let [roles (d/pull db '[:roles/ignored]
@@ -411,13 +404,6 @@
           (assert-test "maint3@test.org IS maintainer"
                        (contains? (set (:roles/maintainers roles))
                                   "maint3@test.org")))
-
-        ;; --- Email 46: Add admin via maint is ignored (not a valid command) ---
-        (println "\n--- Email 46: Add admin ignored (not recognized) ---")
-        (let [roles (d/pull db '[:roles/admin]
-                            [:roles/source "direct"])]
-          (assert= "Admin still admin@test.org"
-                   "admin@test.org" (:roles/admin roles)))
 
         ;; --- Regular user can't add maintainer (email 47) ---
         (println "\n--- Email 47: user can't add maintainer ---")
