@@ -9,6 +9,16 @@
 ;; Utilities
 ;; ---------------------------------------------------------------------------
 
+(defn slugify
+  "Normalize a source name for use as a directory name: strip accents,
+  downcase, replace non-alphanumeric runs with hyphens, trim hyphens."
+  [s]
+  (-> (java.text.Normalizer/normalize (str s) java.text.Normalizer$Form/NFD)
+      (str/replace #"\p{InCombiningDiacriticalMarks}+" "")
+      str/lower-case
+      (str/replace #"[^a-z0-9]+" "-")
+      (str/replace #"^-|-$" "")))
+
 (defn sha256
   "Compute SHA-256 hex digest of a string."
   [^String s]

@@ -483,7 +483,7 @@
         (let [reports (filter-by-source all-reps src-name)
               reports (if min-priority (filter-by-priority reports min-priority) reports)
               reports (if min-status   (filter-by-status reports min-status) reports)
-              out-dir (str "public/" src-name)]
+              out-dir (str "public/" (slugify src-name))]
           (println (str "[" src-name "] " (count reports) " report(s)"))
           (if (empty? reports)
             (println (str "  No reports for source '" src-name "', skipping."))
