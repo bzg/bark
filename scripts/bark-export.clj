@@ -80,7 +80,7 @@
 
 (defn- build-maintainers
   "Gather per-source maintainer sets from DB roles.
-   Returns source-name → #{maintainer-emails}."
+   Returns source-name -> #{maintainer-emails}."
   [db source-map]
   (into {}
         (map (fn [[source-name _]]
@@ -94,7 +94,7 @@
         source-map))
 
 ;; ---------------------------------------------------------------------------
-;; Report → map
+;; Report -> map
 ;; ---------------------------------------------------------------------------
 
 ;; get-header loaded from bark-common.clj
@@ -222,8 +222,8 @@
   (let [data     (mapv #(report->map % source-map maintainers-map) reports)
         meta     (source-metadata source-name source-map)
         envelope (cond-> {:format-version "0.1.0"
-                         :source         source-name
-                         :reports        data}
+                          :source         source-name
+                          :reports        data}
                    (seq meta) (merge meta))
         filename (str out-dir "/reports.json")]
     (spit filename (json/generate-string envelope {:pretty true}))

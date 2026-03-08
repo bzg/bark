@@ -102,10 +102,10 @@
         (if (case requires :admin is-admin :maint is-maint)
           (case action
             :add       (do (add-role! conn source-name attr addresses)
-                           (println (str "    → " (str/lower-case command) ": "
+                           (println (str "    -> " (str/lower-case command) ": "
                                          (str/join " " addresses) " (for " source-name ")")))
             :remove    (do (remove-role! conn source-name attr addresses)
-                           (println (str "    → " (str/lower-case command) ": "
+                           (println (str "    -> " (str/lower-case command) ": "
                                          (str/join " " addresses) " (for " source-name ")"))))
           (println (str "    [denied] " from-addr " lacks permission for: " command)))))))
 
@@ -182,7 +182,7 @@
                      (contains? params :min-priority)   (assoc :notify/min-priority (:min-priority params))
                      (contains? params :min-status)     (assoc :notify/min-status (:min-status params)))]
         (d/transact! conn [txn])
-        (println (str "    → notify: " params-str " (for " from-addr " on " source-name ")"))))))
+        (println (str "    -> notify: " params-str " (for " from-addr " on " source-name ")"))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Permission check for report creation (pure)
@@ -197,7 +197,7 @@
 
 (defn- list-post-address
   "Extract the email address from the List-Post header, e.g.
-  \"<mailto:list@example.org>\" → \"list@example.org\".  Returns nil if absent."
+  \"<mailto:list@example.org>\" -> \"list@example.org\".  Returns nil if absent."
   [email]
   (when-let [lp (get-header (:email/headers-edn email) "List-Post")]
     (second (re-find #"<mailto:([^>]+)>" lp))))

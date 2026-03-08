@@ -27,7 +27,7 @@
    :change       ["CHG" "CHANGE"]})
 
 (defn compile-labels
-  "Compile a labels map into a map of type → regex pattern.
+  "Compile a labels map into a map of type -> regex pattern.
   Tags for :bug/:patch/:release/:change allow an optional version suffix.
   Tags for :request/:announcement match the tag exactly (no suffix)."
   [st]

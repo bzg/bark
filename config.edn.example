@@ -13,8 +13,8 @@
  ;; Checked in order; first match wins.  Omit :match for a catch-all.
  ;;
  ;; Two use-cases:
- ;;   1. Mailing list (public or private) → match on :list-id
- ;;   2. Email address (alias or mailbox) → match on :delivered-to
+ ;;   1. Mailing list (public or private) -> match on :list-id
+ ;;   2. Email address (alias or mailbox) -> match on :delivered-to
  ;;      (fallback: :to, when the MTA does not set Delivered-To)
  :sources [
            ;; --- Use-case 1: mailing list ---

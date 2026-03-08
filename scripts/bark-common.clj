@@ -111,7 +111,7 @@
 
 (defn extract-list-id
   "Extract the identifier from a List-Id header value.
-  RFC 2919: \"Description <list-id>\" → \"list-id\".
+  RFC 2919: \"Description <list-id>\" -> \"list-id\".
   Returns the content inside angle brackets, or the raw value if none found."
   [raw]
   (when raw
@@ -149,7 +149,7 @@
         sources))
 
 (defn build-source-map
-  "Build source-name → {:admin :list-post :list-id :list-archive :bark-path ...} from config."
+  "Build source-name -> {:admin :list-post :list-id :list-archive :bark-path ...} from config."
   [config]
   (let [default-admin    (:admin config)
         global-st        (:labels config)

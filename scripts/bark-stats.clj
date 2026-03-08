@@ -3,8 +3,8 @@
 ;; bark-stats.clj — Compute statistics from BARK data.
 ;;
 ;; Usage:
-;;   bb stats                        → writes public/stats.json
-;;   bb stats html                   → writes public/stats.html (Vega-Lite charts)
+;;   bb stats                        -> writes public/stats.json
+;;   bb stats html                   -> writes public/stats.html (Vega-Lite charts)
 ;;   bb scripts/bark-stats.clj html -o path/to/stats.html
 ;;
 ;; Environment / defaults:

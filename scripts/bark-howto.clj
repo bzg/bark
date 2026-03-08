@@ -4,12 +4,12 @@
 ;;
 ;; Reads the org template and substitutes source-specific labels and
 ;; triggers into the unified table, based on merged config
-;; (defaults → global → per-source).
+;; (defaults -> global -> per-source).
 ;;
 ;; Usage:
-;;   bb scripts/bark-howto.clj -n my-source              → public/my-source/howto.html
-;;   bb scripts/bark-howto.clj -n my-source -o out.html  → writes out.html
-;;   bb scripts/bark-howto.clj                           → public/howto.html (defaults)
+;;   bb scripts/bark-howto.clj -n my-source              -> public/my-source/howto.html
+;;   bb scripts/bark-howto.clj -n my-source -o out.html  -> writes out.html
+;;   bb scripts/bark-howto.clj                           -> public/howto.html (defaults)
 
 (require '[clojure.string :as str]
          '[hiccup2.core :as h])
@@ -155,7 +155,7 @@
       org-text)))
 
 ;; ---------------------------------------------------------------------------
-;; Minimal org → HTML conversion
+;; Minimal org -> HTML conversion
 ;; ---------------------------------------------------------------------------
 
 (defn- org-inline [s]
@@ -167,8 +167,8 @@
 
 (defn- heading-id [text]
   (-> text str/lower-case str/trim
-      (str/replace #"[^a-z0-9 -]" "")
-      (str/replace #"\s+" "-")))
+                          (str/replace #"[^a-z0-9 -]" "")
+                          (str/replace #"\s+" "-")))
 
 (defn- parse-table [lines]
   (let [rows (->> lines
@@ -176,7 +176,7 @@
                   (mapv (fn [line]
                           (->> (str/split line #"\|" -1)
                                (drop 1) butlast
-                               (mapv str/trim)))))]
+                                        (mapv str/trim)))))]
     (when (seq rows)
       (let [header (first rows)
             body   (rest rows)]

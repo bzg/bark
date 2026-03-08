@@ -147,13 +147,13 @@
       (when (and restart? ancestor?)
         (doseq [sid existing-series]
           (close-series! conn sid email-eid)
-          (println (str "    → auto-closed series "
+          (println (str "    -> auto-closed series "
                         (pr-str (:series/id (d/pull (d/db conn) [:series/id] sid)))
                         " (superseded)"))))
       ;; Find or create the series for this patch
       (let [series-eid (or (find-open-series (d/db conn) topic from-addr m)
                            (let [sid (create-series! conn topic from-addr m)]
-                             (println (str "    → new series: "
+                             (println (str "    -> new series: "
                                            (pr-str (series-id topic from-addr m))
                                            " (expecting " m " patches)"))
                              sid))]

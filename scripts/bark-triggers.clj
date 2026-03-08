@@ -31,12 +31,12 @@
    :change       {:closed ["Canceled"]}})
 
 (defn- compile-trigger-words
-  "Compile a map of action→word-lists into action→regex-patterns."
+  "Compile a map of action->word-lists into action->regex-patterns."
   [action-map]
   (into {} (map (fn [[action words]] [action (apply trigger-pattern words)])) action-map))
 
 (defn- compile-triggers-by-type
-  "Compile a full type→action→words map into type→action→pattern."
+  "Compile a full type->action->words map into type->action->pattern."
   [tw]
   (into {} (map (fn [[rtype actions]] [rtype (compile-trigger-words actions)])) tw))
 
@@ -50,8 +50,8 @@
              base overrides))
 
 (defn build-source-triggers
-  "Merge triggers for a source: defaults → global → per-source.
-  Returns compiled type→action→pattern map."
+  "Merge triggers for a source: defaults -> global -> per-source.
+  Returns compiled type->action->pattern map."
   [source-cfg]
   (let [global  (:global-triggers source-cfg)
         per-src (:triggers source-cfg)
@@ -212,7 +212,7 @@
             ;; Build set transactions
             set-tx (mapcat (fn [[attr addr]]
                              (let [target-eid (find-or-create-synthetic-email!
-                                              conn addr report-mid attr)]
+                                               conn addr report-mid attr)]
                                [[:db/add report-eid attr target-eid]
                                 [:db/add report-eid (proxy-attrs attr) proxy-eid]]))
                            set)
@@ -230,9 +230,9 @@
             all-tx (vec (concat set-tx unset-tx))]
         (when (seq all-tx)
           (d/transact! conn all-tx)
-          (println (str "    → directives: "
+          (println (str "    -> directives: "
                         (str/join ", " (concat (map (fn [[attr addr]]
-                                                      (str (name attr) " → " addr))
+                                                      (str (name attr) " -> " addr))
                                                     set)
                                                (map #(str "un-" (name %)) unset)))
                         " (proxy by " from-addr ")")))))))
@@ -250,7 +250,7 @@
               n    (or (get current attr) 0)]
           (d/transact! conn [[:db/add report-eid attr (inc n)]
                              [:db/add report-eid :report/voters from-addr]])
-          (println (str "    → vote " (case vote :up "+1" :down "-1" "0")
+          (println (str "    -> vote " (case vote :up "+1" :down "-1" "0")
                         " by " from-addr)))))))
 
 (defn apply-triggers! [conn report-eid report-type email source-map]
@@ -271,6 +271,6 @@
                        [(into {:db/id report-eid} (map (fn [[k _]] [k eid])) new-sets)])]
         (when (seq set-tx)
           (d/transact! conn set-tx)
-          (println (str "    → "
+          (println (str "    -> "
                         (str/join ", " (map (comp name key) new-sets))
                         " (by " (:email/message-id email) ")")))))))

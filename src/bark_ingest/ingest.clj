@@ -31,14 +31,16 @@
     (.text (Jsoup/parse html))))
 
 (defn- parse-message-ids
-  "Parse a space-separated list of message-ids (as in References header).
-  Returns a set of message-id strings, or nil if empty."
+  "Parse a References header value into a single space-separated string
+  of message-ids, preserving RFC 2822 order (root -> parent).
+  Returns the string, or nil if empty."
   [s]
   (when s
     (let [ids (->> (re-seq #"<[^>]+>" s)
                    (map str)
-                   set)]
-      (when (seq ids) ids))))
+                   distinct
+                   vec)]
+      (when (seq ids) (str/join " " ids)))))
 
 
 ;; ---------------------------------------------------------------------------

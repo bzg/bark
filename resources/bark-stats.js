@@ -1,7 +1,7 @@
 // bark-stats.js — Vega-Lite chart rendering with theme support.
 //
 // Expects:
-//   barkSpecs — object populated by inline <script> tags (id → vega-lite spec)
+//   barkSpecs — object populated by inline <script> tags (id -> vega-lite spec)
 //   toggleTheme() from bark-theme.js (extended here to re-render charts)
 
 var barkSpecs = {};

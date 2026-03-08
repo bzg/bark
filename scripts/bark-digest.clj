@@ -45,18 +45,17 @@
 
 (defn ancestor-mids
   "Return an ordered vector of ancestor message-ids, nearest last.
-  Built from References (which is ordered root→parent per RFC 2822)
+  Built from References (ordered root->parent per RFC 2822)
   plus In-Reply-To.  Duplicates are removed, order preserved."
   [email]
-  (let [refs (:email/references email)
-        refs (cond (nil? refs)    []
-                   (string? refs) [refs]
-                   (coll? refs)   (vec refs)
-                   :else          [])
+  (let [raw  (:email/references email)
+        refs (if (string? raw)
+               (re-seq #"<[^>]+>" raw)
+               [])
         irt  (:email/in-reply-to email)
         all  (if (and irt (not (some #{irt} refs)))
-               (conj refs irt)
-               refs)]
+               (conj (vec refs) irt)
+               (vec refs))]
     (vec (distinct all))))
 
 (defn- index-assoc [idx mid rid] (update idx mid (fnil conj #{}) rid))
@@ -82,7 +81,7 @@
         as-desc (d/q '[:find [?r ...]
                        :in $ ?mid
                        :where [?r :report/descendants ?e]
-                              [?e :email/message-id ?mid]]
+                       [?e :email/message-id ?mid]]
                      db mid)]
     (into (set as-root) as-desc)))
 
@@ -176,7 +175,7 @@
                          db version)]
       (when (seq open-chgs)
         (d/transact! conn (mapv (fn [r] {:db/id r :report/closed release-email-eid}) open-chgs))
-        (println (str "    → auto-closed " (count open-chgs)
+        (println (str "    -> auto-closed " (count open-chgs)
                       " [CHG " version "] (superseded by release)"))))))
 
 ;; ---------------------------------------------------------------------------
@@ -202,10 +201,10 @@
       (do (println (str "  [ignored] " from-addr " — " (:email/subject email)))
           (assoc acc :skipped (inc skipped)))
       (do ;; Role and notify commands (only for direct emails, not mailing list)
-          (when (and from-addr body-text source-name
-                     (not (from-mailing-list? email)))
-            (apply-role-commands! conn roles source-name from-addr body-text)
-            (apply-notify-commands! conn roles source-name from-addr body-text))
+       (when (and from-addr body-text source-name
+                  (not (from-mailing-list? email)))
+         (apply-role-commands! conn roles source-name from-addr body-text)
+         (apply-notify-commands! conn roles source-name from-addr body-text))
           ;; Detect and create report
           (let [report-info (detect-report email subj-patterns)
                 permitted?  (and report-info from-addr
@@ -256,7 +255,7 @@
                 (when (seq patches)
                   (d/transact! conn [{:db/id report-eid
                                       :report/patches patches}])
-                  (println (str "    → " (count patches) " patch file(s) stored")))))
+                  (println (str "    -> " (count patches) " patch file(s) stored")))))
             {:created created :threaded threaded :skipped skipped
              :thread-index thread-index :type-index type-index})))))
 

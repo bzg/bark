@@ -66,7 +66,7 @@
   :email/date-sent  #inst "2026-01-01T12:00:00"
   :email/ingested-at #inst "2026-01-01T12:00:00"
   :email/in-reply-to "<02@test.org>"
-  :email/references #{"<02@test.org>"}
+  :email/references "<02@test.org>"
   :email/body-text  "Confirmed.\nUrgent.\n"}
 
  ;; =========================================================================
@@ -81,7 +81,7 @@
   :email/date-sent  #inst "2026-01-01T13:00:00"
   :email/ingested-at #inst "2026-01-01T13:00:00"
   :email/in-reply-to "<04@test.org>"
-  :email/references #{"<02@test.org>" "<04@test.org>"}
+  :email/references "<02@test.org> <04@test.org>"
   :email/body-text  "Handled.\n"}
 
  ;; =========================================================================
@@ -96,7 +96,7 @@
   :email/date-sent  #inst "2026-01-01T14:00:00"
   :email/ingested-at #inst "2026-01-01T14:00:00"
   :email/in-reply-to "<05@test.org>"
-  :email/references #{"<02@test.org>" "<04@test.org>" "<05@test.org>"}
+  :email/references "<02@test.org> <04@test.org> <05@test.org>"
   :email/body-text  "Fixed.\n"}
 
  ;; =========================================================================
@@ -153,7 +153,7 @@
   :email/date-sent  #inst "2026-01-02T14:00:00"
   :email/ingested-at #inst "2026-01-02T14:00:00"
   :email/in-reply-to "<07@test.org>"
-  :email/references #{"<07@test.org>"}
+  :email/references "<07@test.org>"
   :email/body-text  "Reviewed.\nApplied.\n"}
 
  ;; =========================================================================
@@ -181,7 +181,7 @@
   :email/date-sent  #inst "2026-01-03T11:00:00"
   :email/ingested-at #inst "2026-01-03T11:00:00"
   :email/in-reply-to "<11@test.org>"
-  :email/references #{"<11@test.org>"}
+  :email/references "<11@test.org>"
   :email/body-text  "+1\n"}
 
  ;; =========================================================================
@@ -196,7 +196,7 @@
   :email/date-sent  #inst "2026-01-03T12:00:00"
   :email/ingested-at #inst "2026-01-03T12:00:00"
   :email/in-reply-to "<11@test.org>"
-  :email/references #{"<11@test.org>"}
+  :email/references "<11@test.org>"
   :email/body-text  "-1\n"}
 
  ;; =========================================================================
@@ -211,7 +211,7 @@
   :email/date-sent  #inst "2026-01-03T13:00:00"
   :email/ingested-at #inst "2026-01-03T13:00:00"
   :email/in-reply-to "<11@test.org>"
-  :email/references #{"<11@test.org>"}
+  :email/references "<11@test.org>"
   :email/body-text  "+1\n"}
 
  ;; =========================================================================
@@ -239,7 +239,7 @@
   :email/date-sent  #inst "2026-01-04T14:00:00"
   :email/ingested-at #inst "2026-01-04T14:00:00"
   :email/in-reply-to "<15@test.org>"
-  :email/references #{"<15@test.org>"}
+  :email/references "<15@test.org>"
   :email/body-text  "Done.\n"}
 
  ;; =========================================================================
@@ -319,7 +319,7 @@
   :email/date-sent  #inst "2026-01-08T12:00:00"
   :email/ingested-at #inst "2026-01-08T12:00:00"
   :email/in-reply-to "<17@test.org>"
-  :email/references #{"<17@test.org>"}
+  :email/references "<17@test.org>"
   :email/body-text  "Canceled.\n"}
 
  ;; =========================================================================
@@ -344,7 +344,7 @@
   :email/date-sent  #inst "2026-01-09T11:00:00"
   :email/ingested-at #inst "2026-01-09T11:00:00"
   :email/in-reply-to "<23@test.org>"
-  :email/references #{"<23@test.org>"}
+  :email/references "<23@test.org>"
   :email/body-text  "Important.\n"}
 
  {
@@ -356,7 +356,7 @@
   :email/date-sent  #inst "2026-01-09T12:00:00"
   :email/ingested-at #inst "2026-01-09T12:00:00"
   :email/in-reply-to "<24@test.org>"
-  :email/references #{"<23@test.org>" "<24@test.org>"}
+  :email/references "<23@test.org> <24@test.org>"
   :email/body-text  "Noted.\n"}
 
  ;; =========================================================================
@@ -400,7 +400,7 @@
   :email/body-text  "Refactor patch.\n\ndiff --git a/parser.el b/parser.el\n--- a/parser.el\n+++ b/parser.el\n@@ -1,3 +1,3 @@\n-old\n+new\n"}
 
  ;; =========================================================================
- ;; 29 — Role command sent via mailing list (has List-Id → ignored)
+ ;; 29 — Role command sent via mailing list (has List-Id -> ignored)
  ;; =========================================================================
  {
   :email/imap-uid   29
@@ -492,7 +492,7 @@
   :email/date-sent  #inst "2026-01-15T10:01:00"
   :email/ingested-at #inst "2026-01-15T10:01:00"
   :email/in-reply-to "<34@test.org>"
-  :email/references #{"<34@test.org>"}
+  :email/references "<34@test.org>"
   :email/body-text  "Tokenizer rewrite.\n\ndiff --git a/tokenizer.clj b/tokenizer.clj\n--- a/tokenizer.clj\n+++ b/tokenizer.clj\n@@ -1,3 +1,3 @@\n-old\n+new\n"}
 
  ;; =========================================================================
@@ -507,7 +507,7 @@
   :email/date-sent  #inst "2026-01-15T10:02:00"
   :email/ingested-at #inst "2026-01-15T10:02:00"
   :email/in-reply-to "<34@test.org>"
-  :email/references #{"<34@test.org>"}
+  :email/references "<34@test.org>"
   :email/body-text  "AST builder rewrite.\n\ndiff --git a/ast.clj b/ast.clj\n--- a/ast.clj\n+++ b/ast.clj\n@@ -1,3 +1,3 @@\n-old\n+new\n"}
 
  ;; =========================================================================
@@ -522,7 +522,7 @@
   :email/date-sent  #inst "2026-01-15T10:03:00"
   :email/ingested-at #inst "2026-01-15T10:03:00"
   :email/in-reply-to "<34@test.org>"
-  :email/references #{"<34@test.org>"}
+  :email/references "<34@test.org>"
   :email/body-text  "Renderer rewrite.\n\ndiff --git a/render.clj b/render.clj\n--- a/render.clj\n+++ b/render.clj\n@@ -1,3 +1,3 @@\n-old\n+new\n"}
 
  ;; =========================================================================
@@ -537,7 +537,7 @@
   :email/date-sent  #inst "2026-01-16T10:00:00"
   :email/ingested-at #inst "2026-01-16T10:00:00"
   :email/in-reply-to "<34@test.org>"
-  :email/references #{"<34@test.org>"}
+  :email/references "<34@test.org>"
   :email/body-text  "v2 addressing review comments.\n"}
 
  ;; =========================================================================
@@ -552,7 +552,7 @@
   :email/date-sent  #inst "2026-01-16T10:01:00"
   :email/ingested-at #inst "2026-01-16T10:01:00"
   :email/in-reply-to "<38@test.org>"
-  :email/references #{"<38@test.org>" "<34@test.org>"}
+  :email/references "<34@test.org> <38@test.org>"
   :email/body-text  "Tokenizer v2.\n\ndiff --git a/tokenizer.clj b/tokenizer.clj\n--- a/tokenizer.clj\n+++ b/tokenizer.clj\n@@ -1,3 +1,3 @@\n-old\n+new-v2\n"}
 
  ;; =========================================================================
@@ -567,7 +567,7 @@
   :email/date-sent  #inst "2026-01-17T10:00:00"
   :email/ingested-at #inst "2026-01-17T10:00:00"
   :email/in-reply-to "<23@test.org>"
-  :email/references #{"<23@test.org>"}
+  :email/references "<23@test.org>"
   :email/body-text  "Here is a fix for the slow export bug.\n\ndiff --git a/export.clj b/export.clj\n--- a/export.clj\n+++ b/export.clj\n@@ -10,3 +10,3 @@\n-(defn slow-fn [] ...)\n+(defn fast-fn [] ...)\n"}
 
  ;; =========================================================================
@@ -680,7 +680,7 @@
   :email/date-sent  #inst "2026-01-19T11:00:00"
   :email/ingested-at #inst "2026-01-19T11:00:00"
   :email/in-reply-to "<48@test.org>"
-  :email/references #{"<48@test.org>"}
+  :email/references "<48@test.org>"
   :email/body-text  "Approved;\n"}
 
  ;; =========================================================================
@@ -705,7 +705,7 @@
   :email/date-sent  #inst "2026-01-19T13:00:00"
   :email/ingested-at #inst "2026-01-19T13:00:00"
   :email/in-reply-to "<50@test.org>"
-  :email/references #{"<50@test.org>"}
+  :email/references "<50@test.org>"
   :email/body-text  "I think this should be Fixed. But not yet.\n"}
 
  ;; =========================================================================
@@ -730,7 +730,7 @@
   :email/date-sent  #inst "2026-01-19T15:00:00"
   :email/ingested-at #inst "2026-01-19T15:00:00"
   :email/in-reply-to "<52@test.org>"
-  :email/references #{"<52@test.org>"}
+  :email/references "<52@test.org>"
   :email/body-text  "Closed.\n"}
 
  ;; =========================================================================
@@ -755,7 +755,7 @@
   :email/date-sent  #inst "2026-01-20T11:00:00"
   :email/ingested-at #inst "2026-01-20T11:00:00"
   :email/in-reply-to "<54@test.org>"
-  :email/references #{"<54@test.org>"}
+  :email/references "<54@test.org>"
   :email/body-text  "Approved.\nHandled.\nUrgent.\n"}
 
  ;; =========================================================================
@@ -834,7 +834,7 @@
   :email/from-address "maint@test.org"
   :email/date-sent  #inst "2026-01-21T12:00:00"
   :email/ingested-at #inst "2026-01-21T12:00:00"
-  :email/references #{"<59@test.org>"}
+  :email/references "<59@test.org>"
   :email/body-text  "Confirmed.\n"}
 
  ;; =========================================================================
@@ -849,7 +849,7 @@
   :email/date-sent  #inst "2026-01-21T13:00:00"
   :email/ingested-at #inst "2026-01-21T13:00:00"
   :email/in-reply-to "<61@test.org>"
-  :email/references #{"<59@test.org>" "<61@test.org>"}
+  :email/references "<59@test.org> <61@test.org>"
   :email/body-text  "Fixed,\n"}
 
  ;; =========================================================================
@@ -880,7 +880,7 @@
   :email/date-sent  #inst "2026-01-21T15:00:00"
   :email/ingested-at #inst "2026-01-21T15:00:00"
   :email/in-reply-to "<59@test.org>"
-  :email/references #{"<59@test.org>"}
+  :email/references "<59@test.org>"
   :email/body-text  "Duplicate.\n"}
 
  ;; =========================================================================
@@ -905,7 +905,7 @@
   :email/date-sent  #inst "2026-01-22T11:00:00"
   :email/ingested-at #inst "2026-01-22T11:00:00"
   :email/in-reply-to "<65@test.org>"
-  :email/references #{"<65@test.org>"}
+  :email/references "<65@test.org>"
   :email/body-text-from-html "Confirmed.\n"}
 
  ;; =========================================================================
@@ -943,7 +943,7 @@
   :email/date-sent  #inst "2026-01-23T10:01:00"
   :email/ingested-at #inst "2026-01-23T10:01:00"
   :email/in-reply-to "<68@test.org>"
-  :email/references #{"<68@test.org>"}
+  :email/references "<68@test.org>"
   :email/body-text  "Doc update.\n\ndiff --git a/docs.md b/docs.md\n--- a/docs.md\n+++ b/docs.md\n@@ -1,3 +1,3 @@\n-old\n+new\n"}
 
  ;; =========================================================================
@@ -1037,7 +1037,7 @@
   :email/date-sent  #inst "2026-01-25T11:00:00"
   :email/ingested-at #inst "2026-01-25T11:00:00"
   :email/in-reply-to "<75@test.org>"
-  :email/references #{"<75@test.org>"}
+  :email/references "<75@test.org>"
   :email/body-text  "+1, great idea\n"}
 
  ;; =========================================================================
@@ -1052,7 +1052,7 @@
   :email/date-sent  #inst "2026-01-25T12:00:00"
   :email/ingested-at #inst "2026-01-25T12:00:00"
   :email/in-reply-to "<75@test.org>"
-  :email/references #{"<75@test.org>"}
+  :email/references "<75@test.org>"
   :email/body-text  "1+\n"}
 
  ;; =========================================================================
@@ -1067,7 +1067,7 @@
   :email/date-sent  #inst "2026-01-25T13:00:00"
   :email/ingested-at #inst "2026-01-25T13:00:00"
   :email/in-reply-to "<75@test.org>"
-  :email/references #{"<75@test.org>"}
+  :email/references "<75@test.org>"
   :email/body-text  "1-\n"}
 
  ;; =========================================================================
@@ -1082,7 +1082,7 @@
   :email/date-sent  #inst "2026-01-25T14:00:00"
   :email/ingested-at #inst "2026-01-25T14:00:00"
   :email/in-reply-to "<75@test.org>"
-  :email/references #{"<75@test.org>"}
+  :email/references "<75@test.org>"
   :email/body-text  "+10 people agree\n"}
 
  ;; =========================================================================
@@ -1097,7 +1097,7 @@
   :email/date-sent  #inst "2026-01-25T15:00:00"
   :email/ingested-at #inst "2026-01-25T15:00:00"
   :email/in-reply-to "<75@test.org>"
-  :email/references #{"<75@test.org>"}
+  :email/references "<75@test.org>"
   :email/body-text  "+0\n"}
 
  ;; =========================================================================
@@ -1125,7 +1125,7 @@
   :email/date-sent  #inst "2026-01-26T11:00:00"
   :email/ingested-at #inst "2026-01-26T11:00:00"
   :email/in-reply-to "<81@test.org>"
-  :email/references #{"<81@test.org>"}
+  :email/references "<81@test.org>"
   :email/body-text  "Acked-by: reviewer@test.org\n"}
 
  ;; =========================================================================
@@ -1140,7 +1140,7 @@
   :email/date-sent  #inst "2026-01-26T12:00:00"
   :email/ingested-at #inst "2026-01-26T12:00:00"
   :email/in-reply-to "<81@test.org>"
-  :email/references #{"<81@test.org>"}
+  :email/references "<81@test.org>"
   :email/body-text  "Owned-by: fixer@test.org\nUrgent-by: fixer@test.org\n"}
 
  ;; =========================================================================
@@ -1155,7 +1155,7 @@
   :email/date-sent  #inst "2026-01-26T13:00:00"
   :email/ingested-at #inst "2026-01-26T13:00:00"
   :email/in-reply-to "<81@test.org>"
-  :email/references #{"<81@test.org>"}
+  :email/references "<81@test.org>"
   :email/body-text  "Closed-by: someone@test.org\n"}
 
  ;; =========================================================================
@@ -1170,7 +1170,7 @@
   :email/date-sent  #inst "2026-01-26T14:00:00"
   :email/ingested-at #inst "2026-01-26T14:00:00"
   :email/in-reply-to "<81@test.org>"
-  :email/references #{"<81@test.org>"}
+  :email/references "<81@test.org>"
   :email/body-text  "Unacked\n"}
 
  ;; =========================================================================
@@ -1198,7 +1198,7 @@
   :email/date-sent  #inst "2026-01-27T11:00:00"
   :email/ingested-at #inst "2026-01-27T11:00:00"
   :email/in-reply-to "<86@test.org>"
-  :email/references #{"<86@test.org>"}
+  :email/references "<86@test.org>"
   :email/body-text  "Acked-by: someone@test.org\nUnacked\n"}
 
  ;; =========================================================================
@@ -1226,6 +1226,6 @@
   :email/date-sent  #inst "2026-01-28T11:00:00"
   :email/ingested-at #inst "2026-01-28T11:00:00"
   :email/in-reply-to "<88@test.org>"
-  :email/references #{"<88@test.org>"}
+  :email/references "<88@test.org>"
   :email/body-text  "Closed-by: closer@test.org\nImportant-by: closer@test.org\n"}
 ]

@@ -8,9 +8,9 @@
 ;; permalink state.
 ;;
 ;; Usage:
-;;   bb export html                              → via bb task (preferred)
-;;   bb scripts/bark-index.clj                   → writes public/index.html
-;;   bb scripts/bark-index.clj -o reports.html   → writes reports.html
+;;   bb export html                              -> via bb task (preferred)
+;;   bb scripts/bark-index.clj                   -> writes public/index.html
+;;   bb scripts/bark-index.clj -o reports.html   -> writes reports.html
 
 (require '[babashka.process :as process]
          '[cheshire.core :as json]

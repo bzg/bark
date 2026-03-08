@@ -554,7 +554,7 @@
         (let [r70 (get-report db "<70@test.org>")
               r68 (get-report db "<68@test.org>")]
           (assert= "Patch 70 type" :patch (:report/type r70))
-          (assert-test "Different senders → different series"
+          (assert-test "Different senders -> different series"
                        (not= (get-in r68 [:report/series :series/id])
                              (get-in r70 [:report/series :series/id]))))
 
@@ -562,17 +562,17 @@
         (println "\n--- POLL 75: vote format variants ---")
         (let [r (get-report db "<75@test.org>")]
           (assert= "Type is :request" :request (:report/type r))
-          ;; voter1: "+1, great idea" → up
-          ;; voter2: "1+"             → up
+          ;; voter1: "+1, great idea" -> up
+          ;; voter2: "1+"             -> up
           (assert= "2 votes up (+1 with comma, 1+)"
                    2 (:report/votes-up r))
-          ;; user: "1-"              → down
+          ;; user: "1-"              -> down
           (assert= "1 vote down (1-)"
                    1 (:report/votes-down r))
-          ;; newadmin: "+0"          → null
+          ;; newadmin: "+0"          -> null
           (assert= "1 null vote (+0)"
                    1 (:report/votes-null r))
-          ;; admin: "+10 people agree" → NOT a vote (digit follows)
+          ;; admin: "+10 people agree" -> NOT a vote (digit follows)
           (assert= "4 voters (admin +10 not counted)"
                    4 (count (:report/voters r)))
           (assert-test "admin NOT in voters (+10 is not a vote)"
@@ -643,7 +643,7 @@
         ;; --- Bug 86: last-one-wins in same email (email 87) ---
         (println "\n--- Bug 86: last-one-wins in same email ---")
         (let [r (get-report db "<86@test.org>")]
-          (assert-test "NOT acked (Acked-by then Unacked → unset wins)"
+          (assert-test "NOT acked (Acked-by then Unacked -> unset wins)"
                        (nil? (:report/acked r))))
 
         ;; --- Bug 88: Closed-by + Important-by (email 89) ---

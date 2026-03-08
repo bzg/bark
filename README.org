@@ -42,12 +42,12 @@ bb digest          # incremental
 bb digest --all    # rescan everything
 
 # 4. Export reports
-bb export          # → public/reports.json
-bb export rss      # → public/reports.rss
-bb export org      # → public/reports.org
-bb export html     # → public/index.html
-bb export stats    # → public/stats.json
-bb export all      # → all of the above
+bb export          # -> public/reports.json
+bb export rss      # -> public/reports.rss
+bb export org      # -> public/reports.org
+bb export html     # -> public/index.html
+bb export stats    # -> public/stats.json
+bb export all      # -> all of the above
 
 # 5. Test SMTP configuration
 bb test-smtp --dry-run
