@@ -1,9 +1,10 @@
 * 🐕 BARK --- Bug And Report Keeper
 
-BARK monitors a mailbox and turns incoming emails into reports.
-Follow-up emails in the same thread can update that report's state
-through trigger words. Admins and maintainers manage roles and can
-receive periodic digest email notifications.
+BARK monitors a mailbox and converts incoming emails into reports.
+Subsequent emails in the same thread can update the status of that
+report using predefined trigger keywords. Admins and maintainers can
+update reports by writing directly to the monitored inbox, manage
+roles, and receive periodic digest emails.
 
 For a more detailed howto, see the [[https://codeberg.org/bzg/bark/src/branch/main/docs/howto.org][BARK project page]].
 
@@ -29,11 +30,13 @@ instance:
 
 ** Priority trigger keywords
 
-Users can mark reports as important/urgent with =Important.= or =Urgent.=.
+On top of trigger keyword to update the status of a report, users can
+tell if it is important or urgent. They cannot set the priority
+directly: it is computed as the sum of important (+1) and urgent (+2).
 
 ** Combining trigger keywords
 
-You can combine several triggers:
+You can combine several triggers in a single email:
 
 #+begin_example
 Confirmed.

@@ -1,68 +1,79 @@
 * 🐕 BARK --- Bug And Report Keeper
 
-BARK monitors a mailbox and turns incoming emails into reports.
-Follow-up emails in the same thread can update that report's state
-through trigger words. Admins and maintainers manage roles and can
-receive periodic digest email notifications.
+BARK monitors a mailbox and converts incoming emails into reports.
+Subsequent emails in the same thread can update the status of that
+report using predefined trigger keywords. Admins and maintainers can
+update reports by writing directly to the monitored inbox, manage
+roles, and receive periodic digest emails.
 
-For the full documentation, see the [[https://codeberg.org/bzg/bark][BARK project page]].
+* As a user
+** Bug, Patch, Request
 
-* Usage
-** Creating reports and announcements
+As a user, you can report bugs, propose patches and make other
+requests:
 
-*Reports* (bug, patch, request) can be created by anyone sending an
-email to the monitored mailbox.
+- You create a bug report by adding =[BUG]= to the subject.
+- You send a patch by adding an inline or attached patch.
+- You can also create a =[POLL]=, share a feature request =[FR]= or a
+  =[TODO]=.
 
-*Announcements* (announcement, release, change) can only be created by
-admins or maintainers.
-
-See the [[#report-types][Report types]] table below for the full list of subject tags.
-
-Patches are also detected from =.patch/.diff= attachments and inline
-diffs (git format).
+See below the list of [[#report types][report types]].
 
 ** Updating reports
 
-State changes happen when a reply in the same thread contains a
-trigger word at the beginning of a line, followed by a punctuation
-mark (=.= =,= =;= =:=). For example, replying to a bug report with a line
-starting with =Confirmed.= marks the bug as acked.
+State changes occur when a reply in the same thread contains a
+case-senstive trigger keyword at the start of a line, followed by a
+punctuation mark (=.= =,= =;= =:=). For example, a reply to a bug report with
+a line starting with =Confirmed.= marks the bug as "acked"; a reply to a
+patch with a line starting with =Applied.= marks the bug as "closed".
 
-Multiple triggers can appear in the same email:
-
-#+begin_example
-Confirmed.
-Urgent.
-Important.
-#+end_example
-
-This marks the bug as confirmed, urgent, and important (highest
-priority).
-
-Priority cannot be set directly --- it is computed from the
-combination of urgent and important flags.
-
-See the [[#triggers][Triggers]] table below for the full list.
-
-** Updating without notifying the list
-
-Admins and maintainers can reply directly to the BARK inbox (adding it
-in the =To:= field) instead of replying to the list. This updates the
-report without sending a message to the mailing list.
-
-This is also useful for reclassifying emails: if someone forgot the
-=[BUG]= prefix, a maintainer can edit the subject and resend the email
-to the BARK inbox.
-
-** Exploring reports
-
-The [[https://codeberg.org/bzg/bone][bone]] CLI tool lets you browse and filter BARK reports
-interactively from the terminal.
+See the [[#Triggers keywords][Triggers keywords]] below for the full list.
 
 ** Voting on requests
 
-Requests (=[POLL]=, =[FR]=, =[TODO]=, etc.) support voting: reply with =+1= or
-=-1= in the body.
+Requests (=[POLL]=, =[FR]=, =[TODO]=, etc.) support voting: 
+
+- =+1= or =1+= means "I support"
+- =-1= or =1-= means "I don't support"
+- =-0=, =0-=, =+0= or =-0= means "I abstain"
+
+* As a maintainer or admin
+
+** Announcements, releases, changes
+
+In addition to bugs, patches, and requests, maintainers can make
+general announcements, share a release, or announce an upcoming change
+in a future release.
+
+** Updating reports offlist
+
+Also, maintainers can write directly to the watched inbox to update a
+report without notifying the list. 
+
+For example, the maintainer can clean up old issues by marking them as
+=Cancelled= in the body of a reply sent to the monitored inbox, rather
+than to the entire list. This is also useful for reclassifying emails:
+if someone forgot the =[BUG]= prefix, a maintainer can edit the subject
+and resend the email to the BARK inbox.
+
+** Managing roles and permissions
+
+Here is how the permissions work:
+
+- There is only one admin per source.
+- The admin and maintainers can promote users as maintainers.
+- The admin can demote maintainers as users.
+- The admin and maintainers can ignore users.
+- The admin can "unignore" users.
+
+Roles and permissions are set by writing to the BARK inbox:
+
+#+begin_example
+Add maintainer: dev@example.com        (admin or maintainer)
+Remove maintainer: dev@example.com     (admin only)
+Ignore: spammer@example.com            (admin or maintainer)
+Unignore: user@example.com             (admin only)
+#+end_example
 
 ** Notifications
 
@@ -71,13 +82,11 @@ with a summary of open reports. Notifications are never sent to
 regular users.
 
 Notifications require SMTP configuration (see [[#config][Config]]) and are sent via
-=bb notify=, typically from a cron job.
+=bb notify=, typically from a cron job. Each notification email contains
+two sections: open bugs/patches/requests owned by the recipient, and
+all unacked & unowned bugs/patches/requests by anyone.
 
-Each notification email contains two sections: open
-bugs/patches/requests owned by the recipient, and all unacked &
-unowned bugs/patches/requests.
-
-*** Subscribing and unsubscribing
+*** (Un)subscribing
 
 Admins and maintainers are subscribed by default when =bb digest= runs
 for the first time. To unsubscribe, send an email to the BARK inbox
@@ -93,10 +102,10 @@ To re-subscribe:
 Notify: on
 #+end_example
 
-*** Setting notification preferences
+*** Preferences
 
-Preferences are set via the same =Notify:= command. Parameters can be
-combined on a single line:
+Notification preferences are set via the same =Notify:= command.
+Parameters can be combined on a single line:
 
 | Parameter | Description                        | Default |
 |-----------+------------------------------------+---------|
@@ -114,39 +123,37 @@ Notify: d:3 s:4 p:2         — every 3 days, only open reports with priority >=
 #+end_example
 
 Like role commands, =Notify:= commands are only processed from direct
-emails (not from mailing list traffic).
+emails, not from the mailing list.
 
 * Report types
 
-Detected from email subject tags:
+Reports are detected from email subject labels:
 
 | Tag                                             | Type           |
 |-------------------------------------------------+----------------|
 | =[BUG]= =[BUG version]=                             | bug            |
 | =[PATCH]= =[PATCH n/m]= =[PATCH topic n/m]=           | patch          |
 | =[POLL]= =[FR]= =[TODO]=                              | request        |
-| =[ANN]= =[ANNOUNCEMENT]=                            | announcement * |
-| =[REL]= =[RELEASE]= =[REL version]= =[RELEASE version]= | release *      |
-| =[CHG]= =[CHANGE]= =[CHG version]= =[CHANGE version]=   | change *       |
-
-​* Require admin or maintainer permission.
-
-Patches are also detected from =.patch/.diff= attachments and inline
-diffs (git format).
+| =[ANN]= =[ANNOUNCEMENT]=                            | announcement   |
+| =[REL]= =[RELEASE]= =[REL version]= =[RELEASE version]= | release        |
+| =[CHG]= =[CHANGE]= =[CHG version]= =[CHANGE version]=   | change         |
 
 When a =[REL version]= report is created, any open =[CHG version]= reports
 with the same version are automatically closed.
 
-** Customising subject tags
+Announcements, releases and changes require maintainer permission.
 
-The subject tags above are the built-in defaults. You can override
-them globally or per source in =config.edn= via =:labels=. Specify only
-the types you want to change; unspecified types keep their defaults.
+** Customising subject labels
+
+The subject labels in the table above are the built-in defaults. You
+can override them globally or per source in =config.edn= via =:labels=.
+Specify only the types you want to change; unspecified types keep
+their defaults.
 
 #+begin_src edn
 ;; Global override (applies to all sources)
 :labels {:bug     ["BUG" "DEFECT"]
-                   :request ["POLL" "FR" "TODO" "RFE"]}
+         :request ["POLL" "FR" "TODO" "RFE"]}
 #+end_src
 
 #+begin_src edn
@@ -155,29 +162,33 @@ the types you want to change; unspecified types keep their defaults.
  :labels {:announcement ["ANN" "NEWS"]}}
 #+end_src
 
-Per-source settings take precedence over the global =:labels=,
-which in turn take precedence over the built-in defaults.
+Per-source settings take precedence over the global =:labels=, which in
+turn take precedence over the built-in defaults.
 
-* Triggers
+* Trigger keywords
 
-State changes detected from body lines (at start of line, followed by
-=.= =,= =;= or =:=):
+State changes are detected by trigger keywords within the body of a
+response down the thread, at the beginning of the line, followed by a
+punctuation mark (=.= =,= =;= =:=):
 
-| Trigger        | Effect on report            |
-|----------------+-----------------------------|
-| =Approved.=      | acked (bug, patch, request) |
-| =Confirmed.=     | acked (bug)                 |
-| =Reviewed.=      | acked (patch)               |
-| =Handled.=       | owned                       |
-| =Fixed.=         | closed (bug)                |
-| =Applied.=       | closed (patch)              |
-| =Done.=          | closed (request)            |
-| =Closed.=        | closed (request)            |
-| =Canceled.=      | closed (all)                |
-| =Urgent.=        | urgent                      |
-| =Important.=     | important                   |
-| =Not urgent.=    | un-urgent                   |
-| =Not important.= | un-important                |
+| Trigger keyword | Effect on report            |
+|-----------------+-----------------------------|
+| =Approved.=       | acked (bug, patch, request) |
+| =Confirmed.=      | acked (bug)                 |
+| =Reviewed.=       | acked (patch)               |
+| =Handled.=        | owned                       |
+| =Fixed.=          | closed (bug)                |
+| =Applied.=        | closed (patch)              |
+| =Done.=           | closed (request)            |
+| =Closed.=         | closed (request)            |
+| =Canceled.=       | closed (all)                |
+| =Cancelled.=      | closed (all)                |
+| =Urgent.=         | urgent                      |
+| =Important.=      | important                   |
+| =Not urgent.=     | un-urgent                   |
+| =Not important.=  | un-important                |
+
+You can use multiple keywords in the same email, one per line.
 
 ** Report states
 
@@ -189,25 +200,13 @@ All reports can be in a combination of three states:
 
 Announcements, releases, and changes can only be closed.
 
-* Roles
+* Exploring reports
 
-Per-source, managed via email body commands:
+The BARK instance can expose reports as HTML and JSON.
 
-- *Admin* --- one per source, set in =config.edn= (=:admin= field),
-  changeable via =Add admin: new@addr=. Can manage all roles.
-- *Maintainers* --- can add maintainers, ignore addresses, create
-  announcements/releases/changes.
-- *Ignored* --- emails from these addresses are skipped.
+The [[https://codeberg.org/bzg/bone][bone]] CLI tool lets you browse and filter BARK reports
+interactively from the terminal.
 
-Role commands are only processed from direct emails (not from emails
-delivered through a mailing list, i.e. those with a =List-Id= header).
+The [[https://codeberg.org/bzg/gnus-bone][gnus-bone.el]] library lets you explore BARK reports from within
+[[https://gnus.org/][Emacs Gnus]].
 
-Commands (admin-only unless noted):
-
-#+begin_example
-Add admin: new-admin@example.com
-Add maintainer: dev@example.com        (admin or maintainer)
-Remove maintainer: dev@example.com
-Ignore: spammer@example.com            (admin or maintainer)
-Unignore: user@example.com
-#+end_example
