@@ -52,7 +52,7 @@
     {:report/owned [:email/from-address]}
     {:report/closed [:email/from-address :email/date-sent]}
     :report/urgent :report/important
-    :report/votes-up :report/votes-down
+    :report/votes-up :report/votes-down :report/votes-null
     :report/descendants :report/digested-at
     {:report/related [:report/type :report/message-id
                       {:report/email [:email/headers-edn]}]}

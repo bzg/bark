@@ -170,11 +170,14 @@
 
 (defn vote-leaders [reports n]
   (->> reports
-       (filter #(pos? (or (:report/votes-up %) 0)))
+       (filter #(pos? (+ (or (:report/votes-up %) 0)
+                         (or (:report/votes-down %) 0)
+                         (or (:report/votes-null %) 0))))
        (map (fn [r] {:message-id (:report/message-id r)
                      :topic      (get-in r [:report/email :email/subject])
                      :votes-up   (or (:report/votes-up r) 0)
                      :votes-down (or (:report/votes-down r) 0)
+                     :votes-null (or (:report/votes-null r) 0)
                      :score      (- (or (:report/votes-up r) 0) (or (:report/votes-down r) 0))}))
        (sort-by :score >) (take n)))
 

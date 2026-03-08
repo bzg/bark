@@ -119,9 +119,22 @@
        " "
        [:a {:href href :title label :aria-label label} "📎"]])))
 
+(defn- vote-badge
+  "Render a small vote badge with score/total and colored background."
+  [votes]
+  (when votes
+    (let [[score-s total-s] (str/split votes #"/")
+          score (parse-long (or score-s "0"))
+          cls   (cond (pos? score) "vote-pos"
+                      (neg? score) "vote-neg"
+                      :else        "vote-zero")]
+      [:small {:class (str "vote-badge " cls)
+               :title (str "Vote: " votes)}
+       votes])))
+
 (defn- report-row [{:strs [type subject from from-name date date-raw flags status priority
                            replies archived-at message-id related role source
-                           acked owned closed patches]}]
+                           acked owned closed patches votes]}]
   (let [label    (get type-labels type type)
         closed?  (and flags (>= (count flags) 3) (= (nth flags 2 \-) \C))
         iso-date (or (parse-to-iso-date (or date-raw date "")) "")
@@ -141,7 +154,7 @@
      [:td [:mark {:data-type type} label]]
      [:td {:data-value (str (or status 0))} (status-square flags)]
      [:td (priority-square priority)]
-     [:td (subject-el subject role archived-at) (related-link related) (patch-link patches)]
+     [:td (subject-el subject role archived-at) (related-link related) (patch-link patches) (vote-badge votes)]
      [:td.secondary {:title from} author]
      [:td {:data-value iso-date} [:small (or iso-date date "")]]
      [:td {:style "text-align:center"} (or replies 0)]]))
@@ -176,6 +189,11 @@
   th[data-sort].desc::after { content: ' ↓'; opacity: 0.7; }
   tr.hidden { display: none; }
   #status { font-size: 0.8rem; margin-bottom: 0.5rem; }
+  .vote-badge { display: inline-block; padding: 0.1rem 0.4rem; border-radius: 3px;
+                font-size: 0.7rem; font-weight: 600; margin-left: 0.4em; vertical-align: middle; }
+  .vote-pos { background: #27ae6033; color: #27ae60; }
+  .vote-neg { background: #c0392b33; color: #c0392b; }
+  .vote-zero { background: #95a5a622; color: #7f8c8d; }
   .theme-toggle { cursor: pointer; background: none; border: none; font-size: 1.2rem; padding: 0.3rem; }
   .controls { display: flex; gap: 0.5rem; align-items: center; }
   .controls label { font-size: 0.85rem; margin-bottom: 0; cursor: pointer; }

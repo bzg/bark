@@ -73,9 +73,10 @@
 (defn- votes-str [report]
   (let [up   (or (:report/votes-up report) 0)
         down (or (:report/votes-down report) 0)
-        total (+ up down)]
+        null (or (:report/votes-null report) 0)
+        total (+ up down null)]
     (when (pos? total)
-      (str up "/" total))))
+      (str (- up down) "/" total))))
 
 ;; ---------------------------------------------------------------------------
 ;; Config & source map — loaded from bark-common.clj
@@ -153,6 +154,12 @@
       (:report/patch-source report)   (assoc :patch-source (mapv name (:report/patch-source report)))
       arch                            (assoc :archived-at arch)
       votes                           (assoc :votes votes)
+      (pos? (or (:report/votes-up report) 0))
+      (assoc :votes-up (:report/votes-up report))
+      (pos? (or (:report/votes-down report) 0))
+      (assoc :votes-down (:report/votes-down report))
+      (pos? (or (:report/votes-null report) 0))
+      (assoc :votes-null (:report/votes-null report))
       series                          (assoc :series
                                              (let [patches (:series/patches series)]
                                                {:received (count patches)
@@ -309,6 +316,9 @@
                          (when-let [v (:version m)]      (str ":VERSION: " v))
                          (when-let [t (:topic m)]        (str ":TOPIC: " t))
                          (when-let [v (:votes m)]        (str ":VOTES: " v))
+                         (when-let [v (:votes-up m)]     (str ":VOTES-UP: " v))
+                         (when-let [v (:votes-down m)]   (str ":VOTES-DOWN: " v))
+                         (when-let [v (:votes-null m)]   (str ":VOTES-NULL: " v))
                          (when-let [a (seq (:acked m))]  (str ":ACKED-BY: " a))
                          (when-let [o (seq (:owned m))]  (str ":OWNED-BY: " o))
                          (when-let [c (seq (:closed m))] (str ":CLOSED-BY: " c))

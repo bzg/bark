@@ -106,14 +106,16 @@
 
 (def vote-up-pattern   #"(?m)^\s*(?:\+1|1\+)\s*$")
 (def vote-down-pattern #"(?m)^\s*(?:-1|1-)\s*$")
+(def vote-null-pattern #"(?m)^\s*(?:\+0|0\+|-0|0-)\s*$")
 
 (defn detect-vote
-  "Detect a +1/-1 vote in body text. Returns :up, :down, or nil."
+  "Detect a vote in body text. Returns :up, :down, :null, or nil."
   [body-text]
   (when body-text
     (cond
       (re-find vote-up-pattern body-text)   :up
-      (re-find vote-down-pattern body-text) :down)))
+      (re-find vote-down-pattern body-text) :down
+      (re-find vote-null-pattern body-text) :null)))
 
 ;; ---------------------------------------------------------------------------
 ;; Trigger and vote application (effectful)
@@ -128,14 +130,15 @@
   ;; sequentially. If parallelized, this needs a transaction function.
   (when-let [vote (detect-vote body-text)]
     (let [db      (d/db conn)
-          current (d/pull db [:report/voters :report/votes-up :report/votes-down] report-eid)
+          current (d/pull db [:report/voters :report/votes-up :report/votes-down
+                              :report/votes-null] report-eid)
           voters  (set (:report/voters current))]
       (when-not (contains? voters from-addr)
-        (let [attr (if (= vote :up) :report/votes-up :report/votes-down)
+        (let [attr (case vote :up :report/votes-up :down :report/votes-down :report/votes-null)
               n    (or (get current attr) 0)]
           (d/transact! conn [[:db/add report-eid attr (inc n)]
                              [:db/add report-eid :report/voters from-addr]])
-          (println (str "    → vote " (if (= vote :up) "+1" "-1")
+          (println (str "    → vote " (case vote :up "+1" :down "-1" "0")
                         " by " from-addr)))))))
 
 (defn apply-triggers! [conn report-eid report-type email source-map]
