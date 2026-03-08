@@ -125,6 +125,133 @@
 
 (def state-attrs [:report/acked :report/owned :report/closed :report/urgent :report/important])
 
+(def proxy-attrs
+  {:report/acked     :report/acked-proxy
+   :report/owned     :report/owned-proxy
+   :report/closed    :report/closed-proxy
+   :report/urgent    :report/urgent-proxy
+   :report/important :report/important-proxy})
+
+;; ---------------------------------------------------------------------------
+;; Maintainer directives: Acked-by, Owned-by, Closed-by, Urgent-by,
+;; Important-by, Unacked, Unowned, Unclosed, Unurgent, Unimportant
+;; ---------------------------------------------------------------------------
+
+(def directive-by-pattern
+  #"(?m)^(Acked|Owned|Closed|Urgent|Important)-by:\s+(\S+@\S+)[.,;:]?\s*$")
+
+(def directive-un-pattern
+  #"(?m)^(Unacked|Unowned|Unclosed|Unurgent|Unimportant)[.,;:]?\s*$")
+
+(def ^:private directive-attr
+  {"Acked"     :report/acked
+   "Owned"     :report/owned
+   "Closed"    :report/closed
+   "Urgent"    :report/urgent
+   "Important" :report/important})
+
+(def ^:private un-directive-attr
+  {"Unacked"      :report/acked
+   "Unowned"      :report/owned
+   "Unclosed"     :report/closed
+   "Unurgent"     :report/urgent
+   "Unimportant"  :report/important})
+
+(defn detect-directives
+  "Parse maintainer directives from body text.
+  Returns a seq of actions in order, each {:action :set/:unset :attr ... :addr ...}.
+  Last-one-wins is handled by the caller."
+  [body-text]
+  (when body-text
+    (let [lines (str/split-lines body-text)]
+      (->> lines
+           (keep (fn [line]
+                   (or (when-let [[_ verb addr] (re-matches directive-by-pattern line)]
+                         {:action :set :attr (directive-attr verb) :addr addr})
+                       (when-let [[_ verb] (re-matches directive-un-pattern line)]
+                         {:action :unset :attr (un-directive-attr verb)}))))
+           vec))))
+
+(defn resolve-directives
+  "Given a seq of directive actions, apply last-one-wins per attribute.
+  Returns {:set {attr addr ...} :unset #{attr ...}}."
+  [directives]
+  (reduce (fn [acc {:keys [action attr addr]}]
+            (case action
+              :set   (-> acc
+                         (assoc-in [:set attr] addr)
+                         (update :unset disj attr))
+              :unset (-> acc
+                         (update :set dissoc attr)
+                         (update :unset conj attr))))
+          {:set {} :unset #{}}
+          directives))
+
+(defn find-or-create-synthetic-email!
+  "Return the eid of a synthetic email entity for `addr`.
+  Uses a deterministic Message-ID keyed on (attr, addr, report-message-id)
+  so repeated processing is idempotent."
+  [conn addr report-message-id attr-name]
+  (let [synthetic-mid (str "<bark-synthetic-" (name attr-name) "-"
+                           addr "-" report-message-id ">")
+        existing      (d/q '[:find ?e .
+                             :in $ ?mid
+                             :where [?e :email/message-id ?mid]]
+                           (d/db conn) synthetic-mid)]
+    (if existing
+      existing
+      (do (d/transact! conn [{:email/message-id   synthetic-mid
+                              :email/from-address addr
+                              :email/date-sent    (java.util.Date.)
+                              :email/subject      (str "Synthetic: " (name attr-name)
+                                                       " for " report-message-id)}])
+          (d/q '[:find ?e .
+                 :in $ ?mid
+                 :where [?e :email/message-id ?mid]]
+               (d/db conn) synthetic-mid)))))
+
+(defn apply-directives!
+  "Apply maintainer proxy directives to a report.
+  `email` is the maintainer's email entity (used as the proxy ref)."
+  [conn report-eid email roles]
+  (let [body-text  (or (:email/body-text email) (:email/body-text-from-html email))
+        from-addr  (:email/from-address email)
+        directives (detect-directives body-text)]
+    (when (and (seq directives) (admin-or-maintainer? roles from-addr))
+      (let [{:keys [set unset]} (resolve-directives directives)
+            report-mid (d/q '[:find ?mid . :in $ ?r
+                              :where [?r :report/message-id ?mid]]
+                            (d/db conn) report-eid)
+            proxy-eid  (:db/id email)
+            current    (d/pull (d/db conn) state-attrs report-eid)
+            ;; Build set transactions
+            set-tx (mapcat (fn [[attr addr]]
+                             (let [target-eid (find-or-create-synthetic-email!
+                                              conn addr report-mid attr)]
+                               [[:db/add report-eid attr target-eid]
+                                [:db/add report-eid (proxy-attrs attr) proxy-eid]]))
+                           set)
+            ;; Build unset transactions
+            unset-tx (mapcat (fn [attr]
+                               (when-let [cur (get current attr)]
+                                 (let [retract [[:db/retract report-eid attr (ref-eid cur)]]
+                                       proxy-attr (proxy-attrs attr)
+                                       proxy-cur  (get (d/pull (d/db conn) [proxy-attr] report-eid)
+                                                       proxy-attr)]
+                                   (if proxy-cur
+                                     (conj retract [:db/retract report-eid proxy-attr (ref-eid proxy-cur)])
+                                     retract))))
+                             unset)
+            all-tx (vec (concat set-tx unset-tx))]
+        (when (seq all-tx)
+          (d/transact! conn all-tx)
+          (println (str "    → directives: "
+                        (str/join ", " (concat (map (fn [[attr addr]]
+                                                      (str (name attr) " → " addr))
+                                                    set)
+                                               (map #(str "un-" (name %)) unset)))
+                        " (proxy by " from-addr ")")))))))
+
 (defn apply-vote! [conn report-eid from-addr body-text]
   ;; NB: read-then-write is safe because cmd-digest! processes emails
   ;; sequentially. If parallelized, this needs a transaction function.

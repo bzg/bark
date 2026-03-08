@@ -61,7 +61,12 @@
     {:report/acked [:email/from-address]}
     {:report/owned [:email/from-address]}
     {:report/closed [:email/from-address :email/date-sent]}
+    {:report/acked-proxy [:email/from-address]}
+    {:report/owned-proxy [:email/from-address]}
+    {:report/closed-proxy [:email/from-address]}
     :report/urgent :report/important
+    {:report/urgent-proxy [:email/from-address]}
+    {:report/important-proxy [:email/from-address]}
     :report/votes-up :report/votes-down :report/votes-null
     :report/descendants :report/digested-at
     {:report/related [:report/type :report/message-id

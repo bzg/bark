@@ -239,7 +239,8 @@
                                              (d/q '[:find ?t . :in $ ?r
                                                     :where [?r :report/type ?t]]
                                                   (d/db conn) rid))]
-                          (apply-triggers! conn rid rtype email source-map)))
+                          (apply-triggers! conn rid rtype email source-map)
+                          (apply-directives! conn rid email roles)))
                       [(+ threaded (count parent-report-eids))
                        (reduce #(index-assoc %1 message-id %2) thread-index parent-report-eids)])
                   [threaded thread-index])]

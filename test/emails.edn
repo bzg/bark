@@ -1099,4 +1099,133 @@
   :email/in-reply-to "<75@test.org>"
   :email/references #{"<75@test.org>"}
   :email/body-text  "+0\n"}
+
+ ;; =========================================================================
+ ;; 81 — [BUG] base report for directive tests
+ ;; =========================================================================
+ {
+  :email/imap-uid   81
+  :email/source     "direct"
+  :email/message-id "<81@test.org>"
+  :email/subject    "[BUG] Directive test bug"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-26T10:00:00"
+  :email/ingested-at #inst "2026-01-26T10:00:00"
+  :email/body-text  "Something is broken.\n"}
+
+ ;; =========================================================================
+ ;; 82 — Maintainer uses Acked-by directive on bug 81
+ ;; =========================================================================
+ {
+  :email/imap-uid   82
+  :email/source     "direct"
+  :email/message-id "<82@test.org>"
+  :email/subject    "Re: [BUG] Directive test bug"
+  :email/from-address "maint@test.org"
+  :email/date-sent  #inst "2026-01-26T11:00:00"
+  :email/ingested-at #inst "2026-01-26T11:00:00"
+  :email/in-reply-to "<81@test.org>"
+  :email/references #{"<81@test.org>"}
+  :email/body-text  "Acked-by: reviewer@test.org\n"}
+
+ ;; =========================================================================
+ ;; 83 — Maintainer uses Owned-by and Urgent-by directives on bug 81
+ ;; =========================================================================
+ {
+  :email/imap-uid   83
+  :email/source     "direct"
+  :email/message-id "<83@test.org>"
+  :email/subject    "Re: [BUG] Directive test bug"
+  :email/from-address "maint@test.org"
+  :email/date-sent  #inst "2026-01-26T12:00:00"
+  :email/ingested-at #inst "2026-01-26T12:00:00"
+  :email/in-reply-to "<81@test.org>"
+  :email/references #{"<81@test.org>"}
+  :email/body-text  "Owned-by: fixer@test.org\nUrgent-by: fixer@test.org\n"}
+
+ ;; =========================================================================
+ ;; 84 — Regular user tries Closed-by directive (should be denied)
+ ;; =========================================================================
+ {
+  :email/imap-uid   84
+  :email/source     "direct"
+  :email/message-id "<84@test.org>"
+  :email/subject    "Re: [BUG] Directive test bug"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-26T13:00:00"
+  :email/ingested-at #inst "2026-01-26T13:00:00"
+  :email/in-reply-to "<81@test.org>"
+  :email/references #{"<81@test.org>"}
+  :email/body-text  "Closed-by: someone@test.org\n"}
+
+ ;; =========================================================================
+ ;; 85 — Maintainer uses Unacked on bug 81
+ ;; =========================================================================
+ {
+  :email/imap-uid   85
+  :email/source     "direct"
+  :email/message-id "<85@test.org>"
+  :email/subject    "Re: [BUG] Directive test bug"
+  :email/from-address "maint@test.org"
+  :email/date-sent  #inst "2026-01-26T14:00:00"
+  :email/ingested-at #inst "2026-01-26T14:00:00"
+  :email/in-reply-to "<81@test.org>"
+  :email/references #{"<81@test.org>"}
+  :email/body-text  "Unacked\n"}
+
+ ;; =========================================================================
+ ;; 86 — [BUG] base report for last-one-wins test
+ ;; =========================================================================
+ {
+  :email/imap-uid   86
+  :email/source     "direct"
+  :email/message-id "<86@test.org>"
+  :email/subject    "[BUG] Last-one-wins test"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-27T10:00:00"
+  :email/ingested-at #inst "2026-01-27T10:00:00"
+  :email/body-text  "Another bug.\n"}
+
+ ;; =========================================================================
+ ;; 87 — Last-one-wins: Acked-by then Unacked in same email
+ ;; =========================================================================
+ {
+  :email/imap-uid   87
+  :email/source     "direct"
+  :email/message-id "<87@test.org>"
+  :email/subject    "Re: [BUG] Last-one-wins test"
+  :email/from-address "admin@test.org"
+  :email/date-sent  #inst "2026-01-27T11:00:00"
+  :email/ingested-at #inst "2026-01-27T11:00:00"
+  :email/in-reply-to "<86@test.org>"
+  :email/references #{"<86@test.org>"}
+  :email/body-text  "Acked-by: someone@test.org\nUnacked\n"}
+
+ ;; =========================================================================
+ ;; 88 — [BUG] base report for Closed-by + Important-by test
+ ;; =========================================================================
+ {
+  :email/imap-uid   88
+  :email/source     "direct"
+  :email/message-id "<88@test.org>"
+  :email/subject    "[BUG] Closed-by test"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-28T10:00:00"
+  :email/ingested-at #inst "2026-01-28T10:00:00"
+  :email/body-text  "Yet another bug.\n"}
+
+ ;; =========================================================================
+ ;; 89 — Admin uses Closed-by and Important-by on bug 88
+ ;; =========================================================================
+ {
+  :email/imap-uid   89
+  :email/source     "direct"
+  :email/message-id "<89@test.org>"
+  :email/subject    "Re: [BUG] Closed-by test"
+  :email/from-address "admin@test.org"
+  :email/date-sent  #inst "2026-01-28T11:00:00"
+  :email/ingested-at #inst "2026-01-28T11:00:00"
+  :email/in-reply-to "<88@test.org>"
+  :email/references #{"<88@test.org>"}
+  :email/body-text  "Closed-by: closer@test.org\nImportant-by: closer@test.org\n"}
 ]

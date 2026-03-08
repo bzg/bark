@@ -6,7 +6,7 @@ report using predefined trigger keywords. Admins and maintainers can
 update reports by writing directly to the monitored inbox, manage
 roles, and receive periodic digest emails.
 
-For a more detailed howto, see the [[https://codeberg.org/bzg/bark/src/branch/main/docs/howto.org][BARK project page]].
+For admin and maintainers, see the full [[https://codeberg.org/bzg/bark/src/branch/main/docs/howto.org][BARK documentation]].
 
 ** Labels and trigger keywords
 
@@ -30,9 +30,11 @@ instance:
 
 ** Priority trigger keywords
 
-On top of trigger keyword to update the status of a report, users can
-tell if it is important or urgent. They cannot set the priority
-directly: it is computed as the sum of important (+1) and urgent (+2).
+On top of trigger keywords to update the status of a report, users can
+tell if a report is important (=Important.=) and/or urgent (=Urgent.=).
+
+They cannot set the priority directly: priority is computed as the sum
+of important (+1) and urgent (+2).
 
 ** Combining trigger keywords
 

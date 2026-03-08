@@ -48,13 +48,32 @@ in a future release.
 ** Updating reports offlist
 
 Also, maintainers can write directly to the watched inbox to update a
-report without notifying the list. 
+report without notifying the list.
 
 For example, the maintainer can clean up old issues by marking them as
 =Cancelled= in the body of a reply sent to the monitored inbox, rather
 than to the entire list. This is also useful for reclassifying emails:
 if someone forgot the =[BUG]= prefix, a maintainer can edit the subject
 and resend the email to the BARK inbox.
+
+** Acting as a proxy for updates
+
+Maintainers can also write directly to the BARK inbox to act as
+"proxies" and update a report as if they were users:
+
+: Acked-by: a-user@example.com
+: Owned-by: a-user@example.com
+: Closed-by: a-user@example.com
+: Urgent-by: a-user@example.com
+: Important-by: a-user@example.com
+
+They can also "undo" an update:
+
+: Unacked.
+: Unowned.
+: Unclosed.
+: Unurgent.
+: Unimportant.
 
 ** Managing roles and permissions
 

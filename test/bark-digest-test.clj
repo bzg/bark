@@ -119,6 +119,11 @@
             :report/patch-seq :report/patch-source :report/message-id
             :report/acked :report/owned :report/closed
             :report/urgent :report/important
+            {:report/acked-proxy [:email/from-address]}
+            {:report/owned-proxy [:email/from-address]}
+            {:report/closed-proxy [:email/from-address]}
+            {:report/urgent-proxy [:email/from-address]}
+            {:report/important-proxy [:email/from-address]}
             :report/votes-up :report/votes-down :report/votes-null :report/voters
             {:report/descendants [:email/message-id]}
             {:report/related [:report/type :report/message-id]}
@@ -573,6 +578,85 @@
           (assert-test "admin NOT in voters (+10 is not a vote)"
                        (not (contains? (set (:report/voters r))
                                        "admin@test.org"))))
+
+        ;; =================================================================
+        ;; DIRECTIVE TESTS (emails 81-89)
+        ;; =================================================================
+
+        ;; --- Unit tests: detect-directives ---
+        (println "\n--- detect-directives unit tests ---")
+        (assert= "Acked-by parsed"
+                 [{:action :set :attr :report/acked :addr "a@b.com"}]
+                 (detect-directives "Acked-by: a@b.com\n"))
+        (assert= "Multiple directives parsed in order"
+                 [{:action :set :attr :report/owned :addr "x@y.com"}
+                  {:action :set :attr :report/urgent :addr "x@y.com"}]
+                 (detect-directives "Owned-by: x@y.com\nUrgent-by: x@y.com\n"))
+        (assert= "Unacked parsed"
+                 [{:action :unset :attr :report/acked}]
+                 (detect-directives "Unacked\n"))
+        (assert= "Unurgent parsed"
+                 [{:action :unset :attr :report/urgent}]
+                 (detect-directives "Unurgent\n"))
+        (assert= "Unimportant parsed"
+                 [{:action :unset :attr :report/important}]
+                 (detect-directives "Unimportant\n"))
+        (assert= "No directives in plain text"
+                 [] (detect-directives "Just a normal reply.\n"))
+        (assert= "nil body" nil (detect-directives nil))
+
+        ;; --- Unit tests: resolve-directives (last-one-wins) ---
+        (println "\n--- resolve-directives unit tests ---")
+        (assert= "Last-one-wins: set then unset"
+                 {:set {} :unset #{:report/acked}}
+                 (resolve-directives [{:action :set :attr :report/acked :addr "a@b.com"}
+                                      {:action :unset :attr :report/acked}]))
+        (assert= "Last-one-wins: unset then set"
+                 {:set {:report/acked "a@b.com"} :unset #{}}
+                 (resolve-directives [{:action :unset :attr :report/acked}
+                                      {:action :set :attr :report/acked :addr "a@b.com"}]))
+
+        ;; --- Bug 81: Acked-by directive (email 82) ---
+        (println "\n--- Bug 81: Acked-by directive ---")
+        (let [r (get-report db "<81@test.org>")]
+          ;; After email 85 (Unacked), acked should be nil
+          (assert-test "Acked retracted by Unacked directive"
+                       (nil? (:report/acked r)))
+          (assert-test "Acked-proxy retracted too"
+                       (nil? (:report/acked-proxy r)))
+          ;; Owned-by and Urgent-by from email 83 should persist
+          (assert-test "Owned is set" (some? (:report/owned r)))
+          (assert-test "Urgent is set" (some? (:report/urgent r)))
+          (assert= "Owned-proxy is maint@test.org"
+                   "maint@test.org"
+                   (get-in r [:report/owned-proxy :email/from-address]))
+          (assert= "Urgent-proxy is maint@test.org"
+                   "maint@test.org"
+                   (get-in r [:report/urgent-proxy :email/from-address])))
+
+        ;; --- Bug 81: regular user directive denied (email 84) ---
+        (println "\n--- Bug 81: user directive denied ---")
+        (let [r (get-report db "<81@test.org>")]
+          (assert-test "NOT closed (user can't use Closed-by)"
+                       (nil? (:report/closed r))))
+
+        ;; --- Bug 86: last-one-wins in same email (email 87) ---
+        (println "\n--- Bug 86: last-one-wins in same email ---")
+        (let [r (get-report db "<86@test.org>")]
+          (assert-test "NOT acked (Acked-by then Unacked → unset wins)"
+                       (nil? (:report/acked r))))
+
+        ;; --- Bug 88: Closed-by + Important-by (email 89) ---
+        (println "\n--- Bug 88: Closed-by + Important-by ---")
+        (let [r (get-report db "<88@test.org>")]
+          (assert-test "Closed is set" (some? (:report/closed r)))
+          (assert-test "Important is set" (some? (:report/important r)))
+          (assert= "Closed-proxy is admin@test.org"
+                   "admin@test.org"
+                   (get-in r [:report/closed-proxy :email/from-address]))
+          (assert= "Important-proxy is admin@test.org"
+                   "admin@test.org"
+                   (get-in r [:report/important-proxy :email/from-address])))
 
         ;; --- Summary ---
         (println "\n=== Summary ===")
