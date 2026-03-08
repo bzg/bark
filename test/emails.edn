@@ -1012,4 +1012,92 @@
   :email/ingested-at #inst "2026-01-24T13:00:00"
   :email/body-text  "Notify: d:1\n"
   :email/headers-edn "{\"List-Id\" \"<emacs-orgmode.gnu.org>\"}"}
+
+ ;; =========================================================================
+ ;; 75 — POLL for vote-format tests
+ ;; =========================================================================
+ {
+  :email/imap-uid   75
+  :email/source     "direct"
+  :email/message-id "<75@test.org>"
+  :email/subject    "[POLL] Test vote formats"
+  :email/from-address "maint@test.org"
+  :email/date-sent  #inst "2026-01-25T10:00:00"
+  :email/ingested-at #inst "2026-01-25T10:00:00"
+  :email/body-text  "Please vote.\n"}
+
+ ;; =========================================================================
+ ;; 76 — Vote "+1, great idea" (inline with punctuation after)
+ ;; =========================================================================
+ {
+  :email/imap-uid   76
+  :email/source     "direct"
+  :email/message-id "<76@test.org>"
+  :email/subject    "Re: [POLL] Test vote formats"
+  :email/from-address "voter1@test.org"
+  :email/date-sent  #inst "2026-01-25T11:00:00"
+  :email/ingested-at #inst "2026-01-25T11:00:00"
+  :email/in-reply-to "<75@test.org>"
+  :email/references #{"<75@test.org>"}
+  :email/body-text  "+1, great idea\n"}
+
+ ;; =========================================================================
+ ;; 77 — Vote "1+" (reversed form)
+ ;; =========================================================================
+ {
+  :email/imap-uid   77
+  :email/source     "direct"
+  :email/message-id "<77@test.org>"
+  :email/subject    "Re: [POLL] Test vote formats"
+  :email/from-address "voter2@test.org"
+  :email/date-sent  #inst "2026-01-25T12:00:00"
+  :email/ingested-at #inst "2026-01-25T12:00:00"
+  :email/in-reply-to "<75@test.org>"
+  :email/references #{"<75@test.org>"}
+  :email/body-text  "1+\n"}
+
+ ;; =========================================================================
+ ;; 78 — Vote "1-" (reversed down vote)
+ ;; =========================================================================
+ {
+  :email/imap-uid   78
+  :email/source     "direct"
+  :email/message-id "<78@test.org>"
+  :email/subject    "Re: [POLL] Test vote formats"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-25T13:00:00"
+  :email/ingested-at #inst "2026-01-25T13:00:00"
+  :email/in-reply-to "<75@test.org>"
+  :email/references #{"<75@test.org>"}
+  :email/body-text  "1-\n"}
+
+ ;; =========================================================================
+ ;; 79 — NOT a vote: "+10" (digit follows)
+ ;; =========================================================================
+ {
+  :email/imap-uid   79
+  :email/source     "direct"
+  :email/message-id "<79@test.org>"
+  :email/subject    "Re: [POLL] Test vote formats"
+  :email/from-address "admin@test.org"
+  :email/date-sent  #inst "2026-01-25T14:00:00"
+  :email/ingested-at #inst "2026-01-25T14:00:00"
+  :email/in-reply-to "<75@test.org>"
+  :email/references #{"<75@test.org>"}
+  :email/body-text  "+10 people agree\n"}
+
+ ;; =========================================================================
+ ;; 80 — Vote "+0" (null vote)
+ ;; =========================================================================
+ {
+  :email/imap-uid   80
+  :email/source     "direct"
+  :email/message-id "<80@test.org>"
+  :email/subject    "Re: [POLL] Test vote formats"
+  :email/from-address "newadmin@test.org"
+  :email/date-sent  #inst "2026-01-25T15:00:00"
+  :email/ingested-at #inst "2026-01-25T15:00:00"
+  :email/in-reply-to "<75@test.org>"
+  :email/references #{"<75@test.org>"}
+  :email/body-text  "+0\n"}
 ]

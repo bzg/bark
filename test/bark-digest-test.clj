@@ -44,6 +44,48 @@
 (load-file "scripts/bark-digest.clj")
 
 ;; ---------------------------------------------------------------------------
+;; Unit tests: detect-vote patterns
+;; ---------------------------------------------------------------------------
+
+(println "\n--- detect-vote unit tests ---")
+
+;; Up votes
+(assert= "detect +1 (bare)"         :up (detect-vote "+1"))
+(assert= "detect +1\\n"             :up (detect-vote "+1\n"))
+(assert= "detect +1 with text"      :up (detect-vote "+1 thanks"))
+(assert= "detect +1, punctuation"   :up (detect-vote "+1, great idea"))
+(assert= "detect +1."               :up (detect-vote "+1."))
+(assert= "detect +1!"               :up (detect-vote "+1!"))
+(assert= "detect 1+ (reversed)"     :up (detect-vote "1+"))
+(assert= "detect 1+ with space"     :up (detect-vote "1+ "))
+(assert= "detect +1 mid-body"       :up (detect-vote "I agree\n+1\nthanks"))
+
+;; Down votes
+(assert= "detect -1"                :down (detect-vote "-1"))
+(assert= "detect 1-"                :down (detect-vote "1-"))
+(assert= "detect -1 with text"      :down (detect-vote "-1 nope"))
+(assert= "detect 1-."               :down (detect-vote "1-."))
+
+;; Null votes
+(assert= "detect +0"                :null (detect-vote "+0"))
+(assert= "detect -0"                :null (detect-vote "-0"))
+(assert= "detect 0+"                :null (detect-vote "0+"))
+(assert= "detect 0-"                :null (detect-vote "0-"))
+(assert= "detect +0, meh"           :null (detect-vote "+0, meh"))
+
+;; Non-votes (digit or alpha follows)
+(assert= "+10 is NOT a vote"        nil (detect-vote "+10"))
+(assert= "+1abc is NOT a vote"      nil (detect-vote "+1abc"))
+(assert= "1+2 is NOT a vote"        nil (detect-vote "1+2"))
+(assert= "-10 is NOT a vote"        nil (detect-vote "-10"))
+(assert= "-1a is NOT a vote"        nil (detect-vote "-1a"))
+(assert= "1-2 is NOT a vote"        nil (detect-vote "1-2"))
+(assert= "+0x is NOT a vote"        nil (detect-vote "+0x"))
+(assert= "plain text is NOT a vote" nil (detect-vote "nothing here"))
+(assert= "empty is NOT a vote"      nil (detect-vote ""))
+(assert= "nil is NOT a vote"        nil (detect-vote nil))
+
+;; ---------------------------------------------------------------------------
 ;; Test setup
 ;; ---------------------------------------------------------------------------
 
@@ -524,6 +566,27 @@
           (assert-test "Different senders → different series"
                        (not= (get-in r68 [:report/series :series/id])
                              (get-in r70 [:report/series :series/id]))))
+
+        ;; --- POLL 75: vote format variants ---
+        (println "\n--- POLL 75: vote format variants ---")
+        (let [r (get-report db "<75@test.org>")]
+          (assert= "Type is :request" :request (:report/type r))
+          ;; voter1: "+1, great idea" → up
+          ;; voter2: "1+"             → up
+          (assert= "2 votes up (+1 with comma, 1+)"
+                   2 (:report/votes-up r))
+          ;; user: "1-"              → down
+          (assert= "1 vote down (1-)"
+                   1 (:report/votes-down r))
+          ;; newadmin: "+0"          → null
+          (assert= "1 null vote (+0)"
+                   1 (:report/votes-null r))
+          ;; admin: "+10 people agree" → NOT a vote (digit follows)
+          (assert= "4 voters (admin +10 not counted)"
+                   4 (count (:report/voters r)))
+          (assert-test "admin NOT in voters (+10 is not a vote)"
+                       (not (contains? (set (:report/voters r))
+                                       "admin@test.org"))))
 
         ;; --- Summary ---
         (println "\n=== Summary ===")

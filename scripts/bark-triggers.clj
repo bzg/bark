@@ -104,9 +104,9 @@
 ;; Vote detection (pure)
 ;; ---------------------------------------------------------------------------
 
-(def vote-up-pattern   #"(?m)^\s*(?:\+1|1\+)\s*$")
-(def vote-down-pattern #"(?m)^\s*(?:-1|1-)\s*$")
-(def vote-null-pattern #"(?m)^\s*(?:\+0|0\+|-0|0-)\s*$")
+(def vote-up-pattern   #"(?m)(?:^|\s)(?:\+1|1\+)(?![a-zA-Z0-9])")
+(def vote-down-pattern #"(?m)(?:^|\s)(?:-1|1-)(?![a-zA-Z0-9])")
+(def vote-null-pattern #"(?m)(?:^|\s)(?:\+0|0\+|-0|0-)(?![a-zA-Z0-9])")
 
 (defn detect-vote
   "Detect a vote in body text. Returns :up, :down, :null, or nil."
