@@ -41,10 +41,6 @@
 ;; Report scoring (same logic as bark-export.clj)
 ;; ---------------------------------------------------------------------------
 
-(def priority          report-priority)
-(def status            report-status)
-(def descendant-count  report-descendant-count)
-
 (defn- format-date [date]
   (let [s (str (or date ""))]
     (subs s 0 (min 10 (count s)))))
@@ -111,8 +107,8 @@
         subject (or (:email/subject email) "(no subject)")
         date    (format-date (:email/date-sent email))
         from    (or (:email/from-address email) "?")
-        pri     (priority report)
-        replies (descendant-count report)
+        pri     (report-priority report)
+        replies (report-descendant-count report)
         arch    (get-header (:email/headers-edn email) "Archived-At")]
     (str "  [" type "] " subject "\n"
          "    from: " from " — " date
@@ -137,8 +133,8 @@
         by-type    (filter #(contains? actionable-types (:report/type %)) reports)
         by-open    (filter open? by-type)
         by-source  (filter #(= source (get-in % [:report/email :email/source])) by-open)
-        by-pri     (filter #(>= (priority %) min-pri) by-source)
-        by-sts     (filter #(>= (status %) min-sts) by-pri)
+        by-pri     (filter #(>= (report-priority %) min-pri) by-source)
+        by-sts     (filter #(>= (report-status %) min-sts) by-pri)
         _          (when debug?
                      (println (str "  [debug] build-email-body for " email " (source: " source ")"))
                      (println (str "  [debug]   all reports: " (count reports)))
@@ -150,8 +146,8 @@
                                      (pr-str (set (map #(get-in % [:report/email :email/source]) by-open))))))
                      (println (str "  [debug]   by min-priority>=" min-pri ": " (count by-pri)))
                      (println (str "  [debug]   by min-status>=" min-sts ": " (count by-sts))))
-        relevant   (sort-by (juxt #(- (priority %))
-                                  #(- (descendant-count %)))
+        relevant   (sort-by (juxt #(- (report-priority %))
+                                  #(- (report-descendant-count %)))
                             compare by-sts)
         owned      (filter #(owned-by? % email) relevant)
         unacked    (->> relevant

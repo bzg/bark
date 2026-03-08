@@ -42,30 +42,23 @@
 
 (def default-triggers-by-type (compile-triggers-by-type default-trigger-words))
 
+(defn- deep-merge-triggers
+  "Merge overrides into base trigger-words, merging per-type action maps."
+  [base overrides]
+  (reduce-kv (fn [acc rtype actions]
+               (assoc acc rtype (merge (get acc rtype) actions)))
+             base overrides))
+
 (defn build-source-triggers
   "Merge triggers for a source: defaults → global → per-source.
   Returns compiled type→action→pattern map."
   [source-cfg]
   (let [global  (:global-triggers source-cfg)
         per-src (:triggers source-cfg)
-        merged  (cond
-                  (and global per-src)
-                  (reduce-kv (fn [acc rtype overrides]
-                               (assoc acc rtype (merge (get acc rtype) overrides)))
-                             (reduce-kv (fn [acc rtype overrides]
-                                          (assoc acc rtype (merge (get acc rtype) overrides)))
-                                        default-trigger-words global)
-                             per-src)
-                  global
-                  (reduce-kv (fn [acc rtype overrides]
-                               (assoc acc rtype (merge (get acc rtype) overrides)))
-                             default-trigger-words global)
-                  per-src
-                  (reduce-kv (fn [acc rtype overrides]
-                               (assoc acc rtype (merge (get acc rtype) overrides)))
-                             default-trigger-words per-src)
-                  :else nil)]
-    (if merged
+        merged  (cond-> default-trigger-words
+                  global  (deep-merge-triggers global)
+                  per-src (deep-merge-triggers per-src))]
+    (if (or global per-src)
       (compile-triggers-by-type merged)
       default-triggers-by-type)))
 

@@ -203,7 +203,7 @@
           (assoc acc :skipped (inc skipped)))
       (do ;; Role and notify commands (only for direct emails, not mailing list)
           (when (and from-addr body-text source-name
-                     (not (from-mailing-list-email? email)))
+                     (not (from-mailing-list? email)))
             (apply-role-commands! conn roles source-name from-addr body-text)
             (apply-notify-commands! conn roles source-name from-addr body-text))
           ;; Detect and create report

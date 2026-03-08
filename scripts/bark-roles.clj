@@ -190,7 +190,7 @@
 
 (def announcement-types #{:announcement :release :change})
 
-(defn- from-mailing-list?
+(defn from-mailing-list?
   "True if the email was delivered through a mailing list (has List-Id header)."
   [email]
   (some? (get-header (:email/headers-edn email) "List-Id")))
@@ -224,7 +224,3 @@
             (println (str "    [list-post mismatch] expected " ml-email " got " lp)))
           (= lp ml-email))))))
 
-(defn from-mailing-list-email?
-  "True if the email was delivered through a mailing list."
-  [email]
-  (from-mailing-list? email))

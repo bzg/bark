@@ -62,10 +62,6 @@
 (defn- flags-str [report]
   (apply str (map (fn [[k c]] (if (get report k) c \-)) flag-defs)))
 
-(def priority        report-priority)
-(def status          report-status)
-(def descendant-count report-descendant-count)
-
 (defn- format-date [date]
   (let [s (str (or date ""))]
     (subs s 0 (min 16 (count s)))))
@@ -139,9 +135,9 @@
              :date     (format-date (:email/date-sent email))
              :date-raw (str (:email/date-sent email))
              :flags    (flags-str report)
-             :status   (status report)
-             :priority (priority report)
-             :replies  (descendant-count report)}
+             :status   (report-status report)
+             :priority (report-priority report)
+             :replies  (report-descendant-count report)}
       (:email/from-name email)        (assoc :from-name (:email/from-name email))
       role                            (assoc :role role)
       (:report/acked report)          (assoc :acked (:email/from-address (:report/acked report)))
@@ -412,12 +408,12 @@
 (defn- filter-by-priority
   "Keep only reports with priority >= min-p."
   [reports min-p]
-  (filter #(>= (priority %) min-p) reports))
+  (filter #(>= (report-priority %) min-p) reports))
 
 (defn- filter-by-status
   "Keep only reports with status >= min-s."
   [reports min-s]
-  (filter #(>= (status %) min-s) reports))
+  (filter #(>= (report-status %) min-s) reports))
 
 ;; ---------------------------------------------------------------------------
 ;; Per-source export orchestration
