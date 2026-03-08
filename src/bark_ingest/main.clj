@@ -132,11 +132,11 @@
                   (start-idle! conn db-conn folder))
                 (catch Exception e
                   (log/error "IDLE interrupted:" (.getMessage e))))
-              ;; If we get here, IDLE exited (error or server disconnect)
+              ;; If we get here, IDLE exited (heartbeat or server disconnect)
               (try (imap/disconnect conn) (catch Exception _))
               (when-not (shutting-down?)
                 ;; Reset backoff — the connection was working
-                (log/warn "IDLE exited, reconnecting in 1s")
+                (log/debug "IDLE exited, reconnecting in 1s")
                 (Thread/sleep 1000)
                 (recur 1000)))))))))
 
