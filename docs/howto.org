@@ -45,7 +45,17 @@ In addition to bugs, patches, and requests, maintainers can make
 general announcements, share a release, or announce an upcoming change
 in a future release.
 
-** Updating reports offlist
+** Undoing updates
+
+Maintainers can also "undo" an update:
+
+: Unacked.
+: Unowned.
+: Unclosed.
+: Unurgent.
+: Unimportant.
+
+** Updating offlist
 
 Also, maintainers can write directly to the watched inbox to update a
 report without notifying the list.
@@ -55,14 +65,6 @@ For example, the maintainer can clean up old issues by marking them as
 than to the entire list. This is also useful for reclassifying emails:
 if someone forgot the =[BUG]= prefix, a maintainer can edit the subject
 and resend the email to the BARK inbox.
-
-Maintainers can also "undo" an update:
-
-: Unacked.
-: Unowned.
-: Unclosed.
-: Unurgent.
-: Unimportant.
 
 ** Acting as an update proxy
 
