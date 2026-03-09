@@ -213,21 +213,64 @@
         (str/replace "\"" "&quot;"))))
 
 ;; ---------------------------------------------------------------------------
+;; Filtering
+;; ---------------------------------------------------------------------------
+
+(defn- filter-by-source
+  "Filter reports to only those from the given source name."
+  [reports source-name]
+  (filter #(= source-name (get-in % [:report/email :email/source])) reports))
+
+(defn- filter-by-priority
+  "Keep only reports with priority >= min-p."
+  [reports min-p]
+  (filter #(>= (report-priority %) min-p) reports))
+
+(defn- filter-by-status
+  "Keep only reports with status >= min-s."
+  [reports min-s]
+  (filter #(>= (report-status %) min-s) reports))
+
+(defn- filter-by-type
+  "Keep only reports of the given type keyword."
+  [reports rtype]
+  (filter #(= rtype (:report/type %)) reports))
+
+(defn- open-reports
+  "Keep only reports that are not closed."
+  [reports]
+  (remove :report/closed reports))
+
+;; ---------------------------------------------------------------------------
+;; Per-type helpers
+;; ---------------------------------------------------------------------------
+
+(def report-types [:bug :patch :request :announcement :release :change])
+
+(def type->plural
+  {:bug "bugs" :patch "patches" :request "requests"
+   :announcement "announcements" :release "releases" :change "changes"})
+
+(def rss-limit 50)
+
+;; ---------------------------------------------------------------------------
 ;; Per-source export functions
 ;; ---------------------------------------------------------------------------
 
 (defn dump-json!
   "Dump reports as JSON for a single source."
-  [reports out-dir source-name source-map maintainers-map]
-  (let [data     (mapv #(report->map % source-map maintainers-map) reports)
-        meta     (source-metadata source-name source-map)
-        envelope (cond-> {:format-version "0.1.0"
-                          :source         source-name
-                          :reports        data}
-                   (seq meta) (merge meta))
-        filename (str out-dir "/reports.json")]
-    (spit filename (json/generate-string envelope {:pretty true}))
-    (println (str "  Wrote " (count data) " reports to " filename))))
+  ([reports out-dir source-name source-map maintainers-map]
+   (dump-json! reports out-dir source-name source-map maintainers-map "reports.json"))
+  ([reports out-dir source-name source-map maintainers-map basename]
+   (let [data     (mapv #(report->map % source-map maintainers-map) reports)
+         meta     (source-metadata source-name source-map)
+         envelope (cond-> {:format-version "0.1.0"
+                           :source         source-name
+                           :reports        data}
+                    (seq meta) (merge meta))
+         filename (str out-dir "/" basename)]
+     (spit filename (json/generate-string envelope {:pretty true}))
+     (println (str "  Wrote " (count data) " reports to " filename)))))
 
 (defn- rfc822-date
   "RFC 822 date from an ISO-ish date string or inst."
@@ -281,23 +324,27 @@
          "    </item>")))
 
 (defn dump-rss!
-  "Dump reports as RSS 2.0 for a single source."
-  [reports out-dir source-name source-map maintainers-map]
-  (let [data     (mapv #(report->map % source-map maintainers-map) reports)
-        items    (str/join "\n" (map report->rss-item data))
-        list-url (get-in source-map [source-name :list-archive] "")
-        filename (str out-dir "/reports.rss")]
-    (spit filename
-          (str "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-               "<rss version=\"2.0\">\n"
-               "  <channel>\n"
-               "    <title>BARK " source-name " reports</title>\n"
-               "    <link>" list-url "</link>\n"
-               "    <description>Reports from the Bug And Report Keeper</description>\n"
-               items "\n"
-               "  </channel>\n"
-               "</rss>\n"))
-    (println (str "  Wrote " (count data) " reports to " filename))))
+  "Dump reports as RSS 2.0 for a single source.
+  Only includes open reports, capped at rss-limit (50)."
+  ([reports out-dir source-name source-map maintainers-map]
+   (dump-rss! reports out-dir source-name source-map maintainers-map "reports.rss" "reports"))
+  ([reports out-dir source-name source-map maintainers-map basename feed-label]
+   (let [capped   (->> reports open-reports (take rss-limit))
+         data     (mapv #(report->map % source-map maintainers-map) capped)
+         items    (str/join "\n" (map report->rss-item data))
+         list-url (get-in source-map [source-name :list-archive] "")
+         filename (str out-dir "/" basename)]
+     (spit filename
+           (str "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                "<rss version=\"2.0\">\n"
+                "  <channel>\n"
+                "    <title>BARK " source-name " " feed-label "</title>\n"
+                "    <link>" list-url "</link>\n"
+                "    <description>Reports from the Bug And Report Keeper</description>\n"
+                items "\n"
+                "  </channel>\n"
+                "</rss>\n"))
+     (println (str "  Wrote " (count data) " reports to " filename)))))
 
 (defn- report->org-entry [m]
   (let [todo    (if (= (nth (:flags m "---") 2 \-) \C) "DONE" "TODO")
@@ -342,15 +389,17 @@
 
 (defn dump-org!
   "Dump reports as Org for a single source."
-  [reports out-dir source-name source-map maintainers-map]
-  (let [data     (mapv #(report->map % source-map maintainers-map) reports)
-        entries  (str/join "\n" (map report->org-entry data))
-        filename (str out-dir "/reports.org")]
-    (spit filename
-          (str "#+TITLE: BARK " source-name " reports\n"
-               "#+DATE: " (str (java.time.LocalDate/now)) "\n\n"
-               entries))
-    (println (str "  Wrote " (count data) " reports to " filename))))
+  ([reports out-dir source-name source-map maintainers-map]
+   (dump-org! reports out-dir source-name source-map maintainers-map "reports.org" "reports"))
+  ([reports out-dir source-name source-map maintainers-map basename title-label]
+   (let [data     (mapv #(report->map % source-map maintainers-map) reports)
+         entries  (str/join "\n" (map report->org-entry data))
+         filename (str out-dir "/" basename)]
+     (spit filename
+           (str "#+TITLE: BARK " source-name " " title-label "\n"
+                "#+DATE: " (str (java.time.LocalDate/now)) "\n\n"
+                entries))
+     (println (str "  Wrote " (count data) " reports to " filename)))))
 
 (defn dump-patches!
   "Export patch files for a single source."
@@ -397,47 +446,65 @@
          (when source-name ["-n" source-name])))
 
 ;; ---------------------------------------------------------------------------
-;; Filtering
+;; Per-type export
 ;; ---------------------------------------------------------------------------
 
-(defn- filter-by-source
-  "Filter reports to only those from the given source name."
-  [reports source-name]
-  (filter #(= source-name (get-in % [:report/email :email/source])) reports))
+(def default-export-formats #{"json" "org" "rss"})
 
-(defn- filter-by-priority
-  "Keep only reports with priority >= min-p."
-  [reports min-p]
-  (filter #(>= (report-priority %) min-p) reports))
+(defn- resolve-export-formats
+  "Return the set of export formats for a source.
+  Per-source :export-formats in source-map, or the global default."
+  [source-name source-map]
+  (or (get-in source-map [source-name :export-formats])
+      default-export-formats))
 
-(defn- filter-by-status
-  "Keep only reports with status >= min-s."
-  [reports min-s]
-  (filter #(>= (report-status %) min-s) reports))
+(defn- dump-per-type!
+  "Export per-type JSON, Org, and RSS files for all report types present."
+  [reports out-dir source-name source-map maintainers-map fmts]
+  (doseq [rtype report-types
+          :let [typed (filter-by-type reports rtype)
+                plural (type->plural rtype)]
+          :when (seq typed)]
+    (when (fmts "json")
+      (dump-json! typed out-dir source-name source-map maintainers-map
+                  (str plural ".json")))
+    (when (fmts "org")
+      (dump-org! typed out-dir source-name source-map maintainers-map
+                 (str plural ".org") plural))
+    (when (fmts "rss")
+      (dump-rss! typed out-dir source-name source-map maintainers-map
+                 (str plural ".rss") plural))))
 
 ;; ---------------------------------------------------------------------------
 ;; Per-source export orchestration
 ;; ---------------------------------------------------------------------------
 
 (defn export-source!
-  "Export a single source in the given format(s)."
+  "Export a single source in the given format(s).
+  When format is \"all\", per-type feeds respect :export-formats from config."
   [format reports out-dir source-name source-map maintainers-map cli-extra]
   (.mkdirs (io/file out-dir))
-  (let [do-format (fn [fmt]
+  (let [ef (resolve-export-formats source-name source-map)
+        do-format (fn [fmt]
                     (case fmt
-                      "json"    (dump-json!    reports out-dir source-name source-map maintainers-map)
-                      "rss"     (dump-rss!     reports out-dir source-name source-map maintainers-map)
-                      "org"     (dump-org!     reports out-dir source-name source-map maintainers-map)
+                      "json"    (do (dump-json! reports out-dir source-name source-map maintainers-map)
+                                    (dump-per-type! reports out-dir source-name source-map maintainers-map #{"json"}))
+                      "rss"     (do (dump-rss!  reports out-dir source-name source-map maintainers-map)
+                                    (dump-per-type! reports out-dir source-name source-map maintainers-map #{"rss"}))
+                      "org"     (do (dump-org!  reports out-dir source-name source-map maintainers-map)
+                                    (dump-per-type! reports out-dir source-name source-map maintainers-map #{"org"}))
                       "patches" (dump-patches! reports out-dir)
                       "html"    (do (dump-json! reports out-dir source-name source-map maintainers-map)
+                                    (dump-per-type! reports out-dir source-name source-map maintainers-map #{"json"})
                                     (dump-howto! out-dir source-name)
                                     (dump-html!  out-dir source-name cli-extra))
                       "stats"   (dump-stats! out-dir source-name "json" cli-extra)))]
     (if (= format "all")
-      (do (do-format "json")
-          (do-format "rss")
-          (do-format "org")
-          (do-format "patches")
+      (do (when (ef "json") (dump-json! reports out-dir source-name source-map maintainers-map))
+          (when (ef "rss")  (dump-rss!  reports out-dir source-name source-map maintainers-map))
+          (when (ef "org")  (dump-org!  reports out-dir source-name source-map maintainers-map))
+          (dump-per-type! reports out-dir source-name source-map maintainers-map ef)
+          (dump-patches! reports out-dir)
           (dump-howto! out-dir source-name)
           (dump-html!  out-dir source-name cli-extra)
           (dump-stats! out-dir source-name "json" cli-extra)

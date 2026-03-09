@@ -61,4 +61,16 @@ Important.
 | date:2023-01-01..2023-12-31 | d:    | Reports from 2023-01-01 to 2023-12-31  |
 | match1 \vert match2             |       | Reports matching "match1" or "match2"  |
 | *                           |       | Wildcard for from/acked/owned/closed   |
+** Getting the data
+
+| Type          | Format         |
+|---------------+----------------|
+| All reports   | [[reports.json][json]], [[reports.rss][rss]], [[reports.org][org]] |
+|---------------+----------------|
+| Announcements | [[announcements.json][json]], [[announcements.rss][rss]], [[announcements.org][org]] |
+| Bugs          | [[bugs.json][json]], [[bugs.rss][rss]], [[bugs.org][org]] |
+| Changes       | [[changes.json][json]], [[changes.rss][rss]], [[changes.org][org]] |
+| Patches       | [[patches.json][json]], [[patches.rss][rss]], [[patches.org][org]] |
+| Releases      | [[releases.json][json]], [[releases.rss][rss]], [[releases.org][org]] |
+| Requests      | [[requests.json][json]], [[requests.rss][rss]], [[requests.org][org]] |
 

@@ -153,7 +153,8 @@
   [config]
   (let [default-admin    (:admin config)
         global-st        (:labels config)
-        global-tg        (:triggers config)]
+        global-tg        (:triggers config)
+        global-ef        (:export-formats config)]
     (into {}
           (map (fn [src]
                  [(:name src)
@@ -175,7 +176,12 @@
                     global-st
                     (assoc :global-labels global-st)
                     global-tg
-                    (assoc :global-triggers global-tg))]))
+                    (assoc :global-triggers global-tg)
+                    true
+                    (assoc :export-formats
+                           (set (or (:export-formats src)
+                                    global-ef
+                                    ["json" "org" "rss"]))))]))
           (:sources config))))
 
 ;; ---------------------------------------------------------------------------
