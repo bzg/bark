@@ -18,9 +18,9 @@ function barkRenderAll() {
 
 // Patch toggleTheme to also re-render charts
 var _origToggleTheme = typeof toggleTheme === 'function' ? toggleTheme : null;
-function toggleTheme() {
+toggleTheme = function() {
   if (_origToggleTheme) _origToggleTheme();
   barkRenderAll();
-}
+};
 
 document.addEventListener('DOMContentLoaded', barkRenderAll);
