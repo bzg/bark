@@ -134,23 +134,25 @@
 
 (defn- report-row [{:strs [type subject from from-name date date-raw flags status priority
                            replies archived-at message-id related role source
-                           acked owned closed patches votes]}]
+                           acked owned closed urgent-by important-by patches votes]}]
   (let [label    (get type-labels type type)
         closed?  (and flags (>= (count flags) 3) (= (nth flags 2 \-) \C))
         iso-date (or (parse-to-iso-date (or date-raw date "")) "")
         author   (or (when (seq from-name) from-name) from)]
-    [:tr {:data-type     type
-          :data-closed   (str closed?)
-          :data-mid      (or message-id "")
-          :data-from     (str/lower-case (or from ""))
-          :data-subject  (str/lower-case (or subject ""))
-          :data-date     iso-date
-          :data-source   (or source "")
-          :data-acked    (str/lower-case (or acked ""))
-          :data-owned    (str/lower-case (or owned ""))
-          :data-closedby (str/lower-case (or closed ""))
-          :data-priority (str (or priority 0))
-          :data-search   (str/lower-case (str subject " " from " " author " " iso-date))}
+    [:tr {:data-type        type
+          :data-closed      (str closed?)
+          :data-mid         (or message-id "")
+          :data-from        (str/lower-case (or from ""))
+          :data-subject     (str/lower-case (or subject ""))
+          :data-date        iso-date
+          :data-source      (or source "")
+          :data-acked       (str/lower-case (or acked ""))
+          :data-owned       (str/lower-case (or owned ""))
+          :data-closedby    (str/lower-case (or closed ""))
+          :data-urgentby    (str/lower-case (or urgent-by ""))
+          :data-importantby (str/lower-case (or important-by ""))
+          :data-priority    (str (or priority 0))
+          :data-search      (str/lower-case (str subject " " from " " author " " iso-date))}
      [:td [:mark {:data-type type} label]]
      [:td {:data-value (str (or status 0))} (status-square flags)]
      [:td (priority-square priority)]

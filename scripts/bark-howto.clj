@@ -162,8 +162,9 @@
   (-> s
       (str/replace #"\[\[([^\]]+)\]\[([^\]]+)\]\]" "<a href=\"$1\">$2</a>")
       (str/replace #"\[\[([^\]]+)\]\]" "<a href=\"$1\">$1</a>")
-      (str/replace #"=([^=\n]+)=" "<code>$1</code>")
-      (str/replace #"(?<=\s|^)\*([^*\n]+)\*(?=[\s.,;:!?)]|$)" "<strong>$1</strong>")))
+      (str/replace #"=([^=\n\"<>]+)=" "<code>$1</code>")
+      (str/replace #"(?<=\s|^)\*([^*\n]+)\*(?=[\s.,;:!?)]|$)" "<strong>$1</strong>")
+      (str/replace "\\vert" "|")))
 
 (defn- heading-id [text]
   (-> text str/lower-case str/trim
@@ -307,10 +308,71 @@
          [:script (h/raw theme-toggle-js)]]]]))))
 
 ;; ---------------------------------------------------------------------------
+;; Filter feed links in "Getting the data" table
+;; ---------------------------------------------------------------------------
+
+(defn- strip-dead-links
+  "Remove org links [[file][label]] whose target does not exist in out-dir.
+  Bare links are replaced by their label; separators (', ') before/after
+  removed links are cleaned up."
+  [cell out-dir]
+  (let [;; Replace each [[target][label]] with label if file exists, else ""
+        replaced (str/replace
+                  cell
+                  #"\[\[([^\]]+)\]\[([^\]]+)\]\]"
+                  (fn [[_ target label]]
+                    (if (.exists (clojure.java.io/file out-dir target))
+                      (str "[[" target "][" label "]]")
+                      "")))
+        ;; Clean up separators: collapse multiple ", " and trim
+        cleaned (-> replaced
+                    str/trim
+                    (str/replace #",\s*,+" ",")
+                    (str/replace #"^,\s*" "")
+                    (str/replace #",\s*$" "")
+                    str/trim)]
+    cleaned))
+
+(defn filter-feed-links
+  "Process the org text: in table rows that contain feed links (*.json,
+  *.rss, *.org), remove links to files that don't exist in out-dir.
+  Removes entire rows where all links have been stripped.
+  Cleans up adjacent hlines left by removed rows."
+  [org-text out-dir]
+  (if-not out-dir
+    org-text
+    (let [lines (str/split-lines org-text)
+          hline? #(re-matches #"\s*\|[-+]+\|\s*" %)]
+      (->> lines
+           (map (fn [line]
+                  (if (and (str/starts-with? (str/trim line) "|")
+                           (re-find #"\[\[.+\.(json|rss|org)\]" line))
+                    ;; This is a table row with feed links — process each cell
+                    (let [cells (->> (str/split line #"\|" -1)
+                                     (drop 1) butlast
+                                     (mapv #(str/trim %)))
+                          filtered (mapv #(strip-dead-links % out-dir) cells)
+                          ;; Drop row if format column (2nd cell) is empty
+                          format-cell (get filtered 1)]
+                      (when-not (str/blank? format-cell)
+                        (str "| " (str/join " | " filtered) " |")))
+                    line)))
+           (remove nil?)
+           ;; Remove consecutive hlines (keep first)
+           (reduce (fn [acc line]
+                     (if (and (hline? line)
+                              (seq acc)
+                              (hline? (peek acc)))
+                       acc
+                       (conj acc line)))
+                   [])
+           (str/join "\n")))))
+
+;; ---------------------------------------------------------------------------
 ;; Main
 ;; ---------------------------------------------------------------------------
 
-(let [{:keys [out-file source-name]} (parse-cli-args *command-line-args*)
+(let [{:keys [out-file out-dir source-name]} (parse-cli-args *command-line-args*)
       config      (load-config)
       source-map  (when config (build-source-map config))
       source-cfg  (get source-map source-name)
@@ -320,8 +382,12 @@
                       (if source-name
                         (str "public/" source-name "/howto.html")
                         "public/howto.html"))
+      ;; Infer out-dir from out-file when not given explicitly
+      effective-dir (or out-dir
+                       (.getParent (clojure.java.io/file out-file)))
       org-text    (-> (slurp "docs/howto-tpl.org")
-                      (substitute-template labels triggers))
+                      (substitute-template labels triggers)
+                      (filter-feed-links effective-dir))
       body-html   (org->html org-text)
       html        (page body-html)]
   (.mkdirs (.getParentFile (clojure.java.io/file out-file)))

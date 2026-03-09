@@ -143,6 +143,8 @@
       (:report/acked report)          (assoc :acked (:email/from-address (:report/acked report)))
       (:report/owned report)          (assoc :owned (:email/from-address (:report/owned report)))
       (:report/closed report)         (assoc :closed (:email/from-address (:report/closed report)))
+      (:report/urgent report)         (assoc :urgent-by (:email/from-address (:report/urgent report)))
+      (:report/important report)      (assoc :important-by (:email/from-address (:report/important report)))
       (:report/acked-proxy report)    (assoc :acked-proxy (:email/from-address (:report/acked-proxy report)))
       (:report/owned-proxy report)    (assoc :owned-proxy (:email/from-address (:report/owned-proxy report)))
       (:report/closed-proxy report)   (assoc :closed-proxy (:email/from-address (:report/closed-proxy report)))
@@ -443,6 +445,7 @@
   [out-dir source-name]
   (apply process/shell "bb" "scripts/bark-howto.clj"
          "-o" (str out-dir "/howto.html")
+         "--dir" out-dir
          (when source-name ["-n" source-name])))
 
 ;; ---------------------------------------------------------------------------

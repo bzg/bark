@@ -64,7 +64,8 @@
     {:report/acked-proxy [:email/from-address]}
     {:report/owned-proxy [:email/from-address]}
     {:report/closed-proxy [:email/from-address]}
-    :report/urgent :report/important
+    {:report/urgent [:email/from-address]}
+    {:report/important [:email/from-address]}
     {:report/urgent-proxy [:email/from-address]}
     {:report/important-proxy [:email/from-address]}
     :report/votes-up :report/votes-down :report/votes-null
@@ -191,7 +192,7 @@
 (defn parse-cli-args
   "Parse common CLI flags into a map.
   Recognises: -o/--output, -n/--source, -p/--min-priority, -s/--min-status,
-  --json (path to reports.json).
+  --json (path to reports.json), --dir (output directory).
   Any leading non-flag token is captured as :format."
   [args]
   (loop [opts {} [a & [v & r :as more]] args]
@@ -199,6 +200,7 @@
       (nil? a)                        opts
       (#{"-o" "--output"} a)          (if v (recur (assoc opts :out-file v) r) opts)
       (#{"--json"} a)                 (if v (recur (assoc opts :json-file v) r) opts)
+      (#{"--dir"} a)                  (if v (recur (assoc opts :out-dir v) r) opts)
       (#{"-n" "--source"} a)          (if v (recur (assoc opts :source-name v) r) opts)
       (#{"-p" "--min-priority"} a)    (if v (recur (assoc opts :min-priority (parse-long v)) r) opts)
       (#{"-s" "--min-status"} a)      (if v (recur (assoc opts :min-status (parse-long v)) r) opts)
