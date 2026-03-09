@@ -38,7 +38,6 @@ Requests (=[POLL]=, =[FR]=, =[TODO]=, etc.) support voting:
 - =-0=, =0-=, =+0= or =-0= means "I abstain"
 
 * As a maintainer or admin
-
 ** Announcements, releases, changes
 
 In addition to bugs, patches, and requests, maintainers can make
@@ -95,56 +94,6 @@ Remove maintainer: dev@example.com     (admin only)
 Ignore: spammer@example.com            (admin or maintainer)
 Unignore: user@example.com             (admin only)
 #+end_example
-
-** Notifications
-
-BARK can send periodic email notifications to admins and maintainers
-with a summary of open reports. Notifications are never sent to
-regular users.
-
-Notifications require SMTP configuration (see [[#config][Config]]) and are sent via
-=bb notify=, typically from a cron job. Each notification email contains
-two sections: open bugs/patches/requests owned by the recipient, and
-all unacked & unowned bugs/patches/requests by anyone.
-
-*** (Un)subscribing
-
-Admins and maintainers are subscribed by default when =bb digest= runs
-for the first time. To unsubscribe, send an email to the BARK inbox
-with this body:
-
-#+begin_example
-Notify: off
-#+end_example
-
-To re-subscribe:
-
-#+begin_example
-Notify: on
-#+end_example
-
-*** Setting preferences
-
-Notification preferences are set via the same =Notify:= command.
-Parameters can be combined on a single line:
-
-| Parameter | Description                        | Default |
-|-----------+------------------------------------+---------|
-| =d:N=       | Receive notifications every N days |      30 |
-| =p:N=       | Minimum priority (0--3)            |       1 |
-| =s:N=       | Minimum status (0--7)              |       1 |
-
-Examples:
-
-#+begin_example
-Notify: d:7                 — every 7 days
-Notify: d:1                 — daily
-Notify: p:1                 — only important reports
-Notify: d:3 s:4 p:2         — every 3 days, only open reports with priority >= 2
-#+end_example
-
-Like role commands, =Notify:= commands are only processed from direct
-emails, not from the mailing list.
 
 * Report types
 
@@ -209,7 +158,7 @@ punctuation mark (=.= =,= =;= =:=):
 
 You can use multiple keywords in the same email, one per line.
 
-** Report states
+** Report statuses and priority
 
 All reports can be in a combination of three states:
 
@@ -218,6 +167,28 @@ All reports can be in a combination of three states:
 - *Closed* --- the report is resolved (fixed, applied, done, or canceled).
 
 Announcements, releases, and changes can only be closed.
+
+** Status (as number)
+
+When the status is represented as a numeric value, it is computed like
+this:
+
+| (Un)acked  | (0)1 |
+| (Un)owned  | (0)2 |
+| (Un)closed | (4)0 |
+
+So a acked, unowned and open report is =1+0+4 = 5=.
+
+** Priority (as number)
+
+Prority is never set directly, it is derived from whether the report
+is marked as urgent or important. When the prority is represented as a
+numeric value, it is computed like this:
+
+| (Un)important | (0)1 |
+| (Un)urgent    | (0)2 |
+
+So an important and urgent report is =1+2 = 3=.
 
 ** Customising trigger keywords
 
@@ -256,3 +227,53 @@ The search field has a minimal syntax:
 terminal.
 
 [[https://codeberg.org/bzg/gnus-bone][gnus-bone.el]] lets you explore BARK reports from within [[https://gnus.org/][Emacs Gnus]].
+* Notifications
+
+BARK can send periodic email notifications to admins and maintainers
+with a summary of open reports. Notifications are never sent to
+regular users.
+
+Notifications require SMTP configuration (see [[#config][Config]]) and are sent via
+=bb notify=, typically from a cron job. Each notification email contains
+two sections: open bugs/patches/requests owned by the recipient, and
+all unacked & unowned bugs/patches/requests by anyone.
+
+** (Un)subscribing
+
+Admins and maintainers are subscribed by default when =bb digest= runs
+for the first time. To unsubscribe, send an email to the BARK inbox
+with this body:
+
+#+begin_example
+Notify: off
+#+end_example
+
+To re-subscribe:
+
+#+begin_example
+Notify: on
+#+end_example
+
+** Setting preferences
+
+Notification preferences are set via the same =Notify:= command.
+Parameters can be combined on a single line:
+
+| Parameter | Description                        | Default |
+|-----------+------------------------------------+---------|
+| =d:N=       | Receive notifications every N days |      30 |
+| =p:N=       | Minimum priority (0--3)            |       1 |
+| =s:N=       | Minimum status (0--7)              |       1 |
+
+Examples:
+
+#+begin_example
+Notify: d:7                 — every 7 days
+Notify: d:1                 — daily
+Notify: p:1                 — only important reports
+Notify: d:3 s:4 p:2         — every 3 days, only open reports with priority >= 2
+#+end_example
+
+Like role commands, =Notify:= commands are only processed from direct
+emails, not from the mailing list.
+
