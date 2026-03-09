@@ -219,6 +219,13 @@ All reports can be in a combination of three states:
 
 Announcements, releases, and changes can only be closed.
 
+** Customising trigger keywords
+
+You can customize trigger keywords globally or per source:
+
+ : :triggers {:bug {:closed ["Canceled" "Fixed" "Resolved"]}
+ :            :patch {:acked ["Approved" "Reviewed" "LGTM"]}}
+
 * Exploring reports
 
 The BARK instance can expose reports as HTML, JSON and Org formats.

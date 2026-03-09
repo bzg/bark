@@ -62,6 +62,10 @@
 
  ;; Global labels (optional) — override built-in subject tag lists.
  ;; Merged on top of defaults; specify only the types you want to change.
+ ;;
+ ;; Example:
+ ;; :labels {:bug ["BUG" "DEFECT"]
+ ;;                    :request ["POLL" "FR" "TODO" "RFE"]}
  ;; Defaults:
  ;;   :bug          ["BUG"]
  ;;   :patch        ["PATCH"]
@@ -69,13 +73,15 @@
  ;;   :announcement ["ANN" "ANNOUNCEMENT"]
  ;;   :release      ["REL" "RELEASE"]
  ;;   :change       ["CHG" "CHANGE"]
- ;; Example:
- ;; :labels {:bug ["BUG" "DEFECT"]
- ;;                    :request ["POLL" "FR" "TODO" "RFE"]}
 
  ;; Global triggers (optional) — override built-in body trigger words.
  ;; Merged on top of defaults; specify only the types/actions you want to change.
  ;; Per-source :triggers (above) override these in turn.
+ ;;
+ ;; Example:
+ ;; :triggers {:bug {:closed ["Canceled" "Fixed" "Resolved"]}
+ ;;            :patch {:acked ["Approved" "Reviewed" "LGTM"]}}
+ ;;
  ;; Defaults:
  ;;   :bug          {:acked ["Approved" "Confirmed"] :owned ["Handled"] :closed ["Canceled" "Fixed"]}
  ;;   :patch        {:acked ["Approved" "Reviewed"]  :owned ["Handled"] :closed ["Canceled" "Applied"]}
@@ -83,9 +89,6 @@
  ;;   :announcement {:closed ["Canceled"]}
  ;;   :release      {:closed ["Canceled"]}
  ;;   :change       {:closed ["Canceled"]}
- ;; Example:
- ;; :triggers {:bug {:closed ["Canceled" "Fixed" "Resolved"]}
- ;;            :patch {:acked ["Approved" "Reviewed" "LGTM"]}}
 
  ;; Datalevin database path
  :db {:path "data/bark-db"}
