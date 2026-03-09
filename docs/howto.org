@@ -221,11 +221,31 @@ Announcements, releases, and changes can only be closed.
 
 * Exploring reports
 
-The BARK instance can expose reports as HTML and JSON.
+The BARK instance can expose reports as HTML, JSON and Org formats.
 
-The [[https://codeberg.org/bzg/bone][bone]] CLI tool lets you browse and filter BARK reports
-interactively from the terminal.
+** Browsing Bark reports online
 
-The [[https://codeberg.org/bzg/gnus-bone][gnus-bone.el]] library lets you explore BARK reports from within
-[[https://gnus.org/][Emacs Gnus]].
+A web interface let you navigate Bark reports.
 
+The search field has a minimal syntax:
+
+| Long form                   | Short | Explanation                            |
+|-----------------------------+-------+----------------------------------------|
+| from:me@example.org         | f:    | Reports from me@example.org            |
+| acked:me@example.org        | a:    | Reports acked by me@example.org        |
+| owned:me@example.org        | o:    | Reports owned by me@example.org        |
+| closed:me@example.org       | c:    | Reports closed by me@example.org       |
+| subject:match               | s:    | Reports matching subject               |
+| priority:[0-4]              | p:    | Reports matching priority level 0 to 4 |
+| mid:<messageid>             | m:    | Report open with <messageid>           |
+| date:3d..                   | d:    | Reports from 3 days ago                |
+| date:2023-01-01..2023-12-31 | d:    | Reports from 2023-01-01 to 2023-12-31  |
+| match1 \vert match2             |       | Reports matching "match1" or "match2"  |
+| *                           |       | Wildcard for from/acked/owned/closed   |
+
+** The =bone= CLI tool and =gnus-bone.el=
+
+[[https://codeberg.org/bzg/bone][bone]] lets you browse and filter BARK reports interactively from the
+terminal.
+
+[[https://codeberg.org/bzg/gnus-bone][gnus-bone.el]] lets you explore BARK reports from within [[https://gnus.org/][Emacs Gnus]].
