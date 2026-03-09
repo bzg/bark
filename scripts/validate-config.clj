@@ -54,7 +54,7 @@
 ;; Source
 (s/def :source/name
   (s/and ::non-blank-string
-         #(re-matches #"[a-zA-Z0-9][a-zA-Z0-9._-]*" %)))
+         #(re-matches #"[a-zA-Z0-9][a-zA-Z0-9 ._-]*" %)))
 (s/def :source/match ::match)
 (s/def :source/admin ::email)
 (s/def :source/list-post ::email)
