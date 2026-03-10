@@ -204,7 +204,7 @@
 (defn parse-cli-args
   "Parse common CLI flags into a map.
   Recognises: -o/--output, -n/--source, -p/--min-priority, -s/--min-status,
-  --json (path to reports.json), --dir (output directory).
+  --json (path to all.json), --dir (output directory).
   Any leading non-flag token is captured as :format."
   [args]
   (loop [opts {} [a & [v & r :as more]] args]

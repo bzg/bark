@@ -380,8 +380,8 @@
       triggers    (if source-cfg (resolve-triggers source-cfg) default-trigger-words)
       out-file    (or out-file
                       (if source-name
-                        (str "public/" source-name "/howto.html")
-                        "public/howto.html"))
+                        (str "public/" source-name "/web/howto.html")
+                        "public/web/howto.html"))
       ;; Infer out-dir from out-file when not given explicitly
       effective-dir (or out-dir
                        (.getParent (clojure.java.io/file out-file)))

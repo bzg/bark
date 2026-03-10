@@ -2,13 +2,15 @@
 
 ;; bark-export.clj — Export BARK reports per source.
 ;;
-;; Each source gets its own directory under public/:
-;;   public/<source-name>/reports.json
-;;   public/<source-name>/reports.rss
-;;   public/<source-name>/reports.org
-;;   public/<source-name>/index.html
-;;   public/<source-name>/stats.html
-;;   public/<source-name>/howto.html
+;; Each source gets its own directory tree under public/:
+;;   public/<source-name>/web/index.html
+;;   public/<source-name>/web/stats.html
+;;   public/<source-name>/web/howto.html
+;;   public/<source-name>/reports/all.json
+;;   public/<source-name>/reports/all.rss
+;;   public/<source-name>/reports/all.org
+;;   public/<source-name>/reports/bugs.json  (etc.)
+;;   public/<source-name>/reports/stats.json
 ;;   public/<source-name>/patches/<mid-hash>/<file>
 ;;
 ;; Usage:
@@ -190,7 +192,7 @@
       (assoc :patches
              (let [h (mid-hash (:report/message-id report))]
                (mapv (fn [p]
-                       (cond-> {:file   (str "patches/" h "/" (:patch/filename p))
+                       (cond-> {:file   (str "../patches/" h "/" (:patch/filename p))
                                 :source (name (:patch/source p))}
                          (:patch/author p)  (assoc :author  (:patch/author p))
                          (:patch/subject p) (assoc :subject (:patch/subject p))
@@ -271,7 +273,7 @@
 (defn dump-json!
   "Dump reports as JSON for a single source."
   ([reports out-dir source-name source-map maintainers-map]
-   (dump-json! reports out-dir source-name source-map maintainers-map "reports.json"))
+   (dump-json! reports out-dir source-name source-map maintainers-map "all.json"))
   ([reports out-dir source-name source-map maintainers-map basename]
    (let [data     (mapv #(report->map % source-map maintainers-map) reports)
          meta     (source-metadata source-name source-map)
@@ -339,7 +341,7 @@
   "Dump reports as RSS 2.0 for a single source.
   Only includes open reports, capped at rss-limit (50)."
   ([reports out-dir source-name source-map maintainers-map]
-   (dump-rss! reports out-dir source-name source-map maintainers-map "reports.rss" "reports"))
+   (dump-rss! reports out-dir source-name source-map maintainers-map "all.rss" "reports"))
   ([reports out-dir source-name source-map maintainers-map basename feed-label]
    (let [capped   (->> reports open-reports (take rss-limit))
          data     (mapv #(report->map % source-map maintainers-map) capped)
@@ -407,7 +409,7 @@
 (defn dump-org!
   "Dump reports as Org for a single source."
   ([reports out-dir source-name source-map maintainers-map]
-   (dump-org! reports out-dir source-name source-map maintainers-map "reports.org" "reports"))
+   (dump-org! reports out-dir source-name source-map maintainers-map "all.org" "reports"))
   ([reports out-dir source-name source-map maintainers-map basename title-label]
    (let [data     (mapv #(report->map % source-map maintainers-map) reports)
          entries  (str/join "\n" (map report->org-entry data))
@@ -420,13 +422,13 @@
 
 (defn dump-patches!
   "Export patch files for a single source."
-  [reports out-dir]
+  [reports patches-dir]
   (let [patch-reports (filter #(seq (:report/patches %)) reports)
         total         (atom 0)]
     (doseq [report patch-reports]
       (let [mid  (:report/message-id report)
             h    (mid-hash mid)
-            dir  (io/file out-dir "patches" h)]
+            dir  (io/file patches-dir h)]
         (.mkdirs dir)
         (doseq [p (:report/patches report)]
           (let [f (io/file dir (:patch/filename p))]
@@ -438,17 +440,19 @@
 
 (defn dump-html!
   "Generate index.html for a single source."
-  [out-dir source-name cli-args]
-  (let [json-file (str out-dir "/reports.json")]
+  [web-dir reports-dir source-name cli-args]
+  (let [json-file (str reports-dir "/all.json")]
     (apply process/shell "bb" "scripts/bark-index.clj"
-           "-o" (str out-dir "/index.html")
+           "-o" (str web-dir "/index.html")
            "--json" json-file
+           "--dir" reports-dir
            cli-args)))
 
 (defn dump-stats!
   "Generate stats for a single source."
-  [out-dir source-name format cli-args]
-  (let [out-file (str out-dir (if (= format "html") "/stats.html" "/stats.json"))]
+  [web-dir reports-dir source-name format cli-args]
+  (let [dir      (if (= format "html") web-dir reports-dir)
+        out-file (str dir (if (= format "html") "/stats.html" "/stats.json"))]
     (apply process/shell "bb" "scripts/bark-stats.clj"
            (if (= format "html") "html" "json")
            "-o" out-file
@@ -457,10 +461,10 @@
 
 (defn dump-howto!
   "Generate howto.html for a single source."
-  [out-dir source-name]
+  [web-dir reports-dir source-name]
   (apply process/shell "bb" "scripts/bark-howto.clj"
-         "-o" (str out-dir "/howto.html")
-         "--dir" out-dir
+         "-o" (str web-dir "/howto.html")
+         "--dir" reports-dir
          (when source-name ["-n" source-name])))
 
 ;; ---------------------------------------------------------------------------
@@ -506,33 +510,37 @@
 (defn export-source!
   "Export a single source in the given format(s).
   When format is \"all\", per-type feeds respect :export-formats from config."
-  [format reports out-dir source-name source-map maintainers-map cli-extra]
-  (.mkdirs (io/file out-dir))
-  (let [ef (resolve-export-formats source-name source-map)
-        do-format (fn [fmt]
-                    (case fmt
-                      "json"    (do (dump-json! reports out-dir source-name source-map maintainers-map)
-                                    (dump-per-type! reports out-dir source-name source-map maintainers-map #{"json"}))
-                      "rss"     (do (dump-rss!  reports out-dir source-name source-map maintainers-map)
-                                    (dump-per-type! reports out-dir source-name source-map maintainers-map #{"rss"}))
-                      "org"     (do (dump-org!  reports out-dir source-name source-map maintainers-map)
-                                    (dump-per-type! reports out-dir source-name source-map maintainers-map #{"org"}))
-                      "patches" (dump-patches! reports out-dir)
-                      "html"    (do (dump-json! reports out-dir source-name source-map maintainers-map)
-                                    (dump-per-type! reports out-dir source-name source-map maintainers-map #{"json"})
-                                    (dump-howto! out-dir source-name)
-                                    (dump-html!  out-dir source-name cli-extra))
-                      "stats"   (dump-stats! out-dir source-name "json" cli-extra)))]
+  [format reports base-dir source-name source-map maintainers-map cli-extra]
+  (let [web-dir     (str base-dir "/web")
+        reports-dir (str base-dir "/reports")
+        patches-dir (str base-dir "/patches")
+        _           (doseq [d [web-dir reports-dir patches-dir]]
+                      (.mkdirs (io/file d)))
+        ef          (resolve-export-formats source-name source-map)
+        do-format   (fn [fmt]
+                      (case fmt
+                        "json"    (do (dump-json! reports reports-dir source-name source-map maintainers-map)
+                                      (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"json"}))
+                        "rss"     (do (dump-rss!  reports reports-dir source-name source-map maintainers-map)
+                                      (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"rss"}))
+                        "org"     (do (dump-org!  reports reports-dir source-name source-map maintainers-map)
+                                      (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"org"}))
+                        "patches" (dump-patches! reports patches-dir)
+                        "html"    (do (dump-json! reports reports-dir source-name source-map maintainers-map)
+                                      (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"json"})
+                                      (dump-howto! web-dir reports-dir source-name)
+                                      (dump-html!  web-dir reports-dir source-name cli-extra))
+                        "stats"   (dump-stats! web-dir reports-dir source-name "json" cli-extra)))]
     (if (= format "all")
-      (do (when (ef "json") (dump-json! reports out-dir source-name source-map maintainers-map))
-          (when (ef "rss")  (dump-rss!  reports out-dir source-name source-map maintainers-map))
-          (when (ef "org")  (dump-org!  reports out-dir source-name source-map maintainers-map))
-          (dump-per-type! reports out-dir source-name source-map maintainers-map ef)
-          (dump-patches! reports out-dir)
-          (dump-howto! out-dir source-name)
-          (dump-html!  out-dir source-name cli-extra)
-          (dump-stats! out-dir source-name "json" cli-extra)
-          (dump-stats! out-dir source-name "html" cli-extra))
+      (do (when (ef "json") (dump-json! reports reports-dir source-name source-map maintainers-map))
+          (when (ef "rss")  (dump-rss!  reports reports-dir source-name source-map maintainers-map))
+          (when (ef "org")  (dump-org!  reports reports-dir source-name source-map maintainers-map))
+          (dump-per-type! reports reports-dir source-name source-map maintainers-map ef)
+          (dump-patches! reports patches-dir)
+          (dump-howto! web-dir reports-dir source-name)
+          (dump-html!  web-dir reports-dir source-name cli-extra)
+          (dump-stats! web-dir reports-dir source-name "json" cli-extra)
+          (dump-stats! web-dir reports-dir source-name "html" cli-extra))
       (do-format format))))
 
 ;; ---------------------------------------------------------------------------
@@ -577,11 +585,11 @@
               reports (if min-status   (filter-by-status reports min-status) reports)
               er      (resolve-export-reports src-name source-map)
               reports (if er (filter #(contains? er (:report/type %)) reports) reports)
-              out-dir (str "public/" (slugify src-name))]
+              base-dir (str "public/" (slugify src-name))]
           (log/info (str "[" src-name "]") (count reports) "report(s)")
           (if (empty? reports)
             (log/info "No reports for source" (str "'" src-name "'") ", skipping.")
-            (export-source! format reports out-dir src-name
+            (export-source! format reports base-dir src-name
                             source-map maintainers-map cli-extra)))))
     (finally
       (d/close conn))))

@@ -24,8 +24,8 @@
 ;; Config
 ;; ---------------------------------------------------------------------------
 
-(def default-json "public/reports.json")
-(def default-output "public/index.html")
+(def default-json "public/reports/all.json")
+(def default-output "public/web/index.html")
 (def bark-doc-url "https://codeberg.org/bzg/bark/src/branch/main/docs/howto.org")
 
 (def type-labels {"bug" "bug" "announcement" "ann" "request" "req"
@@ -221,17 +221,17 @@
 ;; Page assembly
 ;; ---------------------------------------------------------------------------
 
-(defn page [reports min-status out-dir]
+(defn page [reports min-status reports-dir]
   (let [types      (vec (distinct (map #(get % "type") reports)))
         types-json (json/generate-string types)
         all-open?  (and min-status (>= min-status 4))
-        has-rss?   (.exists (clojure.java.io/file out-dir "reports.rss"))
-        has-org?   (.exists (clojure.java.io/file out-dir "reports.org"))
-        has-json?  (.exists (clojure.java.io/file out-dir "reports.json"))
+        has-rss?   (.exists (clojure.java.io/file reports-dir "all.rss"))
+        has-org?   (.exists (clojure.java.io/file reports-dir "all.org"))
+        has-json?  (.exists (clojure.java.io/file reports-dir "all.json"))
         generated-at (str (java.util.Date.))
-        rss-href   "reports.rss"
-        org-href   "reports.org"
-        json-href  "reports.json"
+        rss-href   "../reports/all.rss"
+        org-href   "../reports/all.org"
+        json-href  "../reports/all.json"
         cols       [[:th {:data-sort "type"     :onclick "sortTable(0,'type')"}     "Type"]
                     [:th {:data-sort "status"   :onclick "sortTable(1,'status')"}   "Status"]
                     [:th {:data-sort "priority" :onclick "sortTable(2,'priority')"} "Priority"]
@@ -305,15 +305,17 @@
 ;; Main
 ;; ---------------------------------------------------------------------------
 
-(let [{:keys [out-file json-file min-status]}
+(let [{:keys [out-file json-file out-dir min-status]}
       (parse-cli-args *command-line-args*)
-      json-file (or json-file default-json)
-      out-file  (or out-file default-output)
-      out-dir   (or (.getParent (clojure.java.io/file out-file)) "public")]
-  (.mkdirs (clojure.java.io/file out-dir))
+      json-file   (or json-file default-json)
+      out-file    (or out-file default-output)
+      reports-dir (or out-dir
+                      (.getParent (clojure.java.io/file json-file))
+                      "public/reports")]
+  (.mkdirs (clojure.java.io/file (.getParent (clojure.java.io/file out-file))))
   (let [envelope (json/parse-string (slurp json-file))
         reports  (get envelope "reports" envelope)
-        html     (page reports min-status out-dir)]
+        html     (page reports min-status reports-dir)]
     (spit out-file html)
     (binding [*out* *err*]
       (log/info "Wrote" (count reports) "reports to" out-file))))

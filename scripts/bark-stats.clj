@@ -357,7 +357,7 @@
         html?       (= (:format opts) "html")
         source-name (:source-name opts)
         out-file    (or (:out-file opts)
-                        (if html? "public/stats.html" "public/stats.json"))
+                        (if html? "public/web/stats.html" "public/reports/stats.json"))
         conn        (d/get-conn db-path schema {:wal? false})
         db          (d/db conn)
         all-reps    (all-reports db)
