@@ -238,7 +238,14 @@
                                                     :where [?r :report/type ?t]]
                                                   (d/db conn) rid))]
                           (apply-triggers! conn rid rtype email source-map)
-                          (apply-directives! conn rid email roles)))
+                          (let [report-source (d/q '[:find ?src . :in $ ?rid
+                                                     :where [?rid :report/email ?e]
+                                                     [?e :email/source ?src]]
+                                                   (d/db conn) rid)
+                                report-roles (if report-source
+                                               (get-roles (d/db conn) report-source)
+                                               roles)]
+                            (apply-directives! conn rid email report-roles))))
                       [(+ threaded (count parent-report-eids))
                        (reduce #(index-assoc %1 message-id %2) thread-index parent-report-eids)])
                   [threaded thread-index])]
@@ -274,8 +281,9 @@
           (do (log/info "Building full thread index...")
               (build-indexes db))
           {:thread-index {} :type-index {}})]
-    (log/info "Found" (count sorted) "email(s) to scan."
-              (when full? (str "Thread index: " (count thread-index) " entries.")))
+    (if full?
+      (log/info "Found" (count sorted) "email(s) to scan. Thread index:" (count thread-index) "entries.")
+      (log/info "Found" (count sorted) "email(s) to scan."))
     (let [{:keys [created threaded skipped]}
           (reduce (fn [acc email]
                     (try

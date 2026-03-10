@@ -46,8 +46,8 @@ function matchField(fieldVal, terms) {
 /* Parse a single AND-clause (no | in it) */
 function parseClause(q) {
   var result = { text: '', mids: [], froms: [], subjects: [],
-                 ackedBy: [], ownedBy: [], closedBy: [],
-                 urgentBy: [], importantBy: [],
+                 acked: [], owned: [], closed: [],
+                 urgent: [], important: [],
                  dateFrom: '', dateTo: '', minPriority: null };
   var parts = q.trim().split(/\s+/).filter(Boolean);
   for (var i = 0; i < parts.length; i++) {
@@ -64,19 +64,19 @@ function parseClause(q) {
       result.subjects = v.toLowerCase().split(',').filter(Boolean);
     } else if (lp.indexOf('acked:') === 0 || lp.indexOf('a:') === 0) {
       var v = p.substring(lp.indexOf(':') + 1);
-      result.ackedBy = v.toLowerCase().split(',').filter(Boolean);
+      result.acked = v.toLowerCase().split(',').filter(Boolean);
     } else if (lp.indexOf('owned:') === 0 || lp.indexOf('o:') === 0) {
       var v = p.substring(lp.indexOf(':') + 1);
-      result.ownedBy = v.toLowerCase().split(',').filter(Boolean);
+      result.owned = v.toLowerCase().split(',').filter(Boolean);
     } else if (lp.indexOf('closed:') === 0 || lp.indexOf('c:') === 0) {
       var v = p.substring(lp.indexOf(':') + 1);
-      result.closedBy = v.toLowerCase().split(',').filter(Boolean);
+      result.closed = v.toLowerCase().split(',').filter(Boolean);
     } else if (lp.indexOf('urgent:') === 0 || lp.indexOf('u:') === 0) {
       var v = p.substring(lp.indexOf(':') + 1);
-      result.urgentBy = v.toLowerCase().split(',').filter(Boolean);
+      result.urgent = v.toLowerCase().split(',').filter(Boolean);
     } else if (lp.indexOf('important:') === 0 || lp.indexOf('i:') === 0) {
       var v = p.substring(lp.indexOf(':') + 1);
-      result.importantBy = v.toLowerCase().split(',').filter(Boolean);
+      result.important = v.toLowerCase().split(',').filter(Boolean);
     } else if (lp.indexOf('priority:') === 0 || lp.indexOf('p:') === 0) {
       var v = p.substring(lp.indexOf(':') + 1);
       var n = parseInt(v, 10);
@@ -105,11 +105,11 @@ function matchClause(tr, q) {
   if (q.mids.length     > 0 && !matchField((d.mid || '').toLowerCase(), q.mids))     return false;
   if (q.froms.length    > 0 && !matchField(d.from,                      q.froms))    return false;
   if (q.subjects.length > 0 && !matchField(d.subject,                   q.subjects)) return false;
-  if (q.ackedBy.length  > 0 && !matchField(d.acked,                     q.ackedBy))  return false;
-  if (q.ownedBy.length  > 0 && !matchField(d.owned,                     q.ownedBy))  return false;
-  if (q.closedBy.length > 0 && !matchField(d.closedby,                  q.closedBy)) return false;
-  if (q.urgentBy.length > 0 && !matchField(d.urgentby,                  q.urgentBy)) return false;
-  if (q.importantBy.length > 0 && !matchField(d.importantby,            q.importantBy)) return false;
+  if (q.acked.length     > 0 && !matchField(d.acked,                     q.acked))     return false;
+  if (q.owned.length     > 0 && !matchField(d.owned,                     q.owned))     return false;
+  if (q.closed.length    > 0 && !matchField(d.closedby,                  q.closed))    return false;
+  if (q.urgent.length    > 0 && !matchField(d.urgent,                    q.urgent))    return false;
+  if (q.important.length > 0 && !matchField(d.important,                 q.important)) return false;
 
   if (q.minPriority !== null) {
     if (parseInt(d.priority || '0', 10) < q.minPriority) return false;

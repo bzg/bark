@@ -49,7 +49,7 @@
         (d/transact! conn [{:roles/source name
                             :roles/admin  admin}])
         (when-not existing
-          (log/info "Initialized roles for source" name "(admin:" admin ")")))))
+          (log/info "Initialized roles for source" name "(admin:" admin ")"))))))
 
 (defn- roles-eid [conn source-name]
   (d/q '[:find ?e .
@@ -106,7 +106,7 @@
             :remove    (do (remove-role! conn source-name attr addresses)
                            (log/info (str/lower-case command) ":"
                                      (str/join " " addresses) "(for" source-name ")")))
-          (log/warn "Denied:" from-addr "lacks permission for:" command)))))))
+          (log/warn "Denied:" from-addr "lacks permission for:" command))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Notify command parsing and application

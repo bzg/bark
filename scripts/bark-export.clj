@@ -66,6 +66,14 @@
   (let [s (str (or date ""))]
     (subs s 0 (min 16 (count s)))))
 
+(defn- format-date-iso
+  "Format a java.util.Date as yyyy-MM-dd (ISO 8601 date only)."
+  [date]
+  (when date
+    (let [fmt (java.text.SimpleDateFormat. "yyyy-MM-dd")]
+      (.setTimeZone fmt (java.util.TimeZone/getTimeZone "UTC"))
+      (.format fmt date))))
+
 (defn- votes-str [report]
   (let [up   (or (:report/votes-up report) 0)
         down (or (:report/votes-down report) 0)
@@ -143,8 +151,8 @@
       (:report/acked report)          (assoc :acked (:email/from-address (:report/acked report)))
       (:report/owned report)          (assoc :owned (:email/from-address (:report/owned report)))
       (:report/closed report)         (assoc :closed (:email/from-address (:report/closed report)))
-      (:report/urgent report)         (assoc :urgent-by (:email/from-address (:report/urgent report)))
-      (:report/important report)      (assoc :important-by (:email/from-address (:report/important report)))
+      (:report/urgent report)         (assoc :urgent (:email/from-address (:report/urgent report)))
+      (:report/important report)      (assoc :important (:email/from-address (:report/important report)))
       (:report/acked-proxy report)    (assoc :acked-proxy (:email/from-address (:report/acked-proxy report)))
       (:report/owned-proxy report)    (assoc :owned-proxy (:email/from-address (:report/owned-proxy report)))
       (:report/closed-proxy report)   (assoc :closed-proxy (:email/from-address (:report/closed-proxy report)))
@@ -156,7 +164,7 @@
       (:report/patch-seq report)      (assoc :patch-seq (:report/patch-seq report))
       (:report/patch-source report)   (assoc :patch-source (mapv name (:report/patch-source report)))
       arch                            (assoc :archived-at arch)
-      (:report/deadline report)       (assoc :deadline (format-date (:report/deadline report)))
+      (:report/deadline report)       (assoc :deadline (format-date-iso (:report/deadline report)))
       votes                           (assoc :votes votes)
       (pos? (or (:report/votes-up report) 0))
       (assoc :votes-up (:report/votes-up report))
@@ -310,8 +318,9 @@
         replies (:replies m)
         desc    (xml-escape
                  (str "[" (:type m) "] flags:" flags " replies:" replies
-                      (when-let [v (:version m)] (str " version:" v))
-                      (when-let [t (:topic m)]   (str " topic:" t))))]
+                      (when-let [v (:version m)]  (str " version:" v))
+                      (when-let [t (:topic m)]    (str " topic:" t))
+                      (when-let [d (:deadline m)] (str " deadline:" d))))]
     (str "    <item>\n"
          "      <title>" title "</title>\n"
          (when (seq link)
@@ -370,9 +379,11 @@
                          (when-let [v (:votes-up m)]     (str ":VOTES-UP: " v))
                          (when-let [v (:votes-down m)]   (str ":VOTES-DOWN: " v))
                          (when-let [v (:votes-null m)]   (str ":VOTES-NULL: " v))
-                         (when-let [a (seq (:acked m))]  (str ":ACKED-BY: " a))
-                         (when-let [o (seq (:owned m))]  (str ":OWNED-BY: " o))
-                         (when-let [c (seq (:closed m))] (str ":CLOSED-BY: " c))
+                         (when-let [a (:acked m)]      (str ":ACKED: " a))
+                         (when-let [o (:owned m)]      (str ":OWNED: " o))
+                         (when-let [c (:closed m)]     (str ":CLOSED: " c))
+                         (when-let [u (:urgent m)]     (str ":URGENT: " u))
+                         (when-let [i (:important m)]  (str ":IMPORTANT: " i))
                          (when-let [d (:deadline m)]     (str ":DEADLINE: " d))
                          (when-let [s (:series m)]
                            (str ":SERIES: " (:received s) "/" (:expected s)

@@ -134,7 +134,8 @@
 
 (defn- report-row [{:strs [type subject from from-name date date-raw flags status priority
                            replies archived-at message-id related role source
-                           acked owned closed urgent-by important-by patches votes]}]
+                           acked owned closed urgent important patches votes
+                           deadline]}]
   (let [label    (get type-labels type type)
         closed?  (and flags (>= (count flags) 3) (= (nth flags 2 \-) \C))
         iso-date (or (parse-to-iso-date (or date-raw date "")) "")
@@ -149,9 +150,10 @@
           :data-acked       (str/lower-case (or acked ""))
           :data-owned       (str/lower-case (or owned ""))
           :data-closedby    (str/lower-case (or closed ""))
-          :data-urgentby    (str/lower-case (or urgent-by ""))
-          :data-importantby (str/lower-case (or important-by ""))
+          :data-urgent      (str/lower-case (or urgent ""))
+          :data-important   (str/lower-case (or important ""))
           :data-priority    (str (or priority 0))
+          :data-deadline    (or deadline "")
           :data-search      (str/lower-case (str subject " " from " " author " " iso-date))}
      [:td [:mark {:data-type type} label]]
      [:td {:data-value (str (or status 0))} (status-square flags)]
@@ -159,7 +161,8 @@
      [:td (subject-el subject role archived-at) (related-link related) (patch-link patches) (vote-badge votes)]
      [:td.secondary {:title from} author]
      [:td {:data-value iso-date} [:small (or iso-date date "")]]
-     [:td {:style "text-align:center"} (or replies 0)]]))
+     [:td {:style "text-align:center"} (or replies 0)]
+     [:td {:data-value (or deadline "")} [:small (or deadline "")]]]))
 
 ;; ---------------------------------------------------------------------------
 ;; CSS (inlined)
@@ -235,7 +238,8 @@
                     [:th {:data-sort "subject"  :onclick "sortTable(3,'subject')"}  "Subject"]
                     [:th {:data-sort "from"     :onclick "sortTable(4,'from')"}     "Author"]
                     [:th {:data-sort "date"     :onclick "sortTable(5,'date')"}     "Date"]
-                    [:th {:data-sort "replies"  :onclick "sortTable(6,'replies')"}  "↩"]]]
+                    [:th {:data-sort "replies"  :onclick "sortTable(6,'replies')"}  "↩"]
+                    [:th {:data-sort "deadline" :onclick "sortTable(7,'deadline')"} "Deadline"]]]
     (str
      "<!DOCTYPE html>\n"
      (h/html

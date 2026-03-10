@@ -45,6 +45,14 @@
   (let [s (str (or date ""))]
     (subs s 0 (min 10 (count s)))))
 
+(defn- format-date-iso
+  "Format a java.util.Date as yyyy-MM-dd."
+  [date]
+  (when date
+    (let [fmt (java.text.SimpleDateFormat. "yyyy-MM-dd")]
+      (.setTimeZone fmt (java.util.TimeZone/getTimeZone "UTC"))
+      (.format fmt date))))
+
 ;; ---------------------------------------------------------------------------
 ;; Notification queries
 ;; ---------------------------------------------------------------------------
@@ -114,7 +122,7 @@
     (str "  [" type "] " subject "\n"
          "    from: " from " — " date
          " — priority:" pri " replies:" replies
-         (when deadline (str " deadline:" (format-date deadline)))
+         (when deadline (str " deadline:" (format-date-iso deadline)))
          (when arch (str "\n    " arch)))))
 
 (defn- section

@@ -57,14 +57,13 @@ Maintainers can also "undo" an update:
 
 ** Setting a deadline
 
-Maintainers can set a deadline on a report using Org-mode timestamp
-syntax in the body of a reply:
+Maintainers can set a deadline on a report by writing the following
+in the body of a reply:
 
-: Deadline: <2026-03-10 mar.>
+: Deadline: 2026-03-10.
 
-Both active =<...>= and inactive =[...]= timestamps are accepted.
-The day name and time components are ignored; only the date matters.
-The deadline appears in JSON exports, Org output (as a proper
+The date must be in =yyyy-MM-dd= format, followed by a punctuation
+mark.  The deadline appears in JSON exports, Org output (as a proper
 =DEADLINE:= line), and notification emails.
 
 To remove a deadline:

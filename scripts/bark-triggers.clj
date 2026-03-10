@@ -147,8 +147,8 @@
 ;; ---------------------------------------------------------------------------
 
 (def ^:private deadline-pattern
-  "Matches 'Deadline: <2026-03-10 ...>' or 'Deadline: [2026-03-10 ...]'."
-  #"(?m)^Deadline:\s+[<\[]\s*(\d{4}-\d{2}-\d{2})(?:\s+[^\]>]*)?\s*[>\]]\s*$")
+  "Matches 'Deadline: 2026-03-10.' (with trailing punctuation)."
+  #"(?m)^Deadline:\s+(\d{4}-\d{2}-\d{2})[.,;:]?\s*$")
 
 (def ^:private undeadline-pattern
   #"(?m)^Undeadline[.,;:]?\s*$")
@@ -157,9 +157,9 @@
   "Parse an ISO date string (yyyy-MM-dd) into a java.util.Date at midnight UTC."
   [s]
   (try
-    (let [ld  (java.time.LocalDate/parse s)
-          inst (.toInstant (.atStartOfDay ld (java.time.ZoneOffset/UTC)))]
-      (java.util.Date/from inst))
+    (let [fmt (java.text.SimpleDateFormat. "yyyy-MM-dd")]
+      (.setTimeZone fmt (java.util.TimeZone/getTimeZone "UTC"))
+      (.parse fmt s))
     (catch Exception _ nil)))
 
 (defn detect-directives
@@ -169,17 +169,22 @@
   [body-text]
   (when body-text
     (let [lines (str/split-lines body-text)]
+      (log/debug "detect-directives: checking" (count lines) "lines")
       (->> lines
            (keep (fn [line]
-                   (or (when-let [[_ verb addr] (re-matches directive-by-pattern line)]
-                         {:action :set :attr (directive-attr verb) :addr addr})
-                       (when-let [[_ verb] (re-matches directive-un-pattern line)]
-                         {:action :unset :attr (un-directive-attr verb)})
-                       (when-let [[_ date-str] (re-matches deadline-pattern line)]
-                         (when-let [d (parse-org-date date-str)]
-                           {:action :set-deadline :date d}))
-                       (when (re-matches undeadline-pattern line)
-                         {:action :unset-deadline}))))
+                   (let [dl-match (re-matches deadline-pattern line)]
+                     (when dl-match
+                       (log/debug "  deadline regex matched:" (pr-str dl-match)))
+                     (or (when-let [[_ verb addr] (re-matches directive-by-pattern line)]
+                           {:action :set :attr (directive-attr verb) :addr addr})
+                         (when-let [[_ verb] (re-matches directive-un-pattern line)]
+                           {:action :unset :attr (un-directive-attr verb)})
+                         (when-let [[_ date-str] dl-match]
+                           (let [d (parse-org-date date-str)]
+                             (log/debug "  parsed date:" (pr-str date-str) "->" (pr-str d))
+                             (when d {:action :set-deadline :date d})))
+                         (when (re-matches undeadline-pattern line)
+                           {:action :unset-deadline})))))
            vec))))
 
 (defn resolve-directives
@@ -233,6 +238,10 @@
   (let [body-text  (or (:email/body-text email) (:email/body-text-from-html email))
         from-addr  (:email/from-address email)
         directives (detect-directives body-text)]
+    (log/debug "apply-directives! from:" from-addr
+               "directives:" (pr-str directives)
+               "roles:" (pr-str roles)
+               "admin-or-maint?:" (admin-or-maintainer? roles from-addr))
     (when (and (seq directives) (admin-or-maintainer? roles from-addr))
       (let [{:keys [set unset deadline undeadline?]} (resolve-directives directives)
             report-mid (d/q '[:find ?mid . :in $ ?r
