@@ -3,7 +3,14 @@
 ;; Usage: (load-file "scripts/bark-common.clj")
 
 (require '[clojure.string :as str]
-         '[clojure.edn :as edn])
+         '[clojure.edn :as edn]
+         '[taoensso.timbre :as log])
+
+;; ---------------------------------------------------------------------------
+;; Logging config
+;; ---------------------------------------------------------------------------
+
+(log/merge-config! {:min-level :info})
 
 ;; ---------------------------------------------------------------------------
 ;; Utilities
@@ -107,7 +114,7 @@
             lname   (str/lower-case header-name)]
         (some (fn [[k v]] (when (= (str/lower-case k) lname) v)) headers))
       (catch Exception e
-        (println (str "  [warn] Failed to parse headers-edn: " (.getMessage e)))
+        (log/warn "Failed to parse headers-edn:" (.getMessage e))
         nil))))
 
 (defn extract-list-id

@@ -393,4 +393,4 @@
   (.mkdirs (.getParentFile (clojure.java.io/file out-file)))
   (spit out-file html)
   (binding [*out* *err*]
-    (println (str "Wrote " out-file))))
+    (log/info "Wrote" out-file)))

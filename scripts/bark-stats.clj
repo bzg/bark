@@ -368,8 +368,7 @@
     (io/make-parents out-file)
     (if html?
       (do (spit out-file (render-html stats))
-          (println (str "Wrote " out-file " (HTML, " (count reports) " reports)")))
+          (log/info "Wrote" out-file "(HTML," (count reports) "reports)"))
       (do (spit out-file (json/generate-string stats {:pretty true}))
-          (println (str "Wrote " out-file " (JSON, " (count reports) " reports)"))))))
-
+          (log/info "Wrote" out-file "(JSON," (count reports) "reports)")))))
 (apply -main *command-line-args*)

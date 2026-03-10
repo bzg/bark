@@ -49,8 +49,7 @@
         (d/transact! conn [{:roles/source name
                             :roles/admin  admin}])
         (when-not existing
-          (println (str "  Initialized roles for source " name
-                        " (admin: " admin ")")))))))
+          (log/info "Initialized roles for source" name "(admin:" admin ")")))))
 
 (defn- roles-eid [conn source-name]
   (d/q '[:find ?e .
@@ -102,12 +101,12 @@
         (if (case requires :admin is-admin :maint is-maint)
           (case action
             :add       (do (add-role! conn source-name attr addresses)
-                           (println (str "    -> " (str/lower-case command) ": "
-                                         (str/join " " addresses) " (for " source-name ")")))
+                           (log/info (str/lower-case command) ":"
+                                     (str/join " " addresses) "(for" source-name ")"))
             :remove    (do (remove-role! conn source-name attr addresses)
-                           (println (str "    -> " (str/lower-case command) ": "
-                                         (str/join " " addresses) " (for " source-name ")"))))
-          (println (str "    [denied] " from-addr " lacks permission for: " command)))))))
+                           (log/info (str/lower-case command) ":"
+                                     (str/join " " addresses) "(for" source-name ")")))
+          (log/warn "Denied:" from-addr "lacks permission for:" command)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Notify command parsing and application
@@ -182,7 +181,7 @@
                      (contains? params :min-priority)   (assoc :notify/min-priority (:min-priority params))
                      (contains? params :min-status)     (assoc :notify/min-status (:min-status params)))]
         (d/transact! conn [txn])
-        (println (str "    -> notify: " params-str " (for " from-addr " on " source-name ")"))))))
+        (log/info "Notify:" params-str "(for" from-addr "on" source-name ")")))))
 
 ;; ---------------------------------------------------------------------------
 ;; Permission check for report creation (pure)
@@ -221,6 +220,6 @@
         true
         (let [lp (list-post-address email)]
           (when (and lp (not= lp ml-email))
-            (println (str "    [list-post mismatch] expected " ml-email " got " lp)))
+            (log/warn "List-post mismatch: expected" ml-email "got" lp))
           (= lp ml-email))))))
 

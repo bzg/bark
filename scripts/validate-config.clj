@@ -10,7 +10,8 @@
 
 (require '[clojure.spec.alpha :as s]
          '[clojure.edn :as edn]
-         '[clojure.string :as str])
+         '[clojure.string :as str]
+         '[taoensso.timbre :as log])
 
 ;; ---------------------------------------------------------------------------
 ;; Specs
@@ -132,39 +133,33 @@
 (let [path (or (first *command-line-args*) "config.edn")
       file (clojure.java.io/file path)]
   (if-not (.exists file)
-    (do (println (str "Error: config file not found: " path))
+    (do (log/error "Config file not found:" path)
         (System/exit 1))
     (let [config (try
                    (edn/read-string (slurp file))
                    (catch Exception e
-                     (println (str "Error: invalid EDN: " (.getMessage e)))
+                     (log/error "Invalid EDN:" (.getMessage e))
                      (System/exit 1)))
           result (validate-config config)]
       (if (:valid? result)
-        (do (println (str "✓ " path " is valid."))
-            (println (str "  Default admin: " (:admin config)))
+        (do (log/info "✓" path "is valid.")
+            (log/info "  Default admin:" (:admin config))
             (let [imap (:imap config)]
-              (println (str "  IMAP:          " (:user imap) "@" (:host imap)
-                            "/" (:folder imap))))
-            (println (str "  Sources:       " (count (:sources config))))
+              (log/info "  IMAP:" (str (:user imap) "@" (:host imap) "/" (:folder imap))))
+            (log/info "  Sources:" (count (:sources config)))
             (doseq [src (:sources config)]
-              (println (str "    - " (:name src)
-                            (when-let [m (:match src)]
-                              (str " (match: " (pr-str m) ")"))
-                            (when-let [ml (:list-post src)]
-                              (str " list: " ml))
-                            (when-let [la (:list-archive src)]
-                              (str " archive: " la))
-                            (when-let [a (:admin src)]
-                              (str " admin: " a)))))
-            (println (str "  DB path:       " (get-in config [:db :path])))
+              (log/info "    -" (:name src)
+                        (when-let [m (:match src)] (str "(match: " (pr-str m) ")"))
+                        (when-let [ml (:list-post src)] (str "list: " ml))
+                        (when-let [la (:list-archive src)] (str "archive: " la))
+                        (when-let [a (:admin src)] (str "admin: " a))))
+            (log/info "  DB path:" (get-in config [:db :path]))
             (when-let [ingest (:ingest config)]
-              (println (str "  Initial:       "
-                            (or (:initial-fetch ingest) 50) " msgs")))
+              (log/info "  Initial:" (or (:initial-fetch ingest) 50) "msgs"))
             (when-let [notif (:notifications config)]
-              (println (str "  Notifications: " (if (:enabled notif) "enabled" "disabled")))
+              (log/info "  Notifications:" (if (:enabled notif) "enabled" "disabled"))
               (when-let [smtp (:smtp notif)]
-                (println (str "  SMTP:          " (:user smtp) "@" (:host smtp))))))
-        (do (println (str "✗ " path " is invalid:\n"))
-            (println (:explanation result))
+                (log/info "  SMTP:" (str (:user smtp) "@" (:host smtp))))))
+        (do (log/error "✗" path "is invalid:")
+            (log/error (:explanation result))
             (System/exit 1))))))

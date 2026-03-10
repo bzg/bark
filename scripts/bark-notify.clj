@@ -125,7 +125,7 @@
 
 (defn build-email-body
   "Build the notification email body for a given subscriber."
-  [reports notify debug?]
+  [reports notify]
   (let [email      (:notify/email notify)
         source     (:notify/source notify)
         min-pri    (:notify/min-priority notify 0)
@@ -135,17 +135,16 @@
         by-source  (filter #(= source (get-in % [:report/email :email/source])) by-open)
         by-pri     (filter #(>= (report-priority %) min-pri) by-source)
         by-sts     (filter #(>= (report-status %) min-sts) by-pri)
-        _          (when debug?
-                     (println (str "  [debug] build-email-body for " email " (source: " source ")"))
-                     (println (str "  [debug]   all reports: " (count reports)))
-                     (println (str "  [debug]   by type (bug/patch/request): " (count by-type)))
-                     (println (str "  [debug]   by open: " (count by-open)))
-                     (println (str "  [debug]   by source =" (pr-str source) ": " (count by-source)))
-                     (when (and (pos? (count by-open)) (zero? (count by-source)))
-                       (println (str "  [debug]   report sources: "
-                                     (pr-str (set (map #(get-in % [:report/email :email/source]) by-open))))))
-                     (println (str "  [debug]   by min-priority>=" min-pri ": " (count by-pri)))
-                     (println (str "  [debug]   by min-status>=" min-sts ": " (count by-sts))))
+        _          (do (log/debug "build-email-body for" email "(source:" source ")")
+                       (log/debug "  all reports:" (count reports))
+                       (log/debug "  by type (bug/patch/request):" (count by-type))
+                       (log/debug "  by open:" (count by-open))
+                       (log/debug "  by source =" (pr-str source) ":" (count by-source))
+                       (when (and (pos? (count by-open)) (zero? (count by-source)))
+                         (log/debug "  report sources:"
+                                    (pr-str (set (map #(get-in % [:report/email :email/source]) by-open)))))
+                       (log/debug "  by min-priority>=" min-pri ":" (count by-pri))
+                       (log/debug "  by min-status>=" min-sts ":" (count by-sts)))
         relevant   (sort-by (juxt #(- (report-priority %))
                                   #(- (report-descendant-count %)))
                             compare by-sts)
@@ -195,14 +194,15 @@
         dry-run? (flags "--dry-run")
         force?   (flags "--force")
         debug?   (flags "--debug")
+        _        (when debug? (log/merge-config! {:min-level :debug}))
         db-path  (or (System/getenv "BARK_DB") "data/bark-db")
         config   (load-config)
         notif    (:notifications config)]
     (when-not (and notif (:enabled notif))
-      (println "Notifications disabled in config.")
+      (log/info "Notifications disabled in config.")
       (System/exit 0))
     (let [smtp (or (:smtp notif)
-                   (do (println "No :smtp config under :notifications.")
+                   (do (log/error "No :smtp config under :notifications.")
                        (System/exit 1)))
           conn (d/get-conn db-path schema)]
       (try
@@ -210,39 +210,34 @@
               now      (java.util.Date.)
               reports  (all-reports db)
               prefs    (all-notify-prefs db)
-              _        (when debug?
-                         (println (str "  [debug] " (count prefs) " notify pref(s) found"))
-                         (doseq [p prefs]
-                           (println (str "  [debug]   " (:notify/key p)
-                                         " enabled=" (:notify/enabled p)
-                                         " last-sent=" (:notify/last-sent p)
-                                         " interval=" (:notify/interval-days p)))))
+              _        (do (log/debug (count prefs) "notify pref(s) found")
+                           (doseq [p prefs]
+                             (log/debug " " (:notify/key p)
+                                        "enabled=" (:notify/enabled p)
+                                        "last-sent=" (:notify/last-sent p)
+                                        "interval=" (:notify/interval-days p))))
               enabled  (filter :notify/enabled prefs)
-              _        (when debug?
-                         (println (str "  [debug] " (count enabled) " enabled")))
+              _        (log/debug (count enabled) "enabled")
               on-time  (if force? enabled (filter #(due? % now) enabled))
-              _        (when debug?
-                         (println (str "  [debug] " (count on-time) " due"
-                                       (when force? " (--force, skipped interval check)"))))
+              _        (log/debug (count on-time) "due"
+                                  (when force? "(--force, skipped interval check)"))
               due      (filter #(still-privileged? db %) on-time)
-              _        (when debug?
-                         (println (str "  [debug] " (count due) " still privileged"))
-                         (when (< (count due) (count on-time))
-                           (doseq [p on-time
-                                   :when (not (still-privileged? db p))]
-                             (println (str "  [debug]   DROPPED " (:notify/email p)
-                                           " — not admin/maintainer for "
-                                           (:notify/source p))))))
+              _        (do (log/debug (count due) "still privileged")
+                           (when (< (count due) (count on-time))
+                             (doseq [p on-time
+                                     :when (not (still-privileged? db p))]
+                               (log/debug "DROPPED" (:notify/email p)
+                                          "— not admin/maintainer for"
+                                          (:notify/source p)))))
               sent     (atom 0)]
           (if (empty? due)
-            (println "No notifications due.")
+            (log/info "No notifications due.")
             (doseq [notify due]
               (let [addr (:notify/email notify)
-                    body (build-email-body reports notify debug?)]
+                    body (build-email-body reports notify)]
                 (if body
-                  (do (println (str (if dry-run? "[dry-run] " "")
-                                    "Notifying " addr
-                                    " (source: " (:notify/source notify) ")"))
+                  (do (log/info (if dry-run? "[dry-run]" "")
+                                "Notifying" addr "(source:" (:notify/source notify) ")")
                       (when-not dry-run?
                         (send-notification! smtp addr body)
                         (d/transact! conn [{:notify/key       (:notify/key notify)
@@ -252,8 +247,8 @@
                         (println "---")
                         (println body)
                         (println "---")))
-                  (println (str "  No open items for " addr
-                                " (source: " (:notify/source notify) "), skipping."))))))
-          (println (str "Done. " (if dry-run? "Dry run, no emails sent." (str @sent " email(s) sent.")))))
+                  (log/info "No open items for" addr
+                            "(source:" (:notify/source notify) "), skipping.")))))
+          (log/info "Done." (if dry-run? "Dry run, no emails sent." (str @sent " email(s) sent."))))
         (finally
           (d/close conn))))))

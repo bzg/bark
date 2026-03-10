@@ -230,12 +230,13 @@
             all-tx (vec (concat set-tx unset-tx))]
         (when (seq all-tx)
           (d/transact! conn all-tx)
-          (println (str "    -> directives: "
+          (log/info "Directives:"
                         (str/join ", " (concat (map (fn [[attr addr]]
                                                       (str (name attr) " -> " addr))
                                                     set)
                                                (map #(str "un-" (name %)) unset)))
-                        " (proxy by " from-addr ")")))))))
+                        "(proxy by" from-addr ")")))))
+
 
 (defn apply-vote! [conn report-eid from-addr body-text]
   ;; NB: read-then-write is safe because cmd-digest! processes emails
@@ -250,8 +251,7 @@
               n    (or (get current attr) 0)]
           (d/transact! conn [[:db/add report-eid attr (inc n)]
                              [:db/add report-eid :report/voters from-addr]])
-          (println (str "    -> vote " (case vote :up "+1" :down "-1" "0")
-                        " by " from-addr)))))))
+          (log/info "Vote" (case vote :up "+1" :down "-1" "0") "by" from-addr)))))))
 
 (defn apply-triggers! [conn report-eid report-type email source-map]
   (let [body-text  (or (:email/body-text email) (:email/body-text-from-html email))
@@ -271,6 +271,5 @@
                        [(into {:db/id report-eid} (map (fn [[k _]] [k eid])) new-sets)])]
         (when (seq set-tx)
           (d/transact! conn set-tx)
-          (println (str "    -> "
-                        (str/join ", " (map (comp name key) new-sets))
-                        " (by " (:email/message-id email) ")")))))))
+          (log/info (str/join ", " (map (comp name key) new-sets))
+                        "(by" (:email/message-id email) ")"))))))

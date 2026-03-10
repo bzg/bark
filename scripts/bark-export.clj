@@ -272,7 +272,7 @@
                     (seq meta) (merge meta))
          filename (str out-dir "/" basename)]
      (spit filename (json/generate-string envelope {:pretty true}))
-     (println (str "  Wrote " (count data) " reports to " filename)))))
+     (log/info "Wrote" (count data) "reports to" filename))))
 
 (defn- rfc822-date
   "RFC 822 date from an ISO-ish date string or inst."
@@ -346,7 +346,7 @@
                 items "\n"
                 "  </channel>\n"
                 "</rss>\n"))
-     (println (str "  Wrote " (count data) " reports to " filename)))))
+     (log/info "Wrote" (count data) "reports to" filename))))
 
 (defn- report->org-entry [m]
   (let [todo    (if (= (nth (:flags m "---") 2 \-) \C) "DONE" "TODO")
@@ -401,7 +401,7 @@
            (str "#+TITLE: BARK " source-name " " title-label "\n"
                 "#+DATE: " (str (java.time.LocalDate/now)) "\n\n"
                 entries))
-     (println (str "  Wrote " (count data) " reports to " filename)))))
+     (log/info "Wrote" (count data) "reports to" filename))))
 
 (defn dump-patches!
   "Export patch files for a single source."
@@ -418,8 +418,8 @@
             (spit f (:patch/text p))
             (swap! total inc)))))
     (when (pos? @total)
-      (println (str "  Wrote " @total " patch file(s) from "
-                    (count patch-reports) " report(s)")))))
+      (log/info "Wrote" @total "patch file(s) from"
+                    (count patch-reports) "report(s)"))))
 
 (defn dump-html!
   "Generate index.html for a single source."
@@ -527,14 +527,14 @@
       conn    (d/get-conn db-path schema {:wal? false})]
   (try
     (when-not (formats format)
-      (println (str "Unknown format: " format))
-      (println "Formats: json rss org html stats patches all")
+      (log/error "Unknown format:" format)
+      (log/error "Formats: json rss org html stats patches all")
       (System/exit 1))
     (when (and min-priority (not (#{1 2 3} min-priority)))
-      (println (str "Invalid --min-priority: " min-priority " (must be 1, 2, or 3)"))
+      (log/error "Invalid --min-priority:" min-priority "(must be 1, 2, or 3)")
       (System/exit 1))
     (when (and min-status (not (<= 1 min-status 7)))
-      (println (str "Invalid --min-status: " min-status " (must be 1–7)"))
+      (log/error "Invalid --min-status:" min-status "(must be 1–7)")
       (System/exit 1))
     (let [db              (d/db conn)
           config          (load-config)
@@ -544,9 +544,9 @@
           source-names    (if source-name
                             (if (contains? source-map source-name)
                               [source-name]
-                              (do (println (str "Error: no source named '" source-name "'"))
-                                  (println (str "Available: "
-                                                (str/join ", " (keys source-map))))
+                              (do (log/error "No source named" (str "'" source-name "'"))
+                                  (log/error "Available:"
+                                                (str/join ", " (keys source-map)))
                                   (System/exit 1)))
                             (mapv :name (:sources config)))
           cli-extra       (remove #{format "-n" source-name} (rest *command-line-args*))]
@@ -555,9 +555,9 @@
               reports (if min-priority (filter-by-priority reports min-priority) reports)
               reports (if min-status   (filter-by-status reports min-status) reports)
               out-dir (str "public/" (slugify src-name))]
-          (println (str "[" src-name "] " (count reports) " report(s)"))
+          (log/info (str "[" src-name "]") (count reports) "report(s)")
           (if (empty? reports)
-            (println (str "  No reports for source '" src-name "', skipping."))
+            (log/info "No reports for source" (str "'" src-name "'") ", skipping.")
             (export-source! format reports out-dir src-name
                             source-map maintainers-map cli-extra)))))
     (finally

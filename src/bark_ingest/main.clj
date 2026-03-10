@@ -13,8 +13,17 @@
             [fetch-imap.idle :as idle]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [clojure.tools.logging :as log])
+            [taoensso.timbre :as log])
   (:gen-class))
+
+;; ---------------------------------------------------------------------------
+;; Logging config — replaces logback.xml
+;; ---------------------------------------------------------------------------
+
+(log/merge-config!
+ {:min-level [["datalevin.*"          :warn]
+              ["org.eclipse.angus.*"  :warn]
+              ["*"                    :info]]})
 
 ;; ---------------------------------------------------------------------------
 ;; Config

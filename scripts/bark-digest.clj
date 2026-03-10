@@ -175,9 +175,8 @@
                          db version)]
       (when (seq open-chgs)
         (d/transact! conn (mapv (fn [r] {:db/id r :report/closed release-email-eid}) open-chgs))
-        (println (str "    -> auto-closed " (count open-chgs)
-                      " [CHG " version "] (superseded by release)"))))))
-
+        (log/info "Auto-closed" (count open-chgs)
+                      "[CHG" version "] (superseded by release)")))))
 ;; ---------------------------------------------------------------------------
 ;; Digest orchestration
 ;; ---------------------------------------------------------------------------
@@ -198,7 +197,7 @@
         body-text     (or (:email/body-text email) (:email/body-text-from-html email))
         subj-patterns (resolve-labels (or source-cfg {}))]
     (if (and from-addr (ignored? roles from-addr))
-      (do (println (str "  [ignored] " from-addr " — " (:email/subject email)))
+      (do (log/debug "Ignored" from-addr "—" (:email/subject email))
           (assoc acc :skipped (inc skipped)))
       (do ;; Role and notify commands (only for direct emails, not mailing list)
        (when (and from-addr body-text source-name
@@ -213,7 +212,7 @@
                 new-report? (and permitted? (not (report-exists? (d/db conn) message-id)))
                 [created thread-index type-index report-eid]
                 (if new-report?
-                  (do (println (str "  [" (name (:type report-info)) "] " (:email/subject email)))
+                  (do (log/info (str "[" (name (:type report-info)) "]") (:email/subject email))
                       (create-report! conn eid message-id report-info)
                       (when (and (= :release (:type report-info)) (:version report-info))
                         (close-changes-for-release! conn (:version report-info) eid))
@@ -224,7 +223,7 @@
                          (assoc type-index rid (:type report-info))
                          rid]))
                   (do (when (and report-info (not permitted?))
-                        (println (str "  [denied] " from-addr " cannot create " (name (:type report-info)))))
+                        (log/warn "Denied:" from-addr "cannot create" (name (:type report-info))))
                       [created thread-index type-index nil]))
                 ;; Threading
                 parent-report-eids (find-reports-for-email email thread-index (d/db conn))
@@ -255,7 +254,7 @@
                 (when (seq patches)
                   (d/transact! conn [{:db/id report-eid
                                       :report/patches patches}])
-                  (println (str "    -> " (count patches) " patch file(s) stored")))))
+                  (log/info (count patches) "patch file(s) stored"))))
             {:created created :threaded threaded :skipped skipped
              :thread-index thread-index :type-index type-index})))))
 
@@ -264,32 +263,32 @@
         last-run (get-last-run db)
         full?    (or process-all? (nil? last-run))
         emails   (if process-all?
-                   (do (println "Processing ALL emails...") (all-emails db))
+                   (do (log/info "Processing ALL emails...") (all-emails db))
                    (if last-run
-                     (do (println (str "Processing emails since " last-run "..."))
+                     (do (log/info "Processing emails since" last-run "...")
                          (emails-since db last-run))
-                     (do (println "First run — processing ALL emails...") (all-emails db))))
+                     (do (log/info "First run — processing ALL emails...") (all-emails db))))
         sorted   (sort-by (fn [e] (or (:email/ingested-at e) (:email/date-sent e) (java.util.Date. 0))) emails)
         {:keys [thread-index type-index]}
         (if full?
-          (do (println "Building full thread index...")
+          (do (log/info "Building full thread index...")
               (build-indexes db))
           {:thread-index {} :type-index {}})]
-    (println (str "Found " (count sorted) " email(s) to scan."
-                  (when full? (str " Thread index: " (count thread-index) " entries."))))
+    (log/info "Found" (count sorted) "email(s) to scan."
+              (when full? (str "Thread index: " (count thread-index) " entries.")))
     (let [{:keys [created threaded skipped]}
           (reduce (fn [acc email]
                     (try
                       (process-email! conn source-map sources acc email)
                       (catch Exception e
-                        (println (str "  [error] " (:email/message-id email) ": " (.getMessage e)))
+                        (log/error "Error processing" (:email/message-id email) (.getMessage e))
                         (update acc :skipped inc))))
                   {:created 0 :threaded 0 :skipped 0
                    :thread-index thread-index :type-index type-index}
                   sorted)]
       (save-last-run! conn (java.util.Date.))
-      (println (str "Created " created " report(s), threaded " threaded
-                    " email(s), skipped " skipped " ignored.")))))
+      (log/info "Created" created "report(s), threaded" threaded
+                    "email(s), skipped" skipped "ignored."))))
 
 ;; ---------------------------------------------------------------------------
 ;; Main

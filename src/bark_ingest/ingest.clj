@@ -8,7 +8,7 @@
   (:require [bark-ingest.db :as db]
             [datalevin.core :as d]
             [clojure.string :as str]
-            [clojure.tools.logging :as log])
+            [taoensso.timbre :as log])
   (:import [java.util Date]
            [org.jsoup Jsoup]))
 

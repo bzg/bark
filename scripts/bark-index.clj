@@ -312,4 +312,4 @@
         html     (page reports min-status out-dir)]
     (spit out-file html)
     (binding [*out* *err*]
-      (println (str "Wrote " (count reports) " reports to " out-file)))))
+      (log/info "Wrote" (count reports) "reports to" out-file))))

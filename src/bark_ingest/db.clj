@@ -7,7 +7,7 @@
   (:require [datalevin.core :as d]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [clojure.tools.logging :as log]))
+            [taoensso.timbre :as log]))
 
 ;; ---------------------------------------------------------------------------
 ;; Schema
