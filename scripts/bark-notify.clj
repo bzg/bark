@@ -109,10 +109,12 @@
         from    (or (:email/from-address email) "?")
         pri     (report-priority report)
         replies (report-descendant-count report)
+        deadline (:report/deadline report)
         arch    (get-header (:email/headers-edn email) "Archived-At")]
     (str "  [" type "] " subject "\n"
          "    from: " from " — " date
          " — priority:" pri " replies:" replies
+         (when deadline (str " deadline:" (format-date deadline)))
          (when arch (str "\n    " arch)))))
 
 (defn- section

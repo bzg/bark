@@ -156,6 +156,7 @@
       (:report/patch-seq report)      (assoc :patch-seq (:report/patch-seq report))
       (:report/patch-source report)   (assoc :patch-source (mapv name (:report/patch-source report)))
       arch                            (assoc :archived-at arch)
+      (:report/deadline report)       (assoc :deadline (format-date (:report/deadline report)))
       votes                           (assoc :votes votes)
       (pos? (or (:report/votes-up report) 0))
       (assoc :votes-up (:report/votes-up report))
@@ -372,10 +373,13 @@
                          (when-let [a (seq (:acked m))]  (str ":ACKED-BY: " a))
                          (when-let [o (seq (:owned m))]  (str ":OWNED-BY: " o))
                          (when-let [c (seq (:closed m))] (str ":CLOSED-BY: " c))
+                         (when-let [d (:deadline m)]     (str ":DEADLINE: " d))
                          (when-let [s (:series m)]
                            (str ":SERIES: " (:received s) "/" (:expected s)
                                 (when (:closed s) " closed")))])]
     (str "* " todo " " prio subject (when tags (str "  " tags)) "\n"
+         (when-let [d (:deadline m)]
+           (str "DEADLINE: <" d ">\n"))
          ":PROPERTIES:\n"
          (str/join "\n" props) "\n"
          ":END:\n"

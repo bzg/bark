@@ -61,6 +61,7 @@
  :report/closed-proxy    {:db/valueType :db.type/ref}
  :report/urgent-proxy    {:db/valueType :db.type/ref}
  :report/important-proxy {:db/valueType :db.type/ref}
+ :report/deadline        {:db/valueType :db.type/instant}
  :report/digested-at     {:db/valueType :db.type/instant}
  :report/votes-up        {:db/valueType :db.type/long}
  :report/votes-down      {:db/valueType :db.type/long}

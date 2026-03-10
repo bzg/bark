@@ -53,6 +53,23 @@ Maintainers can also "undo" an update:
 : Unclosed.
 : Unurgent.
 : Unimportant.
+: Undeadline.
+
+** Setting a deadline
+
+Maintainers can set a deadline on a report using Org-mode timestamp
+syntax in the body of a reply:
+
+: Deadline: <2026-03-10 mar.>
+
+Both active =<...>= and inactive =[...]= timestamps are accepted.
+The day name and time components are ignored; only the date matters.
+The deadline appears in JSON exports, Org output (as a proper
+=DEADLINE:= line), and notification emails.
+
+To remove a deadline:
+
+: Undeadline.
 
 ** Updating offlist
 

@@ -142,9 +142,29 @@
    "Unurgent"     :report/urgent
    "Unimportant"  :report/important})
 
+;; ---------------------------------------------------------------------------
+;; Deadline directive — Org timestamp parsing
+;; ---------------------------------------------------------------------------
+
+(def ^:private deadline-pattern
+  "Matches 'Deadline: <2026-03-10 ...>' or 'Deadline: [2026-03-10 ...]'."
+  #"(?m)^Deadline:\s+[<\[]\s*(\d{4}-\d{2}-\d{2})(?:\s+[^\]>]*)?\s*[>\]]\s*$")
+
+(def ^:private undeadline-pattern
+  #"(?m)^Undeadline[.,;:]?\s*$")
+
+(defn- parse-org-date
+  "Parse an ISO date string (yyyy-MM-dd) into a java.util.Date at midnight UTC."
+  [s]
+  (try
+    (let [ld  (java.time.LocalDate/parse s)
+          inst (.toInstant (.atStartOfDay ld (java.time.ZoneOffset/UTC)))]
+      (java.util.Date/from inst))
+    (catch Exception _ nil)))
+
 (defn detect-directives
   "Parse maintainer directives from body text.
-  Returns a seq of actions in order, each {:action :set/:unset :attr ... :addr ...}.
+  Returns a seq of actions in order, each {:action :set/:unset :attr ... :addr/:date ...}.
   Last-one-wins is handled by the caller."
   [body-text]
   (when body-text
@@ -154,21 +174,32 @@
                    (or (when-let [[_ verb addr] (re-matches directive-by-pattern line)]
                          {:action :set :attr (directive-attr verb) :addr addr})
                        (when-let [[_ verb] (re-matches directive-un-pattern line)]
-                         {:action :unset :attr (un-directive-attr verb)}))))
+                         {:action :unset :attr (un-directive-attr verb)})
+                       (when-let [[_ date-str] (re-matches deadline-pattern line)]
+                         (when-let [d (parse-org-date date-str)]
+                           {:action :set-deadline :date d}))
+                       (when (re-matches undeadline-pattern line)
+                         {:action :unset-deadline}))))
            vec))))
 
 (defn resolve-directives
   "Given a seq of directive actions, apply last-one-wins per attribute.
-  Returns {:set {attr addr ...} :unset #{attr ...}}."
+  Returns {:set {attr addr ...} :unset #{attr ...} :deadline date-or-nil :undeadline? bool}."
   [directives]
-  (reduce (fn [acc {:keys [action attr addr]}]
+  (reduce (fn [acc {:keys [action attr addr date]}]
             (case action
               :set   (-> acc
                          (assoc-in [:set attr] addr)
                          (update :unset disj attr))
               :unset (-> acc
                          (update :set dissoc attr)
-                         (update :unset conj attr))))
+                         (update :unset conj attr))
+              :set-deadline   (-> acc
+                                  (assoc :deadline date)
+                                  (dissoc :undeadline?))
+              :unset-deadline (-> acc
+                                  (dissoc :deadline)
+                                  (assoc :undeadline? true))))
           {:set {} :unset #{}}
           directives))
 
@@ -203,12 +234,12 @@
         from-addr  (:email/from-address email)
         directives (detect-directives body-text)]
     (when (and (seq directives) (admin-or-maintainer? roles from-addr))
-      (let [{:keys [set unset]} (resolve-directives directives)
+      (let [{:keys [set unset deadline undeadline?]} (resolve-directives directives)
             report-mid (d/q '[:find ?mid . :in $ ?r
                               :where [?r :report/message-id ?mid]]
                             (d/db conn) report-eid)
             proxy-eid  (:db/id email)
-            current    (d/pull (d/db conn) state-attrs report-eid)
+            current    (d/pull (d/db conn) (conj state-attrs :report/deadline) report-eid)
             ;; Build set transactions
             set-tx (mapcat (fn [[attr addr]]
                              (let [target-eid (find-or-create-synthetic-email!
@@ -227,15 +258,23 @@
                                      (conj retract [:db/retract report-eid proxy-attr (ref-eid proxy-cur)])
                                      retract))))
                              unset)
-            all-tx (vec (concat set-tx unset-tx))]
+            ;; Deadline transactions
+            deadline-tx (cond
+                          deadline    [[:db/add report-eid :report/deadline deadline]]
+                          undeadline? (when (:report/deadline current)
+                                        [[:db/retract report-eid :report/deadline
+                                          (:report/deadline current)]])
+                          :else       nil)
+            all-tx (vec (concat set-tx unset-tx deadline-tx))
+            ;; Log description
+            desc (concat (map (fn [[attr addr]] (str (name attr) " -> " addr)) set)
+                         (map #(str "un-" (name %)) unset)
+                         (when deadline [(str "deadline " deadline)])
+                         (when undeadline? ["undeadline"]))]
         (when (seq all-tx)
           (d/transact! conn all-tx)
-          (log/info "Directives:"
-                        (str/join ", " (concat (map (fn [[attr addr]]
-                                                      (str (name attr) " -> " addr))
-                                                    set)
-                                               (map #(str "un-" (name %)) unset)))
-                        "(proxy by" from-addr ")")))))
+          (log/info "Directives:" (str/join ", " desc)
+                        "(proxy by" from-addr ")"))))))
 
 
 (defn apply-vote! [conn report-eid from-addr body-text]
@@ -251,7 +290,7 @@
               n    (or (get current attr) 0)]
           (d/transact! conn [[:db/add report-eid attr (inc n)]
                              [:db/add report-eid :report/voters from-addr]])
-          (log/info "Vote" (case vote :up "+1" :down "-1" "0") "by" from-addr)))))))
+          (log/info "Vote" (case vote :up "+1" :down "-1" "0") "by" from-addr))))))
 
 (defn apply-triggers! [conn report-eid report-type email source-map]
   (let [body-text  (or (:email/body-text email) (:email/body-text-from-html email))

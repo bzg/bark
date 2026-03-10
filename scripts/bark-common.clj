@@ -76,7 +76,7 @@
     {:report/urgent-proxy [:email/from-address]}
     {:report/important-proxy [:email/from-address]}
     :report/votes-up :report/votes-down :report/votes-null
-    :report/descendants :report/digested-at
+    :report/deadline :report/descendants :report/digested-at
     {:report/related [:report/type :report/message-id
                       {:report/email [:email/headers-edn]}]}
     {:report/series [:series/id :series/expected :series/closed
