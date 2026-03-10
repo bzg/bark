@@ -17,8 +17,8 @@
 
 (def default-labels
   "Default subject tags per report type.
-  :bug/:patch/:release/:change accept a version suffix after the tag.
-  :request/:announcement match any of the listed tags exactly."
+  All types accept an optional inner text after the tag:
+    [BUG topic], [PATCH topic v2 1/3], [REL topic version], etc."
   {:bug          ["BUG"]
    :patch        ["PATCH"]
    :request      ["POLL" "FR" "TODO"]
@@ -28,18 +28,14 @@
 
 (defn compile-labels
   "Compile a labels map into a map of type -> regex pattern.
-  Tags for :bug/:patch/:release/:change allow an optional version suffix.
-  Tags for :request/:announcement match the tag exactly (no suffix)."
+  All types allow an optional suffix inside the brackets."
   [st]
-  (let [versioned? #{:bug :patch :release :change}]
-    (into {}
-          (map (fn [[rtype tags]]
-                 (let [alts (str/join "|" (map #(java.util.regex.Pattern/quote %) tags))
-                       pat  (if (versioned? rtype)
-                              (re-pattern (str "(?i)^" ml-prefix "\\[(" alts ")(?:\\s+([^\\]]*))?\\]"))
-                              (re-pattern (str "(?i)^" ml-prefix "\\[(" alts ")\\]")))]
-                   [rtype pat])))
-          st)))
+  (into {}
+        (map (fn [[rtype tags]]
+               (let [alts (str/join "|" (map #(java.util.regex.Pattern/quote %) tags))
+                     pat  (re-pattern (str "(?i)^" ml-prefix "\\[(" alts ")(?:\\s+([^\\]]*))?\\]"))]
+                 [rtype pat])))
+        st))
 
 (def default-compiled-labels
   (compile-labels default-labels))
@@ -61,40 +57,112 @@
       default-compiled-labels)))
 
 ;; ---------------------------------------------------------------------------
+;; Colon-based topic extraction from subject (fallback)
+;; ---------------------------------------------------------------------------
+
+(def ^:private post-bracket-re
+  "Captures text after the last ']' in the subject."
+  #"(?i)\]\s*(.*)")
+
+(defn- extract-colon-topic
+  "Extract topic from the post-bracket portion of a subject.
+  E.g. 'parser: crash on empty input' -> 'parser'.
+  E.g. 'auth: oauth: fix refresh' -> 'auth: oauth'.
+  Returns nil if no colon-delimited prefix is found."
+  [subject]
+  (when-let [[_ rest] (re-find post-bracket-re subject)]
+    (let [parts (str/split rest #":" -1)]
+      (when (> (count parts) 1)
+        (let [topic (str/trim (str/join ":" (butlast parts)))]
+          (when-not (str/blank? topic) topic))))))
+
+;; ---------------------------------------------------------------------------
 ;; Report detection (pure)
 ;; ---------------------------------------------------------------------------
 
 (def patch-seq-pattern #"(\d+/\d+)\s*$")
+(def ^:private patch-version-pattern #"v\d+")
+
+(defn- extract-inner
+  "Extract the optional inner text from a regex match (group 2)."
+  [m]
+  (when-let [s (nth m 2 nil)]
+    (let [t (str/trim s)]
+      (when-not (str/blank? t) t))))
 
 (defn detect-bug [subject patterns]
   (when-let [m (re-find (:bug patterns) subject)]
-    {:type :bug :version (when (nth m 2 nil) (str/trim (nth m 2)))}))
+    (let [inner (extract-inner m)
+          topic (or inner (extract-colon-topic subject))]
+      (cond-> {:type :bug}
+        topic (assoc :topic topic)))))
 
 (defn detect-patch-subject [subject patterns]
   (when-let [m (re-find (:patch patterns) subject)]
-    (let [inner   (when (nth m 2 nil) (str/trim (nth m 2)))
+    (let [inner   (extract-inner m)
+          ;; Strip trailing N/M sequence marker
           seq-m   (when inner (re-find patch-seq-pattern inner))
           seq-str (when seq-m (first seq-m))
-          topic   (when inner
-                    (let [t (if seq-str
-                              (str/trim (subs inner 0 (- (count inner) (count seq-str))))
-                              inner)]
-                      (when-not (str/blank? t) t)))]
+          rest    (when inner
+                    (str/trim (if seq-str
+                                (subs inner 0 (- (count inner) (count seq-str)))
+                                inner)))
+          ;; Split remaining tokens: last v\d+ is version, rest is topic
+          tokens  (when (and rest (not (str/blank? rest)))
+                    (str/split rest #"\s+"))
+          version (when (and tokens (re-matches patch-version-pattern (last tokens)))
+                    (last tokens))
+          topic-tokens (if version (butlast tokens) tokens)
+          topic   (when (seq topic-tokens)
+                    (str/join " " topic-tokens))
+          ;; Fallback to colon topic
+          topic   (or topic (extract-colon-topic subject))]
       (cond-> {:type :patch :patch-source #{:subject}}
         seq-str (assoc :patch-seq seq-str)
+        version (assoc :version version)
         topic   (assoc :topic topic)))))
 
-(defn detect-request [subject patterns] (when (re-find (:request patterns) subject) {:type :request}))
-(defn detect-announcement [subject patterns] (when (re-find (:announcement patterns) subject) {:type :announcement}))
+(defn detect-request [subject patterns]
+  (when-let [m (re-find (:request patterns) subject)]
+    (let [inner (extract-inner m)
+          topic (or inner (extract-colon-topic subject))]
+      (cond-> {:type :request}
+        topic (assoc :topic topic)))))
 
-(defn- detect-versioned-tag [pattern type subject]
-  (when-let [m (re-find pattern subject)]
-    (let [ver (nth m 2 nil)]
-      (cond-> {:type type}
-        (and ver (not (str/blank? ver))) (assoc :version (str/trim ver))))))
+(defn detect-announcement [subject patterns]
+  (when-let [m (re-find (:announcement patterns) subject)]
+    (let [inner (extract-inner m)
+          topic (or inner (extract-colon-topic subject))]
+      (cond-> {:type :announcement}
+        topic (assoc :topic topic)))))
 
-(defn detect-release [subject patterns] (detect-versioned-tag (:release patterns) :release subject))
-(defn detect-change [subject patterns] (detect-versioned-tag (:change patterns) :change subject))
+(defn detect-release [subject patterns]
+  (when-let [m (re-find (:release patterns) subject)]
+    (let [inner  (extract-inner m)
+          tokens (when inner (str/split inner #"\s+"))
+          ;; Last token is always the version; rest is topic
+          version (when (seq tokens) (last tokens))
+          topic-tokens (when (> (count tokens) 1) (butlast tokens))
+          topic   (when (seq topic-tokens)
+                    (str/join " " topic-tokens))
+          topic   (or topic (extract-colon-topic subject))]
+      (cond-> {:type :release}
+        version (assoc :version version)
+        topic   (assoc :topic topic)))))
+
+(defn detect-change [subject patterns]
+  (when-let [m (re-find (:change patterns) subject)]
+    (let [inner  (extract-inner m)
+          tokens (when inner (str/split inner #"\s+"))
+          ;; Last token is always the version; rest is topic
+          version (when (seq tokens) (last tokens))
+          topic-tokens (when (> (count tokens) 1) (butlast tokens))
+          topic   (when (seq topic-tokens)
+                    (str/join " " topic-tokens))
+          topic   (or topic (extract-colon-topic subject))]
+      (cond-> {:type :change}
+        version (assoc :version version)
+        topic   (assoc :topic topic)))))
 
 ;; Attachment & inline patch detection
 
@@ -126,6 +194,7 @@
     (when (seq sources)
       (cond-> {:type :patch :patch-source sources}
         (:patch-seq from-subject) (assoc :patch-seq (:patch-seq from-subject))
+        (:version from-subject)   (assoc :version (:version from-subject))
         (:topic from-subject)     (assoc :topic (:topic from-subject))))))
 
 (defn detect-report

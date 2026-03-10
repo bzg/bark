@@ -18,15 +18,20 @@ punctuation mark (=.= =,= =;= =:=).
 Here is a table of available labels and triggers for this BARK
 instance:
 
-| Type         | Subject labels                                  | Acked              | Owned   | Closed               |
-|--------------+-------------------------------------------------+--------------------+---------+----------------------|
-| bug          | =[BUG]= =[BUG version]=                             | =Approved= =Confirmed= | =Handled= | =Canceled= =Fixed=       |
-| patch        | =[PATCH]= =[PATCH n/m]= =[PATCH topic n/m]=           | =Approved= =Reviewed=  | =Handled= | =Canceled= =Applied=     |
-| request      | =[POLL]= =[FR]= =[TODO]=                              | =Approved=           | =Handled= | =Canceled= =Done= =Closed= |
-|--------------+-------------------------------------------------+--------------------+---------+----------------------|
-| announcement | =[ANN]= =[ANNOUNCEMENT]=                            |                    |         | =Canceled=             |
-| release      | =[REL]= =[RELEASE]= =[REL version]= =[RELEASE version]= |                    |         | =Canceled=             |
-| change       | =[CHG]= =[CHANGE]= =[CHG version]= =[CHANGE version]=   |                    |         | =Canceled=             |
+| Type         | Subject labels                             | Acked              | Owned   | Closed               |
+|--------------+--------------------------------------------+--------------------+---------+----------------------|
+| bug          | =[BUG]= =[BUG topic]=                          | =Approved= =Confirmed= | =Handled= | =Canceled= =Fixed=       |
+| patch        | =[PATCH]= =[PATCH topic]= =[PATCH topic v2 n/m]= | =Approved= =Reviewed=  | =Handled= | =Canceled= =Applied=     |
+| request      | =[POLL]= =[FR]= =[TODO]= =[FR topic]=              | =Approved=           | =Handled= | =Canceled= =Done= =Closed= |
+|--------------+--------------------------------------------+--------------------+---------+----------------------|
+| announcement | =[ANN]= =[ANNOUNCEMENT]= =[ANN topic]=           |                    |         | =Canceled=             |
+| release      | =[REL version]= =[REL topic version]=          |                    |         | =Canceled=             |
+| change       | =[CHG version]= =[CHG topic version]=          |                    |         | =Canceled=             |
+
+Topics can also be set using a colon-delimited prefix in the subject
+after the label: =[BUG] parser: crash on empty input= sets the topic to
+"parser". Multiple colons are supported: =[FR] auth: oauth: add refresh=
+sets the topic to "auth: oauth".
 
 ** Priority trigger keywords
 

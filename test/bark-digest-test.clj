@@ -197,7 +197,7 @@
         (println "\n--- Bug 02: [BUG 9.7] lifecycle ---")
         (let [r (get-report db "<02@test.org>")]
           (assert= "Type is :bug" :bug (:report/type r))
-          (assert= "Version is 9.7" "9.7" (:report/version r))
+          (assert= "Topic is 9.7" "9.7" (:report/topic r))
           (assert-test "Acked (Confirmed)" (some? (:report/acked r)))
           (assert-test "Owned (Handled)" (some? (:report/owned r)))
           (assert-test "Closed (Fixed)" (some? (:report/closed r)))
@@ -209,7 +209,7 @@
         (println "\n--- Bug 03: mailing list prefix ---")
         (let [r (get-report db "<03@test.org>")]
           (assert= "Type is :bug" :bug (:report/type r))
-          (assert= "No version" nil (:report/version r)))
+          (assert= "No topic" nil (:report/topic r)))
 
         ;; --- Patch 07: subject detection ---
         (println "\n--- Patch 07: [PATCH subject] ---")
