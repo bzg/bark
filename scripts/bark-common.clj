@@ -162,7 +162,8 @@
   (let [default-admin    (:admin config)
         global-st        (:labels config)
         global-tg        (:triggers config)
-        global-ef        (:export-formats config)]
+        global-ef        (:export-formats config)
+        global-er        (:export-reports config)]
     (into {}
           (map (fn [src]
                  [(:name src)
@@ -189,7 +190,11 @@
                     (assoc :export-formats
                            (set (or (:export-formats src)
                                     global-ef
-                                    ["json" "org" "rss"]))))]))
+                                    ["json" "org" "rss"])))
+                    true
+                    (assoc :export-reports
+                           (when-let [er (or (:export-reports src) global-er)]
+                             (set (map keyword er)))))]))
           (:sources config))))
 
 ;; ---------------------------------------------------------------------------

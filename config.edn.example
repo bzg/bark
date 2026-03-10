@@ -57,6 +57,12 @@
             ;; Overrides global :export-formats for this source.
             ;; Default: ["json" "org" "rss"]
             ;; :export-formats ["json" "rss"]
+            ;;
+            ;; Per-source export reports (optional).
+            ;; Restricts which report types are included in all exports.
+            ;; Overrides global :export-reports for this source.
+            ;; Default: all types (when absent).
+            ;; :export-reports #{:bug :patch :request}
             }
 
            ;; --- Use-case 2: email address (alias or mailbox) ---
@@ -102,6 +108,12 @@
  ;; Per-source :export-formats override this.
  ;; Default: ["json" "org" "rss"]
  ;; :export-formats ["json" "rss"]
+
+ ;; Global export reports (optional) — restricts which report types are
+ ;; included in all exports (JSON, RSS, Org, HTML, stats, patches).
+ ;; Per-source :export-reports override this.
+ ;; Default: all types (when absent).
+ ;; :export-reports #{:bug :patch :request :announcement :release :change}
 
  ;; Datalevin database path
  :db {:path "data/bark-db"}

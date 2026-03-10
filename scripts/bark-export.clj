@@ -461,6 +461,12 @@
   (or (get-in source-map [source-name :export-formats])
       default-export-formats))
 
+(defn- resolve-export-reports
+  "Return the set of report type keywords to export for a source,
+  or nil (meaning all types)."
+  [source-name source-map]
+  (get-in source-map [source-name :export-reports]))
+
 (defn- dump-per-type!
   "Export per-type JSON, Org, and RSS files for all report types present."
   [reports out-dir source-name source-map maintainers-map fmts]
@@ -554,6 +560,8 @@
         (let [reports (filter-by-source all-reps src-name)
               reports (if min-priority (filter-by-priority reports min-priority) reports)
               reports (if min-status   (filter-by-status reports min-status) reports)
+              er      (resolve-export-reports src-name source-map)
+              reports (if er (filter #(contains? er (:report/type %)) reports) reports)
               out-dir (str "public/" (slugify src-name))]
           (log/info (str "[" src-name "]") (count reports) "report(s)")
           (if (empty? reports)

@@ -66,7 +66,7 @@
   (s/keys :req-un [:source/name]
           :opt-un [:source/match :source/admin :source/list-post
                    :source/list-archive :source/triggers :source/labels
-                   :source/bark-path]))
+                   :source/bark-path :source/export-reports]))
 
 (s/def :bark/sources
   (s/and (s/coll-of ::source :kind vector? :min-count 1)
@@ -111,10 +111,18 @@
 (s/def :source/labels ::labels)
 (s/def :bark/labels ::labels)
 
+;; Export reports: set of report type keywords to include in export
+(def valid-report-types #{:bug :patch :request :announcement :release :change})
+(s/def ::export-reports
+  (s/coll-of valid-report-types :kind set? :min-count 1))
+(s/def :source/export-reports ::export-reports)
+(s/def :bark/export-reports ::export-reports)
+
 ;; Top-level config
 (s/def ::config
   (s/keys :req-un [:bark/admin :bark/imap :bark/sources :bark/db]
-          :opt-un [:bark/ingest :bark/notifications :bark/labels :bark/triggers]))
+          :opt-un [:bark/ingest :bark/notifications :bark/labels :bark/triggers
+                   :bark/export-reports]))
 
 ;; ---------------------------------------------------------------------------
 ;; Validation
