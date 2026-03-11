@@ -153,7 +153,7 @@
 (def ^:private undeadline-pattern
   #"(?m)^Undeadline[.,;:]?\s*$")
 
-(defn- parse-org-date
+(defn- parse-date-iso
   "Parse an ISO date string (yyyy-MM-dd) into a java.util.Date at midnight UTC."
   [s]
   (try
@@ -176,7 +176,7 @@
                        (when-let [[_ verb] (re-matches directive-un-pattern line)]
                          {:action :unset :attr (un-directive-attr verb)})
                        (when-let [[_ date-str] (re-matches deadline-pattern line)]
-                         (when-let [d (parse-org-date date-str)]
+                         (when-let [d (parse-date-iso date-str)]
                            {:action :set-deadline :date d}))
                        (when (re-matches undeadline-pattern line)
                          {:action :unset-deadline}))))
@@ -230,7 +230,7 @@
   "Apply maintainer proxy directives to a report.
   `email` is the maintainer's email entity (used as the proxy ref)."
   [conn report-eid email roles]
-  (let [body-text  (or (:email/body-text email) (:email/body-text-from-html email))
+  (let [body-text  (email-body-text email)
         from-addr  (:email/from-address email)
         directives (detect-directives body-text)]
     (when (and (seq directives) (admin-or-maintainer? roles from-addr))
@@ -293,7 +293,7 @@
           (log/info "Vote" (case vote :up "+1" :down "-1" "0") "by" from-addr))))))
 
 (defn apply-triggers! [conn report-eid report-type email source-map]
-  (let [body-text  (or (:email/body-text email) (:email/body-text-from-html email))
+  (let [body-text  (email-body-text email)
         from-addr  (:email/from-address email)
         src-name   (d/q '[:find ?src . :in $ ?rid :where
                           [?rid :report/email ?e] [?e :email/source ?src]]

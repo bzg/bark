@@ -197,7 +197,7 @@
   ([email patterns]
    (when-let [subject (:email/subject email)]
      (let [attachments (:email/attachments email)
-           body-text   (or (:email/body-text email) (:email/body-text-from-html email))]
+           body-text   (email-body-text email)]
        (or (detect-bug subject patterns)
            (detect-patch subject attachments body-text patterns)
            (detect-request subject patterns)
@@ -265,7 +265,7 @@
   "Build patch entity maps from an email's inline content and attachments.
   Returns a vector of maps suitable for :report/patches."
   [email]
-  (let [body-text   (or (:email/body-text email) (:email/body-text-from-html email))
+  (let [body-text   (email-body-text email)
         attachments (:email/attachments email)
         ;; Inline patch
         inline      (when-let [text (extract-inline-patch body-text)]

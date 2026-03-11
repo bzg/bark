@@ -99,13 +99,10 @@
     (doseq [{:keys [command addresses]} commands]
       (when-let [{:keys [requires action attr]} (role-dispatch command)]
         (if (case requires :admin is-admin :maint is-maint)
-          (case action
-            :add       (do (add-role! conn source-name attr addresses)
-                           (log/info (str/lower-case command) ":"
-                                     (str/join " " addresses) "(for" source-name ")"))
-            :remove    (do (remove-role! conn source-name attr addresses)
-                           (log/info (str/lower-case command) ":"
-                                     (str/join " " addresses) "(for" source-name ")")))
+          (do ((case action :add add-role! :remove remove-role!)
+               conn source-name attr addresses)
+              (log/info (str/lower-case command) ":"
+                        (str/join " " addresses) "(for" source-name ")"))
           (log/warn "Denied:" from-addr "lacks permission for:" command))))))
 
 ;; ---------------------------------------------------------------------------

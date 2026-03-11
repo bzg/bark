@@ -45,6 +45,12 @@
   [filename]
   (boolean (and filename (re-find patch-filename-re filename))))
 
+(defn email-body-text
+  "Return the plain-text body of an email, preferring :email/body-text
+  over :email/body-text-from-html. Returns nil if neither is present."
+  [email]
+  (or (:email/body-text email) (:email/body-text-from-html email)))
+
 ;; ---------------------------------------------------------------------------
 ;; Datalevin pod — single version definition
 ;; ---------------------------------------------------------------------------

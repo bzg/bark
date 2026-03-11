@@ -488,19 +488,19 @@
 
 (defn- dump-per-type!
   "Export per-type JSON, Org, and RSS files for all report types present."
-  [reports out-dir source-name source-map maintainers-map fmts]
+  [reports reports-dir source-name source-map maintainers-map fmts]
   (doseq [rtype report-types
           :let [typed (filter-by-type reports rtype)
                 plural (type->plural rtype)]
           :when (seq typed)]
     (when (fmts "json")
-      (dump-json! typed out-dir source-name source-map maintainers-map
+      (dump-json! typed reports-dir source-name source-map maintainers-map
                   (str plural ".json")))
     (when (fmts "org")
-      (dump-org! typed out-dir source-name source-map maintainers-map
+      (dump-org! typed reports-dir source-name source-map maintainers-map
                  (str plural ".org") plural))
     (when (fmts "rss")
-      (dump-rss! typed out-dir source-name source-map maintainers-map
+      (dump-rss! typed reports-dir source-name source-map maintainers-map
                  (str plural ".rss") plural))))
 
 ;; ---------------------------------------------------------------------------

@@ -194,7 +194,7 @@
                         (d/transact! conn [{:db/id eid :email/source source-name}]))
         source-cfg    (get source-map source-name)
         roles         (if source-name (get-roles (d/db conn) source-name) {})
-        body-text     (or (:email/body-text email) (:email/body-text-from-html email))
+        body-text     (email-body-text email)
         subj-patterns (resolve-labels (or source-cfg {}))]
     (if (and from-addr (ignored? roles from-addr))
       (do (log/debug "Ignored" from-addr "—" (:email/subject email))
