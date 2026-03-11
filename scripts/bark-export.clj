@@ -3,9 +3,9 @@
 ;; bark-export.clj — Export BARK reports per source.
 ;;
 ;; Each source gets its own directory tree under public/:
-;;   public/<source-name>/web/index.html
-;;   public/<source-name>/web/stats.html
-;;   public/<source-name>/web/howto.html
+;;   public/<source-name>/index.html
+;;   public/<source-name>/stats.html
+;;   public/<source-name>/howto.html
 ;;   public/<source-name>/reports/all.json
 ;;   public/<source-name>/reports/all.rss
 ;;   public/<source-name>/reports/all.org
@@ -440,18 +440,18 @@
 
 (defn dump-html!
   "Generate index.html for a single source."
-  [web-dir reports-dir cli-args]
+  [base-dir reports-dir cli-args]
   (let [json-file (str reports-dir "/all.json")]
     (apply process/shell "bb" "scripts/bark-index.clj"
-           "-o" (str web-dir "/index.html")
+           "-o" (str base-dir "/index.html")
            "--json" json-file
            "--dir" reports-dir
            cli-args)))
 
 (defn dump-stats!
   "Generate stats for a single source."
-  [web-dir reports-dir source-name format cli-args]
-  (let [dir      (if (= format "html") web-dir reports-dir)
+  [base-dir reports-dir source-name format cli-args]
+  (let [dir      (if (= format "html") base-dir reports-dir)
         out-file (str dir (if (= format "html") "/stats.html" "/stats.json"))]
     (apply process/shell "bb" "scripts/bark-stats.clj"
            (if (= format "html") "html" "json")
@@ -461,9 +461,9 @@
 
 (defn dump-howto!
   "Generate howto.html for a single source."
-  [web-dir reports-dir source-name]
+  [base-dir reports-dir source-name]
   (apply process/shell "bb" "scripts/bark-howto.clj"
-         "-o" (str web-dir "/howto.html")
+         "-o" (str base-dir "/howto.html")
          "--dir" reports-dir
          (when source-name ["-n" source-name])))
 
@@ -511,10 +511,9 @@
   "Export a single source in the given format(s).
   When format is \"all\", per-type feeds respect :export-formats from config."
   [format reports base-dir source-name source-map maintainers-map cli-extra]
-  (let [web-dir     (str base-dir "/web")
-        reports-dir (str base-dir "/reports")
+  (let [reports-dir (str base-dir "/reports")
         patches-dir (str base-dir "/patches")
-        _           (doseq [d [web-dir reports-dir patches-dir]]
+        _           (doseq [d [reports-dir patches-dir]]
                       (.mkdirs (io/file d)))
         ef          (resolve-export-formats source-name source-map)
         do-format   (fn [fmt]
@@ -528,19 +527,19 @@
                         "patches" (dump-patches! reports patches-dir)
                         "html"    (do (dump-json! reports reports-dir source-name source-map maintainers-map)
                                       (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"json"})
-                                      (dump-howto! web-dir reports-dir source-name)
-                                      (dump-html! web-dir reports-dir cli-extra))
-                        "stats"   (dump-stats! web-dir reports-dir source-name "json" cli-extra)))]
+                                      (dump-howto! base-dir reports-dir source-name)
+                                      (dump-html! base-dir reports-dir cli-extra))
+                        "stats"   (dump-stats! base-dir reports-dir source-name "json" cli-extra)))]
     (if (= format "all")
       (do (when (ef "json") (dump-json! reports reports-dir source-name source-map maintainers-map))
           (when (ef "rss")  (dump-rss!  reports reports-dir source-name source-map maintainers-map))
           (when (ef "org")  (dump-org!  reports reports-dir source-name source-map maintainers-map))
           (dump-per-type! reports reports-dir source-name source-map maintainers-map ef)
           (dump-patches! reports patches-dir)
-          (dump-howto! web-dir reports-dir source-name)
-          (dump-html! web-dir reports-dir cli-extra)
-          (dump-stats! web-dir reports-dir source-name "json" cli-extra)
-          (dump-stats! web-dir reports-dir source-name "html" cli-extra))
+          (dump-howto! base-dir reports-dir source-name)
+          (dump-html! base-dir reports-dir cli-extra)
+          (dump-stats! base-dir reports-dir source-name "json" cli-extra)
+          (dump-stats! base-dir reports-dir source-name "html" cli-extra))
       (do-format format))))
 
 ;; ---------------------------------------------------------------------------
