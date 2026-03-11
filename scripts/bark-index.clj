@@ -158,11 +158,11 @@
      [:td [:mark {:data-type type} label]]
      [:td {:data-value (str (or status 0))} (status-square flags)]
      [:td (priority-square priority)]
+     [:td {:data-value (or deadline "") :class "due-cell"} ""]
      [:td (subject-el subject role archived-at) (related-link related) (patch-link patches) (vote-badge votes)]
      [:td.secondary {:title from} author]
      [:td {:data-value iso-date} [:small (or iso-date date "")]]
-     [:td {:style "text-align:center"} (or replies 0)]
-     [:td {:data-value (or deadline "")} [:small (or deadline "")]]]))
+     [:td {:style "text-align:center"} (or replies 0)]]))
 
 ;; ---------------------------------------------------------------------------
 ;; CSS (inlined)
@@ -235,11 +235,11 @@
         cols       [[:th {:data-sort "type"     :onclick "sortTable(0,'type')"}     "Type"]
                     [:th {:data-sort "status"   :onclick "sortTable(1,'status')"}   "Status"]
                     [:th {:data-sort "priority" :onclick "sortTable(2,'priority')"} "Priority"]
-                    [:th {:data-sort "subject"  :onclick "sortTable(3,'subject')"}  "Subject"]
-                    [:th {:data-sort "from"     :onclick "sortTable(4,'from')"}     "Author"]
-                    [:th {:data-sort "date"     :onclick "sortTable(5,'date')"}     "Date"]
-                    [:th {:data-sort "replies"  :onclick "sortTable(6,'replies')"}  "↩"]
-                    [:th {:data-sort "deadline" :onclick "sortTable(7,'deadline')"} "Deadline"]]]
+                    [:th {:data-sort "due"      :onclick "sortTable(3,'due')"}      "Due"]
+                    [:th {:data-sort "subject"  :onclick "sortTable(4,'subject')"}  "Subject"]
+                    [:th {:data-sort "from"     :onclick "sortTable(5,'from')"}     "Author"]
+                    [:th {:data-sort "date"     :onclick "sortTable(6,'date')"}     "Date"]
+                    [:th {:data-sort "replies"  :onclick "sortTable(7,'replies')"}  "↩"]]]
     (str
      "<!DOCTYPE html>\n"
      (h/html

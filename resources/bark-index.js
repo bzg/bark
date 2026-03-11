@@ -244,3 +244,25 @@ function sortTable(colIdx, key) {
 }
 
 restoreFromURL();
+
+/* Compute "Due" column: convert deadline dates to days-until-deadline */
+(function() {
+  var today = new Date();
+  today.setHours(0,0,0,0);
+  var todayMs = today.getTime();
+  var msPerDay = 86400000;
+  document.querySelectorAll('.due-cell').forEach(function(td) {
+    var dl = td.getAttribute('data-value');
+    if (!dl) return;
+    var parts = dl.split('-');
+    if (parts.length !== 3) return;
+    var deadlineMs = new Date(+parts[0], +parts[1]-1, +parts[2]).getTime();
+    var days = Math.round((deadlineMs - todayMs) / msPerDay);
+    td.setAttribute('data-value', String(days));
+    td.textContent = String(days);
+    td.title = dl;
+    td.style.textAlign = 'center';
+    if (days < 0) td.style.color = 'var(--pico-del-color, #c0392b)';
+    else if (days <= 3) td.style.color = 'var(--pico-ins-color, #b8860b)';
+  });
+})();
