@@ -118,11 +118,19 @@
 (s/def :source/export-reports ::export-reports)
 (s/def :bark/export-reports ::export-reports)
 
+;; Logging (optional)
+(s/def :logging/file ::non-blank-string)
+(s/def :logging/level #{:debug :info :warn :error})
+(s/def :logging/max-size (s/and ::non-blank-string #(re-matches #"\d+[KMG]B" (str/upper-case (str/trim %)))))
+(s/def :logging/backlog ::pos-int)
+(s/def :bark/logging (s/keys :req-un [:logging/file]
+                             :opt-un [:logging/level :logging/max-size :logging/backlog]))
+
 ;; Top-level config
 (s/def ::config
   (s/keys :req-un [:bark/admin :bark/imap :bark/sources :bark/db]
           :opt-un [:bark/ingest :bark/notifications :bark/labels :bark/triggers
-                   :bark/export-reports]))
+                   :bark/export-reports :bark/logging]))
 
 ;; ---------------------------------------------------------------------------
 ;; Validation
@@ -167,7 +175,9 @@
             (when-let [notif (:notifications config)]
               (log/info "  Notifications:" (if (:enabled notif) "enabled" "disabled"))
               (when-let [smtp (:smtp notif)]
-                (log/info "  SMTP:" (str (:user smtp) "@" (:host smtp))))))
-        (do (log/error "✗" path "is invalid:")
+                (log/info "  SMTP:" (str (:user smtp) "@" (:host smtp)))))
+            (when-let [logging (:logging config)]
+              (log/info "  Logging:" (:file logging)
+                        "level:" (or (:level logging) :warn))))        (do (log/error "✗" path "is invalid:")
             (log/error (:explanation result))
             (System/exit 1))))))

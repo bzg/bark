@@ -13,6 +13,7 @@
             [fetch-imap.idle :as idle]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [taoensso.timbre :as log])
   (:gen-class))
 
@@ -24,6 +25,50 @@
  {:min-level [["datalevin.*"          :warn]
               ["org.eclipse.angus.*"  :warn]
               ["*"                    :info]]})
+
+(defn- parse-size
+  "Parse a size string like \"10MB\" into bytes. Supports KB, MB, GB."
+  [s]
+  (let [s (str/upper-case (str/trim (str s)))]
+    (cond
+      (str/ends-with? s "GB") (* (parse-long (str/replace s #"GB$" "")) 1024 1024 1024)
+      (str/ends-with? s "MB") (* (parse-long (str/replace s #"MB$" "")) 1024 1024)
+      (str/ends-with? s "KB") (* (parse-long (str/replace s #"KB$" "")) 1024)
+      :else                   (parse-long s))))
+
+(defn- rotate-log!
+  "Rotate log-file if it exceeds max-bytes, keeping up to backlog files."
+  [log-file max-bytes backlog]
+  (let [f (io/file log-file)]
+    (when (and (.exists f) (> (.length f) max-bytes))
+      ;; Shift existing rotated files
+      (doseq [i (range (dec backlog) 0 -1)]
+        (let [src (io/file (str log-file "." i))
+              dst (io/file (str log-file "." (inc i)))]
+          (when (.exists src) (.renameTo src dst))))
+      (.renameTo f (io/file (str log-file ".1"))))))
+
+(defn configure-file-logging!
+  "If config contains :logging with :file, add a Timbre file appender
+  that persists logs at or above the specified :level."
+  [{:keys [file level max-size backlog]
+    :or   {level :warn max-size "10MB" backlog 5}}]
+  (when file
+    (io/make-parents file)
+    (let [max-bytes (parse-size max-size)]
+      (log/merge-config!
+       {:appenders
+        {:file
+         {:enabled?  true
+          :min-level level
+          :fn        (fn [data]
+                       (rotate-log! file max-bytes backlog)
+                       (spit file
+                             (str (force (:timestamp_ data)) " "
+                                  (str/upper-case (name (:level data))) " "
+                                  (:?ns-str data) " - "
+                                  (force (:msg_ data)) "\n")
+                             :append true))}}}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Config
@@ -157,6 +202,8 @@
   (let [config-path (or (first args) "config.edn")
         config      (load-config config-path)
         imap-cfg    (:imap config)]
+    (when (:logging config)
+      (configure-file-logging! (:logging config)))
     (when-not imap-cfg
       (log/error "No :imap key in config.edn.")
       (System/exit 1))

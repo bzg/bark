@@ -115,6 +115,12 @@
  ;; Default: all types (when absent).
  ;; :export-reports #{:bug :patch :request :announcement :release :change}
 
+ ;; Logging (optional — logs go to stdout only when absent)
+ ;; :logging {:file     "logs/bark.log"    ;; path to log file
+ ;;           :level    :warn              ;; minimum level to persist (:debug :info :warn :error)
+ ;;           :max-size "10MB"             ;; rotate when file exceeds this size (default: 10MB)
+ ;;           :backlog  5}                 ;; number of rotated files to keep (default: 5)
+
  ;; Datalevin database path
  :db {:path "data/bark-db"}
 

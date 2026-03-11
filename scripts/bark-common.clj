@@ -12,6 +12,49 @@
 
 (log/merge-config! {:min-level :info})
 
+(defn- parse-size
+  "Parse a size string like \"10MB\" into bytes."
+  [s]
+  (let [s (str/upper-case (str/trim (str s)))]
+    (cond
+      (str/ends-with? s "GB") (* (parse-long (str/replace s #"GB$" "")) 1024 1024 1024)
+      (str/ends-with? s "MB") (* (parse-long (str/replace s #"MB$" "")) 1024 1024)
+      (str/ends-with? s "KB") (* (parse-long (str/replace s #"KB$" "")) 1024)
+      :else                   (parse-long s))))
+
+(defn- rotate-log!
+  "Rotate log-file if it exceeds max-bytes, keeping up to backlog files."
+  [log-file max-bytes backlog]
+  (let [f (clojure.java.io/file log-file)]
+    (when (and (.exists f) (> (.length f) max-bytes))
+      (doseq [i (range (dec backlog) 0 -1)]
+        (let [src (clojure.java.io/file (str log-file "." i))
+              dst (clojure.java.io/file (str log-file "." (inc i)))]
+          (when (.exists src) (.renameTo src dst))))
+      (.renameTo f (clojure.java.io/file (str log-file ".1"))))))
+
+(defn configure-file-logging!
+  "If logging-cfg contains :file, add a Timbre file appender
+  that persists logs at or above the specified :level."
+  [{:keys [file level max-size backlog]
+    :or   {level :warn max-size "10MB" backlog 5}}]
+  (when file
+    (clojure.java.io/make-parents file)
+    (let [max-bytes (parse-size max-size)]
+      (log/merge-config!
+       {:appenders
+        {:file
+         {:enabled?  true
+          :min-level level
+          :fn        (fn [data]
+                       (rotate-log! file max-bytes backlog)
+                       (spit file
+                             (str (force (:timestamp_ data)) " "
+                                  (str/upper-case (name (:level data))) " "
+                                  (:?ns-str data) " - "
+                                  (force (:msg_ data)) "\n")
+                             :append true))}}}))))
+
 ;; ---------------------------------------------------------------------------
 ;; Utilities
 ;; ---------------------------------------------------------------------------
@@ -105,10 +148,15 @@
          (map first))))
 
 (defn load-config
-  "Load config.edn if it exists, or nil."
+  "Load config.edn if it exists, or nil.
+  Configures file logging when :logging is present."
   []
   (let [f (clojure.java.io/file "config.edn")]
-    (when (.exists f) (edn/read-string (slurp f)))))
+    (when (.exists f)
+      (let [cfg (edn/read-string (slurp f))]
+        (when (:logging cfg)
+          (configure-file-logging! (:logging cfg)))
+        cfg))))
 
 (defn get-header
   "Case-insensitive header lookup. headers-edn can be an EDN string or
