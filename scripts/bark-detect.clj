@@ -62,7 +62,7 @@
 
 (def ^:private post-bracket-re
   "Captures text after the last ']' in the subject."
-  #"(?i)\]\s*(.*)")
+  #".*\]\s*(.*)")
 
 (defn- extract-colon-topic
   "Extract topic from the post-bracket portion of a subject.
