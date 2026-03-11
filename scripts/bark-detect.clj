@@ -66,14 +66,15 @@
 
 (defn- extract-colon-topic
   "Extract topic from the post-bracket portion of a subject.
+  Returns the first colon-delimited segment only.
   E.g. 'parser: crash on empty input' -> 'parser'.
-  E.g. 'auth: oauth: fix refresh' -> 'auth: oauth'.
+  E.g. 'topic1: topic2: blabla' -> 'topic1'.
   Returns nil if no colon-delimited prefix is found."
   [subject]
   (when-let [[_ rest] (re-find post-bracket-re subject)]
     (let [parts (str/split rest #":" -1)]
       (when (> (count parts) 1)
-        (let [topic (str/trim (str/join ":" (butlast parts)))]
+        (let [topic (str/trim (first parts))]
           (when-not (str/blank? topic) topic))))))
 
 ;; ---------------------------------------------------------------------------

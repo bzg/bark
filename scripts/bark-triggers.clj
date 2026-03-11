@@ -153,6 +153,14 @@
 (def ^:private undeadline-pattern
   #"(?m)^Undeadline[.,;:]?\s*$")
 
+;; ---------------------------------------------------------------------------
+;; Topic directive — maintainer-set topic (last-one-wins, overwrites)
+;; ---------------------------------------------------------------------------
+
+(def ^:private topic-directive-pattern
+  "Matches 'Topic: <topic>.' at the beginning of a line (trailing punctuation required)."
+  #"(?m)^Topic:\s+(.+?)\s*[.,;:]\s*$")
+
 (defn- parse-date-iso
   "Parse an ISO date string (yyyy-MM-dd) into a java.util.Date at midnight UTC."
   [s]
@@ -164,7 +172,7 @@
 
 (defn detect-directives
   "Parse maintainer directives from body text.
-  Returns a seq of actions in order, each {:action :set/:unset :attr ... :addr/:date ...}.
+  Returns a seq of actions in order, each {:action :set/:unset :attr ... :addr/:date/:topic ...}.
   Last-one-wins is handled by the caller."
   [body-text]
   (when body-text
@@ -179,14 +187,17 @@
                          (when-let [d (parse-date-iso date-str)]
                            {:action :set-deadline :date d}))
                        (when (re-matches undeadline-pattern line)
-                         {:action :unset-deadline}))))
+                         {:action :unset-deadline})
+                       (when-let [[_ topic] (re-matches topic-directive-pattern line)]
+                         {:action :set-topic :topic (str/trim topic)}))))
            vec))))
 
 (defn resolve-directives
   "Given a seq of directive actions, apply last-one-wins per attribute.
-  Returns {:set {attr addr ...} :unset #{attr ...} :deadline date-or-nil :undeadline? bool}."
+  Returns {:set {attr addr ...} :unset #{attr ...} :deadline date-or-nil
+           :undeadline? bool :topic str-or-nil}."
   [directives]
-  (reduce (fn [acc {:keys [action attr addr date]}]
+  (reduce (fn [acc {:keys [action attr addr date topic]}]
             (case action
               :set   (-> acc
                          (assoc-in [:set attr] addr)
@@ -199,7 +210,8 @@
                                   (dissoc :undeadline?))
               :unset-deadline (-> acc
                                   (dissoc :deadline)
-                                  (assoc :undeadline? true))))
+                                  (assoc :undeadline? true))
+              :set-topic      (assoc acc :topic topic)))
           {:set {} :unset #{}}
           directives))
 
@@ -234,7 +246,7 @@
         from-addr  (:email/from-address email)
         directives (detect-directives body-text)]
     (when (and (seq directives) (admin-or-maintainer? roles from-addr))
-      (let [{:keys [set unset deadline undeadline?]} (resolve-directives directives)
+      (let [{:keys [set unset deadline undeadline? topic]} (resolve-directives directives)
             report-mid (d/q '[:find ?mid . :in $ ?r
                               :where [?r :report/message-id ?mid]]
                             (d/db conn) report-eid)
@@ -265,12 +277,15 @@
                                         [[:db/retract report-eid :report/deadline
                                           (:report/deadline current)]])
                           :else       nil)
-            all-tx (vec (concat set-tx unset-tx deadline-tx))
+            ;; Topic transaction (overwrites previous topic)
+            topic-tx (when topic [[:db/add report-eid :report/topic topic]])
+            all-tx (vec (concat set-tx unset-tx deadline-tx topic-tx))
             ;; Log description
             desc (concat (map (fn [[attr addr]] (str (name attr) " -> " addr)) set)
                          (map #(str "un-" (name %)) unset)
                          (when deadline [(str "deadline " deadline)])
-                         (when undeadline? ["undeadline"]))]
+                         (when undeadline? ["undeadline"])
+                         (when topic [(str "topic: " topic)]))]
         (when (seq all-tx)
           (d/transact! conn all-tx)
           (log/info "Directives:" (str/join ", " desc)
