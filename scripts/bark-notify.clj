@@ -37,21 +37,7 @@
 ;; Report queries (all-reports and report-pull-pattern loaded from bark-common.clj)
 ;; ---------------------------------------------------------------------------
 
-;; ---------------------------------------------------------------------------
-;; Report scoring (same logic as bark-export.clj)
-;; ---------------------------------------------------------------------------
-
-(defn- format-date [date]
-  (let [s (str (or date ""))]
-    (subs s 0 (min 10 (count s)))))
-
-(defn- format-date-iso
-  "Format a java.util.Date as yyyy-MM-dd."
-  [date]
-  (when date
-    (let [fmt (java.text.SimpleDateFormat. "yyyy-MM-dd")]
-      (.setTimeZone fmt (java.util.TimeZone/getTimeZone "UTC"))
-      (.format fmt date))))
+;; format-date and format-date-iso are defined in bark-common.clj
 
 ;; ---------------------------------------------------------------------------
 ;; Notification queries

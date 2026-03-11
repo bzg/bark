@@ -15,27 +15,16 @@
 ;; bracketed construct, so we skip zero or more leading "[...] " groups.
 (def ^:private ml-prefix "(?:\\[[^\\]]*\\]\\s*)*")
 
-(def default-labels
-  "Default subject tags per report type.
-  All types accept an optional inner text after the tag:
-    [BUG topic], [PATCH topic v2 1/3], [REL topic version], etc."
-  {:bug          ["BUG"]
-   :patch        ["PATCH"]
-   :request      ["POLL" "FR" "TODO"]
-   :announcement ["ANN" "ANNOUNCEMENT"]
-   :release      ["REL" "RELEASE"]
-   :change       ["CHG" "CHANGE"]})
+;; default-labels is defined in bark-common.clj
 
 (defn compile-labels
   "Compile a labels map into a map of type -> regex pattern.
   All types allow an optional suffix inside the brackets."
   [st]
-  (into {}
-        (map (fn [[rtype tags]]
-               (let [alts (str/join "|" (map #(java.util.regex.Pattern/quote %) tags))
-                     pat  (re-pattern (str "(?i)^" ml-prefix "\\[(" alts ")(?:\\s+([^\\]]*))?\\]"))]
-                 [rtype pat])))
-        st))
+  (update-vals st
+               (fn [tags]
+                 (let [alts (str/join "|" (map #(java.util.regex.Pattern/quote %) tags))]
+                   (re-pattern (str "(?i)^" ml-prefix "\\[(" alts ")(?:\\s+([^\\]]*))?\\]"))))))
 
 (def default-compiled-labels
   (compile-labels default-labels))
@@ -45,16 +34,10 @@
   Merges global (:global-labels) and per-source (:labels)
   overrides on top of defaults. Returns compiled patterns."
   [source-cfg]
-  (let [global  (:global-labels source-cfg)
-        per-src (:labels source-cfg)
-        merged  (cond
-                  (and global per-src) (merge default-labels global per-src)
-                  global              (merge default-labels global)
-                  per-src             (merge default-labels per-src)
-                  :else               nil)]
-    (if merged
-      (compile-labels merged)
-      default-compiled-labels)))
+  (let [merged (resolve-labels-map source-cfg)]
+    (if (= merged default-labels)
+      default-compiled-labels
+      (compile-labels merged))))
 
 ;; ---------------------------------------------------------------------------
 ;; Colon-based topic extraction from subject (fallback)
@@ -262,34 +245,25 @@
       (when start
         (str/join "\n" (subvec (vec lines) start))))))
 
+(defn- patch-entity
+  "Build a single patch entity map from filename, source keyword, and text."
+  [filename source text]
+  (let [fp-meta (parse-format-patch-headers text)]
+    (cond-> {:patch/filename filename :patch/source source :patch/text text}
+      (:author fp-meta)  (assoc :patch/author  (:author fp-meta))
+      (:subject fp-meta) (assoc :patch/subject (:subject fp-meta))
+      (:date fp-meta)    (assoc :patch/date    (:date fp-meta)))))
+
 (defn build-patch-entities
   "Build patch entity maps from an email's inline content and attachments.
   Returns a vector of maps suitable for :report/patches."
   [email]
   (let [body-text   (email-body-text email)
         attachments (:email/attachments email)
-        ;; Inline patch
         inline      (when-let [text (extract-inline-patch body-text)]
-                      (let [fp-meta (parse-format-patch-headers text)]
-                        [(cond-> {:patch/filename "inline.patch"
-                                  :patch/source   :inline
-                                  :patch/text     text}
-                           (:author fp-meta)  (assoc :patch/author  (:author fp-meta))
-                           (:subject fp-meta) (assoc :patch/subject (:subject fp-meta))
-                           (:date fp-meta)    (assoc :patch/date    (:date fp-meta)))]))
-        ;; Attachment patches
-        att-patches (when (seq attachments)
-                      (->> attachments
-                           (filter (fn [att]
-                                     (and (patch-file? (:attachment/filename att))
-                                          (:attachment/data att))))
-                           (mapv (fn [att]
-                                   (let [text    (:attachment/data att)
-                                         fp-meta (parse-format-patch-headers text)]
-                                     (cond-> {:patch/filename (:attachment/filename att)
-                                              :patch/source   :attachment
-                                              :patch/text     text}
-                                       (:author fp-meta)  (assoc :patch/author  (:author fp-meta))
-                                       (:subject fp-meta) (assoc :patch/subject (:subject fp-meta))
-                                       (:date fp-meta)    (assoc :patch/date    (:date fp-meta))))))))]
-    (vec (concat inline att-patches))))
+                      [(patch-entity "inline.patch" :inline text)])
+        att-patches (->> attachments
+                         (filter #(and (patch-file? (:attachment/filename %))
+                                       (:attachment/data %)))
+                         (mapv #(patch-entity (:attachment/filename %) :attachment (:attachment/data %))))]
+    (into (vec inline) att-patches)))

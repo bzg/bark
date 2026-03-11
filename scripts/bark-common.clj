@@ -94,7 +94,7 @@
                                                    " — " msg)}))
                           (catch Exception e
                             (binding [*out* *err*]
-                              (println "Failed to send log email:" (.getMessage e))))))}}))))
+                              (println "Failed to send log email:" (.getMessage e))))))}}}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Utilities
@@ -115,7 +115,7 @@
   [^String s]
   (let [digest (java.security.MessageDigest/getInstance "SHA-256")
         bytes  (.digest digest (.getBytes s "UTF-8"))]
-    (str/join (map #(format "%02x" (bit-and (int %) 0xff)) bytes))))
+    (str/join (map #(format "%02x" (Byte/toUnsignedInt %)) bytes))))
 
 (defn mid-hash
   "Compute a stable directory-safe hash from a message-id."
@@ -266,34 +266,17 @@
     (into {}
           (map (fn [src]
                  [(:name src)
-                  (cond-> {:admin (or (:admin src) default-admin)}
-                    (:list-post src)
-                    (assoc :list-post (:list-post src))
-                    (get-in src [:match :list-id])
-                    (assoc :list-id (get-in src [:match :list-id]))
-                    (:triggers src)
-                    (assoc :triggers (:triggers src))
-                    (:labels src)
-                    (assoc :labels (:labels src))
-                    (:archive-format-string src)
-                    (assoc :archive-format-string (:archive-format-string src))
-                    (:list-archive src)
-                    (assoc :list-archive (:list-archive src))
-                    (:bark-path src)
-                    (assoc :bark-path (:bark-path src))
-                    global-st
-                    (assoc :global-labels global-st)
-                    global-tg
-                    (assoc :global-triggers global-tg)
-                    true
-                    (assoc :export-formats
-                           (set (or (:export-formats src)
-                                    global-ef
-                                    ["json" "org" "rss"])))
-                    true
-                    (assoc :export-reports
-                           (when-let [er (or (:export-reports src) global-er)]
-                             (set (map keyword er)))))]))
+                  (merge {:admin (or (:admin src) default-admin)}
+                         (select-keys src [:list-post :triggers :labels
+                                           :archive-format-string :list-archive :bark-path])
+                         (when-let [lid (get-in src [:match :list-id])] {:list-id lid})
+                         (when global-st {:global-labels global-st})
+                         (when global-tg {:global-triggers global-tg})
+                         {:export-formats (set (or (:export-formats src)
+                                                   global-ef
+                                                   ["json" "org" "rss"]))
+                          :export-reports (when-let [er (or (:export-reports src) global-er)]
+                                           (set (map keyword er)))})]))
           (:sources config))))
 
 ;; ---------------------------------------------------------------------------
@@ -340,3 +323,65 @@
     (cond (sequential? d) (count d)
           (map? d)        1
           :else           0)))
+
+;; ---------------------------------------------------------------------------
+;; Date formatting (shared by bark-export, bark-notify, bark-stats)
+;; ---------------------------------------------------------------------------
+
+(defn format-date [date]
+  (let [s (str (or date ""))]
+    (subs s 0 (min 16 (count s)))))
+
+(defn format-date-iso
+  "Format a java.util.Date as yyyy-MM-dd (ISO 8601 date only)."
+  [date]
+  (when date
+    (let [fmt (java.text.SimpleDateFormat. "yyyy-MM-dd")]
+      (.setTimeZone fmt (java.util.TimeZone/getTimeZone "UTC"))
+      (.format fmt date))))
+
+;; ---------------------------------------------------------------------------
+;; Shared label/trigger defaults and merge logic
+;; (canonical definitions used by bark-detect, bark-triggers, bark-howto)
+;; ---------------------------------------------------------------------------
+
+(def default-labels
+  "Default subject tags per report type."
+  {:bug          ["BUG"]
+   :patch        ["PATCH"]
+   :request      ["POLL" "FR" "TODO"]
+   :announcement ["ANN" "ANNOUNCEMENT"]
+   :release      ["REL" "RELEASE"]
+   :change       ["CHG" "CHANGE"]})
+
+(def default-trigger-words
+  "Default trigger words per report type and action."
+  {:bug          {:acked ["Approved" "Confirmed"] :owned ["Handled"] :closed ["Canceled" "Fixed"]}
+   :patch        {:acked ["Approved" "Reviewed"]  :owned ["Handled"] :closed ["Canceled" "Applied"]}
+   :request      {:acked ["Approved"]             :owned ["Handled"] :closed ["Canceled" "Done" "Closed"]}
+   :announcement {:closed ["Canceled"]}
+   :release      {:closed ["Canceled"]}
+   :change       {:closed ["Canceled"]}})
+
+(defn deep-merge-triggers
+  "Merge overrides into base trigger-words, merging per-type action maps."
+  [base overrides]
+  (reduce-kv (fn [acc rtype actions]
+               (assoc acc rtype (merge (get acc rtype) actions)))
+             base overrides))
+
+(defn resolve-labels-map
+  "Resolve labels for a source-map entry: defaults -> global -> per-source.
+  Returns a (non-compiled) labels map."
+  [source-cfg]
+  (cond-> default-labels
+    (:global-labels source-cfg) (merge (:global-labels source-cfg))
+    (:labels source-cfg)        (merge (:labels source-cfg))))
+
+(defn resolve-triggers-map
+  "Resolve triggers for a source-map entry: defaults -> global -> per-source.
+  Returns a (non-compiled) trigger-words map."
+  [source-cfg]
+  (cond-> default-trigger-words
+    (:global-triggers source-cfg) (deep-merge-triggers (:global-triggers source-cfg))
+    (:triggers source-cfg)        (deep-merge-triggers (:triggers source-cfg))))

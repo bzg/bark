@@ -18,50 +18,21 @@
 (load-file "scripts/bark-html.clj")
 
 ;; ---------------------------------------------------------------------------
-;; Defaults (mirrors bark-detect.clj / bark-triggers.clj)
+;; Defaults — canonical definitions in bark-common.clj
 ;; ---------------------------------------------------------------------------
 
-(def default-labels
-  {:bug          ["BUG"]
-   :patch        ["PATCH"]
-   :request      ["POLL" "FR" "TODO"]
-   :announcement ["ANN" "ANNOUNCEMENT"]
-   :release      ["REL" "RELEASE"]
-   :change       ["CHG" "CHANGE"]})
-
-(def default-trigger-words
-  {:bug          {:acked ["Approved" "Confirmed"] :owned ["Handled"] :closed ["Canceled" "Fixed"]}
-   :patch        {:acked ["Approved" "Reviewed"]  :owned ["Handled"] :closed ["Canceled" "Applied"]}
-   :request      {:acked ["Approved"]             :owned ["Handled"] :closed ["Canceled" "Done" "Closed"]}
-   :announcement {:closed ["Canceled"]}
-   :release      {:closed ["Canceled"]}
-   :change       {:closed ["Canceled"]}})
+;; default-labels and default-trigger-words are defined in bark-common.clj
 
 ;; ---------------------------------------------------------------------------
 ;; Resolve labels & triggers with config merge chain
+;; (using shared resolve-labels-map / resolve-triggers-map from bark-common)
 ;; ---------------------------------------------------------------------------
 
 (defn resolve-labels [source-cfg]
-  (let [global  (:global-labels source-cfg)
-        per-src (:labels source-cfg)]
-    (cond
-      (and global per-src) (merge default-labels global per-src)
-      global               (merge default-labels global)
-      per-src              (merge default-labels per-src)
-      :else                default-labels)))
+  (resolve-labels-map source-cfg))
 
 (defn resolve-triggers [source-cfg]
-  (let [global  (:global-triggers source-cfg)
-        per-src (:triggers source-cfg)
-        deep-merge (fn [base overrides]
-                     (reduce-kv (fn [acc rtype ov]
-                                  (assoc acc rtype (merge (get acc rtype) ov)))
-                                base overrides))]
-    (cond
-      (and global per-src) (-> default-trigger-words (deep-merge global) (deep-merge per-src))
-      global               (deep-merge default-trigger-words global)
-      per-src              (deep-merge default-trigger-words per-src)
-      :else                default-trigger-words)))
+  (resolve-triggers-map source-cfg))
 
 ;; ---------------------------------------------------------------------------
 ;; Build the org table from resolved labels + triggers

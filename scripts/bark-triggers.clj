@@ -21,46 +21,28 @@
 ;; Trigger defaults and compilation
 ;; ---------------------------------------------------------------------------
 
-(def default-trigger-words
-  "Default trigger words per report type and action."
-  {:bug          {:acked ["Approved" "Confirmed"] :owned ["Handled"] :closed ["Canceled" "Fixed"]}
-   :patch        {:acked ["Approved" "Reviewed"]  :owned ["Handled"] :closed ["Canceled" "Applied"]}
-   :request      {:acked ["Approved"]             :owned ["Handled"] :closed ["Canceled" "Done" "Closed"]}
-   :announcement {:closed ["Canceled"]}
-   :release      {:closed ["Canceled"]}
-   :change       {:closed ["Canceled"]}})
+;; default-trigger-words and deep-merge-triggers are defined in bark-common.clj
 
 (defn- compile-trigger-words
   "Compile a map of action->word-lists into action->regex-patterns."
   [action-map]
-  (into {} (map (fn [[action words]] [action (apply trigger-pattern words)])) action-map))
+  (update-vals action-map #(apply trigger-pattern %)))
 
 (defn- compile-triggers-by-type
   "Compile a full type->action->words map into type->action->pattern."
   [tw]
-  (into {} (map (fn [[rtype actions]] [rtype (compile-trigger-words actions)])) tw))
+  (update-vals tw compile-trigger-words))
 
 (def default-triggers-by-type (compile-triggers-by-type default-trigger-words))
-
-(defn- deep-merge-triggers
-  "Merge overrides into base trigger-words, merging per-type action maps."
-  [base overrides]
-  (reduce-kv (fn [acc rtype actions]
-               (assoc acc rtype (merge (get acc rtype) actions)))
-             base overrides))
 
 (defn build-source-triggers
   "Merge triggers for a source: defaults -> global -> per-source.
   Returns compiled type->action->pattern map."
   [source-cfg]
-  (let [global  (:global-triggers source-cfg)
-        per-src (:triggers source-cfg)
-        merged  (cond-> default-trigger-words
-                  global  (deep-merge-triggers global)
-                  per-src (deep-merge-triggers per-src))]
-    (if (or global per-src)
-      (compile-triggers-by-type merged)
-      default-triggers-by-type)))
+  (let [merged (resolve-triggers-map source-cfg)]
+    (if (= merged default-trigger-words)
+      default-triggers-by-type
+      (compile-triggers-by-type merged))))
 
 ;; ---------------------------------------------------------------------------
 ;; Priority triggers

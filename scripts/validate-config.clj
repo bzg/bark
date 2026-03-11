@@ -45,7 +45,7 @@
 (s/def :match/list-id
   (s/and ::non-blank-string
          ;; Must be the bare identifier, not the full header with angle brackets
-         (fn [s] (not (re-find #"[<>]" s)))))
+         (complement #(re-find #"[<>]" %))))
 (s/def :match/delivered-to ::non-blank-string)
 (s/def :match/to ::non-blank-string)
 

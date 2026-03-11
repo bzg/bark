@@ -64,17 +64,7 @@
 (defn- flags-str [report]
   (apply str (map (fn [[k c]] (if (get report k) c \-)) flag-defs)))
 
-(defn- format-date [date]
-  (let [s (str (or date ""))]
-    (subs s 0 (min 16 (count s)))))
-
-(defn- format-date-iso
-  "Format a java.util.Date as yyyy-MM-dd (ISO 8601 date only)."
-  [date]
-  (when date
-    (let [fmt (java.text.SimpleDateFormat. "yyyy-MM-dd")]
-      (.setTimeZone fmt (java.util.TimeZone/getTimeZone "UTC"))
-      (.format fmt date))))
+;; format-date and format-date-iso are defined in bark-common.clj
 
 (defn- votes-str [report]
   (let [up   (or (:report/votes-up report) 0)
@@ -124,6 +114,23 @@
         (contains? (get maintainers-map source-name #{}) from-lc)    "maintainer"
         :else                                                        nil))))
 
+(def ^:private from-address-fields
+  "Report attrs whose :email/from-address should be extracted into the output map."
+  [[:report/acked :acked] [:report/owned :owned] [:report/closed :closed]
+   [:report/urgent :urgent] [:report/important :important]
+   [:report/acked-proxy :acked-proxy] [:report/owned-proxy :owned-proxy]
+   [:report/closed-proxy :closed-proxy] [:report/urgent-proxy :urgent-proxy]
+   [:report/important-proxy :important-proxy]])
+
+(defn- assoc-from-addresses
+  "Extract :email/from-address from report attrs defined in from-address-fields."
+  [m report]
+  (reduce (fn [m [rk mk]]
+            (if-let [v (get report rk)]
+              (assoc m mk (:email/from-address v))
+              m))
+          m from-address-fields))
+
 (defn report->map [report source-map maintainers-map]
   (let [email       (:report/email report)
         source-name (:email/source email)
@@ -139,65 +146,57 @@
         series      (:report/series report)
         related     (:report/related report)
         role        (sender-role from source-name source-map maintainers-map)]
-    (cond-> {:type     (name (:report/type report))
-             :subject  (or (:email/subject email) "")
-             :from     from
-             :date     (format-date (:email/date-sent email))
-             :date-raw (str (:email/date-sent email))
-             :flags    (flags-str report)
-             :status   (report-status report)
-             :priority (report-priority report)
-             :replies  (report-descendant-count report)}
-      (:email/from-name email)        (assoc :from-name (:email/from-name email))
-      role                            (assoc :role role)
-      (:report/acked report)          (assoc :acked (:email/from-address (:report/acked report)))
-      (:report/owned report)          (assoc :owned (:email/from-address (:report/owned report)))
-      (:report/closed report)         (assoc :closed (:email/from-address (:report/closed report)))
-      (:report/urgent report)         (assoc :urgent (:email/from-address (:report/urgent report)))
-      (:report/important report)      (assoc :important (:email/from-address (:report/important report)))
-      (:report/acked-proxy report)    (assoc :acked-proxy (:email/from-address (:report/acked-proxy report)))
-      (:report/owned-proxy report)    (assoc :owned-proxy (:email/from-address (:report/owned-proxy report)))
-      (:report/closed-proxy report)   (assoc :closed-proxy (:email/from-address (:report/closed-proxy report)))
-      (:report/urgent-proxy report)   (assoc :urgent-proxy (:email/from-address (:report/urgent-proxy report)))
-      (:report/important-proxy report) (assoc :important-proxy (:email/from-address (:report/important-proxy report)))
-      (:report/message-id report)     (assoc :message-id (:report/message-id report))
-      (:report/version report)        (assoc :version (:report/version report))
-      (:report/topic report)          (assoc :topic (:report/topic report))
-      (:report/patch-seq report)      (assoc :patch-seq (:report/patch-seq report))
-      (:report/patch-source report)   (assoc :patch-source (mapv name (:report/patch-source report)))
-      arch                            (assoc :archived-at arch)
-      (:report/deadline report)       (assoc :deadline (format-date-iso (:report/deadline report)))
-      votes                           (assoc :votes votes)
-      (pos? (or (:report/votes-up report) 0))
-      (assoc :votes-up (:report/votes-up report))
-      (pos? (or (:report/votes-down report) 0))
-      (assoc :votes-down (:report/votes-down report))
-      (pos? (or (:report/votes-null report) 0))
-      (assoc :votes-null (:report/votes-null report))
-      series                          (assoc :series
-                                             (let [patches (:series/patches series)]
-                                               {:received (count patches)
-                                                :expected (:series/expected series)
-                                                :complete (= (count patches)
-                                                             (:series/expected series))
-                                                :closed   (some? (:series/closed series))}))
-      (seq related)                   (assoc :related
-                                             (mapv (fn [r]
-                                                     (let [arch (archived-at (:report/email r))]
-                                                       (cond-> {:type       (name (:report/type r))
-                                                                :message-id (:report/message-id r)}
-                                                         arch (assoc :archived-at arch))))
-                                                   related))
-      (seq (:report/patches report))
-      (assoc :patches
-             (let [h (mid-hash (:report/message-id report))]
-               (mapv (fn [p]
-                       (cond-> {:file   (str "../patches/" h "/" (:patch/filename p))
-                                :source (name (:patch/source p))}
-                         (:patch/author p)  (assoc :author  (:patch/author p))
-                         (:patch/subject p) (assoc :subject (:patch/subject p))
-                         (:patch/date p)    (assoc :date    (:patch/date p))))
-                     (:report/patches report)))))))
+    (-> {:type     (name (:report/type report))
+         :subject  (or (:email/subject email) "")
+         :from     from
+         :date     (format-date (:email/date-sent email))
+         :date-raw (str (:email/date-sent email))
+         :flags    (flags-str report)
+         :status   (report-status report)
+         :priority (report-priority report)
+         :replies  (report-descendant-count report)}
+        (assoc-from-addresses report)
+        (cond->
+          (:email/from-name email)        (assoc :from-name (:email/from-name email))
+          role                            (assoc :role role)
+          (:report/message-id report)     (assoc :message-id (:report/message-id report))
+          (:report/version report)        (assoc :version (:report/version report))
+          (:report/topic report)          (assoc :topic (:report/topic report))
+          (:report/patch-seq report)      (assoc :patch-seq (:report/patch-seq report))
+          (:report/patch-source report)   (assoc :patch-source (mapv name (:report/patch-source report)))
+          arch                            (assoc :archived-at arch)
+          (:report/deadline report)       (assoc :deadline (format-date-iso (:report/deadline report)))
+          votes                           (assoc :votes votes)
+          (pos? (or (:report/votes-up report) 0))
+          (assoc :votes-up (:report/votes-up report))
+          (pos? (or (:report/votes-down report) 0))
+          (assoc :votes-down (:report/votes-down report))
+          (pos? (or (:report/votes-null report) 0))
+          (assoc :votes-null (:report/votes-null report))
+          series                          (assoc :series
+                                                 (let [patches (:series/patches series)]
+                                                   {:received (count patches)
+                                                    :expected (:series/expected series)
+                                                    :complete (= (count patches)
+                                                                 (:series/expected series))
+                                                    :closed   (some? (:series/closed series))}))
+          (seq related)                   (assoc :related
+                                                 (mapv (fn [r]
+                                                         (let [arch (archived-at (:report/email r))]
+                                                           (cond-> {:type       (name (:report/type r))
+                                                                    :message-id (:report/message-id r)}
+                                                             arch (assoc :archived-at arch))))
+                                                       related))
+          (seq (:report/patches report))
+          (assoc :patches
+                 (let [h (mid-hash (:report/message-id report))]
+                   (mapv (fn [p]
+                           (cond-> {:file   (str "../patches/" h "/" (:patch/filename p))
+                                    :source (name (:patch/source p))}
+                             (:patch/author p)  (assoc :author  (:patch/author p))
+                             (:patch/subject p) (assoc :subject (:patch/subject p))
+                             (:patch/date p)    (assoc :date    (:patch/date p))))
+                         (:report/patches report))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Source metadata for JSON envelope
@@ -423,20 +422,17 @@
 (defn dump-patches!
   "Export patch files for a single source."
   [reports patches-dir]
-  (let [patch-reports (filter #(seq (:report/patches %)) reports)
-        total         (atom 0)]
-    (doseq [report patch-reports]
-      (let [mid  (:report/message-id report)
-            h    (mid-hash mid)
-            dir  (io/file patches-dir h)]
-        (.mkdirs dir)
-        (doseq [p (:report/patches report)]
-          (let [f (io/file dir (:patch/filename p))]
-            (spit f (:patch/text p))
-            (swap! total inc)))))
-    (when (pos? @total)
-      (log/info "Wrote" @total "patch file(s) from"
-                    (count patch-reports) "report(s)"))))
+  (let [total (reduce (fn [n report]
+                        (let [h   (mid-hash (:report/message-id report))
+                              dir (io/file patches-dir h)]
+                          (.mkdirs dir)
+                          (doseq [p (:report/patches report)]
+                            (spit (io/file dir (:patch/filename p)) (:patch/text p)))
+                          (+ n (count (:report/patches report)))))
+                      0
+                      (filter #(seq (:report/patches %)) reports))]
+    (when (pos? total)
+      (log/info "Wrote" total "patch file(s)"))))
 
 (defn dump-html!
   "Generate index.html for a single source."

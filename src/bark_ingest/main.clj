@@ -8,6 +8,7 @@
   Source classification is deferred to bark-digest."
   (:require [bark-ingest.db :as db]
             [bark-ingest.ingest :as ingest]
+            [bark-ingest.logging :as blog]
             [fetch-imap.core :as imap]
             [fetch-imap.fetch :as fetch]
             [fetch-imap.idle :as idle]
@@ -27,49 +28,7 @@
               ["org.eclipse.angus.*"  :warn]
               ["*"                    :info]]})
 
-(defn- parse-size
-  "Parse a size string like \"10MB\" into bytes. Supports KB, MB, GB."
-  [s]
-  (let [s (str/upper-case (str/trim (str s)))]
-    (cond
-      (str/ends-with? s "GB") (* (parse-long (str/replace s #"GB$" "")) 1024 1024 1024)
-      (str/ends-with? s "MB") (* (parse-long (str/replace s #"MB$" "")) 1024 1024)
-      (str/ends-with? s "KB") (* (parse-long (str/replace s #"KB$" "")) 1024)
-      :else                   (parse-long s))))
-
-(defn- rotate-log!
-  "Rotate log-file if it exceeds max-bytes, keeping up to backlog files."
-  [log-file max-bytes backlog]
-  (let [f (io/file log-file)]
-    (when (and (.exists f) (> (.length f) max-bytes))
-      ;; Shift existing rotated files
-      (doseq [i (range (dec backlog) 0 -1)]
-        (let [src (io/file (str log-file "." i))
-              dst (io/file (str log-file "." (inc i)))]
-          (when (.exists src) (.renameTo src dst))))
-      (.renameTo f (io/file (str log-file ".1"))))))
-
-(defn configure-file-logging!
-  "If config contains :logging with :file, add a Timbre file appender
-  that persists logs at or above the specified :level."
-  [{:keys [file level max-size backlog]
-    :or   {level :warn max-size "10MB" backlog 5}}]
-  (when file
-    (io/make-parents file)
-    (let [max-bytes (parse-size max-size)]
-      (log/merge-config!
-       {:appenders
-        {:file
-         {:enabled?  true
-          :min-level level
-          :fn        (fn [data]
-                       (rotate-log! file max-bytes backlog)
-                       (spit file
-                             (str (force (:timestamp_ data)) " "
-                                  (str/upper-case (name (:level data))) " "
-                                  (:?ns-str data) " - "
-                                  (force (:msg_ data)) "\n")
-                             :append true))}}}))))
+;; parse-size, rotate-log!, and configure-file-logging! are in bark-ingest.logging
 
 (defn configure-email-logging!
   "Add a Timbre email appender using Postal and the SMTP config from :notifications."
@@ -102,7 +61,7 @@
                             ;; Avoid recursive logging — print to stderr
                             (.println System/err
                                       (str "Failed to send log email: "
-                                           (.getMessage e)))))}}}}))))
+                                           (.getMessage e))))))}}}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Config
@@ -237,7 +196,7 @@
         config      (load-config config-path)
         imap-cfg    (:imap config)]
     (when-let [logging (:logging config)]
-      (configure-file-logging! logging)
+      (blog/configure-file-logging! logging)
       (when-let [email-cfg (:email logging)]
         (if-let [smtp (get-in config [:notifications :smtp])]
           (configure-email-logging! smtp email-cfg)
