@@ -135,7 +135,7 @@
 (defn- report-row [{:strs [type subject from from-name date date-raw flags status priority
                            replies archived-at message-id related role source
                            acked owned closed urgent important patches votes
-                           deadline]}]
+                           deadline topic]}]
   (let [label    (get type-labels type type)
         closed?  (and flags (>= (count flags) 3) (= (nth flags 2 \-) \C))
         iso-date (or (parse-to-iso-date (or date-raw date "")) "")
@@ -154,7 +154,8 @@
           :data-important   (str/lower-case (or important ""))
           :data-priority    (str (or priority 0))
           :data-deadline    (or deadline "")
-          :data-search      (str/lower-case (str subject " " from " " author " " iso-date))}
+          :data-topic       (str/lower-case (or topic ""))
+          :data-search      (str/lower-case (str subject " " from " " author " " iso-date " " topic))}
      [:td [:mark {:data-type type} label]]
      [:td {:data-value (str (or status 0))} (status-square flags)]
      [:td (priority-square priority)]

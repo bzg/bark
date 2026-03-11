@@ -46,7 +46,7 @@ function matchField(fieldVal, terms) {
 /* Parse a single AND-clause (no | in it) */
 function parseClause(q) {
   var result = { text: '', mids: [], froms: [], subjects: [],
-                 acked: [], owned: [], closed: [],
+                 acked: [], owned: [], closed: [], topics: [],
                  urgent: [], important: [],
                  dateFrom: '', dateTo: '', minPriority: null };
   var parts = q.trim().split(/\s+/).filter(Boolean);
@@ -62,6 +62,9 @@ function parseClause(q) {
     } else if (lp.indexOf('subject:') === 0 || lp.indexOf('s:') === 0) {
       var v = p.substring(lp.indexOf(':') + 1);
       result.subjects = v.toLowerCase().split(',').filter(Boolean);
+    } else if (lp.indexOf('topic:') === 0 || lp.indexOf('t:') === 0) {
+      var v = p.substring(lp.indexOf(':') + 1);
+      result.topics = v.toLowerCase().split(',').filter(Boolean);
     } else if (lp.indexOf('acked:') === 0 || lp.indexOf('a:') === 0) {
       var v = p.substring(lp.indexOf(':') + 1);
       result.acked = v.toLowerCase().split(',').filter(Boolean);
@@ -105,6 +108,7 @@ function matchClause(tr, q) {
   if (q.mids.length     > 0 && !matchField((d.mid || '').toLowerCase(), q.mids))     return false;
   if (q.froms.length    > 0 && !matchField(d.from,                      q.froms))    return false;
   if (q.subjects.length > 0 && !matchField(d.subject,                   q.subjects)) return false;
+  if (q.topics.length   > 0 && !matchField(d.topic,                     q.topics))   return false;
   if (q.acked.length     > 0 && !matchField(d.acked,                     q.acked))     return false;
   if (q.owned.length     > 0 && !matchField(d.owned,                     q.owned))     return false;
   if (q.closed.length    > 0 && !matchField(d.closedby,                  q.closed))    return false;
