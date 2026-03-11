@@ -136,33 +136,26 @@
       (cond-> {:type :announcement}
         topic (assoc :topic topic)))))
 
-(defn detect-release [subject patterns]
-  (when-let [m (re-find (:release patterns) subject)]
+(defn- detect-versioned-tag
+  "Detect a report type where the bracket inner text is [topic...] version.
+  Last token is always version; preceding tokens form topic."
+  [rtype pattern subject]
+  (when-let [m (re-find pattern subject)]
     (let [inner  (extract-inner m)
           tokens (when inner (str/split inner #"\s+"))
-          ;; Last token is always the version; rest is topic
           version (when (seq tokens) (last tokens))
           topic-tokens (when (> (count tokens) 1) (butlast tokens))
-          topic   (when (seq topic-tokens)
-                    (str/join " " topic-tokens))
-          topic   (or topic (extract-colon-topic subject))]
-      (cond-> {:type :release}
+          topic   (or (when (seq topic-tokens) (str/join " " topic-tokens))
+                      (extract-colon-topic subject))]
+      (cond-> {:type rtype}
         version (assoc :version version)
         topic   (assoc :topic topic)))))
 
+(defn detect-release [subject patterns]
+  (detect-versioned-tag :release (:release patterns) subject))
+
 (defn detect-change [subject patterns]
-  (when-let [m (re-find (:change patterns) subject)]
-    (let [inner  (extract-inner m)
-          tokens (when inner (str/split inner #"\s+"))
-          ;; Last token is always the version; rest is topic
-          version (when (seq tokens) (last tokens))
-          topic-tokens (when (> (count tokens) 1) (butlast tokens))
-          topic   (when (seq topic-tokens)
-                    (str/join " " topic-tokens))
-          topic   (or topic (extract-colon-topic subject))]
-      (cond-> {:type :change}
-        version (assoc :version version)
-        topic   (assoc :topic topic)))))
+  (detect-versioned-tag :change (:change patterns) subject))
 
 ;; Attachment & inline patch detection
 

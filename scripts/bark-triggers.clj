@@ -169,22 +169,17 @@
   [body-text]
   (when body-text
     (let [lines (str/split-lines body-text)]
-      (log/debug "detect-directives: checking" (count lines) "lines")
       (->> lines
            (keep (fn [line]
-                   (let [dl-match (re-matches deadline-pattern line)]
-                     (when dl-match
-                       (log/debug "  deadline regex matched:" (pr-str dl-match)))
-                     (or (when-let [[_ verb addr] (re-matches directive-by-pattern line)]
-                           {:action :set :attr (directive-attr verb) :addr addr})
-                         (when-let [[_ verb] (re-matches directive-un-pattern line)]
-                           {:action :unset :attr (un-directive-attr verb)})
-                         (when-let [[_ date-str] dl-match]
-                           (let [d (parse-org-date date-str)]
-                             (log/debug "  parsed date:" (pr-str date-str) "->" (pr-str d))
-                             (when d {:action :set-deadline :date d})))
-                         (when (re-matches undeadline-pattern line)
-                           {:action :unset-deadline})))))
+                   (or (when-let [[_ verb addr] (re-matches directive-by-pattern line)]
+                         {:action :set :attr (directive-attr verb) :addr addr})
+                       (when-let [[_ verb] (re-matches directive-un-pattern line)]
+                         {:action :unset :attr (un-directive-attr verb)})
+                       (when-let [[_ date-str] (re-matches deadline-pattern line)]
+                         (when-let [d (parse-org-date date-str)]
+                           {:action :set-deadline :date d}))
+                       (when (re-matches undeadline-pattern line)
+                         {:action :unset-deadline}))))
            vec))))
 
 (defn resolve-directives
@@ -238,10 +233,6 @@
   (let [body-text  (or (:email/body-text email) (:email/body-text-from-html email))
         from-addr  (:email/from-address email)
         directives (detect-directives body-text)]
-    (log/debug "apply-directives! from:" from-addr
-               "directives:" (pr-str directives)
-               "roles:" (pr-str roles)
-               "admin-or-maint?:" (admin-or-maintainer? roles from-addr))
     (when (and (seq directives) (admin-or-maintainer? roles from-addr))
       (let [{:keys [set unset deadline undeadline?]} (resolve-directives directives)
             report-mid (d/q '[:find ?mid . :in $ ?r

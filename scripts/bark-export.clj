@@ -15,9 +15,9 @@
 ;;
 ;; Usage:
 ;;   bb export               — export all sources, all formats
-;;   bb export json          — export reports.json for each source
-;;   bb export rss           — export reports.rss for each source
-;;   bb export org           — export reports.org for each source
+;;   bb export json          — export all.json for each source
+;;   bb export rss           — export all.rss for each source
+;;   bb export org           — export all.org for each source
 ;;   bb export html          — generate index.html for each source
 ;;   bb export stats         — generate stats.json for each source
 ;;   bb export patches       — export patch files for each source
@@ -416,7 +416,7 @@
          filename (str out-dir "/" basename)]
      (spit filename
            (str "#+TITLE: BARK " source-name " " title-label "\n"
-                "#+DATE: " (str (java.time.LocalDate/now)) "\n\n"
+                "#+DATE: " (java.time.LocalDate/now) "\n\n"
                 entries))
      (log/info "Wrote" (count data) "reports to" filename))))
 
@@ -440,7 +440,7 @@
 
 (defn dump-html!
   "Generate index.html for a single source."
-  [web-dir reports-dir source-name cli-args]
+  [web-dir reports-dir cli-args]
   (let [json-file (str reports-dir "/all.json")]
     (apply process/shell "bb" "scripts/bark-index.clj"
            "-o" (str web-dir "/index.html")
@@ -529,7 +529,7 @@
                         "html"    (do (dump-json! reports reports-dir source-name source-map maintainers-map)
                                       (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"json"})
                                       (dump-howto! web-dir reports-dir source-name)
-                                      (dump-html!  web-dir reports-dir source-name cli-extra))
+                                      (dump-html! web-dir reports-dir cli-extra))
                         "stats"   (dump-stats! web-dir reports-dir source-name "json" cli-extra)))]
     (if (= format "all")
       (do (when (ef "json") (dump-json! reports reports-dir source-name source-map maintainers-map))
@@ -538,7 +538,7 @@
           (dump-per-type! reports reports-dir source-name source-map maintainers-map ef)
           (dump-patches! reports patches-dir)
           (dump-howto! web-dir reports-dir source-name)
-          (dump-html!  web-dir reports-dir source-name cli-extra)
+          (dump-html! web-dir reports-dir cli-extra)
           (dump-stats! web-dir reports-dir source-name "json" cli-extra)
           (dump-stats! web-dir reports-dir source-name "html" cli-extra))
       (do-format format))))

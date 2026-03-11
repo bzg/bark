@@ -123,7 +123,7 @@
   "Render a small vote badge with score/total and colored background."
   [votes]
   (when votes
-    (let [[score-s total-s] (str/split votes #"/")
+    (let [[score-s] (str/split votes #"/")
           score (parse-long (or score-s "0"))
           cls   (cond (pos? score) "vote-pos"
                       (neg? score) "vote-neg"
