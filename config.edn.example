@@ -116,10 +116,13 @@
  ;; :export-reports #{:bug :patch :request :announcement :release :change}
 
  ;; Logging (optional — logs go to stdout only when absent)
- ;; :logging {:file     "logs/bark.log"    ;; path to log file
- ;;           :level    :warn              ;; minimum level to persist (:debug :info :warn :error)
+ ;; :logging {:file     "logs/bark.log"    ;; path to log file (optional)
+ ;;           :level    :warn              ;; minimum level for file (:debug :info :warn :error)
  ;;           :max-size "10MB"             ;; rotate when file exceeds this size (default: 10MB)
- ;;           :backlog  5}                 ;; number of rotated files to keep (default: 5)
+ ;;           :backlog  5                  ;; number of rotated files to keep (default: 5)
+ ;;           ;; Email logging — requires :notifications :smtp to be configured.
+ ;;           :email    {:to    "admin@example.com"  ;; recipient address
+ ;;                      :level :error}}             ;; minimum level to email (default: :error)
 
  ;; Datalevin database path
  :db {:path "data/bark-db"}

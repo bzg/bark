@@ -123,8 +123,15 @@
 (s/def :logging/level #{:debug :info :warn :error})
 (s/def :logging/max-size (s/and ::non-blank-string #(re-matches #"\d+[KMG]B" (str/upper-case (str/trim %)))))
 (s/def :logging/backlog ::pos-int)
-(s/def :bark/logging (s/keys :req-un [:logging/file]
-                             :opt-un [:logging/level :logging/max-size :logging/backlog]))
+
+;; Logging :email — sends log entries via :notifications :smtp
+(s/def :log-email/to ::email)
+(s/def :log-email/level #{:debug :info :warn :error})
+(s/def :logging/email (s/keys :req-un [:log-email/to]
+                              :opt-un [:log-email/level]))
+
+(s/def :bark/logging (s/keys :opt-un [:logging/file :logging/level :logging/max-size
+                                      :logging/backlog :logging/email]))
 
 ;; Top-level config
 (s/def ::config
@@ -138,7 +145,10 @@
 
 (defn validate-config [config]
   (if (s/valid? ::config config)
-    {:valid? true}
+    (cond-> {:valid? true}
+      (and (get-in config [:logging :email])
+           (not (get-in config [:notifications :smtp])))
+      (assoc :warnings ["Logging :email is configured but :notifications :smtp is absent."]))
     {:valid? false
      :explanation (s/explain-str ::config config)}))
 
@@ -177,7 +187,14 @@
               (when-let [smtp (:smtp notif)]
                 (log/info "  SMTP:" (str (:user smtp) "@" (:host smtp)))))
             (when-let [logging (:logging config)]
-              (log/info "  Logging:" (:file logging)
-                        "level:" (or (:level logging) :warn))))        (do (log/error "✗" path "is invalid:")
+              (when (:file logging)
+                (log/info "  Log file:" (:file logging)
+                          "level:" (or (:level logging) :warn)))
+              (when-let [em (:email logging)]
+                (log/info "  Log email:" (:to em)
+                          "level:" (or (:level em) :error))))
+            (doseq [w (:warnings result)]
+              (log/warn "⚠" w)))
+        (do (log/error "✗" path "is invalid:")
             (log/error (:explanation result))
             (System/exit 1))))))

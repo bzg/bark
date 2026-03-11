@@ -55,6 +55,47 @@
                                   (force (:msg_ data)) "\n")
                              :append true))}}}))))
 
+(defn- ensure-mail-pod!
+  "Load the tzzh/mail pod once (idempotent)."
+  []
+  (when-not (try (requiring-resolve 'pod.tzzh.mail/send-mail) (catch Exception _ nil))
+    (require '[babashka.pods :as pods])
+    ((resolve 'pods/load-pod) 'tzzh/mail "0.0.3")
+    (require '[pod.tzzh.mail :as mail])))
+
+(defn configure-email-logging!
+  "Add a Timbre email appender using the SMTP config from :notifications.
+  Loads the tzzh/mail pod on first use."
+  [smtp-cfg {:keys [to level] :or {level :error}}]
+  (when (and smtp-cfg to)
+    (ensure-mail-pod!)
+    (let [{:keys [host port tls user password from]} smtp-cfg
+          send! (resolve 'pod.tzzh.mail/send-mail)]
+      (log/merge-config!
+       {:appenders
+        {:email
+         {:enabled?   true
+          :min-level  level
+          :rate-limit [[5 (* 5 60 1000)]]
+          :fn         (fn [data]
+                        (try
+                          (let [level-str (str/upper-case (name (:level data)))
+                                msg       (force (:msg_ data))]
+                            (send! {:host     host
+                                    :port     (or port 587)
+                                    :tls      (boolean tls)
+                                    :username user
+                                    :password password
+                                    :from     from
+                                    :to       [to]
+                                    :subject  (str "[Bark] " level-str " — " (:?ns-str data))
+                                    :text     (str (force (:timestamp_ data)) " "
+                                                   level-str " " (:?ns-str data)
+                                                   " — " msg)}))
+                          (catch Exception e
+                            (binding [*out* *err*]
+                              (println "Failed to send log email:" (.getMessage e))))))}}))))
+
 ;; ---------------------------------------------------------------------------
 ;; Utilities
 ;; ---------------------------------------------------------------------------
@@ -149,13 +190,17 @@
 
 (defn load-config
   "Load config.edn if it exists, or nil.
-  Configures file logging when :logging is present."
+  Configures file and email logging when :logging is present."
   []
   (let [f (clojure.java.io/file "config.edn")]
     (when (.exists f)
       (let [cfg (edn/read-string (slurp f))]
-        (when (:logging cfg)
-          (configure-file-logging! (:logging cfg)))
+        (when-let [logging (:logging cfg)]
+          (configure-file-logging! logging)
+          (when-let [email-cfg (:email logging)]
+            (if-let [smtp (get-in cfg [:notifications :smtp])]
+              (configure-email-logging! smtp email-cfg)
+              (log/warn "Logging :email configured but no :notifications :smtp found."))))
         cfg))))
 
 (defn get-header

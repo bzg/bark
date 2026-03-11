@@ -14,6 +14,7 @@
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
+            [postal.core :as postal]
             [taoensso.timbre :as log])
   (:gen-class))
 
@@ -69,6 +70,39 @@
                                   (:?ns-str data) " - "
                                   (force (:msg_ data)) "\n")
                              :append true))}}}))))
+
+(defn configure-email-logging!
+  "Add a Timbre email appender using Postal and the SMTP config from :notifications."
+  [smtp-cfg {:keys [to level] :or {level :error}}]
+  (when (and smtp-cfg to)
+    (let [{:keys [host port tls user password from]} smtp-cfg
+          conn {:host host
+                :port (or port 587)
+                :tls  (boolean tls)
+                :user user
+                :pass password}]
+      (log/merge-config!
+       {:appenders
+        {:email
+         {:enabled?   true
+          :min-level  level
+          :rate-limit [[5 (* 5 60 1000)]]  ;; max 5 emails per 5 min
+          :fn         (fn [data]
+                        (try
+                          (let [level-str (str/upper-case (name (:level data)))
+                                msg       (force (:msg_ data))]
+                            (postal/send-message
+                             conn
+                             {:from    from
+                              :to      [to]
+                              :subject (str "[Bark] " level-str " — " (:?ns-str data))
+                              :body    (str (force (:timestamp_ data)) " " level-str " "
+                                            (:?ns-str data) " — " msg)}))
+                          (catch Exception e
+                            ;; Avoid recursive logging — print to stderr
+                            (.println System/err
+                                      (str "Failed to send log email: "
+                                           (.getMessage e)))))}}}}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Config
@@ -202,8 +236,12 @@
   (let [config-path (or (first args) "config.edn")
         config      (load-config config-path)
         imap-cfg    (:imap config)]
-    (when (:logging config)
-      (configure-file-logging! (:logging config)))
+    (when-let [logging (:logging config)]
+      (configure-file-logging! logging)
+      (when-let [email-cfg (:email logging)]
+        (if-let [smtp (get-in config [:notifications :smtp])]
+          (configure-email-logging! smtp email-cfg)
+          (log/warn "Logging :email configured but no :notifications :smtp found."))))
     (when-not imap-cfg
       (log/error "No :imap key in config.edn.")
       (System/exit 1))
