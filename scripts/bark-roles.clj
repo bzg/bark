@@ -9,6 +9,9 @@
 
 (require '[clojure.string :as str])
 
+;; Defined in bark-common.clj; forward-declared for clj-kondo.
+(declare get-header)
+
 ;; ---------------------------------------------------------------------------
 ;; Role queries and checks (pure, given a roles map)
 ;; ---------------------------------------------------------------------------

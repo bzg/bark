@@ -15,6 +15,12 @@
          '[clojure.edn :as edn]
          '[clojure.java.io :as io])
 
+;; Forward-declared for clj-kondo (provided at runtime by load-file calls below).
+(declare load-datalevin-pod! all-reports report-pull-pattern
+         report-priority report-status report-descendant-count
+         format-date format-date-iso parse-cli-args load-config
+         pico-cdn theme-toggle-js bark-schema)
+
 (load-file "scripts/bark-common.clj")
 (load-file "scripts/bark-html.clj")
 
@@ -25,13 +31,6 @@
 ;; ---------------------------------------------------------------------------
 
 (def ^:private stats-js (slurp "resources/bark-stats.js"))
-
-;; ---------------------------------------------------------------------------
-;; Schema & DB
-;; ---------------------------------------------------------------------------
-
-(def schema
-  (edn/read-string (slurp "resources/bark-schema.edn")))
 
 (def db-path
   (or (System/getenv "BARK_DB") "./data/bark-db"))
@@ -298,7 +297,7 @@
 (defn render-html [stats]
   (let [{:keys [generated-at reports-per-type reports-by-month
                 time-to-close open-closed-ratio open-last-year
-                total-last-year top-openers]} stats
+                top-openers]} stats
         n-yr (reduce + (vals reports-per-type))
         pct  #(when % (str (Math/round (* 100.0 %)) "%"))]
     (str
@@ -358,7 +357,7 @@
         source-name (:source-name opts)
         out-file    (or (:out-file opts)
                         (if html? "public/web/stats.html" "public/reports/stats.json"))
-        conn        (d/get-conn db-path schema {:wal? false})
+        conn        (d/get-conn db-path bark-schema {:wal? false})
         db          (d/db conn)
         all-reps    (all-reports db)
         reports     (if source-name

@@ -7,6 +7,10 @@
 
 (require '[clojure.string :as str])
 
+;; Defined in bark-common.clj / bark-roles.clj; forward-declared for clj-kondo.
+(declare default-trigger-words resolve-triggers-map deep-merge-triggers
+         email-body-text report-priority admin-or-maintainer?)
+
 ;; ---------------------------------------------------------------------------
 ;; Trigger pattern compilation
 ;; ---------------------------------------------------------------------------

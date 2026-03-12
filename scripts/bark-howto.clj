@@ -14,6 +14,11 @@
 (require '[clojure.string :as str]
          '[hiccup2.core :as h])
 
+;; Forward-declared for clj-kondo (provided at runtime by load-file calls below).
+(declare default-labels default-trigger-words resolve-labels-map
+         resolve-triggers-map parse-cli-args load-config build-source-map
+         pico-cdn theme-toggle-btn theme-toggle-js)
+
 (load-file "scripts/bark-common.clj")
 (load-file "scripts/bark-html.clj")
 
@@ -28,10 +33,10 @@
 ;; (using shared resolve-labels-map / resolve-triggers-map from bark-common)
 ;; ---------------------------------------------------------------------------
 
-(defn resolve-labels [source-cfg]
+(defn howto-labels [source-cfg]
   (resolve-labels-map source-cfg))
 
-(defn resolve-triggers [source-cfg]
+(defn howto-triggers [source-cfg]
   (resolve-triggers-map source-cfg))
 
 ;; ---------------------------------------------------------------------------
@@ -120,7 +125,7 @@
     (if (and first-tl last-tl)
       (str/join "\n"
                 (concat (take first-tl lines)
-                        [(str table-org)]
+                        [table-org]
                         (drop (inc last-tl) lines)))
       ;; No table found — return as-is
       org-text)))
@@ -252,7 +257,7 @@
   .meta { font-size: 0.78rem; color: var(--pico-muted-color); margin-bottom: 2rem; }
 ")
 
-(defn page [body-html]
+(defn howto-page [body-html]
   (let [title        "BARK — How-to"
         generated-at (str (java.util.Date.))]
     (str
@@ -347,8 +352,8 @@
       config      (load-config)
       source-map  (when config (build-source-map config))
       source-cfg  (get source-map source-name)
-      labels      (if source-cfg (resolve-labels source-cfg) default-labels)
-      triggers    (if source-cfg (resolve-triggers source-cfg) default-trigger-words)
+      labels      (if source-cfg (howto-labels source-cfg) default-labels)
+      triggers    (if source-cfg (howto-triggers source-cfg) default-trigger-words)
       out-file    (or out-file
                       (if source-name
                         (str "public/" source-name "/web/howto.html")
@@ -360,7 +365,7 @@
                       (substitute-template labels triggers)
                       (filter-feed-links effective-dir))
       body-html   (org->html org-text)
-      html        (page body-html)]
+      html        (howto-page body-html)]
   (.mkdirs (.getParentFile (clojure.java.io/file out-file)))
   (spit out-file html)
   (binding [*out* *err*]

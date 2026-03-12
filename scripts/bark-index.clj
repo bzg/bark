@@ -17,6 +17,10 @@
          '[clojure.string :as str]
          '[hiccup2.core :as h])
 
+;; Forward-declared for clj-kondo (provided at runtime by load-file calls below).
+(declare parse-cli-args load-config
+         pico-cdn theme-toggle-btn theme-toggle-js)
+
 (load-file "scripts/bark-common.clj")
 (load-file "scripts/bark-html.clj")
 
@@ -222,7 +226,7 @@
 ;; Page assembly
 ;; ---------------------------------------------------------------------------
 
-(defn page [reports min-status reports-dir]
+(defn index-page [reports min-status reports-dir]
   (let [types      (vec (distinct (map #(get % "type") reports)))
         types-json (json/generate-string types)
         all-open?  (and min-status (>= min-status 4))
@@ -316,7 +320,7 @@
   (.mkdirs (clojure.java.io/file (.getParent (clojure.java.io/file out-file))))
   (let [envelope (json/parse-string (slurp json-file))
         reports  (get envelope "reports" envelope)
-        html     (page reports min-status reports-dir)]
+        html     (index-page reports min-status reports-dir)]
     (spit out-file html)
     (binding [*out* *err*]
       (log/info "Wrote" (count reports) "reports to" out-file))))

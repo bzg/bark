@@ -6,6 +6,7 @@
 ;; Usage: (load-file "scripts/bark-series.clj")
 
 (require '[clojure.string :as str])
+;; Also uses d/ and log/ aliases from bark-common.clj (see .clj-kondo/config.edn).
 
 ;; ---------------------------------------------------------------------------
 ;; Series helpers (pure)

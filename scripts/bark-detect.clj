@@ -6,6 +6,9 @@
 
 (require '[clojure.string :as str])
 
+;; Defined in bark-common.clj; forward-declared for clj-kondo.
+(declare default-labels resolve-labels-map email-body-text patch-file?)
+
 ;; ---------------------------------------------------------------------------
 ;; Label defaults and compilation
 ;; ---------------------------------------------------------------------------

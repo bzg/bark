@@ -35,16 +35,15 @@
          '[clojure.edn :as edn]
          '[clojure.java.io :as io])
 
+;; Forward-declared for clj-kondo (provided at runtime by load-file below).
+(declare load-datalevin-pod! get-header slugify mid-hash email-body-text
+         format-date format-date-iso report-priority report-status
+         report-descendant-count all-reports report-pull-pattern
+         parse-cli-args load-config build-source-map bark-schema)
+
 (load-file "scripts/bark-common.clj")
 
 (load-datalevin-pod!)
-
-;; ---------------------------------------------------------------------------
-;; Schema — loaded from resources/bark-schema.edn
-;; ---------------------------------------------------------------------------
-
-(def schema
-  (edn/read-string (slurp "resources/bark-schema.edn")))
 
 ;; ---------------------------------------------------------------------------
 ;; DB queries (all-reports and report-pull-pattern loaded from bark-common.clj)
@@ -548,7 +547,7 @@
        :or {format "all"}}
       (parse-cli-args *command-line-args*)
       db-path (or (System/getenv "BARK_DB") "data/bark-db")
-      conn    (d/get-conn db-path schema {:wal? false})]
+      conn    (d/get-conn db-path bark-schema {:wal? false})]
   (try
     (when-not (formats format)
       (log/error "Unknown format:" format)

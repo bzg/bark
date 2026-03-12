@@ -21,7 +21,24 @@
 ;;   BARK_DB — path to db (default: ./data/bark-db)
 
 (require '[clojure.string :as str]
-         '[clojure.edn :as edn])
+         '[clojure.edn :as edn]
+         '[taoensso.timbre :as log])
+
+;; Forward-declared for clj-kondo (provided at runtime by load-file calls below).
+(declare ;; bark-common.clj
+         load-datalevin-pod! classify-source email-body-text
+         load-config build-source-map get-header bark-schema
+         ;; bark-roles.clj
+         get-roles ignored? admin-or-maintainer?
+         ensure-source-roles! ensure-notify-defaults!
+         apply-role-commands! apply-notify-commands!
+         from-mailing-list? can-create-report?
+         ;; bark-detect.clj
+         detect-report resolve-labels build-patch-entities
+         ;; bark-triggers.clj
+         apply-triggers! apply-directives!
+         ;; bark-series.clj
+         manage-series!)
 
 (load-file "scripts/bark-common.clj")
 
@@ -32,12 +49,7 @@
 (load-file "scripts/bark-triggers.clj")
 (load-file "scripts/bark-series.clj")
 
-;; ---------------------------------------------------------------------------
-;; Schema — loaded from shared bark-schema.edn
-;; ---------------------------------------------------------------------------
-
-(def report-schema
-  (edn/read-string (slurp "resources/bark-schema.edn")))
+;; bark-schema is defined in bark-common.clj
 
 ;; ---------------------------------------------------------------------------
 ;; Threading
@@ -307,7 +319,7 @@
         all?    (some #{"--all"} args)
         db-path (or (System/getenv "BARK_DB") "data/bark-db")
         config  (load-config)
-        conn    (d/get-conn db-path report-schema {:wal? false})]
+        conn    (d/get-conn db-path bark-schema {:wal? false})]
     (try
       (when config (ensure-source-roles! conn config))
       (when config

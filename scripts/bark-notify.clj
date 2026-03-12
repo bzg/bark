@@ -19,19 +19,17 @@
          '[clojure.string :as str]
          '[clojure.edn :as edn])
 
+;; Forward-declared for clj-kondo (provided at runtime by load-file below).
+(declare load-datalevin-pod! get-header format-date format-date-iso
+         report-priority report-status report-descendant-count
+         all-reports report-pull-pattern load-config bark-schema)
+
 (load-file "scripts/bark-common.clj")
 
 (load-datalevin-pod!)
 (pods/load-pod 'tzzh/mail "0.0.3")
 
 (require '[pod.tzzh.mail :as mail])
-
-;; ---------------------------------------------------------------------------
-;; Schema
-;; ---------------------------------------------------------------------------
-
-(def schema
-  (edn/read-string (slurp "resources/bark-schema.edn")))
 
 ;; ---------------------------------------------------------------------------
 ;; Report queries (all-reports and report-pull-pattern loaded from bark-common.clj)
@@ -200,7 +198,7 @@
     (let [smtp (or (:smtp notif)
                    (do (log/error "No :smtp config under :notifications.")
                        (System/exit 1)))
-          conn (d/get-conn db-path schema)]
+          conn (d/get-conn db-path bark-schema)]
       (try
         (let [db       (d/db conn)
               now      (java.util.Date.)

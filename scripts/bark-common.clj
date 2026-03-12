@@ -385,3 +385,10 @@
   (cond-> default-trigger-words
     (:global-triggers source-cfg) (deep-merge-triggers (:global-triggers source-cfg))
     (:triggers source-cfg)        (deep-merge-triggers (:triggers source-cfg))))
+
+;; ---------------------------------------------------------------------------
+;; Shared schema (used by bark-export, bark-notify, bark-stats, bark-digest)
+;; ---------------------------------------------------------------------------
+
+(def bark-schema
+  (edn/read-string (slurp "resources/bark-schema.edn")))
