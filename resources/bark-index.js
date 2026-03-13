@@ -182,7 +182,7 @@ function updateURL() {
     params.set('dir', sortState[sortKeys[0]]);
   }
   var qs = params.toString();
-  history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
+  history.pushState(null, '', location.pathname + (qs ? '?' + qs : ''));
 }
 
 function restoreFromURL() {
@@ -248,6 +248,8 @@ function sortTable(colIdx, key) {
 }
 
 restoreFromURL();
+
+window.addEventListener('popstate', function() { restoreFromURL(); });
 
 /* Compute "Due" column: convert deadline dates to days-until-deadline */
 (function() {
