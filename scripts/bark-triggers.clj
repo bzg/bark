@@ -16,7 +16,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- trigger-pattern [& words]
-  (re-pattern (str "(?m)^(" (str/join "|" (map #(java.util.regex.Pattern/quote %) words)) ")[.,;:]")))
+  (re-pattern (str "(?m)^(" (str/join "|" (map #(java.util.regex.Pattern/quote %) words)) ")(?:[.,;:]|$)")))
 
 (defn- match-triggers [triggers body-text]
   (into {} (keep (fn [[k p]] (when (re-find p body-text) [(keyword "report" (name k)) true]))) triggers))
