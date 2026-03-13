@@ -73,12 +73,12 @@ Important.
 
 | Type          | Format         |
 |---------------+----------------|
-| All reports   | [[../reports/all.json][json]], [[../reports/all.rss][rss]], [[../reports/all.org][org]] |
+| All reports   | [[reports/all.json][json]], [[reports/all.rss][rss]], [[reports/all.org][org]] |
 |---------------+----------------|
-| Announcements | [[../reports/announcements.json][json]], [[../reports/announcements.rss][rss]], [[../reports/announcements.org][org]] |
-| Bugs          | [[../reports/bugs.json][json]], [[../reports/bugs.rss][rss]], [[../reports/bugs.org][org]] |
-| Changes       | [[../reports/changes.json][json]], [[../reports/changes.rss][rss]], [[../reports/changes.org][org]] |
-| Patches       | [[../reports/patches.json][json]], [[../reports/patches.rss][rss]], [[../reports/patches.org][org]] |
-| Releases      | [[../reports/releases.json][json]], [[../reports/releases.rss][rss]], [[../reports/releases.org][org]] |
-| Requests      | [[../reports/requests.json][json]], [[../reports/requests.rss][rss]], [[../reports/requests.org][org]] |
+| Announcements | [[reports/announcements.json][json]], [[reports/announcements.rss][rss]], [[reports/announcements.org][org]] |
+| Bugs          | [[reports/bugs.json][json]], [[reports/bugs.rss][rss]], [[reports/bugs.org][org]] |
+| Changes       | [[reports/changes.json][json]], [[reports/changes.rss][rss]], [[reports/changes.org][org]] |
+| Patches       | [[reports/patches.json][json]], [[reports/patches.rss][rss]], [[reports/patches.org][org]] |
+| Releases      | [[reports/releases.json][json]], [[reports/releases.rss][rss]], [[reports/releases.org][org]] |
+| Requests      | [[reports/requests.json][json]], [[reports/requests.rss][rss]], [[reports/requests.org][org]] |
 
