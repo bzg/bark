@@ -234,9 +234,9 @@
         has-org?   (.exists (clojure.java.io/file reports-dir "all.org"))
         has-json?  (.exists (clojure.java.io/file reports-dir "all.json"))
         generated-at (str (java.util.Date.))
-        rss-href   "../reports/all.rss"
-        org-href   "../reports/all.org"
-        json-href  "../reports/all.json"
+        rss-href   "reports/all.rss"
+        org-href   "reports/all.org"
+        json-href  "reports/all.json"
         cols       [[:th {:data-sort "type"     :onclick "sortTable(0,'type')"}     "Type"]
                     [:th {:data-sort "status"   :onclick "sortTable(1,'status')"}   "Status"]
                     [:th {:data-sort "priority" :onclick "sortTable(2,'priority')"} "Priority"]
