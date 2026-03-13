@@ -94,7 +94,8 @@
 (defn reports-by-month [reports]
   (->> reports
        (filter #(within-last-year? (report-date %)))
-       (group-by #(subs (str (report-date %)) 0 7))
+       (group-by #(some-> (report-date %) format-date-iso (subs 0 7)))
+       (dissoc nil)
        (into (sorted-map) (map (fn [[m rs]] [m (count rs)])))))
 
 (defn email-vs-reports-ratio [reports total-email-count]
@@ -180,16 +181,25 @@
                      :score      (- (or (:report/votes-up r) 0) (or (:report/votes-down r) 0))}))
        (sort-by :score >) (take n)))
 
-(defn compute-stats [reports]
-  (let [last-year (filter #(within-last-year? (report-date %)) reports)]
-    {:generated-at      (str (java.util.Date.))
-     :reports-per-type  (reports-per-type reports)
-     :reports-by-month  (reports-by-month reports)
-     :time-to-close     (time-to-close-stats reports)
-     :open-closed-ratio (open-closed-ratio reports)
-     :open-last-year    (count (remove :report/closed last-year))
-     :total-last-year   (count last-year)
-     :top-openers       (top-openers reports 10)}))
+(defn compute-stats
+  ([reports] (compute-stats reports nil))
+  ([reports db]
+   (let [last-year     (filter #(within-last-year? (report-date %)) reports)
+         total-emails  (when db (total-emails db))]
+     (cond->
+       {:generated-at      (str (java.util.Date.))
+        :reports-per-type  (reports-per-type reports)
+        :reports-by-month  (reports-by-month reports)
+        :time-to-close     (time-to-close-stats reports)
+        :open-closed-ratio (open-closed-ratio reports)
+        :open-last-year    (count (remove :report/closed last-year))
+        :total-last-year   (count last-year)
+        :top-openers       (top-openers reports 10)
+        :source-breakdown  (source-breakdown reports)
+        :top-triggers      (top-trigger-users reports 10)
+        :vote-leaders      (vote-leaders reports 10)
+        :patch-series      (patch-series-stats reports)}
+       total-emails (assoc :email-ratio (email-vs-reports-ratio reports total-emails))))))
 
 ;; ---------------------------------------------------------------------------
 ;; HTML / Vega-Lite rendering
@@ -297,7 +307,8 @@
 (defn render-html [stats]
   (let [{:keys [generated-at reports-per-type reports-by-month
                 time-to-close open-closed-ratio open-last-year
-                top-openers]} stats
+                top-openers source-breakdown top-triggers
+                patch-series email-ratio]} stats
         n-yr (reduce + (vals reports-per-type))
         pct  #(when % (str (Math/round (* 100.0 %)) "%"))]
     (str
@@ -335,6 +346,13 @@
      (when time-to-close
        (kpi (str (:median-days time-to-close) "d") "Median to close"
             (str "avg " (:avg-days time-to-close) "d")))
+     (when patch-series
+       (kpi (:unique-series patch-series) "Patch series"
+            (str (:closed-series patch-series) " closed")))
+     (when email-ratio
+       (kpi (or (:ratio email-ratio) "—") "Report/email ratio"
+            (str (:reports-last-year email-ratio) " reports / "
+                 (:total-emails email-ratio) " emails")))
      "</div>\n"
 
      "<div class=\"grid\">\n"
@@ -343,6 +361,10 @@
      (when time-to-close
        (chart-box "chart-ttc"   (chart-ttc time-to-close)))
      (chart-box "chart-openers" (chart-openers top-openers))
+     (when (seq source-breakdown)
+       (chart-box "chart-sources" (chart-sources source-breakdown)))
+     (when (seq top-triggers)
+       (chart-box "chart-triggers" (chart-triggers top-triggers)))
      "</div>\n"
 
      "</main>\n</body>\n</html>\n")))
@@ -363,7 +385,7 @@
         reports     (if source-name
                       (filter #(= source-name (get-in % [:report/email :email/source])) all-reps)
                       all-reps)
-        stats       (compute-stats reports)]
+        stats       (compute-stats reports db)]
     (io/make-parents out-file)
     (if html?
       (do (spit out-file (render-html stats))
