@@ -163,26 +163,6 @@
                :count   (count rs)}))
        (sort-by :count >) (take n)))
 
-(defn top-trigger-users [reports n]
-  (let [collect (fn [k rs] (->> rs (keep #(get-in % [k :email/from-address])) frequencies))
-        ackers  (collect :report/acked  reports)
-        owners  (collect :report/owned  reports)
-        closers (collect :report/closed reports)
-        users   (into #{} (concat (keys ackers) (keys owners) (keys closers)))]
-    (->> users
-         (map (fn [u] {:address u
-                       :acked   (get ackers  u 0)
-                       :owned   (get owners  u 0)
-                       :closed  (get closers u 0)
-                       :total   (+ (get ackers u 0) (get owners u 0) (get closers u 0))}))
-         (sort-by :total >) (take n))))
-
-(defn source-breakdown [reports]
-  (->> reports
-       (filter #(within-last-year? (report-date %)))
-       (group-by #(get-in % [:report/email :email/source]))
-       (into {} (map (fn [[src rs]] [(or src "unknown") (count rs)])))))
-
 (def closable-types
   "Report types where open/closed status is meaningful."
   #{:bug :patch :request})
@@ -194,14 +174,6 @@
     {:open open :closed closed
      :ratio (when (pos? (+ open closed))
               (round2 (/ open (double (+ open closed)))))}))
-
-(defn patch-series-stats [reports]
-  (let [with-series   (filter :report/series reports)
-        series-ids    (->> with-series (map #(get-in % [:report/series :series/id])) distinct count)
-        closed-series (->> with-series (filter #(get-in % [:report/series :series/closed]))
-                                       (map #(get-in % [:report/series :series/id])) distinct count)]
-    {:unique-series series-ids :closed-series closed-series
-     :patch-reports (count with-series)}))
 
 (defn vote-leaders [reports n]
   (->> reports
@@ -294,13 +266,6 @@
         {:x {:field "b" :type "ordinal" :title nil :sort order}
          :y {:field "n" :type "quantitative" :title "Reports"}})))
 
-(defn chart-sources [sources]
-  (vl "Reports by source (last year)" "bar"
-      (map (fn [[s c]] {"source" s "count" c}) sources)
-      {:x {:field "source" :type "ordinal" :title nil
-           :sort  "-y" :axis {:labelAngle -30 :labelLimit 120}}
-       :y {:field "count"  :type "quantitative" :title "Reports"}}))
-
 (defn chart-openers [openers]
   (let [data (->> openers
                   (map (fn [{:keys [address name count]}]
@@ -310,20 +275,6 @@
              :sort {:field "count" :order "descending"}
              :axis  {:labelLimit 180}}
          :x {:field "count" :type "quantitative" :title "Reports opened"}})))
-
-(defn chart-triggers [trigger-users]
-  (let [data (mapcat (fn [{:keys [address acked owned closed]}]
-                       [{"user" address "action" "acked"  "n" acked}
-                        {"user" address "action" "owned"  "n" owned}
-                        {"user" address "action" "closed" "n" closed}])
-                     trigger-users)]
-    (vl "Maintainer activity (all time)" "bar" data
-        {:y     {:field "user"   :type "ordinal" :title nil
-                 :sort  "-x" :axis {:labelLimit 180}}
-         :x     {:field "n"      :type "quantitative" :title "Actions"}
-         :color {:field "action" :type "nominal"
-                 :scale {:domain ["acked" "owned" "closed"]
-                         :range  ["#aec6cf" "#7fb3d3" "#2e86c1"]}}})))
 
 ;; HTML assembly
 

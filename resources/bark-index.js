@@ -2,12 +2,11 @@
 //
 // Expects a global `barkConfig` object with:
 //   .types    — array of report type strings
-//   .allOpen  — boolean, true if pre-filtered to open reports only
 
 var allTypes = barkConfig.types;
 var activeTypes = {};
 allTypes.forEach(function(t) { activeTypes[t] = true; });
-var showClosed  = false;
+var onlyOpen    = true;
 var onlyAcked   = false;
 var onlyOwned   = false;
 
@@ -101,8 +100,7 @@ function matchClause(tr, q) {
   var d = tr.dataset;
 
   if (!activeTypes[d.type]) return false;
-  if (showClosed && d.closed !== 'true') return false;
-  if (!showClosed && d.closed === 'true') return false;
+  if (onlyOpen && d.closed === 'true') return false;
   if (onlyAcked  && d.acked  === '')     return false;
   if (onlyOwned  && d.owned  === '')     return false;
 
@@ -170,8 +168,9 @@ function toggleOwned(btn) {
   updateURL(true);
 }
 
-function toggleClosed() {
-  showClosed = document.getElementById('show-closed').checked;
+function toggleOpen(btn) {
+  onlyOpen = !onlyOpen;
+  btn.classList.toggle('outline');
   filterRows();
   updateURL(true);
 }
@@ -182,7 +181,7 @@ function updateURL(push) {
   if (q) params.set('q', q);
   var active = allTypes.filter(function(t) { return activeTypes[t]; });
   if (active.length !== allTypes.length) params.set('types', active.join(','));
-  if (showClosed)  params.set('closed', '1');
+  if (!onlyOpen)   params.set('open', '0');
   if (onlyAcked)   params.set('acked', '1');
   if (onlyOwned)   params.set('owned', '1');
   var sortKeys = Object.keys(sortState);
@@ -206,9 +205,9 @@ function restoreFromURL() {
       btn.classList.toggle('outline', !activeTypes[btn.dataset.type]);
     });
   }
-  if (params.get('closed') === '1') {
-    showClosed = true;
-    document.getElementById('show-closed').checked = true;
+  if (params.get('open') === '0') {
+    onlyOpen = false;
+    document.getElementById('btn-open').classList.add('outline');
   }
   if (params.get('acked') === '1') {
     onlyAcked = true;

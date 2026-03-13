@@ -68,29 +68,6 @@
 ;; Hiccup helpers
 ;; ---------------------------------------------------------------------------
 
-(defn- status-square [flags close-reason]
-  (let [f   (or flags "---")
-        a?  (= (nth f 0 \-) \A)
-        o?  (= (nth f 1 \-) \O)
-        c?  (= (nth f 2 \-) \C)
-        [icon label] (cond
-                       (and c? (= close-reason "canceled")) ["🟫" "Canceled"]
-                       c?          ["🟥" "Closed"]
-                       (and a? o?) ["🟩" "Acked, Owned"]
-                       a?          ["🟨" "Acked"]
-                       o?          ["🟦" "Owned"]
-                       :else       ["⬜" "Open"])]
-    [:span {:title (str label " (" flags ")") :aria-label label} icon]))
-
-(defn- priority-square [priority]
-  (let [p (or priority 0)
-        [icon label] (case (int p)
-                       3 ["🟥" "Urgent + Important"]
-                       2 ["🟧" "Urgent"]
-                       1 ["🟨" "Important"]
-                       ["⬜" "Normal"])]
-    [:span {:title (str label " (" p ")") :aria-label label} icon]))
-
 (defn- subject-el [subject role archived-at]
   (let [inner (case role
                 "admin"      [:strong subject]
@@ -139,10 +116,10 @@
                :title (str "Vote: " votes)}
        votes])))
 
-(defn- report-row [{:strs [type subject from from-name date date-raw flags status priority
+(defn- report-row [{:strs [type subject from from-name date date-raw flags priority
                            replies archived-at message-id related role source
                            acked owned closed urgent important patches votes
-                           deadline topic close-reason]}]
+                           deadline topic]}]
   (let [label    (get type-labels type type)
         closed?  (and flags (>= (count flags) 3) (= (nth flags 2 \-) \C))
         iso-date (or (parse-to-iso-date (or date-raw date "")) "")
@@ -164,8 +141,7 @@
           :data-topic       (str/lower-case (or topic ""))
           :data-search      (str/lower-case (str subject " " from " " author " " iso-date " " topic))}
      [:td [:mark {:data-type type} label]]
-     [:td {:data-value (str (or status 0))} (status-square flags close-reason)]
-     [:td (priority-square priority)]
+     [:td {:data-value (str (or priority 0)) :style "text-align:center"} (or priority 0)]
      [:td {:data-value (or deadline "") :class "due-cell"} ""]
      [:td (subject-el subject role archived-at) (related-link related) (patch-link patches) (vote-badge votes)]
      [:td.secondary {:title from} author]
@@ -190,6 +166,8 @@
   .filters { display: flex; gap: 0.4rem; flex-wrap: wrap; }
   .filters button { padding: 0.3rem 0.7rem; font-size: 0.8rem; }
   .filters button.outline { opacity: 0.5; }
+  .filters.status-filters button.open-btn          { background: #27ae60; border-color: #27ae60; color: #fff; }
+  .filters.status-filters button.open-btn.outline   { background: none; color: #27ae60; opacity: 0.5; }
   .filters.status-filters button.acked-btn         { background: #b8860b; border-color: #b8860b; color: #fff; }
   .filters.status-filters button.acked-btn.outline  { background: none; color: #b8860b; opacity: 0.5; }
   .filters.status-filters button.owned-btn         { background: #1a5a8a; border-color: #1a5a8a; color: #fff; }
@@ -208,9 +186,6 @@
   .vote-neg { background: #c0392b33; color: #c0392b; }
   .vote-zero { background: #95a5a622; color: #7f8c8d; }
   .theme-toggle { cursor: pointer; background: none; border: none; font-size: 1.2rem; padding: 0.3rem; }
-  .controls { display: flex; gap: 0.5rem; align-items: center; }
-  .controls label { font-size: 0.85rem; margin-bottom: 0; cursor: pointer; }
-  .controls input[type=checkbox] { margin: 0; }
 " footer-css))
 
 ;; ---------------------------------------------------------------------------
@@ -219,9 +194,8 @@
 
 (def ^:private index-js (slurp "resources/bark-index.js"))
 
-(defn page-js [types-json all-open?]
-  (str "var barkConfig = {types:" types-json
-       ",allOpen:" (if all-open? "true" "false") "};\n"
+(defn page-js [types-json]
+  (str "var barkConfig = {types:" types-json "};\n"
        index-js "\n"
        theme-toggle-js))
 
@@ -232,7 +206,6 @@
 (defn index-page [reports min-status reports-dir]
   (let [types      (vec (distinct (map #(get % "type") reports)))
         types-json (json/generate-string types)
-        all-open?  (and min-status (>= min-status 4))
         has-rss?   (.exists (clojure.java.io/file reports-dir "all.xml"))
         has-org?   (.exists (clojure.java.io/file reports-dir "all.org"))
         has-json?  (.exists (clojure.java.io/file reports-dir "all.json"))
@@ -241,13 +214,12 @@
         org-href   "reports/all.org"
         json-href  "reports/all.json"
         cols       [[:th {:data-sort "type"     :onclick "sortTable(0,'type')"}     "Type"]
-                    [:th {:data-sort "status"   :onclick "sortTable(1,'status')"}   "Status"]
-                    [:th {:data-sort "priority" :onclick "sortTable(2,'priority')"} "Priority"]
-                    [:th {:data-sort "due"      :onclick "sortTable(3,'due')"}      "Due"]
-                    [:th {:data-sort "subject"  :onclick "sortTable(4,'subject')"}  "Subject"]
-                    [:th {:data-sort "from"     :onclick "sortTable(5,'from')"}     "Author"]
-                    [:th {:data-sort "date"     :onclick "sortTable(6,'date')"}     "Date"]
-                    [:th {:data-sort "replies"  :onclick "sortTable(7,'replies')"}  "↩"]]]
+                    [:th {:data-sort "priority" :onclick "sortTable(1,'priority')"} "Priority"]
+                    [:th {:data-sort "due"      :onclick "sortTable(2,'due')"}      "Due"]
+                    [:th {:data-sort "subject"  :onclick "sortTable(3,'subject')"}  "Subject"]
+                    [:th {:data-sort "from"     :onclick "sortTable(4,'from')"}     "Author"]
+                    [:th {:data-sort "date"     :onclick "sortTable(5,'date')"}     "Date"]
+                    [:th {:data-sort "replies"  :onclick "sortTable(6,'replies')"}  "↩"]]]
     (str
      "<!DOCTYPE html>\n"
      (h/html
@@ -293,17 +265,15 @@
                        :onclick (str "toggleType('" t "',this)")}
               (get type-labels t t)])]
           [:div.filters.status-filters
+           [:button#btn-open.open-btn
+            {:onclick "toggleOpen(this)" :title "Toggle visibility of open reports only"}
+            "Open"]
            [:button#btn-acked.acked-btn.outline
             {:onclick "toggleAcked(this)" :title "Toggle visibility of acked reports"}
             "Acked"]
            [:button#btn-owned.owned-btn.outline
             {:onclick "toggleOwned(this)" :title "Toggle visibility of owned reports"}
-            "Owned"]]
-          (when-not all-open?
-            [:div.controls
-             [:label
-              [:input#show-closed {:type "checkbox" :onchange "toggleClosed()"}]
-              " Only closed"]])]
+            "Owned"]]]
          [:div#status]
          [:figure {:style "overflow-x:auto"}
           [:table.striped
@@ -311,7 +281,7 @@
            [:tbody
             (for [r reports]
               (report-row r))]]]
-         [:script (h/raw (page-js types-json all-open?))]]
+         [:script (h/raw (page-js types-json))]]
         (bark-footer)]]))))
 
 ;; ---------------------------------------------------------------------------
