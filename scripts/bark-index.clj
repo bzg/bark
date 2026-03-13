@@ -114,10 +114,10 @@
   (when (seq patches)
     (let [n    (count patches)
           href (if (= 1 n)
-                 (get (first patches) "file")
+                 (str "patches/" (get (first patches) "file"))
                  (let [f (get (first patches) "file")]
                    ;; directory: strip filename from first patch path
-                   (str/replace f #"/[^/]+$" "/")))
+                   (str "patches/" (str/replace f #"/[^/]+$" "/"))))
           label (if (= 1 n) "1 patch file" (str n " patch files"))]
       [:small.secondary
        " "
