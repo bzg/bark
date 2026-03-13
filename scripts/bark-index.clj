@@ -20,7 +20,7 @@
 ;; Forward-declared for clj-kondo (provided at runtime by load-file calls below).
 (declare parse-cli-args load-config
          pico-cdn bark-description bark-repo-url bark-license-url
-         footer-css bark-footer
+         footer-css bark-footer wrap-js
          theme-toggle-btn theme-toggle-js)
 
 (load-file "scripts/bark-common.clj")
@@ -195,9 +195,9 @@
 (def ^:private index-js (slurp "resources/bark-index.js"))
 
 (defn page-js [types-json]
-  (str "var barkConfig = {types:" types-json "};\n"
-       index-js "\n"
-       theme-toggle-js))
+  (wrap-js (str "var barkConfig = {types:" types-json "};\n"
+                index-js "\n"
+                theme-toggle-js)))
 
 ;; ---------------------------------------------------------------------------
 ;; Page assembly

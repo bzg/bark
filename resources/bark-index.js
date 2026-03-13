@@ -1,4 +1,6 @@
 // bark-index.js — Client-side filtering, sorting, URL state, theme toggle.
+// Copyright (c) 2026 Bastien Guerry <bzg@gnu.org>
+// SPDX-License-Identifier: MPL-2.0
 //
 // Expects a global `barkConfig` object with:
 //   .types    — array of report type strings

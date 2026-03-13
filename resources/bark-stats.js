@@ -1,4 +1,6 @@
 // bark-stats.js — Vega-Lite chart rendering with theme support.
+// Copyright (c) 2026 Bastien Guerry <bzg@gnu.org>
+// SPDX-License-Identifier: MPL-2.0
 //
 // Expects:
 //   barkSpecs — object populated by inline <script> tags (id -> vega-lite spec)

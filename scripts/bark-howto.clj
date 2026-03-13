@@ -17,7 +17,7 @@
 ;; Forward-declared for clj-kondo (provided at runtime by load-file calls below).
 (declare default-labels default-trigger-words resolve-labels-map
          resolve-triggers-map parse-cli-args load-config build-source-map
-         pico-cdn bark-description footer-css bark-footer
+         pico-cdn bark-description footer-css bark-footer wrap-js
          theme-toggle-btn theme-toggle-js)
 
 (load-file "scripts/bark-common.clj")
@@ -286,7 +286,7 @@
            [:li (theme-toggle-btn)]]]
          [:p.meta (str "Generated " generated-at)]
          (h/raw body-html)
-         [:script (h/raw theme-toggle-js)]]
+         [:script (h/raw (wrap-js theme-toggle-js))]]
         (bark-footer)]]))))
 
 ;; ---------------------------------------------------------------------------

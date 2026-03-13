@@ -20,7 +20,7 @@
          report-priority report-status report-descendant-count
          format-date format-date-iso parse-cli-args load-config
          pico-cdn bark-description bark-repo-url bark-license-url
-         footer-css bark-footer theme-toggle-js bark-schema)
+         footer-css bark-footer wrap-js theme-toggle-js bark-schema)
 
 (load-file "scripts/bark-common.clj")
 (load-file "scripts/bark-html.clj")
@@ -237,7 +237,7 @@
 
 (defn chart-div [id spec]
   (str "<div class=\"chart\" id=\"" id "\"></div>"
-       "<script>barkSpecs['" id "']=" (json/generate-string spec) ";</script>"))
+       "<script>" (wrap-js (str "barkSpecs['" id "']=" (json/generate-string spec) ";")) "</script>"))
 
 ;; Individual chart specs
 
@@ -311,8 +311,8 @@
      "<script src=\"https://cdn.jsdelivr.net/npm/vega-embed@6/build/vega-embed.min.js\"></script>\n"
      "<title>BARK — Statistics</title>\n"
      "<style>" stats-css "</style>\n"
-     "<script>\n" theme-toggle-js "\n</script>\n"
-     "<script>\n" stats-js "\n</script>\n"
+     "<script>\n" (wrap-js theme-toggle-js) "\n</script>\n"
+     "<script>\n" (wrap-js stats-js) "\n</script>\n"
      "</head>\n<body>\n"
      "<main class=\"container\">\n"
      "<nav><ul><li><strong>BARK — Statistics</strong></li></ul>"

@@ -20,6 +20,20 @@
 (def bark-license-url "https://codeberg.org/bzg/bark/src/branch/main/LICENSES/EPL-2.0.txt")
 
 ;; ---------------------------------------------------------------------------
+;; LibreJS license tags (JS files are MPL-2.0)
+;; ---------------------------------------------------------------------------
+
+(def js-license-start
+  "// @license magnet:?xt=urn:btih:3877d6d54b3accd4bc32f8a48bf32ebc0901502a&dn=mpl-2.0.txt MPL-2.0")
+(def js-license-end
+  "// @license-end")
+
+(defn wrap-js
+  "Wrap JavaScript code with LibreJS license tags."
+  [js]
+  (str js-license-start "\n" js "\n" js-license-end))
+
+;; ---------------------------------------------------------------------------
 ;; Shared JS (loaded from resources/ at build time)
 ;; ---------------------------------------------------------------------------
 
