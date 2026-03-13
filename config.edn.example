@@ -53,7 +53,7 @@
             ;; :labels {:request ["POLL" "FR" "TODO" "TASK"]}
 	    ;;
             ;; Per-source export formats (optional).
-            ;; Controls which per-type feed files are generated (bugs.rss, patches.org, etc.).
+            ;; Controls which per-type feed files are generated (bugs.xml, patches.org, etc.).
             ;; Overrides global :export-formats for this source.
             ;; Default: ["json" "org" "rss"]
             ;; :export-formats ["json" "rss"]
@@ -103,7 +103,7 @@
  ;;   :change       {:closed ["Canceled"]}
 
  ;; Global export formats (optional) — controls which per-type feed files
- ;; are generated (e.g. bugs.json, patches.rss, announcements.org).
+ ;; are generated (e.g. bugs.json, patches.xml, announcements.org).
  ;; Also controls which of reports.json/org/rss are emitted during `bb export all`.
  ;; Per-source :export-formats override this.
  ;; Default: ["json" "org" "rss"]

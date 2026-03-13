@@ -230,11 +230,11 @@
   (let [types      (vec (distinct (map #(get % "type") reports)))
         types-json (json/generate-string types)
         all-open?  (and min-status (>= min-status 4))
-        has-rss?   (.exists (clojure.java.io/file reports-dir "all.rss"))
+        has-rss?   (.exists (clojure.java.io/file reports-dir "all.xml"))
         has-org?   (.exists (clojure.java.io/file reports-dir "all.org"))
         has-json?  (.exists (clojure.java.io/file reports-dir "all.json"))
         generated-at (str (java.util.Date.))
-        rss-href   "reports/all.rss"
+        rss-href   "reports/all.xml"
         org-href   "reports/all.org"
         json-href  "reports/all.json"
         cols       [[:th {:data-sort "type"     :onclick "sortTable(0,'type')"}     "Type"]

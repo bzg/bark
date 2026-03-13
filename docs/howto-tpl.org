@@ -53,32 +53,32 @@ Important.
 
 ** Searching via the web page
 
-| Long form                   | Short | Explanation                            |
-|-----------------------------+-------+----------------------------------------|
-| from:me@example.org         | f:    | Reports from me@example.org            |
-| acked:me@example.org        | a:    | Reports acked by me@example.org        |
-| owned:me@example.org        | o:    | Reports owned by me@example.org        |
-| closed:me@example.org       | c:    | Reports closed by me@example.org       |
-| urgent:me@example.org       | u:    | Reports marked urgent by me@example.org    |
-| important:me@example.org    | i:    | Reports marked important by me@example.org |
-| subject:match               | s:    | Reports matching subject               |
-| priority:[0-4]              | p:    | Reports matching priority level 0 to 4 |
-| mid:<messageid>             | m:    | Report open with <messageid>           |
-| date:3d..                   | d:    | Reports from 3 days ago                |
-| date:2023-01-01..2023-12-31 | d:    | Reports from 2023-01-01 to 2023-12-31  |
-| match1 \vert match2             |       | Reports matching "match1" or "match2"  |
+| Long form                   | Short | Explanation                                           |
+|-----------------------------+-------+-------------------------------------------------------|
+| from:me@example.org         | f:    | Reports from me@example.org                           |
+| acked:me@example.org        | a:    | Reports acked by me@example.org                       |
+| owned:me@example.org        | o:    | Reports owned by me@example.org                       |
+| closed:me@example.org       | c:    | Reports closed by me@example.org                      |
+| urgent:me@example.org       | u:    | Reports marked urgent by me@example.org               |
+| important:me@example.org    | i:    | Reports marked important by me@example.org            |
+| subject:match               | s:    | Reports matching subject                              |
+| priority:[0-4]              | p:    | Reports matching priority level 0 to 4                |
+| mid:<messageid>             | m:    | Report open with <messageid>                          |
+| date:3d..                   | d:    | Reports from 3 days ago                               |
+| date:2023-01-01..2023-12-31 | d:    | Reports from 2023-01-01 to 2023-12-31                 |
+| match1 \vert match2             |       | Reports matching "match1" or "match2"                 |
 | *                           |       | Wildcard for from/acked/owned/closed/urgent/important |
 
 ** Getting the data
 
 | Type          | Format         |
 |---------------+----------------|
-| All reports   | [[reports/all.json][json]], [[reports/all.rss][rss]], [[reports/all.org][org]] |
+| All reports   | [[reports/all.json][json]], [[reports/all.xml][rss]], [[reports/all.org][org]] |
 |---------------+----------------|
-| Announcements | [[reports/announcements.json][json]], [[reports/announcements.rss][rss]], [[reports/announcements.org][org]] |
-| Bugs          | [[reports/bugs.json][json]], [[reports/bugs.rss][rss]], [[reports/bugs.org][org]] |
-| Changes       | [[reports/changes.json][json]], [[reports/changes.rss][rss]], [[reports/changes.org][org]] |
-| Patches       | [[reports/patches.json][json]], [[reports/patches.rss][rss]], [[reports/patches.org][org]] |
-| Releases      | [[reports/releases.json][json]], [[reports/releases.rss][rss]], [[reports/releases.org][org]] |
-| Requests      | [[reports/requests.json][json]], [[reports/requests.rss][rss]], [[reports/requests.org][org]] |
+| Announcements | [[reports/announcements.json][json]], [[reports/announcements.xml][rss]], [[reports/announcements.org][org]] |
+| Bugs          | [[reports/bugs.json][json]], [[reports/bugs.xml][rss]], [[reports/bugs.org][org]] |
+| Changes       | [[reports/changes.json][json]], [[reports/changes.xml][rss]], [[reports/changes.org][org]] |
+| Patches       | [[reports/patches.json][json]], [[reports/patches.xml][rss]], [[reports/patches.org][org]] |
+| Releases      | [[reports/releases.json][json]], [[reports/releases.xml][rss]], [[reports/releases.org][org]] |
+| Requests      | [[reports/requests.json][json]], [[reports/requests.xml][rss]], [[reports/requests.org][org]] |
 

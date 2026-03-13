@@ -311,7 +311,7 @@
 
 (defn filter-feed-links
   "Process the org text: in table rows that contain feed links (*.json,
-  *.rss, *.org), remove links to files that don't exist in out-dir.
+  *.xml, *.org), remove links to files that don't exist in out-dir.
   Removes entire rows where all links have been stripped.
   Cleans up adjacent hlines left by removed rows."
   [org-text out-dir]
@@ -322,7 +322,7 @@
       (->> lines
            (map (fn [line]
                   (if (and (str/starts-with? (str/trim line) "|")
-                           (re-find #"\[\[.+\.(json|rss|org)\]" line))
+                           (re-find #"\[\[.+\.(json|xml|org)\]" line))
                     ;; This is a table row with feed links — process each cell
                     (let [cells (->> (str/split line #"\|" -1)
                                      (drop 1) butlast

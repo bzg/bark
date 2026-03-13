@@ -7,7 +7,7 @@
 ;;   public/<source-name>/stats.html
 ;;   public/<source-name>/howto.html
 ;;   public/<source-name>/reports/all.json
-;;   public/<source-name>/reports/all.rss
+;;   public/<source-name>/reports/all.xml
 ;;   public/<source-name>/reports/all.org
 ;;   public/<source-name>/reports/bugs.json  (etc.)
 ;;   public/<source-name>/reports/stats.json
@@ -16,7 +16,7 @@
 ;; Usage:
 ;;   bb export               — export all sources, all formats
 ;;   bb export json          — export all.json for each source
-;;   bb export rss           — export all.rss for each source
+;;   bb export rss           — export all.xml for each source
 ;;   bb export org           — export all.org for each source
 ;;   bb export html          — generate index.html for each source
 ;;   bb export stats         — generate stats.json for each source
@@ -343,7 +343,7 @@
   "Dump reports as RSS 2.0 for a single source.
   Only includes open reports, capped at rss-limit (50)."
   ([reports out-dir source-name source-map maintainers-map]
-   (dump-rss! reports out-dir source-name source-map maintainers-map "all.rss" "reports"))
+   (dump-rss! reports out-dir source-name source-map maintainers-map "all.xml" "reports"))
   ([reports out-dir source-name source-map maintainers-map basename feed-label]
    (let [capped   (->> reports open-reports (take rss-limit))
          data     (mapv #(report->map % source-map maintainers-map) capped)
@@ -500,7 +500,7 @@
                  (str plural ".org") plural))
     (when (fmts "rss")
       (dump-rss! typed reports-dir source-name source-map maintainers-map
-                 (str plural ".rss") plural))))
+                 (str plural ".xml") plural))))
 
 ;; ---------------------------------------------------------------------------
 ;; Per-source export orchestration
