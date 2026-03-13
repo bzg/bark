@@ -190,7 +190,7 @@
           (assoc :patches
                  (let [h (mid-hash (:report/message-id report))]
                    (mapv (fn [p]
-                           (cond-> {:file   (str "patches/" h "/" (:patch/filename p))
+                           (cond-> {:file   (str h "/" (:patch/filename p))
                                     :source (name (:patch/source p))}
                              (:patch/author p)  (assoc :author  (:patch/author p))
                              (:patch/subject p) (assoc :subject (:patch/subject p))
@@ -275,7 +275,7 @@
   ([reports out-dir source-name source-map maintainers-map basename]
    (let [data     (mapv #(report->map % source-map maintainers-map) reports)
          meta     (source-metadata source-name source-map)
-         envelope (cond-> {:format-version "0.2.0"
+         envelope (cond-> {:format-version "0.2.1"
                            :source         source-name
                            :reports        data}
                     (seq meta) (merge meta))
