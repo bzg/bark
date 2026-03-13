@@ -66,12 +66,13 @@
 ;; Hiccup helpers
 ;; ---------------------------------------------------------------------------
 
-(defn- status-square [flags]
+(defn- status-square [flags close-reason]
   (let [f   (or flags "---")
         a?  (= (nth f 0 \-) \A)
         o?  (= (nth f 1 \-) \O)
         c?  (= (nth f 2 \-) \C)
         [icon label] (cond
+                       (and c? (= close-reason "canceled")) ["🟫" "Canceled"]
                        c?          ["🟥" "Closed"]
                        (and a? o?) ["🟩" "Acked, Owned"]
                        a?          ["🟨" "Acked"]
@@ -139,7 +140,7 @@
 (defn- report-row [{:strs [type subject from from-name date date-raw flags status priority
                            replies archived-at message-id related role source
                            acked owned closed urgent important patches votes
-                           deadline topic]}]
+                           deadline topic close-reason]}]
   (let [label    (get type-labels type type)
         closed?  (and flags (>= (count flags) 3) (= (nth flags 2 \-) \C))
         iso-date (or (parse-to-iso-date (or date-raw date "")) "")
@@ -161,7 +162,7 @@
           :data-topic       (str/lower-case (or topic ""))
           :data-search      (str/lower-case (str subject " " from " " author " " iso-date " " topic))}
      [:td [:mark {:data-type type} label]]
-     [:td {:data-value (str (or status 0))} (status-square flags)]
+     [:td {:data-value (str (or status 0))} (status-square flags close-reason)]
      [:td (priority-square priority)]
      [:td {:data-value (or deadline "") :class "due-cell"} ""]
      [:td (subject-el subject role archived-at) (related-link related) (patch-link patches) (vote-badge votes)]

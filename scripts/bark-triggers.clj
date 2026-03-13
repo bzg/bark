@@ -8,7 +8,8 @@
 (require '[clojure.string :as str])
 
 ;; Defined in bark-common.clj / bark-roles.clj; forward-declared for clj-kondo.
-(declare default-trigger-words resolve-triggers-map deep-merge-triggers
+(declare default-trigger-words default-close-reasons
+         resolve-triggers-map deep-merge-triggers
          email-body-text report-priority admin-or-maintainer?)
 
 ;; ---------------------------------------------------------------------------
@@ -20,6 +21,19 @@
 
 (defn- match-triggers [triggers body-text]
   (into {} (keep (fn [[k p]] (when (re-find p body-text) [(keyword "report" (name k)) true]))) triggers))
+
+(defn- detect-close-reason
+  "Given the :closed trigger words for a report type, find which word
+  matched in body-text and return the corresponding close-reason keyword.
+  Returns :canceled if the matched word is in default-close-reasons,
+  :applied otherwise, or nil if no closed trigger matched."
+  [action-words body-text]
+  (when-let [words (get action-words :closed)]
+    (let [pattern (re-pattern
+                   (str "(?m)^(" (str/join "|" (map #(java.util.regex.Pattern/quote %) words))
+                        ")(?:[.,;:]|$)"))]
+      (when-let [[_ matched] (re-find pattern body-text)]
+        (get default-close-reasons matched :applied)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Trigger defaults and compilation
@@ -41,12 +55,13 @@
 
 (defn build-source-triggers
   "Merge triggers for a source: defaults -> global -> per-source.
-  Returns compiled type->action->pattern map."
+  Returns {:compiled type->action->pattern, :words type->action->word-list}."
   [source-cfg]
   (let [merged (resolve-triggers-map source-cfg)]
-    (if (= merged default-trigger-words)
-      default-triggers-by-type
-      (compile-triggers-by-type merged))))
+    {:compiled (if (= merged default-trigger-words)
+                 default-triggers-by-type
+                 (compile-triggers-by-type merged))
+     :words    merged}))
 
 ;; ---------------------------------------------------------------------------
 ;; Priority triggers
@@ -63,12 +78,18 @@
 
 (defn detect-triggers
   "Detect trigger words in body text for a given report type.
-  Returns a map of {attr true ...} or nil."
-  [report-type body-text triggers-by-type]
+  `source-triggers` is {:compiled type->action->pattern, :words type->action->word-list}.
+  Returns a map of {attr true/value ...} or nil.
+  When :report/closed is detected, also includes :report/close-reason."
+  [report-type body-text source-triggers]
   (when body-text
-    (let [sets     (when-let [t (triggers-by-type report-type)] (match-triggers t body-text))
+    (let [compiled (:compiled source-triggers)
+          sets     (when-let [t (compiled report-type)] (match-triggers t body-text))
           priority (when (report-types-with-priority report-type) (match-triggers report-priority-triggers body-text))
-          all-sets (merge sets priority)]
+          reason   (when (:report/closed sets)
+                     (detect-close-reason (get-in source-triggers [:words report-type]) body-text))
+          all-sets (cond-> (merge sets priority)
+                     reason (assoc :report/close-reason reason))]
       (when (seq all-sets) all-sets))))
 
 ;; ---------------------------------------------------------------------------
@@ -237,7 +258,7 @@
                               :where [?r :report/message-id ?mid]]
                             (d/db conn) report-eid)
             proxy-eid  (:db/id email)
-            current    (d/pull (d/db conn) (conj state-attrs :report/deadline) report-eid)
+            current    (d/pull (d/db conn) (conj state-attrs :report/deadline :report/close-reason) report-eid)
             ;; Build set transactions
             set-tx (mapcat (fn [[attr addr]]
                              (let [target-eid (find-or-create-synthetic-email!
@@ -245,6 +266,9 @@
                                [[:db/add report-eid attr target-eid]
                                 [:db/add report-eid (proxy-attrs attr) proxy-eid]]))
                            set)
+            ;; Close-reason for Closed-by directive (always :applied)
+            close-reason-tx (when (contains? set :report/closed)
+                              [[:db/add report-eid :report/close-reason :applied]])
             ;; Build unset transactions
             unset-tx (mapcat (fn [attr]
                                (when-let [cur (get current attr)]
@@ -256,6 +280,11 @@
                                      (conj retract [:db/retract report-eid proxy-attr (ref-eid proxy-cur)])
                                      retract))))
                              unset)
+            ;; Clear close-reason when Unclosed
+            unclose-reason-tx (when (and (contains? unset :report/closed)
+                                         (:report/close-reason current))
+                                [[:db/retract report-eid :report/close-reason
+                                  (:report/close-reason current)]])
             ;; Deadline transactions
             deadline-tx (cond
                           deadline    [[:db/add report-eid :report/deadline deadline]]
@@ -265,7 +294,8 @@
                           :else       nil)
             ;; Topic transaction (overwrites previous topic)
             topic-tx (when topic [[:db/add report-eid :report/topic topic]])
-            all-tx (vec (concat set-tx unset-tx deadline-tx topic-tx))
+            all-tx (vec (concat set-tx close-reason-tx unset-tx unclose-reason-tx
+                                deadline-tx topic-tx))
             ;; Log description
             desc (concat (map (fn [[attr addr]] (str (name attr) " -> " addr)) set)
                          (map #(str "un-" (name %)) unset)
@@ -304,12 +334,18 @@
     (when (and (= :request report-type) from-addr body-text)
       (apply-vote! conn report-eid from-addr body-text))
     (when result
-      (let [eid      (:db/id email)
-            current  (d/pull (d/db conn) state-attrs report-eid)
-            new-sets (into {} (remove (fn [[k _]] (get current k))) result)
-            set-tx   (when (seq new-sets)
-                       [(into {:db/id report-eid} (map (fn [[k _]] [k eid])) new-sets)])]
-        (when (seq set-tx)
-          (d/transact! conn set-tx)
-          (log/info (str/join ", " (map (comp name key) new-sets))
+      (let [eid          (:db/id email)
+            close-reason (:report/close-reason result)
+            ref-result   (dissoc result :report/close-reason)
+            current      (d/pull (d/db conn) state-attrs report-eid)
+            new-sets     (into {} (remove (fn [[k _]] (get current k))) ref-result)
+            set-tx       (when (seq new-sets)
+                           [(into {:db/id report-eid} (map (fn [[k _]] [k eid])) new-sets)])
+            reason-tx    (when (and close-reason (:report/closed new-sets))
+                           [[:db/add report-eid :report/close-reason close-reason]])
+            all-tx       (vec (concat set-tx reason-tx))]
+        (when (seq all-tx)
+          (d/transact! conn all-tx)
+          (log/info (str/join ", " (cond-> (mapv (comp name key) new-sets)
+                                     close-reason (conj (str "close-reason:" (name close-reason)))))
                         "(by" (:email/message-id email) ")"))))))

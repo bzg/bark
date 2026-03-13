@@ -165,6 +165,7 @@
     {:report/important [:email/from-address]}
     {:report/urgent-proxy [:email/from-address]}
     {:report/important-proxy [:email/from-address]}
+    :report/close-reason
     :report/votes-up :report/votes-down :report/votes-null
     :report/deadline :report/descendants :report/digested-at
     {:report/related [:report/type :report/message-id
@@ -362,6 +363,11 @@
    :announcement {:closed ["Canceled"]}
    :release      {:closed ["Canceled"]}
    :change       {:closed ["Canceled"]}})
+
+(def default-close-reasons
+  "Map trigger words to close reasons.
+  Words not listed here default to :applied (the report was resolved)."
+  {"Canceled" :canceled})
 
 (defn deep-merge-triggers
   "Merge overrides into base trigger-words, merging per-type action maps."

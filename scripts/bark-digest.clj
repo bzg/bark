@@ -186,7 +186,10 @@
                            (not [?r :report/closed _])]
                          db version)]
       (when (seq open-chgs)
-        (d/transact! conn (mapv (fn [r] {:db/id r :report/closed release-email-eid}) open-chgs))
+        (d/transact! conn (mapv (fn [r] {:db/id r
+                                          :report/closed release-email-eid
+                                          :report/close-reason :applied})
+                                open-chgs))
         (log/info "Auto-closed" (count open-chgs)
                       "[CHG" version "] (superseded by release)")))))
 ;; ---------------------------------------------------------------------------

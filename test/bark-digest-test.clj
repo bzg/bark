@@ -118,6 +118,7 @@
           '[:report/type :report/version :report/topic
             :report/patch-seq :report/patch-source :report/message-id
             :report/acked :report/owned :report/closed
+            :report/close-reason
             :report/urgent :report/important
             {:report/acked-proxy [:email/from-address]}
             {:report/owned-proxy [:email/from-address]}
@@ -201,6 +202,7 @@
           (assert-test "Acked (Confirmed)" (some? (:report/acked r)))
           (assert-test "Owned (Handled)" (some? (:report/owned r)))
           (assert-test "Closed (Fixed)" (some? (:report/closed r)))
+          (assert= "Close-reason is :applied" :applied (:report/close-reason r))
           (assert-test "Urgent still set (unsetting reserved to maintainer directives)" (some? (:report/urgent r)))
           (assert= "3 descendants" 3
                    (count (:report/descendants r))))
@@ -220,7 +222,8 @@
           (assert-test ":subject in patch-source"
                        (contains? (set (:report/patch-source r)) :subject))
           (assert-test "Acked (Reviewed)" (some? (:report/acked r)))
-          (assert-test "Closed (Applied)" (some? (:report/closed r))))
+          (assert-test "Closed (Applied)" (some? (:report/closed r)))
+          (assert= "Close-reason is :applied" :applied (:report/close-reason r)))
 
         ;; --- Patch 08: attachment detection ---
         (println "\n--- Patch 08: attachment detection ---")
@@ -250,13 +253,15 @@
         (println "\n--- TODO 15: request lifecycle ---")
         (let [r (get-report db "<15@test.org>")]
           (assert= "Type is :request" :request (:report/type r))
-          (assert-test "Closed (Done)" (some? (:report/closed r))))
+          (assert-test "Closed (Done)" (some? (:report/closed r)))
+          (assert= "Close-reason is :applied" :applied (:report/close-reason r)))
 
         ;; --- ANN 17: canceled ---
         (println "\n--- ANN 17: announcement canceled ---")
         (let [r (get-report db "<17@test.org>")]
           (assert= "Type is :announcement" :announcement (:report/type r))
-          (assert-test "Closed (Canceled)" (some? (:report/closed r))))
+          (assert-test "Closed (Canceled)" (some? (:report/closed r)))
+          (assert= "Close-reason is :canceled" :canceled (:report/close-reason r)))
 
         ;; --- ANN 18: denied (user cannot create announcements) ---
         (println "\n--- ANN 18: permission denied ---")
@@ -270,6 +275,7 @@
           (assert= "CHG type" :change (:report/type chg))
           (assert= "CHG version" "9.8" (:report/version chg))
           (assert-test "CHG auto-closed" (some? (:report/closed chg)))
+          (assert= "CHG close-reason is :applied" :applied (:report/close-reason chg))
           (assert= "REL type" :release (:report/type rel))
           (assert= "REL version" "9.8" (:report/version rel)))
 
@@ -650,6 +656,7 @@
         (println "\n--- Bug 88: Closed-by + Important-by ---")
         (let [r (get-report db "<88@test.org>")]
           (assert-test "Closed is set" (some? (:report/closed r)))
+          (assert= "Close-reason is :applied (via Closed-by directive)" :applied (:report/close-reason r))
           (assert-test "Important is set" (some? (:report/important r)))
           (assert= "Closed-proxy is admin@test.org"
                    "admin@test.org"
