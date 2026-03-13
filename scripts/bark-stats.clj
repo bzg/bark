@@ -92,16 +92,41 @@
        (group-by #(some-> (:report/type %) name))
        (into {} (map (fn [[t rs]] [t (count rs)])))))
 
+(def ^:private month-names
+  {"Jan" "01" "Feb" "02" "Mar" "03" "Apr" "04"
+   "May" "05" "Jun" "06" "Jul" "07" "Aug" "08"
+   "Sep" "09" "Oct" "10" "Nov" "11" "Dec" "12"})
+
+(defn- date->ym
+  "Extract 'yyyy-MM' from a java.util.Date using its toString (local time).
+  Returns nil on failure."
+  [date]
+  (when date
+    (when-let [[_ mon year] (re-find #"^\w+ (\w+) \d+ .+ (\d{4})$" (str date))]
+      (when-let [m (month-names mon)]
+        (str year "-" m)))))
+
+(defn- current-ym
+  "Return [year month] for right now using (str (java.util.Date.))."
+  []
+  (let [s (str (java.util.Date.))]
+    (when-let [[_ mon year] (re-find #"^\w+ (\w+) \d+ .+ (\d{4})$" s)]
+      [(parse-long year) (parse-long (month-names mon))])))
+
 (defn reports-by-month [reports]
-  (let [counts (->> reports
-                    (filter #(within-last-year? (report-date %)))
-                    (group-by #(some-> (report-date %) format-date-iso (subs 0 7)))
-                    (dissoc nil)
-                    (into {} (map (fn [[m rs]] [m (count rs)]))))
-        ;; Generate all 12 months (current month back 11)
-        now    (java.time.YearMonth/now)
-        months (mapv #(str (.minusMonths now %)) (range 11 -1 -1))]
-    (into (sorted-map) (map (fn [m] [m (get counts m 0)])) months)))
+  (let [;; Group all reports by yyyy-MM (local time, matching what users see)
+        counts (->> reports
+                    (keep (fn [r] (date->ym (report-date r))))
+                    frequencies)
+        ;; Generate the last 12 month labels
+        [cy cm] (current-ym)
+        months  (vec (for [i (range 11 -1 -1)]
+                       (let [total (+ (* cy 12) (dec cm) (- i))
+                             y     (quot total 12)
+                             m     (inc (mod total 12))]
+                         (format "%04d-%02d" y m))))]
+    ;; Return eager vector of [month count] pairs
+    (mapv (fn [m] [m (get counts m 0)]) months)))
 
 (defn email-vs-reports-ratio [reports total-email-count]
   (let [n (count (filter #(within-last-year? (report-date %)) reports))]
@@ -246,8 +271,8 @@
 
 (defn chart-by-month [by-month]
   (vl "Reports per month (last 12 months)" "bar"
-      (map (fn [[m c]] {"month" m "count" c}) by-month)
-      {:x {:field "month" :type "ordinal" :title nil :sort nil
+      (vec (map (fn [[m c]] {"month" m "count" c}) by-month))
+      {:x {:field "month" :type "ordinal" :sort "ascending"
            :axis  {:labelAngle -45}}
        :y {:field "count" :type "quantitative" :title "Reports"}}))
 
