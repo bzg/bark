@@ -17,7 +17,8 @@
 ;; Forward-declared for clj-kondo (provided at runtime by load-file calls below).
 (declare default-labels default-trigger-words resolve-labels-map
          resolve-triggers-map parse-cli-args load-config build-source-map
-         pico-cdn theme-toggle-btn theme-toggle-js)
+         pico-cdn bark-description footer-css bark-footer
+         theme-toggle-btn theme-toggle-js)
 
 (load-file "scripts/bark-common.clj")
 (load-file "scripts/bark-html.clj")
@@ -249,13 +250,13 @@
 ;; Page assembly
 ;; ---------------------------------------------------------------------------
 
-(def howto-css "
+(def howto-css (str "
   main.container { max-width: 1600px; }
   table { font-size: 0.9rem; }
   pre { font-size: 0.85rem; padding: 1rem; }
   .theme-toggle { cursor: pointer; background: none; border: none; font-size: 1.2rem; padding: 0.3rem; }
   .meta { font-size: 0.78rem; color: var(--pico-muted-color); margin-bottom: 2rem; }
-")
+" footer-css))
 
 (defn howto-page [body-html]
   (let [title        "BARK — How-to"
@@ -268,6 +269,10 @@
         [:meta {:charset "UTF-8"}]
         [:meta {:name "viewport" :content "width=device-width, initial-scale=1"}]
         [:meta {:name "color-scheme" :content "light dark"}]
+        [:meta {:name "description" :content bark-description}]
+        [:meta {:property "og:title" :content title}]
+        [:meta {:property "og:description" :content bark-description}]
+        [:meta {:property "og:type" :content "website"}]
         [:link {:rel "stylesheet" :href pico-cdn}]
         [:title title]
         [:style (h/raw howto-css)]]
@@ -281,7 +286,8 @@
            [:li (theme-toggle-btn)]]]
          [:p.meta (str "Generated " generated-at)]
          (h/raw body-html)
-         [:script (h/raw theme-toggle-js)]]]]))))
+         [:script (h/raw theme-toggle-js)]]
+        (bark-footer)]]))))
 
 ;; ---------------------------------------------------------------------------
 ;; Filter feed links in "Getting the data" table

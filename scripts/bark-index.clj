@@ -19,7 +19,9 @@
 
 ;; Forward-declared for clj-kondo (provided at runtime by load-file calls below).
 (declare parse-cli-args load-config
-         pico-cdn theme-toggle-btn theme-toggle-js)
+         pico-cdn bark-description bark-repo-url bark-license-url
+         footer-css bark-footer
+         theme-toggle-btn theme-toggle-js)
 
 (load-file "scripts/bark-common.clj")
 (load-file "scripts/bark-html.clj")
@@ -174,7 +176,7 @@
 ;; CSS (inlined)
 ;; ---------------------------------------------------------------------------
 
-(def page-css "
+(def page-css (str "
   main.container { max-width: 1600px; }
   mark[data-type=bug]          { --pico-mark-background-color: #c0392b22; --pico-mark-color: #c0392b; }
   mark[data-type=announcement] { --pico-mark-background-color: #1a7a8a22; --pico-mark-color: #1a7a8a; }
@@ -209,7 +211,7 @@
   .controls { display: flex; gap: 0.5rem; align-items: center; }
   .controls label { font-size: 0.85rem; margin-bottom: 0; cursor: pointer; }
   .controls input[type=checkbox] { margin: 0; }
-")
+" footer-css))
 
 ;; ---------------------------------------------------------------------------
 ;; JS — client-side filtering, sorting, URL state, theme toggle.
@@ -254,6 +256,10 @@
         [:meta {:charset "UTF-8"}]
         [:meta {:name "viewport" :content "width=device-width, initial-scale=1"}]
         [:meta {:name "color-scheme" :content "light dark"}]
+        [:meta {:name "description" :content bark-description}]
+        [:meta {:property "og:title" :content "BARK — Reports"}]
+        [:meta {:property "og:description" :content bark-description}]
+        [:meta {:property "og:type" :content "website"}]
         [:link {:rel "stylesheet" :href pico-cdn}]
         (when has-rss?
           [:link {:rel "alternate" :type "application/rss+xml"
@@ -305,7 +311,8 @@
            [:tbody
             (for [r reports]
               (report-row r))]]]
-         [:script (h/raw (page-js types-json all-open?))]]]]))))
+         [:script (h/raw (page-js types-json all-open?))]]
+        (bark-footer)]]))))
 
 ;; ---------------------------------------------------------------------------
 ;; Main

@@ -19,7 +19,8 @@
 (declare load-datalevin-pod! all-reports report-pull-pattern
          report-priority report-status report-descendant-count
          format-date format-date-iso parse-cli-args load-config
-         pico-cdn theme-toggle-js bark-schema)
+         pico-cdn bark-description bark-repo-url bark-license-url
+         footer-css bark-footer theme-toggle-js bark-schema)
 
 (load-file "scripts/bark-common.clj")
 (load-file "scripts/bark-html.clj")
@@ -92,11 +93,15 @@
        (into {} (map (fn [[t rs]] [t (count rs)])))))
 
 (defn reports-by-month [reports]
-  (->> reports
-       (filter #(within-last-year? (report-date %)))
-       (group-by #(some-> (report-date %) format-date-iso (subs 0 7)))
-       (dissoc nil)
-       (into (sorted-map) (map (fn [[m rs]] [m (count rs)])))))
+  (let [counts (->> reports
+                    (filter #(within-last-year? (report-date %)))
+                    (group-by #(some-> (report-date %) format-date-iso (subs 0 7)))
+                    (dissoc nil)
+                    (into {} (map (fn [[m rs]] [m (count rs)]))))
+        ;; Generate all 12 months (current month back 11)
+        now    (java.time.YearMonth/now)
+        months (mapv #(str (.minusMonths now %)) (range 11 -1 -1))]
+    (into (sorted-map) (map (fn [m] [m (get counts m 0)])) months)))
 
 (defn email-vs-reports-ratio [reports total-email-count]
   (let [n (count (filter #(within-last-year? (report-date %)) reports))]
@@ -153,9 +158,14 @@
        (group-by #(get-in % [:report/email :email/source]))
        (into {} (map (fn [[src rs]] [(or src "unknown") (count rs)])))))
 
+(def closable-types
+  "Report types where open/closed status is meaningful."
+  #{:bug :patch :request})
+
 (defn open-closed-ratio [reports]
-  (let [open   (count (remove :report/closed reports))
-        closed (count (filter :report/closed reports))]
+  (let [closable (filter #(closable-types (:report/type %)) reports)
+        open     (count (remove :report/closed closable))
+        closed   (count (filter :report/closed closable))]
     {:open open :closed closed
      :ratio (when (pos? (+ open closed))
               (round2 (/ open (double (+ open closed)))))}))
@@ -185,6 +195,7 @@
   ([reports] (compute-stats reports nil))
   ([reports db]
    (let [last-year     (filter #(within-last-year? (report-date %)) reports)
+         closable-yr   (filter #(closable-types (:report/type %)) last-year)
          total-emails  (when db (total-emails db))]
      (cond->
        {:generated-at      (str (java.util.Date.))
@@ -192,13 +203,10 @@
         :reports-by-month  (reports-by-month reports)
         :time-to-close     (time-to-close-stats reports)
         :open-closed-ratio (open-closed-ratio reports)
-        :open-last-year    (count (remove :report/closed last-year))
+        :open-last-year    (count (remove :report/closed closable-yr))
         :total-last-year   (count last-year)
         :top-openers       (top-openers reports 10)
-        :source-breakdown  (source-breakdown reports)
-        :top-triggers      (top-trigger-users reports 10)
-        :vote-leaders      (vote-leaders reports 10)
-        :patch-series      (patch-series-stats reports)}
+        :vote-leaders      (vote-leaders reports 10)}
        total-emails (assoc :email-ratio (email-vs-reports-ratio reports total-emails))))))
 
 ;; ---------------------------------------------------------------------------
@@ -214,7 +222,7 @@
           :encoding encoding}
          extra))
 
-(def stats-css "
+(def stats-css (str "
    main.container { max-width: 1600px; }
   .kpis { display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 1rem; }
   .kpi  { border: 1px solid var(--pico-muted-border-color); border-radius: var(--pico-border-radius);
@@ -228,7 +236,7 @@
   .chart { width: 100%; }
   .meta  { font-size: 0.78rem; color: var(--pico-muted-color); margin-bottom: 2rem; }
   .theme-toggle { cursor: pointer; background: none; border: none; font-size: 1.2rem; padding: 0.3rem; }
-")
+" footer-css))
 
 (defn chart-div [id spec]
   (str "<div class=\"chart\" id=\"" id "\"></div>"
@@ -307,8 +315,7 @@
 (defn render-html [stats]
   (let [{:keys [generated-at reports-per-type reports-by-month
                 time-to-close open-closed-ratio open-last-year
-                top-openers source-breakdown top-triggers
-                patch-series email-ratio]} stats
+                top-openers email-ratio]} stats
         n-yr (reduce + (vals reports-per-type))
         pct  #(when % (str (Math/round (* 100.0 %)) "%"))]
     (str
@@ -318,6 +325,10 @@
      "<meta charset=\"UTF-8\">\n"
      "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
      "<meta name=\"color-scheme\" content=\"light dark\">\n"
+     "<meta name=\"description\" content=\"" bark-description "\">\n"
+     "<meta property=\"og:title\" content=\"BARK — Statistics\">\n"
+     "<meta property=\"og:description\" content=\"" bark-description "\">\n"
+     "<meta property=\"og:type\" content=\"website\">\n"
      "<link rel=\"stylesheet\" href=\"" pico-cdn "\">\n"
      "<script src=\"https://cdn.jsdelivr.net/npm/vega@5/build/vega.min.js\"></script>\n"
      "<script src=\"https://cdn.jsdelivr.net/npm/vega-lite@5/build/vega-lite.min.js\"></script>\n"
@@ -346,9 +357,6 @@
      (when time-to-close
        (kpi (str (:median-days time-to-close) "d") "Median to close"
             (str "avg " (:avg-days time-to-close) "d")))
-     (when patch-series
-       (kpi (:unique-series patch-series) "Patch series"
-            (str (:closed-series patch-series) " closed")))
      (when email-ratio
        (kpi (or (:ratio email-ratio) "—") "Report/email ratio"
             (str (:reports-last-year email-ratio) " reports / "
@@ -361,13 +369,15 @@
      (when time-to-close
        (chart-box "chart-ttc"   (chart-ttc time-to-close)))
      (chart-box "chart-openers" (chart-openers top-openers))
-     (when (seq source-breakdown)
-       (chart-box "chart-sources" (chart-sources source-breakdown)))
-     (when (seq top-triggers)
-       (chart-box "chart-triggers" (chart-triggers top-triggers)))
      "</div>\n"
 
-     "</main>\n</body>\n</html>\n")))
+     "</main>\n"
+     "<footer class=\"bark-footer\">"
+     "<a href=\"" bark-repo-url "\">BARK</a>"
+     " — Licensed under "
+     "<a href=\"" bark-license-url "\">EPL-2.0</a>"
+     "</footer>\n"
+     "</body>\n</html>\n")))
 
 ;; ---------------------------------------------------------------------------
 ;; Main
