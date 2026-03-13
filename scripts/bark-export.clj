@@ -459,7 +459,7 @@
   [base-dir reports-dir source-name]
   (apply process/shell "bb" "scripts/bark-howto.clj"
          "-o" (str base-dir "/howto.html")
-         "--dir" reports-dir
+         "--dir" base-dir
          (when source-name ["-n" source-name])))
 
 ;; ---------------------------------------------------------------------------
