@@ -16,6 +16,7 @@ function getSearchInput() { return document.getElementById('si'); }
 function setSearch(val) {
   getSearchInput().value = val;
   filterRows();
+  updateURL(true);
 }
 
 function localDate(d) {
@@ -131,6 +132,8 @@ function matchRow(tr, raw) {
   return clauses.some(function(c) { return matchClause(tr, parseClause(c)); });
 }
 
+var _searchTimer = null;
+
 function filterRows() {
   var raw  = getSearchInput().value;
   var rows = document.querySelectorAll('tbody tr');
@@ -142,32 +145,38 @@ function filterRows() {
   });
   document.getElementById('status').textContent = visible + '/' + rows.length + ' reports';
   updateURL();
+  clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(function() { updateURL(true); }, 600);
 }
 
 function toggleType(type, btn) {
   activeTypes[type] = !activeTypes[type];
   btn.classList.toggle('outline');
   filterRows();
+  updateURL(true);
 }
 
 function toggleAcked(btn) {
   onlyAcked = !onlyAcked;
   btn.classList.toggle('outline');
   filterRows();
+  updateURL(true);
 }
 
 function toggleOwned(btn) {
   onlyOwned = !onlyOwned;
   btn.classList.toggle('outline');
   filterRows();
+  updateURL(true);
 }
 
 function toggleClosed() {
   showClosed = document.getElementById('show-closed').checked;
   filterRows();
+  updateURL(true);
 }
 
-function updateURL() {
+function updateURL(push) {
   var params = new URLSearchParams();
   var q = getSearchInput().value;
   if (q) params.set('q', q);
@@ -182,7 +191,9 @@ function updateURL() {
     params.set('dir', sortState[sortKeys[0]]);
   }
   var qs = params.toString();
-  history.pushState(null, '', location.pathname + (qs ? '?' + qs : ''));
+  var url = location.pathname + (qs ? '?' + qs : '');
+  if (push) history.pushState(null, '', url);
+  else history.replaceState(null, '', url);
 }
 
 function restoreFromURL() {
@@ -244,7 +255,7 @@ function sortTable(colIdx, key) {
     return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
   });
   rows.forEach(function(r) { tbody.appendChild(r); });
-  updateURL();
+  updateURL(true);
 }
 
 restoreFromURL();
