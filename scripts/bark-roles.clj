@@ -21,10 +21,14 @@
     (if (nil? v) #{} (set (if (string? v) [v] v)))))
 
 (defn admin? [roles addr]
-  (= (:roles/admin roles) addr))
+  (and addr (:roles/admin roles)
+       (= (str/lower-case (:roles/admin roles))
+          (str/lower-case addr))))
 
 (defn maintainer? [roles addr]
-  (contains? (roles-set roles :roles/maintainers) addr))
+  (and addr
+       (let [maints (roles-set roles :roles/maintainers)]
+         (some #(= (str/lower-case %) (str/lower-case addr)) maints))))
 
 (defn admin-or-maintainer? [roles addr]
   (or (admin? roles addr) (maintainer? roles addr)))
