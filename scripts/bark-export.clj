@@ -190,7 +190,7 @@
           (assoc :patches
                  (let [h (mid-hash (:report/message-id report))]
                    (mapv (fn [p]
-                           (cond-> {:file   (str "../patches/" h "/" (:patch/filename p))
+                           (cond-> {:file   (str "patches/" h "/" (:patch/filename p))
                                     :source (name (:patch/source p))}
                              (:patch/author p)  (assoc :author  (:patch/author p))
                              (:patch/subject p) (assoc :subject (:patch/subject p))
