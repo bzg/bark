@@ -198,7 +198,7 @@
     (let [smtp (or (:smtp notif)
                    (do (log/error "No :smtp config under :notifications.")
                        (System/exit 1)))
-          conn (d/get-conn db-path bark-schema)]
+          conn (d/get-conn db-path bark-schema {:wal? false}))]
       (try
         (let [db       (d/db conn)
               now      (java.util.Date.)
