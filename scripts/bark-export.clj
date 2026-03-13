@@ -284,13 +284,17 @@
      (log/info "Wrote" (count data) "reports to" filename))))
 
 (defn- rfc822-date
-  "RFC 822 date from an ISO-ish date string or inst."
+  "RFC 822 date from a java.util.Date#toString string."
   [date-str]
   (try
-    (let [inst (java.time.Instant/parse date-str)]
-      (.format (doto (java.text.SimpleDateFormat. "EEE, dd MMM yyyy HH:mm:ss Z")
-                 (.setTimeZone (java.util.TimeZone/getTimeZone "UTC")))
-               (java.util.Date/from inst)))
+    (let [in-fmt  (doto (java.text.SimpleDateFormat. "EEE MMM dd HH:mm:ss zzz yyyy"
+                                                     java.util.Locale/ENGLISH)
+                    (.setLenient true))
+          d       (.parse in-fmt (str date-str))
+          out-fmt (doto (java.text.SimpleDateFormat. "EEE, dd MMM yyyy HH:mm:ss Z"
+                                                     java.util.Locale/ENGLISH)
+                    (.setTimeZone (java.util.TimeZone/getTimeZone "UTC")))]
+      (.format out-fmt d))
     (catch Exception _ nil)))
 
 (defn- rss-author [m]
