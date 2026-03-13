@@ -72,6 +72,4 @@
 
 (defn bark-footer []
   [:footer.bark-footer
-   [:a {:href bark-repo-url} "BARK"]
-   " — Licensed under "
-   [:a {:href bark-license-url} "EPL-2.0"]])
+   [:a {:href bark-repo-url} "Bark"]])

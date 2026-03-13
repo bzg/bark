@@ -193,4 +193,6 @@ sending, or =bb test-smtp= to send a test email to the global admin.
 
 Copyright © 2026 Bastien Guerry
 
-Distributed under the Eclipse Public License 2.0.
+The Clojure code is distributed under the Eclipse Public License 2.0
+and the Javascript code is distributed under the Mozilla Public
+License 2.0.
