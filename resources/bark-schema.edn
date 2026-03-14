@@ -95,6 +95,14 @@
                           :db/cardinality :db.cardinality/many}
  :series/closed          {:db/valueType :db.type/ref}
 
+ ;; --- Contributors (anyone who creates or updates a report) ---
+ :contributor/key        {:db/valueType :db.type/string
+                          :db/unique    :db.unique/identity}  ;; "source:email"
+ :contributor/source     {:db/valueType :db.type/string}
+ :contributor/email      {:db/valueType :db.type/string}
+ :contributor/name       {:db/valueType :db.type/string}
+ :contributor/since      {:db/valueType :db.type/instant}
+
  ;; --- Watermark ---
  :digest/id              {:db/valueType :db.type/string
                           :db/unique    :db.unique/identity}

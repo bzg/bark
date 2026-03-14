@@ -46,6 +46,24 @@
   (-> (d/q '[:find (count ?e) :where [?e :email/message-id _]] db)
       ffirst (or 0)))
 
+(defn all-contributors
+  "Fetch all contributor entities from the database."
+  [db]
+  (d/q '[:find ?email ?source ?since
+         :where
+         [?e :contributor/email ?email]
+         [?e :contributor/source ?source]
+         [?e :contributor/since ?since]]
+       db))
+
+(defn total-maintainers
+  "Count distinct maintainer addresses across all sources."
+  [db]
+  (let [addrs (d/q '[:find [?a ...]
+                      :where [_ :roles/maintainers ?a]]
+                    db)]
+    (count (distinct addrs))))
+
 ;; ---------------------------------------------------------------------------
 ;; Time helpers
 ;; ---------------------------------------------------------------------------
@@ -129,6 +147,29 @@
     ;; Return eager vector of [month count] pairs
     (mapv (fn [m] [m (get counts m 0)]) months)))
 
+(defn contributors-by-month
+  "Cumulative contributor count per month over the last 12 months.
+  `contributors` is the result of `all-contributors` (tuples of [email source since])."
+  [contributors]
+  (let [by-ym (->> contributors
+                   (keep (fn [[_ _ since]] (date->ym since)))
+                   frequencies)
+        [cy cm] (current-ym)
+        months (vec (for [i (range 11 -1 -1)]
+                      (let [total (+ (* cy 12) (dec cm) (- i))
+                            y     (quot total 12)
+                            m     (inc (mod total 12))]
+                        (format "%04d-%02d" y m))))
+        first-month (first months)
+        ;; Contributors registered before the 12-month window
+        base (->> by-ym
+                  (filter (fn [[ym _]] (neg? (compare ym first-month))))
+                  (map val)
+                  (reduce + 0))
+        new-per-month (map #(get by-ym % 0) months)
+        cumulative (rest (reductions + base new-per-month))]
+    (mapv vector months cumulative)))
+
 (defn email-vs-reports-ratio [reports total-email-count]
   (let [n (count (filter #(within-last-year? (report-date %)) reports))]
     {:reports-last-year n
@@ -208,7 +249,9 @@
   ([reports db]
    (let [last-year     (filter #(within-last-year? (report-date %)) reports)
          closable-yr   (filter #(closable-types (:report/type %)) last-year)
-         total-emails  (when db (total-emails db))]
+         total-emails  (when db (total-emails db))
+         contributors  (when db (all-contributors db))
+         n-maintainers (when db (total-maintainers db))]
      (cond->
        {:generated-at      (str (java.util.Date.))
         :reports-per-type  (reports-per-type reports)
@@ -220,7 +263,10 @@
         :top-openers       (top-openers reports 10)
         :vote-leaders      (vote-leaders reports 10)
         :closed-cancel     (closed-cancel-breakdown reports)}
-       total-emails (assoc :email-ratio (email-vs-reports-ratio reports total-emails))))))
+       total-emails  (assoc :email-ratio (email-vs-reports-ratio reports total-emails))
+       contributors  (assoc :contributors-by-month (contributors-by-month contributors)
+                            :total-contributors (count contributors))
+       n-maintainers (assoc :total-maintainers n-maintainers)))))
 
 ;; ---------------------------------------------------------------------------
 ;; HTML / Vega-Lite rendering
@@ -303,6 +349,26 @@
          :color   {:field "reason" :type "nominal"       :title "Close reason"}
          :xOffset {:field "reason"}})))
 
+(defn chart-contributors
+  "Cumulative contributors line chart with a maintainer-count reference rule."
+  [contributors-by-month n-maintainers]
+  (let [data (mapv (fn [[m c]] {"month" m "contributors" c}) contributors-by-month)]
+    {:$schema  "https://vega.github.io/schema/vega-lite/v5.json"
+     :title    "Contributors & maintainers (last 12 months)"
+     :width    "container"
+     :layer
+     [{:data     {:values data}
+       :mark     {:type "line" :point true :tooltip true}
+       :encoding {:x {:field "month" :type "ordinal" :sort "ascending"
+                      :axis {:labelAngle -45}}
+                  :y {:field "contributors" :type "quantitative"
+                      :title "People"}}}
+      {:data     {:values [{"label" (str "Maintainers: " n-maintainers)
+                            "y" n-maintainers}]}
+       :mark     {:type "rule" :strokeDash [4 4] :tooltip true}
+       :encoding {:y     {:field "y" :type "quantitative"}
+                  :color {:value "#e45756"}}}]}))
+
 ;; HTML assembly
 
 (defn kpi [value label & [sub]]
@@ -374,7 +440,8 @@
 (defn render-html [stats out-dir]
   (let [{:keys [generated-at reports-per-type reports-by-month
                 time-to-close open-closed-ratio open-last-year
-                top-openers email-ratio closed-cancel]} stats
+                top-openers email-ratio closed-cancel
+                contributors-by-month total-contributors total-maintainers]} stats
         n-yr (reduce + (vals reports-per-type))
         pct  #(when % (str (Math/round (* 100.0 %)) "%"))
         nav-html (str (h/html (nav-bar "BARK — Data" "data")))
@@ -419,11 +486,17 @@
        (kpi (or (:ratio email-ratio) "—") "Report/email ratio"
             (str (:reports-last-year email-ratio) " reports / "
                  (:total-emails email-ratio) " emails")))
+     (when total-contributors
+       (kpi total-contributors "Contributors"
+            (when total-maintainers (str total-maintainers " maintainers"))))
      "</div>\n"
 
      "<div class=\"grid\">\n"
      (chart-box "chart-month"   (chart-by-month reports-by-month))
      (chart-box "chart-type"    (chart-per-type reports-per-type))
+     (when (seq contributors-by-month)
+       (chart-box "chart-contributors"
+                  (chart-contributors contributors-by-month (or total-maintainers 0))))
      (when time-to-close
        (chart-box "chart-ttc"   (chart-ttc time-to-close)))
      (chart-box "chart-openers" (chart-openers top-openers))

@@ -122,6 +122,24 @@
 ;; DB operations
 ;; ---------------------------------------------------------------------------
 
+(defn ensure-contributor!
+  "Record `from-addr` as a contributor for `source-name` if not already known.
+  Called when someone creates a report or threads onto one.
+  `date-sent` is the original email date, used as :contributor/since."
+  [conn source-name from-addr from-name date-sent]
+  (when (and source-name from-addr)
+    (let [k (str source-name ":" (str/lower-case from-addr))]
+      (when-not (d/q '[:find ?e .
+                        :in $ ?k
+                        :where [?e :contributor/key ?k]]
+                     (d/db conn) k)
+        (d/transact! conn [{:contributor/key    k
+                            :contributor/source source-name
+                            :contributor/email  (str/lower-case from-addr)
+                            :contributor/name   (or from-name "")
+                            :contributor/since  (or date-sent (java.util.Date.))}])
+        (log/info "New contributor:" from-addr "on" source-name)))))
+
 (defn get-last-run [db]
   (d/q '[:find ?t . :where [?e :digest/id "watermark"] [?e :digest/last-run ?t]] db))
 
@@ -131,7 +149,7 @@
 (def email-pull-pattern
   '[:db/id :email/imap-uid :email/source :email/subject :email/message-id
     :email/in-reply-to :email/references
-    :email/from-address :email/date-sent :email/ingested-at
+    :email/from-address :email/from-name :email/date-sent :email/ingested-at
     :email/body-text :email/body-text-from-html :email/headers-edn
     {:email/attachments [:attachment/filename :attachment/content-type :attachment/data]}])
 
@@ -229,6 +247,8 @@
                 (if new-report?
                   (do (log/info (str "[" (name (:type report-info)) "]") (:email/subject email))
                       (create-report! conn eid message-id report-info)
+                      (ensure-contributor! conn source-name from-addr
+                                           (:email/from-name email) (:email/date-sent email))
                       (when (and (= :release (:type report-info)) (:version report-info))
                         (close-changes-for-release! conn (:version report-info) eid))
                       (let [rid (d/q '[:find ?r . :in $ ?mid :where [?r :report/message-id ?mid]]
@@ -247,6 +267,8 @@
                 (if (seq parent-report-eids)
                   (do (doseq [rid parent-report-eids]
                         (add-descendant! conn rid eid))
+                      (ensure-contributor! conn source-name from-addr
+                                           (:email/from-name email) (:email/date-sent email))
                       (doseq [rid nearest-report-eids]
                         (when-let [rtype (or (type-index rid)
                                              (d/q '[:find ?t . :in $ ?r
