@@ -69,16 +69,4 @@ Important.
 | match1 \vert match2             |       | Reports matching "match1" or "match2"                 |
 | *                           |       | Wildcard for from/acked/owned/closed/urgent/important |
 
-** Getting the data
-
-| Type          | Format         |
-|---------------+----------------|
-| All reports   | [[reports/all.json][json]], [[reports/all.xml][rss]], [[reports/all.org][org]] |
-|---------------+----------------|
-| Announcements | [[reports/announcements.json][json]], [[reports/announcements.xml][rss]], [[reports/announcements.org][org]] |
-| Bugs          | [[reports/bugs.json][json]], [[reports/bugs.xml][rss]], [[reports/bugs.org][org]] |
-| Changes       | [[reports/changes.json][json]], [[reports/changes.xml][rss]], [[reports/changes.org][org]] |
-| Patches       | [[reports/patches.json][json]], [[reports/patches.xml][rss]], [[reports/patches.org][org]] |
-| Releases      | [[reports/releases.json][json]], [[reports/releases.xml][rss]], [[reports/releases.org][org]] |
-| Requests      | [[reports/requests.json][json]], [[reports/requests.xml][rss]], [[reports/requests.org][org]] |
 
