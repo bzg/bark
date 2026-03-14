@@ -62,11 +62,16 @@
 (s/def :source/list-archive (s/and ::non-blank-string #(re-find #"^https?://" %)))
 (s/def :source/bark-path ::non-blank-string)
 
+;; Per-source notifications (optional) — override global notification gate
+(s/def :source-notif/enable boolean?)
+(s/def :source/notifications (s/keys :req-un [:source-notif/enable]))
+
 (s/def ::source
   (s/keys :req-un [:source/name]
           :opt-un [:source/match :source/admin :source/list-post
                    :source/list-archive :source/triggers :source/labels
-                   :source/bark-path :source/export-reports]))
+                   :source/bark-path :source/export-reports
+                   :source/notifications]))
 
 (s/def :bark/sources
   (s/and (s/coll-of ::source :kind vector? :min-count 1)
@@ -178,7 +183,9 @@
                         (when-let [m (:match src)] (str "(match: " (pr-str m) ")"))
                         (when-let [ml (:list-post src)] (str "list: " ml))
                         (when-let [la (:list-archive src)] (str "archive: " la))
-                        (when-let [a (:admin src)] (str "admin: " a))))
+                        (when-let [a (:admin src)] (str "admin: " a))
+                        (when (some? (get-in src [:notifications :enable]))
+                          (str "notify: " (get-in src [:notifications :enable])))))
             (log/info "  DB path:" (get-in config [:db :path]))
             (when-let [ingest (:ingest config)]
               (log/info "  Initial:" (or (:initial-fetch ingest) 50) "msgs"))

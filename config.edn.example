@@ -63,6 +63,10 @@
             ;; Overrides global :export-reports for this source.
             ;; Default: all types (when absent).
             ;; :export-reports #{:bug :patch :request}
+            ;;
+            ;; Per-source notifications (optional).
+            ;; When global :notifications :enabled is true, a source can opt out:
+            ;; :notifications {:enable false}
             }
 
            ;; --- Use-case 2: email address (alias or mailbox) ---

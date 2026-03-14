@@ -22,7 +22,7 @@
 ;; Forward-declared for clj-kondo (provided at runtime by load-file below).
 (declare load-datalevin-pod! get-header format-date format-date-iso
          report-priority report-status report-descendant-count
-         all-reports report-pull-pattern load-config bark-schema)
+         all-reports report-pull-pattern load-config build-source-map bark-schema)
 
 (load-file "scripts/bark-common.clj")
 
@@ -160,6 +160,16 @@
       nil)))
 
 ;; ---------------------------------------------------------------------------
+;; Per-source notification gate
+;; ---------------------------------------------------------------------------
+
+(defn- source-notify-enabled?
+  "True unless the source explicitly sets :notifications {:enable false}."
+  [source-map source-name]
+  (let [src-cfg (get source-map source-name)]
+    (not (false? (get-in src-cfg [:notifications :enable])))))
+
+;; ---------------------------------------------------------------------------
 ;; SMTP
 ;; ---------------------------------------------------------------------------
 
@@ -198,10 +208,11 @@
     (let [smtp (or (:smtp notif)
                    (do (log/error "No :smtp config under :notifications.")
                        (System/exit 1)))
-          conn (d/get-conn db-path bark-schema {:wal? false}))]
+          conn (d/get-conn db-path bark-schema {:wal? false})]
       (try
         (let [db       (d/db conn)
               now      (java.util.Date.)
+              src-map  (build-source-map config)
               reports  (all-reports db)
               prefs    (all-notify-prefs db)
               _        (do (log/debug (count prefs) "notify pref(s) found")
@@ -212,7 +223,15 @@
                                         "interval=" (:notify/interval-days p))))
               enabled  (filter :notify/enabled prefs)
               _        (log/debug (count enabled) "enabled")
-              on-time  (if force? enabled (filter #(due? % now) enabled))
+              src-ok   (filter #(source-notify-enabled? src-map (:notify/source %)) enabled)
+              _        (do (when (< (count src-ok) (count enabled))
+                             (doseq [p enabled
+                                     :when (not (source-notify-enabled? src-map (:notify/source p)))]
+                               (log/debug "SKIPPED" (:notify/email p)
+                                          "— notifications disabled for source"
+                                          (:notify/source p))))
+                           (log/debug (count src-ok) "after per-source filter"))
+              on-time  (if force? src-ok (filter #(due? % now) src-ok))
               _        (log/debug (count on-time) "due"
                                   (when force? "(--force, skipped interval check)"))
               due      (filter #(still-privileged? db %) on-time)

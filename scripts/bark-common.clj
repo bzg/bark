@@ -268,7 +268,7 @@
           (map (fn [src]
                  [(:name src)
                   (merge {:admin (or (:admin src) default-admin)}
-                         (select-keys src [:list-post :triggers :labels
+                         (select-keys src [:list-post :triggers :labels :notifications
                                            :archive-format-string :list-archive :bark-path])
                          (when-let [lid (get-in src [:match :list-id])] {:list-id lid})
                          (when global-st {:global-labels global-st})
