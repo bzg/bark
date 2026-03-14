@@ -109,7 +109,12 @@
 (defn bark-footer []
   [:footer.bark-footer
    [:a {:href bark-repo-url} "Bark"]
+   " is "
+   [:a {:href "https://www.gnu.org/philosophy/free-sw.html"}
+    "Free Software"]
    " — "
    [:a {:href "reports/all.xml"} "RSS"]
    " — "
-   [:a {:href "reports/all.json"} "JSON"]])
+   [:a {:href "reports/all.json"} "JSON"]
+   " — "
+   [:a {:href "reports/all.org"} "Org"]])
