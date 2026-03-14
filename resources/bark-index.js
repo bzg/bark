@@ -20,6 +20,24 @@ function setSearch(val) {
   pushURL();
 }
 
+function resetFilters() {
+  onlyOpen = false;
+  onlyAcked = false;
+  onlyOwned = false;
+  allTypes.forEach(function(t) { activeTypes[t] = true; });
+  document.getElementById('btn-open').classList.add('outline');
+  document.getElementById('btn-acked').classList.add('outline');
+  document.getElementById('btn-owned').classList.add('outline');
+  document.querySelectorAll('.filters button[data-type]').forEach(function(btn) {
+    btn.classList.remove('outline');
+  });
+}
+
+function showRelated(val) {
+  resetFilters();
+  setSearch(val);
+}
+
 function localDate(d) {
   var y = d.getFullYear();
   var m = String(d.getMonth() + 1).padStart(2, '0');

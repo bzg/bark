@@ -85,7 +85,7 @@
     [:small.secondary
      " "
      [:a {:href "#"
-          :onclick (str "setSearch('m:" mids "'); return false;")
+          :onclick (str "showRelated('m:" mids "'); return false;")
           :title "Filter related reports"}
       (str "↳ " (count related) " related")]]))
 
