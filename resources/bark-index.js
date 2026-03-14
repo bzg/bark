@@ -17,7 +17,7 @@ function getSearchInput() { return document.getElementById('si'); }
 function setSearch(val) {
   getSearchInput().value = val;
   filterRows();
-  updateURL(true);
+  pushURL();
 }
 
 function localDate(d) {
@@ -132,8 +132,7 @@ function matchRow(tr, raw) {
   return clauses.some(function(c) { return matchClause(tr, parseClause(c)); });
 }
 
-var _searchTimer = null;
-var _restoring   = false;
+/* ── Pure display: no side effects ─────────────────────────── */
 
 function filterRows() {
   var raw  = getSearchInput().value;
@@ -145,41 +144,11 @@ function filterRows() {
     if (show) visible++;
   });
   document.getElementById('status').textContent = visible + '/' + rows.length + ' reports';
-  updateURL();
-  clearTimeout(_searchTimer);
-  _searchTimer = setTimeout(function() { updateURL(true); }, 600);
 }
 
-function toggleType(type, btn) {
-  activeTypes[type] = !activeTypes[type];
-  btn.classList.toggle('outline');
-  filterRows();
-  updateURL(true);
-}
+/* ── URL ↔ state (no history decision here) ───────────────── */
 
-function toggleAcked(btn) {
-  onlyAcked = !onlyAcked;
-  btn.classList.toggle('outline');
-  filterRows();
-  updateURL(true);
-}
-
-function toggleOwned(btn) {
-  onlyOwned = !onlyOwned;
-  btn.classList.toggle('outline');
-  filterRows();
-  updateURL(true);
-}
-
-function toggleOpen(btn) {
-  onlyOpen = !onlyOpen;
-  btn.classList.toggle('outline');
-  filterRows();
-  updateURL(true);
-}
-
-function updateURL(push) {
-  if (push) clearTimeout(_searchTimer);
+function buildURL() {
   var params = new URLSearchParams();
   var q = getSearchInput().value;
   if (q) params.set('q', q);
@@ -194,16 +163,89 @@ function updateURL(push) {
     params.set('dir', sortState[sortKeys[0]]);
   }
   var qs = params.toString();
-  var url = location.pathname + (qs ? '?' + qs : '');
-  if (push && !_restoring) history.pushState(null, '', url);
-  else history.replaceState(null, '', url);
+  return location.pathname + (qs ? '?' + qs : '');
 }
 
+function pushURL()    { history.pushState(null, '', buildURL()); }
+function replaceURL() { history.replaceState(null, '', buildURL()); }
+
+/* ── Button handlers: mutate → display → one pushState ────── */
+
+function toggleType(type, btn) {
+  activeTypes[type] = !activeTypes[type];
+  btn.classList.toggle('outline');
+  filterRows();
+  pushURL();
+}
+
+function toggleAcked(btn) {
+  onlyAcked = !onlyAcked;
+  btn.classList.toggle('outline');
+  filterRows();
+  pushURL();
+}
+
+function toggleOwned(btn) {
+  onlyOwned = !onlyOwned;
+  btn.classList.toggle('outline');
+  filterRows();
+  pushURL();
+}
+
+function toggleOpen(btn) {
+  onlyOpen = !onlyOpen;
+  btn.classList.toggle('outline');
+  filterRows();
+  pushURL();
+}
+
+/* ── Search input: no history push, just replaceState ─────── */
+
+function onSearchInput() {
+  filterRows();
+  replaceURL();
+}
+
+/* ── Sort: pure DOM reorder + one pushState when user-initiated */
+
+var sortState = {};
+
+function doSort(colIdx, key, dir) {
+  var tbody = document.querySelector('tbody');
+  var rows  = Array.from(tbody.querySelectorAll('tr'));
+  document.querySelectorAll('th[data-sort]').forEach(function(th) {
+    th.classList.remove('asc', 'desc');
+  });
+  document.querySelector('th[data-sort="' + key + '"]').classList.add(dir);
+  var isDate = /^\d{4}-\d{2}-\d{2}$/;
+  rows.sort(function(a, b) {
+    var ac = a.children[colIdx], bc = b.children[colIdx];
+    var av = (ac.getAttribute('data-value') || ac.textContent).trim().toLowerCase();
+    var bv = (bc.getAttribute('data-value') || bc.textContent).trim().toLowerCase();
+    if (isDate.test(av) && isDate.test(bv))
+      return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+    var an = parseFloat(av), bn = parseFloat(bv);
+    if (!isNaN(an) && !isNaN(bn)) return dir === 'asc' ? an - bn : bn - an;
+    return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+  });
+  rows.forEach(function(r) { tbody.appendChild(r); });
+}
+
+/* Called from onclick on <th> — user-initiated, pushes history */
+function sortTable(colIdx, key) {
+  var dir = sortState[key] === 'asc' ? 'desc' : 'asc';
+  sortState = {};
+  sortState[key] = dir;
+  doSort(colIdx, key, dir);
+  pushURL();
+}
+
+/* ── Restore from URL: reads URL → sets state → displays.     */
+/*    Touches NO history (the URL is already correct).          */
+
 function restoreFromURL() {
-  _restoring = true;
   var params = new URLSearchParams(location.search);
 
-  // Reset all state to defaults first
   getSearchInput().value = params.get('q') || '';
 
   if (params.has('types')) {
@@ -225,7 +267,6 @@ function restoreFromURL() {
   onlyOwned = params.get('owned') === '1';
   document.getElementById('btn-owned').classList.toggle('outline', !onlyOwned);
 
-  // Reset sort
   document.querySelectorAll('th[data-sort]').forEach(function(th) {
     th.classList.remove('asc', 'desc');
   });
@@ -235,40 +276,12 @@ function restoreFromURL() {
     var dir = params.get('dir');
     var th  = document.querySelector('th[data-sort="' + key + '"]');
     if (th && (dir === 'asc' || dir === 'desc')) {
-      var colIdx = Array.from(th.parentNode.children).indexOf(th);
-      sortState[key] = dir === 'asc' ? 'desc' : 'asc'; // pre-flip: sortTable toggles
-      sortTable(colIdx, key);
+      sortState[key] = dir;
+      doSort(Array.from(th.parentNode.children).indexOf(th), key, dir);
     }
   }
+
   filterRows();
-  _restoring = false;
-}
-
-var sortState = {};
-
-function sortTable(colIdx, key) {
-  var tbody = document.querySelector('tbody');
-  var rows  = Array.from(tbody.querySelectorAll('tr'));
-  var dir   = sortState[key] === 'asc' ? 'desc' : 'asc';
-  sortState = {};
-  sortState[key] = dir;
-  document.querySelectorAll('th[data-sort]').forEach(function(th) {
-    th.classList.remove('asc', 'desc');
-  });
-  document.querySelector('th[data-sort="' + key + '"]').classList.add(dir);
-  var isDate = /^\d{4}-\d{2}-\d{2}$/;
-  rows.sort(function(a, b) {
-    var ac = a.children[colIdx], bc = b.children[colIdx];
-    var av = (ac.getAttribute('data-value') || ac.textContent).trim().toLowerCase();
-    var bv = (bc.getAttribute('data-value') || bc.textContent).trim().toLowerCase();
-    if (isDate.test(av) && isDate.test(bv))
-      return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
-    var an = parseFloat(av), bn = parseFloat(bv);
-    if (!isNaN(an) && !isNaN(bn)) return dir === 'asc' ? an - bn : bn - an;
-    return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
-  });
-  rows.forEach(function(r) { tbody.appendChild(r); });
-  updateURL(true);
 }
 
 restoreFromURL();
