@@ -70,14 +70,12 @@
 (defn- subject-el [subject role archived-at closed? close-reason]
   (let [canceled? (and closed? (= close-reason "canceled"))
         resolved? (and closed? (not canceled?))
-        text      (cond canceled? (str "❌ " subject)
-                        resolved? (str "✅ " subject)
-                        :else     subject)
-        inner     (case role
-                    "admin"      [:strong text]
-                    "maintainer" [:em text]
-                    text)
-        inner     (if canceled? [:s inner] inner)]
+        inner     (if (#{"admin" "maintainer"} role)
+                    [:strong subject]
+                    subject)
+        inner     (cond canceled? [:s inner]
+                        resolved? [:em inner]
+                        :else     inner)]
     (if archived-at
       [:a {:href archived-at} inner]
       inner)))
