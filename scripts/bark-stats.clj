@@ -218,7 +218,7 @@
               (round2 (/ open (double (+ open closed)))))}))
 
 (defn closed-cancel-breakdown
-  "Among closed closable reports, count canceled vs other per type."
+  "Among closed closable reports, count canceled vs resolved per type."
   [reports]
   (let [closed (->> reports
                     (filter #(closable-types (:report/type %)))
@@ -228,8 +228,8 @@
          (into {}
                (map (fn [[t rs]]
                       (let [canceled (count (filter #(= :canceled (:report/close-reason %)) rs))
-                            other    (- (count rs) canceled)]
-                        [t {:canceled canceled :other other}])))))))
+                            resolved (- (count rs) canceled)]
+                        [t {:canceled canceled :resolved resolved}])))))))
 
 (defn vote-leaders [reports n]
   (->> reports
@@ -339,11 +339,11 @@
          :x {:field "count" :type "quantitative" :title "Reports opened"}})))
 
 (defn chart-cancel-breakdown [cancel-data]
-  (let [data (mapcat (fn [[t {:keys [canceled other]}]]
+  (let [data (mapcat (fn [[t {:keys [canceled resolved]}]]
                        [{"type" t "reason" "Canceled" "count" canceled}
-                        {"type" t "reason" "Other"    "count" other}])
+                        {"type" t "reason" "Resolved" "count" resolved}])
                      cancel-data)]
-    (vl "Closed reports: canceled vs other" "bar" (vec data)
+    (vl "Closed reports: canceled vs resolved" "bar" (vec data)
         {:x       {:field "type"   :type "nominal"      :title "Type"}
          :y       {:field "count"  :type "quantitative"  :title "Reports"}
          :color   {:field "reason" :type "nominal"       :title "Close reason"}
@@ -505,7 +505,7 @@
      "</div>\n"
 
      "</main>\n"
-     (str (h/html (bark-footer)))
+     (h/html (bark-footer))
      "</body>\n</html>\n")))
 
 ;; ---------------------------------------------------------------------------
