@@ -363,20 +363,39 @@
                 "</rss>\n"))
      (log/info "Wrote" (count data) "reports to" filename))))
 
+(defn- format-org-inactive-ts
+  "Parse a java.util.Date#toString and return an Org inactive timestamp
+  like [2026-03-12 Thu 20:05]."
+  [date-raw]
+  (try
+    (let [in-fmt  (doto (java.text.SimpleDateFormat. "EEE MMM dd HH:mm:ss zzz yyyy"
+                                                     java.util.Locale/ENGLISH)
+                    (.setLenient true))
+          d       (.parse in-fmt (str date-raw))
+          out-fmt (doto (java.text.SimpleDateFormat. "yyyy-MM-dd EEE HH:mm"
+                                                     java.util.Locale/ENGLISH)
+                    (.setTimeZone (java.util.TimeZone/getTimeZone "UTC")))]
+      (str "[" (.format out-fmt d) "]"))
+    (catch Exception _ (str date-raw))))
+
+(defn- strip-angle-brackets [s]
+  (when s (str/replace s #"^<|>$" "")))
+
 (defn- report->org-entry [m]
   (let [todo    (if (= (nth (:flags m "---") 2 \-) \C) "DONE" "TODO")
         prio    (case (:priority m 0)
-                  3 "[#A] " 2 "[#A] " 1 "[#B] " "")
+                  3 "[#A] " 2 "[#B] " 1 "[#C] " "")
         subject (:subject m "")
         tags    (when-let [t (:type m)] (str ":" t ":"))
+        org-date (format-org-inactive-ts (:date-raw m))
         props   (remove nil?
                         [(str ":FROM: " (:from m ""))
-                         (str ":DATE: " (:date m ""))
-                         (when-let [mid (:message-id m)] (str ":MESSAGE-ID: " mid))
+                         (str ":DATE: " org-date)
+                         (when-let [mid (:message-id m)]
+                           (str ":MESSAGE-ID: " (strip-angle-brackets mid)))
                          (when-let [a (:archived-at m)]  (str ":ARCHIVED-AT: " a))
                          (str ":FLAGS: " (:flags m "---"))
                          (str ":STATUS: " (:status m 0))
-                         (str ":PRIORITY: " (:priority m 0))
                          (str ":REPLIES: " (:replies m 0))
                          (when-let [v (:version m)]      (str ":VERSION: " v))
                          (when-let [t (:topic m)]        (str ":TOPIC: " t))
