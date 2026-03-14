@@ -164,17 +164,28 @@
                                   #(- (report-descendant-count %)))
                             compare by-topic)
         owned      (filter #(owned-by? % email) relevant)
+        owned-dl   (->> owned
+                        (filter :report/deadline)
+                        (sort-by #(.getTime ^java.util.Date (:report/deadline %))))
+        owned-rest (->> owned
+                        (remove :report/deadline)
+                        (sort-by #(- (report-priority %))))
         unacked    (->> relevant
                         (filter unacked?)
                         (filter unowned?))
+        sec-dl     (section
+                    (str "== Upcoming deadlines — owned by you (" source ") ==")
+                    owned-dl)
         sec-owned  (section
                     (str "== Open bugs/patches/requests owned by you (" source ") ==")
-                    owned)
+                    owned-rest)
         sec-unack  (section
                     (str "== Unacked & unowned bugs/patches/requests (" source ") ==")
                     unacked)]
-    (if (or sec-owned sec-unack)
-      (str (or sec-owned "")
+    (if (or sec-dl sec-owned sec-unack)
+      (str (or sec-dl "")
+           (when (and sec-dl (or sec-owned sec-unack)) "\n")
+           (or sec-owned "")
            (when (and sec-owned sec-unack) "\n")
            (or sec-unack "")
            "\n--\nSent by Bark. Reply with \"Notify: off\" to unsubscribe.")
