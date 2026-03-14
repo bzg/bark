@@ -276,7 +276,7 @@
   ([reports out-dir source-name source-map maintainers-map basename]
    (let [data     (mapv #(report->map % source-map maintainers-map) reports)
          meta     (source-metadata source-name source-map)
-         envelope (cond-> {:format-version "0.2.1"
+         envelope (cond-> {:format-version "0.2.2"
                            :source         source-name
                            :reports        data}
                     (seq meta) (merge meta))
