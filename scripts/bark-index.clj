@@ -77,7 +77,10 @@
                         resolved? [:em inner]
                         :else     inner)]
     (if archived-at
-      [:a {:href archived-at} inner]
+      [:a (cond-> {:href archived-at}
+             canceled? (assoc :title "Canceled")
+             resolved? (assoc :title "Resolved"))
+       inner]
       inner)))
 
 (defn- related-mids [related]
