@@ -1,6 +1,6 @@
 #!/usr/bin/env bb
 
-;; bark-howto.clj — Generate public/<source>/howto.html from docs/howto-tpl.org.
+;; bark-howto.clj — Generate public/<source>/howto.html from resources/howto-tpl.org.
 ;;
 ;; Reads the org template and substitutes source-specific labels and
 ;; triggers into the unified table, based on merged config
@@ -367,7 +367,7 @@
       ;; Infer out-dir from out-file when not given explicitly
       effective-dir (or out-dir
                        (.getParent (clojure.java.io/file out-file)))
-      org-text    (-> (slurp "docs/howto-tpl.org")
+      org-text    (-> (slurp "resources/howto-tpl.org")
                       (substitute-template labels triggers)
                       (filter-feed-links effective-dir))
       body-html   (org->html org-text)
