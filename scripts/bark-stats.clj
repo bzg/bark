@@ -92,26 +92,25 @@
        (group-by #(some-> (:report/type %) name))
        (into {} (map (fn [[t rs]] [t (count rs)])))))
 
-(def ^:private month-names
-  {"Jan" "01" "Feb" "02" "Mar" "03" "Apr" "04"
-   "May" "05" "Jun" "06" "Jul" "07" "Aug" "08"
-   "Sep" "09" "Oct" "10" "Nov" "11" "Dec" "12"})
+(def ^:private ym-formatter
+  "Locale-independent yyyy-MM formatter (UTC)."
+  (doto (java.text.SimpleDateFormat. "yyyy-MM" java.util.Locale/ENGLISH)
+    (.setTimeZone (java.util.TimeZone/getTimeZone "UTC"))))
 
 (defn- date->ym
-  "Extract 'yyyy-MM' from a java.util.Date using its toString (local time).
+  "Extract 'yyyy-MM' from a java.util.Date using a locale-independent formatter.
   Returns nil on failure."
   [date]
   (when date
-    (when-let [[_ mon year] (re-find #"^\w+ (\w+) \d+ .+ (\d{4})$" (str date))]
-      (when-let [m (month-names mon)]
-        (str year "-" m)))))
+    (try (.format ym-formatter date)
+         (catch Exception _ nil))))
 
 (defn- current-ym
-  "Return [year month] for right now using (str (java.util.Date.))."
+  "Return [year month] for right now, locale-independent."
   []
-  (let [s (str (java.util.Date.))]
-    (when-let [[_ mon year] (re-find #"^\w+ (\w+) \d+ .+ (\d{4})$" s)]
-      [(parse-long year) (parse-long (month-names mon))])))
+  (let [s (.format ym-formatter (java.util.Date.))
+        [year month] (str/split s #"-")]
+    [(parse-long year) (parse-long month)]))
 
 (defn reports-by-month [reports]
   (let [;; Group all reports by yyyy-MM (local time, matching what users see)
@@ -147,10 +146,10 @@
        :max-days       (round2 (last durations))
        :avg-days       (round2 (/ (reduce + durations) (count durations)))
        :median-days    (round2 (median durations))
-       :buckets        {:same-day       (count (filter #(<  % 1)   durations))
-                        :within-week    (count (filter #(<= 1  % 7)  durations))
-                        :within-month   (count (filter #(<= 8  % 30) durations))
-                        :within-quarter (count (filter #(<= 31 % 90) durations))
+       :buckets        {:same-day       (count (filter #(<  % 1)    durations))
+                        :within-week    (count (filter #(and (>= % 1)  (< % 7))   durations))
+                        :within-month   (count (filter #(and (>= % 7)  (< % 30))  durations))
+                        :within-quarter (count (filter #(and (>= % 30) (<= % 90)) durations))
                         :longer         (count (filter #(>  % 90)    durations))}})))
 
 (defn top-openers [reports n]

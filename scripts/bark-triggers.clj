@@ -130,10 +130,10 @@
 ;; ---------------------------------------------------------------------------
 
 (def directive-by-pattern
-  #"(?m)^(Acked|Owned|Closed|Urgent|Important)-by:\s+(\S+@\S+)[.,;:]?\s*$")
+  #"^(Acked|Owned|Closed|Urgent|Important)-by:\s+(\S+@\S+)[.,;:]?\s*$")
 
 (def directive-un-pattern
-  #"(?m)^(Unacked|Unowned|Unclosed|Unurgent|Unimportant)[.,;:]?\s*$")
+  #"^(Unacked|Unowned|Unclosed|Unurgent|Unimportant)[.,;:]?\s*$")
 
 (def ^:private directive-attr
   {"Acked"     :report/acked
@@ -154,19 +154,19 @@
 ;; ---------------------------------------------------------------------------
 
 (def ^:private deadline-pattern
-  "Matches 'Deadline: 2026-03-10.' (with trailing punctuation)."
-  #"(?m)^Deadline:\s+(\d{4}-\d{2}-\d{2})[.,;:]?\s*$")
+  "Matches 'Deadline: 2026-03-10' (with optional trailing punctuation)."
+  #"^Deadline:\s+(\d{4}-\d{2}-\d{2})[.,;:]?\s*$")
 
 (def ^:private undeadline-pattern
-  #"(?m)^Undeadline[.,;:]?\s*$")
+  #"^Undeadline[.,;:]?\s*$")
 
 ;; ---------------------------------------------------------------------------
 ;; Topic directive — maintainer-set topic (last-one-wins, overwrites)
 ;; ---------------------------------------------------------------------------
 
 (def ^:private topic-directive-pattern
-  "Matches 'Topic: <topic>.' at the beginning of a line (trailing punctuation required)."
-  #"(?m)^Topic:\s+(.+?)\s*[.,;:]\s*$")
+  "Matches 'Topic: <topic>' at the beginning of a line (trailing punctuation optional)."
+  #"^Topic:\s+(.+?)\s*[.,;:]?\s*$")
 
 (defn- parse-date-iso
   "Parse an ISO date string (yyyy-MM-dd) into a java.util.Date at midnight UTC."

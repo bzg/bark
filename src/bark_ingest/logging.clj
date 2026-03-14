@@ -42,6 +42,8 @@
 ;; File appender
 ;; ---------------------------------------------------------------------------
 
+(def ^:private file-log-lock (Object.))
+
 (defn configure-file-logging!
   "If logging-cfg contains :file, add a Timbre file appender
   that persists logs at or above the specified :level."
@@ -56,10 +58,11 @@
          {:enabled?  true
           :min-level level
           :fn        (fn [data]
-                       (rotate-log! file max-bytes backlog)
-                       (spit file
-                             (str (force (:timestamp_ data)) " "
-                                  (str/upper-case (name (:level data))) " "
-                                  (:?ns-str data) " - "
-                                  (force (:msg_ data)) "\n")
-                             :append true))}}}))))
+                       (locking file-log-lock
+                         (rotate-log! file max-bytes backlog)
+                         (spit file
+                               (str (force (:timestamp_ data)) " "
+                                    (str/upper-case (name (:level data))) " "
+                                    (:?ns-str data) " - "
+                                    (force (:msg_ data)) "\n")
+                               :append true)))}}}))))

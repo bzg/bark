@@ -307,17 +307,17 @@
 ;; ---------------------------------------------------------------------------
 
 (defn report-priority [report]
-  (+ (if (:report/urgent report) 2 0)
-     (if (:report/important report) 1 0)))
+  (+ (if (some? (:report/urgent report)) 2 0)
+     (if (some? (:report/important report)) 1 0)))
 
 (defn report-status
   "Compute a numeric status score for filtering.
   Higher = more active: open (4) > closed (0), +2 if owned, +1 if acked.
   E.g. --min-status 4 filters to open reports only."
   [report]
-  (+ (if-not (:report/closed report) 4 0)
-     (if (:report/owned report) 2 0)
-     (if (:report/acked report) 1 0)))
+  (+ (if-not (some? (:report/closed report)) 4 0)
+     (if (some? (:report/owned report)) 2 0)
+     (if (some? (:report/acked report)) 1 0)))
 
 (defn report-descendant-count [report]
   (let [d (:report/descendants report)]

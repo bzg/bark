@@ -162,7 +162,7 @@
           (:report/version report)        (assoc :version (:report/version report))
           (:report/topic report)          (assoc :topic (:report/topic report))
           (:report/patch-seq report)      (assoc :patch-seq (:report/patch-seq report))
-          (:report/patch-source report)   (assoc :patch-source (mapv name (:report/patch-source report)))
+          (:report/patch-source report)   (assoc :patch-source (mapv name (sort (:report/patch-source report))))
           arch                            (assoc :archived-at arch)
           (:report/deadline report)       (assoc :deadline (format-date-iso (:report/deadline report)))
           (:report/close-reason report)  (assoc :close-reason (name (:report/close-reason report)))

@@ -34,7 +34,9 @@
   (or (admin? roles addr) (maintainer? roles addr)))
 
 (defn ignored? [roles addr]
-  (contains? (roles-set roles :roles/ignored) addr))
+  (and addr
+       (let [ignored (roles-set roles :roles/ignored)]
+         (some #(= (str/lower-case %) (str/lower-case addr)) ignored))))
 
 ;; ---------------------------------------------------------------------------
 ;; Role DB operations
