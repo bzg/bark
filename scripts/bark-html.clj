@@ -77,6 +77,29 @@
    [:span#theme-icon "🌙"]])
 
 ;; ---------------------------------------------------------------------------
+;; Shared nav bar (hiccup vector)
+;; ---------------------------------------------------------------------------
+
+(def nav-pages
+  "Navigation pages in display order: [id label href]."
+  [["reports" "Reports" "index.html"]
+   ["howto"   "How-to"  "howto.html"]
+   ["data"    "Data"    "data.html"]])
+
+(defn nav-bar
+  "Render a <nav> with BARK title and Reports/How-to/Data links.
+  `current` is the id of the active page (bolded)."
+  [title current]
+  [:nav
+   [:ul [:li [:strong title]]]
+   [:ul
+    (for [[id label href] nav-pages]
+      [:li (if (= id current)
+             [:a {:href href} [:strong label]]
+             [:a {:href href} label])])
+    [:li (theme-toggle-btn)]]])
+
+;; ---------------------------------------------------------------------------
 ;; Shared footer (hiccup vector)
 ;; ---------------------------------------------------------------------------
 
@@ -85,4 +108,8 @@
 
 (defn bark-footer []
   [:footer.bark-footer
-   [:a {:href bark-repo-url} "Bark"]])
+   [:a {:href bark-repo-url} "Bark"]
+   " — "
+   [:a {:href "reports/all.xml"} "RSS"]
+   " — "
+   [:a {:href "reports/all.json"} "JSON"]])

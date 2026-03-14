@@ -21,7 +21,7 @@
 (declare parse-cli-args load-config
          pico-cdn bark-description bark-repo-url
          footer-css bark-footer wrap-js
-         theme-toggle-btn theme-toggle-js)
+         theme-toggle-btn theme-toggle-js nav-bar)
 
 (load-file "scripts/bark-common.clj")
 (load-file "scripts/bark-html.clj")
@@ -32,7 +32,6 @@
 
 (def default-json "public/reports/all.json")
 (def default-output "public/web/index.html")
-(def bark-doc-url "https://codeberg.org/bzg/bark/src/branch/main/docs/howto.org")
 
 (def type-labels {"bug" "bug" "announcement" "ann" "request" "req"
                   "patch" "patch" "release" "rel" "change" "chg"})
@@ -207,12 +206,8 @@
   (let [types      (vec (distinct (map #(get % "type") reports)))
         types-json (json/generate-string types)
         has-rss?   (.exists (clojure.java.io/file reports-dir "all.xml"))
-        has-org?   (.exists (clojure.java.io/file reports-dir "all.org"))
-        has-json?  (.exists (clojure.java.io/file reports-dir "all.json"))
         generated-at (str (java.util.Date.))
         rss-href   "reports/all.xml"
-        org-href   "reports/all.org"
-        json-href  "reports/all.json"
         cols       [[:th {:data-sort "type"     :onclick "sortTable(0,'type')"}     "Type"]
                     [:th {:data-sort "priority" :onclick "sortTable(1,'priority')"} "Priority"]
                     [:th {:data-sort "due"      :onclick "sortTable(2,'due')"}      "Due"]
@@ -240,19 +235,7 @@
         [:style (h/raw page-css)]]
        [:body
         [:main.container
-         [:nav
-          [:ul [:li [:strong "BARK — Reports"]]]
-          [:ul
-           (when has-json?
-             [:li [:a {:href json-href :title "JSON data"} "JSON"]])
-           (when has-rss?
-             [:li [:a {:href rss-href :title "RSS feed"} "RSS"]])
-           (when has-org?
-             [:li [:a {:href org-href :title "Org file"} "Org"]])
-           [:li [:a {:href bark-doc-url :title "BARK documentation"} "Docs"]]
-           [:li [:a {:href "howto.html" :title "How-to"} "How-to"]]
-           [:li [:a {:href "stats.html" :title "Statistics"} "Stats"]]
-           [:li (theme-toggle-btn)]]]
+         (nav-bar "BARK — Reports" "reports")
          [:p {:style "font-size:0.78rem;color:var(--pico-muted-color);margin-bottom:1rem"}
           (str "Generated " generated-at)]
          [:div.toolbar

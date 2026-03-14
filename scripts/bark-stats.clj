@@ -4,8 +4,8 @@
 ;;
 ;; Usage:
 ;;   bb stats                        -> writes public/stats.json
-;;   bb stats html                   -> writes public/stats.html (Vega-Lite charts)
-;;   bb scripts/bark-stats.clj html -o path/to/stats.html
+;;   bb stats html                   -> writes public/data.html (Vega-Lite charts)
+;;   bb scripts/bark-stats.clj html -o path/to/data.html
 ;;
 ;; Environment / defaults:
 ;;   BARK_DB — path to db (default: ./data/bark-db)
@@ -13,14 +13,16 @@
 (require '[cheshire.core :as json]
          '[clojure.string :as str]
          '[clojure.edn :as edn]
-         '[clojure.java.io :as io])
+         '[clojure.java.io :as io]
+         '[hiccup2.core :as h])
 
 ;; Forward-declared for clj-kondo (provided at runtime by load-file calls below).
 (declare load-datalevin-pod! all-reports report-pull-pattern
          report-priority report-status report-descendant-count
          format-date format-date-iso parse-cli-args load-config
          pico-cdn bark-description bark-repo-url footer-css
-         bark-footer wrap-js theme-toggle-js bark-schema)
+         bark-footer wrap-js theme-toggle-js bark-schema
+         nav-bar theme-toggle-btn)
 
 (load-file "scripts/bark-common.clj")
 (load-file "scripts/bark-html.clj")
@@ -287,12 +289,70 @@
 (defn chart-box [id spec]
   (str "<div class=\"box\">" (chart-div id spec) "</div>"))
 
-(defn render-html [stats]
+;; ---------------------------------------------------------------------------
+;; data.org rendering (reuses org table parser from bark-howto logic)
+;; ---------------------------------------------------------------------------
+
+(defn- org-inline-data [s]
+  (-> s
+      (str/replace #"\[\[([^\]]+)\]\[([^\]]+)\]\]" "<a href=\"$1\">$2</a>")
+      (str/replace #"\[\[([^\]]+)\]\]" "<a href=\"$1\">$1</a>")))
+
+(defn- parse-data-table
+  "Parse org table lines into an HTML table string."
+  [lines]
+  (let [rows (->> lines
+                  (remove #(re-matches #"\s*\|[-+]+\|\s*" %))
+                  (mapv (fn [line]
+                          (->> (str/split line #"\|" -1)
+                               (drop 1) butlast
+                               (mapv str/trim)))))]
+    (when (seq rows)
+      (let [header (first rows)
+            body   (rest rows)]
+        (str "<table>\n<thead><tr>"
+             (str/join (map #(str "<th>" (org-inline-data %) "</th>") header))
+             "</tr></thead>\n<tbody>\n"
+             (str/join (map (fn [r]
+                              (str "<tr>"
+                                   (str/join (map #(str "<td>" (org-inline-data %) "</td>") r))
+                                   "</tr>\n"))
+                            body))
+             "</tbody></table>")))))
+
+(defn render-data-section
+  "Render resources/data.org as an HTML section, filtering dead links."
+  [out-dir]
+  (let [org-text (slurp "resources/data.org")
+        lines    (str/split-lines org-text)
+        tlines   (filterv #(str/starts-with? (str/trim %) "|") lines)
+        ;; Filter out rows whose link targets don't exist
+        filtered (if out-dir
+                   (filterv (fn [line]
+                              (if (re-find #"\[\[" line)
+                                (let [targets (re-seq #"\[\[([^\]]+)\]\[" line)]
+                                  (some (fn [[_ target]]
+                                          (.exists (io/file out-dir target)))
+                                        targets))
+                                true))
+                            tlines)
+                   tlines)]
+    (when (seq filtered)
+      (str "<h3>Available data</h3>\n"
+           (parse-data-table filtered)))))
+
+;; ---------------------------------------------------------------------------
+;; HTML assembly
+;; ---------------------------------------------------------------------------
+
+(defn render-html [stats out-dir]
   (let [{:keys [generated-at reports-per-type reports-by-month
                 time-to-close open-closed-ratio open-last-year
                 top-openers email-ratio]} stats
         n-yr (reduce + (vals reports-per-type))
-        pct  #(when % (str (Math/round (* 100.0 %)) "%"))]
+        pct  #(when % (str (Math/round (* 100.0 %)) "%"))
+        nav-html (str (h/html (nav-bar "BARK — Data" "data")))
+        data-section (render-data-section out-dir)]
     (str
      "<!DOCTYPE html>\n"
      "<html lang=\"en\" data-theme=\"light\">\n"
@@ -301,28 +361,25 @@
      "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
      "<meta name=\"color-scheme\" content=\"light dark\">\n"
      "<meta name=\"description\" content=\"" bark-description "\">\n"
-     "<meta property=\"og:title\" content=\"BARK — Statistics\">\n"
+     "<meta property=\"og:title\" content=\"BARK — Data\">\n"
      "<meta property=\"og:description\" content=\"" bark-description "\">\n"
      "<meta property=\"og:type\" content=\"website\">\n"
      "<link rel=\"stylesheet\" href=\"" pico-cdn "\">\n"
      "<script src=\"https://cdn.jsdelivr.net/npm/vega@5/build/vega.min.js\"></script>\n"
      "<script src=\"https://cdn.jsdelivr.net/npm/vega-lite@5/build/vega-lite.min.js\"></script>\n"
      "<script src=\"https://cdn.jsdelivr.net/npm/vega-embed@6/build/vega-embed.min.js\"></script>\n"
-     "<title>BARK — Statistics</title>\n"
+     "<title>BARK — Data</title>\n"
      "<style>" stats-css "</style>\n"
      "<script>\n" (wrap-js theme-toggle-js) "\n</script>\n"
      "<script>\n" (wrap-js stats-js) "\n</script>\n"
      "</head>\n<body>\n"
      "<main class=\"container\">\n"
-     "<nav><ul><li><strong>BARK — Statistics</strong></li></ul>"
-     "<ul>"
-     "<li><a href=\"index.html\">Reports</a></li>"
-     "<li><a href=\"howto.html\">How-to</a></li>"
-     "<li><button class=\"theme-toggle\" onclick=\"toggleTheme()\" aria-label=\"Toggle theme\">"
-     "<span id=\"theme-icon\">🌙</span></button></li>"
-     "</ul></nav>\n"
+     nav-html "\n"
      "<p class=\"meta\">Generated " generated-at "</p>\n"
 
+     (when data-section (str data-section "\n"))
+
+     "<h3>Statistics</h3>\n"
      "<div class=\"kpis\">\n"
      (kpi n-yr "Reports (last year)"
           (str open-last-year " still open"))
@@ -347,9 +404,7 @@
      "</div>\n"
 
      "</main>\n"
-     "<footer class=\"bark-footer\">"
-     "<a href=\"" bark-repo-url "\">BARK</a>"
-     "</footer>\n"
+     (str (h/html (bark-footer)))
      "</body>\n</html>\n")))
 
 ;; ---------------------------------------------------------------------------
@@ -361,7 +416,9 @@
         html?       (= (:format opts) "html")
         source-name (:source-name opts)
         out-file    (or (:out-file opts)
-                        (if html? "public/web/stats.html" "public/reports/stats.json"))
+                        (if html? "public/web/data.html" "public/reports/stats.json"))
+        out-dir     (or (:out-dir opts)
+                        (.getParent (io/file out-file)))
         conn        (d/get-conn db-path bark-schema {:wal? false})
         db          (d/db conn)
         all-reps    (all-reports db)
@@ -371,7 +428,7 @@
         stats       (compute-stats reports db)]
     (io/make-parents out-file)
     (if html?
-      (do (spit out-file (render-html stats))
+      (do (spit out-file (render-html stats out-dir))
           (log/info "Wrote" out-file "(HTML," (count reports) "reports)"))
       (do (spit out-file (json/generate-string stats {:pretty true}))
           (log/info "Wrote" out-file "(JSON," (count reports) "reports)")))))

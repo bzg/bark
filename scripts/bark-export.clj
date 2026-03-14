@@ -4,7 +4,7 @@
 ;;
 ;; Each source gets its own directory tree under public/:
 ;;   public/<source-name>/index.html
-;;   public/<source-name>/stats.html
+;;   public/<source-name>/data.html
 ;;   public/<source-name>/howto.html
 ;;   public/<source-name>/reports/all.json
 ;;   public/<source-name>/reports/all.xml
@@ -453,7 +453,7 @@
   "Generate stats for a single source."
   [base-dir reports-dir source-name format cli-args]
   (let [dir      (if (= format "html") base-dir reports-dir)
-        out-file (str dir (if (= format "html") "/stats.html" "/stats.json"))]
+        out-file (str dir (if (= format "html") "/data.html" "/stats.json"))]
     (apply process/shell "bb" "scripts/bark-stats.clj"
            (if (= format "html") "html" "json")
            "-o" out-file

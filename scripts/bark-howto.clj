@@ -18,7 +18,7 @@
 (declare default-labels default-trigger-words resolve-labels-map
          resolve-triggers-map parse-cli-args load-config build-source-map
          pico-cdn bark-description footer-css bark-footer wrap-js
-         theme-toggle-btn theme-toggle-js)
+         theme-toggle-btn theme-toggle-js nav-bar)
 
 (load-file "scripts/bark-common.clj")
 (load-file "scripts/bark-html.clj")
@@ -278,12 +278,7 @@
         [:style (h/raw howto-css)]]
        [:body
         [:main.container
-         [:nav
-          [:ul [:li [:strong title]]]
-          [:ul
-           [:li [:a {:href "index.html" :title "Reports"} "Reports"]]
-           [:li [:a {:href "stats.html" :title "Statistics"} "Stats"]]
-           [:li (theme-toggle-btn)]]]
+         (nav-bar title "howto")
          [:p.meta (str "Generated " generated-at)]
          (h/raw body-html)
          [:script (h/raw (wrap-js theme-toggle-js))]]
