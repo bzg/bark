@@ -176,6 +176,20 @@
      :ratio (when (pos? (+ open closed))
               (round2 (/ open (double (+ open closed)))))}))
 
+(defn closed-cancel-breakdown
+  "Among closed closable reports, count canceled vs other per type."
+  [reports]
+  (let [closed (->> reports
+                    (filter #(closable-types (:report/type %)))
+                    (filter :report/closed))]
+    (->> closed
+         (group-by #(some-> (:report/type %) name))
+         (into {}
+               (map (fn [[t rs]]
+                      (let [canceled (count (filter #(= :canceled (:report/close-reason %)) rs))
+                            other    (- (count rs) canceled)]
+                        [t {:canceled canceled :other other}])))))))
+
 (defn vote-leaders [reports n]
   (->> reports
        (filter #(pos? (+ (or (:report/votes-up %) 0)
@@ -204,7 +218,8 @@
         :open-last-year    (count (remove :report/closed closable-yr))
         :total-last-year   (count last-year)
         :top-openers       (top-openers reports 10)
-        :vote-leaders      (vote-leaders reports 10)}
+        :vote-leaders      (vote-leaders reports 10)
+        :closed-cancel     (closed-cancel-breakdown reports)}
        total-emails (assoc :email-ratio (email-vs-reports-ratio reports total-emails))))))
 
 ;; ---------------------------------------------------------------------------
@@ -277,6 +292,17 @@
              :axis  {:labelLimit 180}}
          :x {:field "count" :type "quantitative" :title "Reports opened"}})))
 
+(defn chart-cancel-breakdown [cancel-data]
+  (let [data (mapcat (fn [[t {:keys [canceled other]}]]
+                       [{"type" t "reason" "Canceled" "count" canceled}
+                        {"type" t "reason" "Other"    "count" other}])
+                     cancel-data)]
+    (vl "Closed reports: canceled vs other" "bar" (vec data)
+        {:x       {:field "type"   :type "nominal"      :title "Type"}
+         :y       {:field "count"  :type "quantitative"  :title "Reports"}
+         :color   {:field "reason" :type "nominal"       :title "Close reason"}
+         :xOffset {:field "reason"}})))
+
 ;; HTML assembly
 
 (defn kpi [value label & [sub]]
@@ -348,7 +374,7 @@
 (defn render-html [stats out-dir]
   (let [{:keys [generated-at reports-per-type reports-by-month
                 time-to-close open-closed-ratio open-last-year
-                top-openers email-ratio]} stats
+                top-openers email-ratio closed-cancel]} stats
         n-yr (reduce + (vals reports-per-type))
         pct  #(when % (str (Math/round (* 100.0 %)) "%"))
         nav-html (str (h/html (nav-bar "BARK — Data" "data")))
@@ -401,6 +427,8 @@
      (when time-to-close
        (chart-box "chart-ttc"   (chart-ttc time-to-close)))
      (chart-box "chart-openers" (chart-openers top-openers))
+     (when (seq closed-cancel)
+       (chart-box "chart-cancel" (chart-cancel-breakdown closed-cancel)))
      "</div>\n"
 
      "</main>\n"
