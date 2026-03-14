@@ -118,4 +118,6 @@
  :notify/interval-days   {:db/valueType :db.type/long}
  :notify/min-priority    {:db/valueType :db.type/long}
  :notify/min-status      {:db/valueType :db.type/long}
+ :notify/subject-match   {:db/valueType :db.type/string}
+ :notify/topic           {:db/valueType :db.type/string}
  :notify/last-sent       {:db/valueType :db.type/instant}}

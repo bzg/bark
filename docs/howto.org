@@ -245,6 +245,7 @@ The search field has a minimal syntax:
 terminal.
 
 [[https://codeberg.org/bzg/gnus-bone][gnus-bone.el]] lets you explore BARK reports from within [[https://gnus.org/][Emacs Gnus]].
+
 * Notifications
 
 BARK can send periodic email notifications to admins and maintainers
@@ -282,6 +283,8 @@ Parameters can be combined on a single line:
 | =d:N=       | Receive notifications every N days |      30 |
 | =p:N=       | Minimum priority (0--3)            |       1 |
 | =s:N=       | Minimum status (0--7)              |       1 |
+| m:<match> | Restrict to subject <match>        |         |
+| t:<topic> | Restrict to subject <topic>        |         |
 
 Examples:
 

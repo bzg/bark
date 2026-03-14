@@ -120,9 +120,10 @@
   #"(?m)^Notify:\s+(.+)$")
 
 (defn- parse-notify-params
-  "Parse 'on', 'off', or param string like 'd:7 p:2 s:4'.
+  "Parse 'on', 'off', or param string like 'd:7 p:2 s:4 m:foo t:bar'.
   Supports 'on'/'off' as prefix combined with params, e.g. 'on d:7 p:2'.
-  Returns map with :enabled, :interval-days, :min-priority, :min-status."
+  Returns map with :enabled, :interval-days, :min-priority, :min-status,
+  :subject-match, :topic."
   [s]
   (let [s (str/trim s)
         lc (str/lower-case s)]
@@ -132,7 +133,7 @@
       :else
       (let [has-on?  (str/starts-with? lc "on ")
             has-off? (str/starts-with? lc "off ")
-            params   (re-seq #"([dps]):(\d+)" s)
+            params   (re-seq #"([dpsmt]):(\S+)" s)
             base     (cond has-on?  {:enabled true}
                            has-off? {:enabled false}
                            :else    {})]
@@ -141,6 +142,8 @@
                     "d" (assoc m :interval-days (parse-long v))
                     "p" (assoc m :min-priority (parse-long v))
                     "s" (assoc m :min-status (parse-long v))
+                    "m" (assoc m :subject-match v)
+                    "t" (assoc m :topic v)
                     m))
                 base params)))))
 
@@ -183,7 +186,9 @@
                      (contains? params :enabled)       (assoc :notify/enabled (:enabled params))
                      (contains? params :interval-days)  (assoc :notify/interval-days (:interval-days params))
                      (contains? params :min-priority)   (assoc :notify/min-priority (:min-priority params))
-                     (contains? params :min-status)     (assoc :notify/min-status (:min-status params)))]
+                     (contains? params :min-status)     (assoc :notify/min-status (:min-status params))
+                     (contains? params :subject-match)  (assoc :notify/subject-match (:subject-match params))
+                     (contains? params :topic)          (assoc :notify/topic (:topic params)))]
         (d/transact! conn [txn])
         (log/info "Notify:" params-str "(for" from-addr "on" source-name ")")))))
 

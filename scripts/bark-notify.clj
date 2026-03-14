@@ -45,6 +45,7 @@
   (->> (d/q '[:find (pull ?e [:notify/key :notify/source :notify/email
                               :notify/enabled :notify/interval-days
                               :notify/min-priority :notify/min-status
+                              :notify/subject-match :notify/topic
                               :notify/last-sent])
               :where [?e :notify/key _]]
             db)
@@ -124,12 +125,28 @@
         source     (:notify/source notify)
         min-pri    (:notify/min-priority notify 0)
         min-sts    (:notify/min-status notify 0)
+        subj-match (:notify/subject-match notify)
+        topic      (:notify/topic notify)
         by-type    (filter #(contains? actionable-types (:report/type %)) reports)
         by-open    (filter open? by-type)
         by-source  (filter #(= source (get-in % [:report/email :email/source])) by-open)
         by-pri     (filter #(>= (report-priority %) min-pri) by-source)
         by-sts     (filter #(>= (report-status %) min-sts) by-pri)
-        _          (do (log/debug "build-email-body for" email "(source:" source ")")
+        by-subj    (if subj-match
+                     (let [lc (str/lower-case subj-match)]
+                       (filter #(some-> (get-in % [:report/email :email/subject])
+                                        str/lower-case
+                                        (str/includes? lc))
+                               by-sts))
+                     by-sts)
+        by-topic   (if topic
+                     (let [lc (str/lower-case topic)]
+                       (filter #(some-> (:report/topic %)
+                                        str/lower-case
+                                        (str/includes? lc))
+                               by-subj))
+                     by-subj)
+        _          (do (log/debug "build-email-body for" email (str "(source: " source ")"))
                        (log/debug "  all reports:" (count reports))
                        (log/debug "  by type (bug/patch/request):" (count by-type))
                        (log/debug "  by open:" (count by-open))
@@ -138,10 +155,14 @@
                          (log/debug "  report sources:"
                                     (pr-str (set (map #(get-in % [:report/email :email/source]) by-open)))))
                        (log/debug "  by min-priority>=" min-pri ":" (count by-pri))
-                       (log/debug "  by min-status>=" min-sts ":" (count by-sts)))
+                       (log/debug "  by min-status>=" min-sts ":" (count by-sts))
+                       (when subj-match
+                         (log/debug "  by subject-match" (pr-str subj-match) ":" (count by-subj)))
+                       (when topic
+                         (log/debug "  by topic" (pr-str topic) ":" (count by-topic))))
         relevant   (sort-by (juxt #(- (report-priority %))
                                   #(- (report-descendant-count %)))
-                            compare by-sts)
+                            compare by-topic)
         owned      (filter #(owned-by? % email) relevant)
         unacked    (->> relevant
                         (filter unacked?)
@@ -250,7 +271,7 @@
                     body (build-email-body reports notify)]
                 (if body
                   (do (log/info (if dry-run? "[dry-run]" "")
-                                "Notifying" addr "(source:" (:notify/source notify) ")")
+                                "Notifying" addr (str "(source: " (:notify/source notify) ")"))
                       (when-not dry-run?
                         (send-notification! smtp addr body)
                         (d/transact! conn [{:notify/key       (:notify/key notify)
@@ -261,7 +282,7 @@
                         (println body)
                         (println "---")))
                   (log/info "No open items for" addr
-                            "(source:" (:notify/source notify) "), skipping.")))))
+                            (str "(source: " (:notify/source notify) "),") "skipping.")))))
           (log/info "Done." (if dry-run? "Dry run, no emails sent." (str @sent " email(s) sent."))))
         (finally
           (d/close conn))))))
