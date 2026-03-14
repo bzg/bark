@@ -152,6 +152,17 @@ function matchRow(tr, raw) {
 
 /* ── Pure display: no side effects ─────────────────────────── */
 
+function restripe() {
+  var i = 0;
+  document.querySelectorAll('tbody tr').forEach(function(tr) {
+    if (!tr.classList.contains('hidden')) {
+      tr.classList.toggle('stripe', i++ % 2 === 1);
+    } else {
+      tr.classList.remove('stripe');
+    }
+  });
+}
+
 function filterRows() {
   var raw  = getSearchInput().value;
   var rows = document.querySelectorAll('tbody tr');
@@ -162,6 +173,7 @@ function filterRows() {
     if (show) visible++;
   });
   document.getElementById('status').textContent = visible + '/' + rows.length + ' reports';
+  restripe();
 }
 
 /* ── URL ↔ state (no history decision here) ───────────────── */
@@ -247,6 +259,7 @@ function doSort(colIdx, key, dir) {
     return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
   });
   rows.forEach(function(r) { tbody.appendChild(r); });
+  restripe();
 }
 
 /* Called from onclick on <th> — user-initiated, pushes history */
