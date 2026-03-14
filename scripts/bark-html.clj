@@ -17,7 +17,6 @@
 
 (def bark-description "BARK (Bug And Report Keeper) — track bugs, patches, and requests.")
 (def bark-repo-url "https://codeberg.org/bzg/bark")
-(def bark-license-url "https://codeberg.org/bzg/bark/src/branch/main/LICENSES/EPL-2.0.txt")
 
 ;; ---------------------------------------------------------------------------
 ;; LibreJS license tags (JS files are MPL-2.0)

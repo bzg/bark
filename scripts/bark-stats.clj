@@ -19,8 +19,8 @@
 (declare load-datalevin-pod! all-reports report-pull-pattern
          report-priority report-status report-descendant-count
          format-date format-date-iso parse-cli-args load-config
-         pico-cdn bark-description bark-repo-url bark-license-url
-         footer-css bark-footer wrap-js theme-toggle-js bark-schema)
+         pico-cdn bark-description bark-repo-url footer-css
+         bark-footer wrap-js theme-toggle-js bark-schema)
 
 (load-file "scripts/bark-common.clj")
 (load-file "scripts/bark-html.clj")
@@ -349,8 +349,6 @@
      "</main>\n"
      "<footer class=\"bark-footer\">"
      "<a href=\"" bark-repo-url "\">BARK</a>"
-     " — Licensed under "
-     "<a href=\"" bark-license-url "\">EPL-2.0</a>"
      "</footer>\n"
      "</body>\n</html>\n")))
 

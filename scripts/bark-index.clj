@@ -19,7 +19,7 @@
 
 ;; Forward-declared for clj-kondo (provided at runtime by load-file calls below).
 (declare parse-cli-args load-config
-         pico-cdn bark-description bark-repo-url bark-license-url
+         pico-cdn bark-description bark-repo-url
          footer-css bark-footer wrap-js
          theme-toggle-btn theme-toggle-js)
 
@@ -203,7 +203,7 @@
 ;; Page assembly
 ;; ---------------------------------------------------------------------------
 
-(defn index-page [reports min-status reports-dir]
+(defn index-page [reports reports-dir]
   (let [types      (vec (distinct (map #(get % "type") reports)))
         types-json (json/generate-string types)
         has-rss?   (.exists (clojure.java.io/file reports-dir "all.xml"))
@@ -288,7 +288,7 @@
 ;; Main
 ;; ---------------------------------------------------------------------------
 
-(let [{:keys [out-file json-file out-dir min-status]}
+(let [{:keys [out-file json-file out-dir]}
       (parse-cli-args *command-line-args*)
       json-file   (or json-file default-json)
       out-file    (or out-file default-output)
@@ -298,7 +298,7 @@
   (.mkdirs (clojure.java.io/file (.getParent (clojure.java.io/file out-file))))
   (let [envelope (json/parse-string (slurp json-file))
         reports  (get envelope "reports" envelope)
-        html     (index-page reports min-status reports-dir)]
+        html     (index-page reports reports-dir)]
     (spit out-file html)
     (binding [*out* *err*]
       (log/info "Wrote" (count reports) "reports to" out-file))))

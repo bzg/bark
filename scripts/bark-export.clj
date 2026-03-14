@@ -462,7 +462,7 @@
 
 (defn dump-howto!
   "Generate howto.html for a single source."
-  [base-dir reports-dir source-name]
+  [base-dir _ source-name]
   (apply process/shell "bb" "scripts/bark-howto.clj"
          "-o" (str base-dir "/howto.html")
          "--dir" base-dir
@@ -528,7 +528,7 @@
                         "patches" (dump-patches! reports patches-dir)
                         "html"    (do (dump-json! reports reports-dir source-name source-map maintainers-map)
                                       (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"json"})
-                                      (dump-howto! base-dir reports-dir source-name)
+                                      (dump-howto! base-dir _ source-name)
                                       (dump-html! base-dir reports-dir cli-extra))
                         "stats"   (dump-stats! base-dir reports-dir source-name "json" cli-extra)))]
     (if (= format "all")
@@ -537,7 +537,7 @@
           (when (ef "org")  (dump-org!  reports reports-dir source-name source-map maintainers-map))
           (dump-per-type! reports reports-dir source-name source-map maintainers-map ef)
           (dump-patches! reports patches-dir)
-          (dump-howto! base-dir reports-dir source-name)
+          (dump-howto! base-dir _ source-name)
           (dump-html! base-dir reports-dir cli-extra)
           (dump-stats! base-dir reports-dir source-name "json" cli-extra)
           (dump-stats! base-dir reports-dir source-name "html" cli-extra))
