@@ -243,7 +243,7 @@
   .kpi-v { font-size: 1.9rem; font-weight: 700; color: var(--pico-primary); }
   .kpi-l { font-size: 0.75rem; color: var(--pico-muted-color); margin-top: 0.2rem; }
   .kpi-s { font-size: 0.7rem;  color: var(--pico-muted-color); opacity: 0.7; margin-top: 0.1rem; }
-  .grid  { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 1.2rem; }
+  .grid  { display: grid; grid-template-columns: repeat(auto-fit, minmax(max(340px, calc(33.34% - 1rem)), 1fr)); gap: 1.2rem; }
   .box   { border: 1px solid var(--pico-muted-border-color); border-radius: var(--pico-border-radius);
            padding: 1rem; }
   .chart { width: 100%; }
