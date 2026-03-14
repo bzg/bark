@@ -133,6 +133,7 @@ function matchRow(tr, raw) {
 }
 
 var _searchTimer = null;
+var _restoring   = false;
 
 function filterRows() {
   var raw  = getSearchInput().value;
@@ -178,6 +179,7 @@ function toggleOpen(btn) {
 }
 
 function updateURL(push) {
+  if (push) clearTimeout(_searchTimer);
   var params = new URLSearchParams();
   var q = getSearchInput().value;
   if (q) params.set('q', q);
@@ -193,32 +195,41 @@ function updateURL(push) {
   }
   var qs = params.toString();
   var url = location.pathname + (qs ? '?' + qs : '');
-  if (push) history.pushState(null, '', url);
+  if (push && !_restoring) history.pushState(null, '', url);
   else history.replaceState(null, '', url);
 }
 
 function restoreFromURL() {
+  _restoring = true;
   var params = new URLSearchParams(location.search);
-  if (params.has('q')) getSearchInput().value = params.get('q');
+
+  // Reset all state to defaults first
+  getSearchInput().value = params.get('q') || '';
+
   if (params.has('types')) {
     var allowed = params.get('types').split(',');
     allTypes.forEach(function(t) { activeTypes[t] = allowed.indexOf(t) !== -1; });
-    document.querySelectorAll('.filters button[data-type]').forEach(function(btn) {
-      btn.classList.toggle('outline', !activeTypes[btn.dataset.type]);
-    });
+  } else {
+    allTypes.forEach(function(t) { activeTypes[t] = true; });
   }
-  if (params.get('open') === '0') {
-    onlyOpen = false;
-    document.getElementById('btn-open').classList.add('outline');
-  }
-  if (params.get('acked') === '1') {
-    onlyAcked = true;
-    document.getElementById('btn-acked').classList.remove('outline');
-  }
-  if (params.get('owned') === '1') {
-    onlyOwned = true;
-    document.getElementById('btn-owned').classList.remove('outline');
-  }
+  document.querySelectorAll('.filters button[data-type]').forEach(function(btn) {
+    btn.classList.toggle('outline', !activeTypes[btn.dataset.type]);
+  });
+
+  onlyOpen = params.get('open') !== '0';
+  document.getElementById('btn-open').classList.toggle('outline', !onlyOpen);
+
+  onlyAcked = params.get('acked') === '1';
+  document.getElementById('btn-acked').classList.toggle('outline', !onlyAcked);
+
+  onlyOwned = params.get('owned') === '1';
+  document.getElementById('btn-owned').classList.toggle('outline', !onlyOwned);
+
+  // Reset sort
+  document.querySelectorAll('th[data-sort]').forEach(function(th) {
+    th.classList.remove('asc', 'desc');
+  });
+  sortState = {};
   if (params.has('sort') && params.has('dir')) {
     var key = params.get('sort');
     var dir = params.get('dir');
@@ -230,6 +241,7 @@ function restoreFromURL() {
     }
   }
   filterRows();
+  _restoring = false;
 }
 
 var sortState = {};
