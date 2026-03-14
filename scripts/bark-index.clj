@@ -67,11 +67,15 @@
 ;; Hiccup helpers
 ;; ---------------------------------------------------------------------------
 
-(defn- subject-el [subject role archived-at]
-  (let [inner (case role
-                "admin"      [:strong subject]
-                "maintainer" [:em subject]
-                subject)]
+(defn- subject-el [subject role archived-at closed? close-reason]
+  (let [canceled? (and closed? (= close-reason "canceled"))
+        resolved? (and closed? (not canceled?))
+        text      (cond-> subject resolved? (->> (str "✅ ")))
+        inner     (case role
+                    "admin"      [:strong text]
+                    "maintainer" [:em text]
+                    text)
+        inner     (if canceled? [:s inner] inner)]
     (if archived-at
       [:a {:href archived-at} inner]
       inner)))
@@ -118,7 +122,7 @@
 (defn- report-row [{:strs [type subject from from-name date date-raw flags priority
                            replies archived-at message-id related role source
                            acked owned closed urgent important patches votes
-                           deadline topic]}]
+                           deadline topic close-reason]}]
   (let [label    (get type-labels type type)
         closed?  (and flags (>= (count flags) 3) (= (nth flags 2 \-) \C))
         iso-date (or (parse-to-iso-date (or date-raw date "")) "")
@@ -142,8 +146,8 @@
      [:td [:mark {:data-type type} label]]
      [:td {:data-value (str (or priority 0)) :style "text-align:center"} (or priority 0)]
      [:td {:data-value (or deadline "") :class "due-cell"} ""]
-     [:td (subject-el subject role archived-at) (related-link related) (patch-link patches) (vote-badge votes)]
-     [:td.secondary {:title from} author]
+     [:td (subject-el subject role archived-at closed? close-reason) (related-link related) (patch-link patches) (vote-badge votes)]
+     [:td.secondary {:title from} (if (> (count author) 25) (str (subs author 0 25) "…") author)]
      [:td {:data-value iso-date} [:small (or iso-date date "")]]
      [:td {:style "text-align:center"} (or replies 0)]]))
 
@@ -178,6 +182,8 @@
   th[data-sort].asc::after  { content: ' ↑'; opacity: 0.7; }
   th[data-sort].desc::after { content: ' ↓'; opacity: 0.7; }
   tr.hidden { display: none; }
+  td:nth-child(4) { width: 45%; min-width: 300px; }
+  td:nth-child(5) { max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #status { font-size: 0.8rem; margin-bottom: 0.5rem; }
   .vote-badge { display: inline-block; padding: 0.1rem 0.4rem; border-radius: 3px;
                 font-size: 0.7rem; font-weight: 600; margin-left: 0.4em; vertical-align: middle; }
