@@ -1303,4 +1303,51 @@
   :email/in-reply-to "<90@test.org>"
   :email/references "<90@test.org>"
   :email/body-text  "Confirmed.\nTopic: regression\n"}
+
+ ;; 96 — Admin sets deadline then unsets it in email 97
+ {:email/imap-uid    96
+  :email/message-id  "<96@test.org>"
+  :email/subject     "Re: [BUG] Deadline with directives test"
+  :email/content-type "text/plain"
+  :email/from-address "admin@test.org"
+  :email/date-sent  #inst "2026-01-30T12:00:00"
+  :email/ingested-at #inst "2026-01-30T12:00:00"
+  :email/in-reply-to "<93@test.org>"
+  :email/references "<93@test.org>"
+  :email/body-text  "Deadline: 2026-09-01\n"}
+
+ ;; 97 — Admin removes deadline on bug 93
+ {:email/imap-uid    97
+  :email/message-id  "<97@test.org>"
+  :email/subject     "Re: [BUG] Deadline with directives test"
+  :email/content-type "text/plain"
+  :email/from-address "admin@test.org"
+  :email/date-sent  #inst "2026-01-30T13:00:00"
+  :email/ingested-at #inst "2026-01-30T13:00:00"
+  :email/in-reply-to "<93@test.org>"
+  :email/references "<93@test.org>"
+  :email/body-text  "Undeadline\n"}
+
+ ;; 98 — Bug report (base for standalone deadline test)
+ {:email/imap-uid    98
+  :email/message-id  "<98@test.org>"
+  :email/subject     "[BUG] Standalone deadline test"
+  :email/content-type "text/plain"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-31T10:00:00"
+  :email/ingested-at #inst "2026-01-31T10:00:00"
+  :email/source      "direct"
+  :email/body-text  "Need a deadline on this.\n"}
+
+ ;; 99 — Admin sets deadline on bug 98 (no subsequent undeadline)
+ {:email/imap-uid    99
+  :email/message-id  "<99@test.org>"
+  :email/subject     "Re: [BUG] Standalone deadline test"
+  :email/content-type "text/plain"
+  :email/from-address "admin@test.org"
+  :email/date-sent  #inst "2026-01-31T11:00:00"
+  :email/ingested-at #inst "2026-01-31T11:00:00"
+  :email/in-reply-to "<98@test.org>"
+  :email/references "<98@test.org>"
+  :email/body-text  "Deadline: 2026-08-15\n"}
 ]

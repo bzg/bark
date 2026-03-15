@@ -608,6 +608,23 @@
         (assert= "Unimportant parsed"
                  [{:action :unset :attr :report/important}]
                  (detect-directives "Unimportant\n"))
+        (assert= "Deadline parsed"
+                 [{:action :set-deadline :date (parse-date-iso "2026-06-15")}]
+                 (detect-directives "Deadline: 2026-06-15\n"))
+        (assert= "Undeadline parsed"
+                 [{:action :unset-deadline}]
+                 (detect-directives "Undeadline\n"))
+        (assert= "Topic parsed"
+                 [{:action :set-topic :topic "my-topic"}]
+                 (detect-directives "Topic: my-topic\n"))
+        (assert= "Mixed directives + deadline + topic in order"
+                 [{:action :set :attr :report/acked :addr "a@b.com"}
+                  {:action :set-deadline :date (parse-date-iso "2026-07-01")}
+                  {:action :set-topic :topic "urgent-fix"}]
+                 (detect-directives "Acked-by: a@b.com\nDeadline: 2026-07-01\nTopic: urgent-fix\n"))
+        (assert= "Directive lines mixed with plain text"
+                 [{:action :set :attr :report/owned :addr "x@y.com"}]
+                 (detect-directives "Thanks for the report.\nOwned-by: x@y.com\nWill look into it.\n"))
         (assert= "No directives in plain text"
                  [] (detect-directives "Just a normal reply.\n"))
         (assert= "nil body" nil (detect-directives nil))
@@ -622,6 +639,18 @@
                  {:set {:report/acked "a@b.com"} :unset #{}}
                  (resolve-directives [{:action :unset :attr :report/acked}
                                       {:action :set :attr :report/acked :addr "a@b.com"}]))
+        (assert= "Deadline then undeadline"
+                 {:set {} :unset #{} :undeadline? true}
+                 (resolve-directives [{:action :set-deadline :date (parse-date-iso "2026-06-01")}
+                                      {:action :unset-deadline}]))
+        (assert= "Undeadline then deadline (deadline wins)"
+                 {:set {} :unset #{} :deadline (parse-date-iso "2026-06-01")}
+                 (resolve-directives [{:action :unset-deadline}
+                                      {:action :set-deadline :date (parse-date-iso "2026-06-01")}]))
+        (assert= "Topic last-one-wins"
+                 {:set {} :unset #{} :topic "second"}
+                 (resolve-directives [{:action :set-topic :topic "first"}
+                                      {:action :set-topic :topic "second"}]))
 
         ;; --- Bug 81: Acked-by directive (email 82) ---
         (println "\n--- Bug 81: Acked-by directive ---")
@@ -687,15 +716,15 @@
           (assert-test "NOT closed (Unclosed directive overrides Fixed trigger)"
                        (nil? (:report/closed r))))
 
-        ;; --- Bug 93: Confirmed trigger + Deadline + Urgent-by (email 94) ---
-        (println "\n--- Bug 93: Confirmed + Deadline + Urgent-by ---")
+        ;; --- Bug 93: Confirmed trigger + Urgent-by (email 94) ---
+        ;; Note: deadline from email 94 is overridden then removed by emails 96-97,
+        ;; so we test deadline persistence separately on bug 98.
+        (println "\n--- Bug 93: Confirmed + Urgent-by ---")
         (let [r (get-report db "<93@test.org>")]
           (assert-test "Acked via Confirmed trigger"
                        (some? (:report/acked r)))
           (assert-test "Urgent via Urgent-by directive"
                        (some? (:report/urgent r)))
-          (assert-test "Deadline is set"
-                       (some? (:report/deadline r)))
           (assert= "Urgent-proxy is admin@test.org"
                    "admin@test.org"
                    (get-in r [:report/urgent-proxy :email/from-address])))
@@ -705,6 +734,20 @@
         (let [r (get-report db "<90@test.org>")]
           (assert= "Topic set to 'regression'"
                    "regression" (:report/topic r)))
+
+        ;; --- Bug 93: Deadline override then Undeadline (emails 96-97) ---
+        ;; Email 94 set deadline to 2026-06-01, email 96 overrides to 2026-09-01,
+        ;; email 97 removes it with Undeadline.
+        (println "\n--- Bug 93: Undeadline removes deadline ---")
+        (let [r (get-report db "<93@test.org>")]
+          (assert-test "Deadline removed by Undeadline"
+                       (nil? (:report/deadline r))))
+
+        ;; --- Bug 98: Standalone deadline (email 99, no undeadline) ---
+        (println "\n--- Bug 98: Standalone deadline ---")
+        (let [r (get-report db "<98@test.org>")]
+          (assert-test "Deadline is set"
+                       (some? (:report/deadline r))))
 
         ;; --- Summary ---
         (println "\n=== Summary ===")
