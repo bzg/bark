@@ -246,15 +246,33 @@
                                   (str/lower-case v)))))
           match-spec))
 
+(def ^:private bark-prefix-pattern
+  "Matches [bark:<list-id>] at the start of a subject line (case-insensitive)."
+  #"(?i)^\[bark:([^\]]+)\]")
+
+(defn- extract-bark-list-id
+  "Extract list-id from a [bark:<list-id>] subject prefix, or nil."
+  [subject]
+  (when subject
+    (second (re-find bark-prefix-pattern subject))))
+
 (defn classify-source
   "Return the :name of the first matching source, or nil.
-  A source with no :match acts as a catch-all."
-  [headers-edn sources]
-  (some (fn [{:keys [name match]}]
-          (when (or (empty? match)
-                    (match-source? headers-edn match))
-            name))
-        sources))
+  Matches by header (List-Id, Delivered-To, etc.) first, then falls back
+  to a [bark:<list-id>] subject prefix for maintainers who cannot set
+  mail headers.  A source with no :match acts as a catch-all."
+  [headers-edn subject sources]
+  (let [bark-lid (extract-bark-list-id subject)]
+    (some (fn [{:keys [name match]}]
+            (when (or (empty? match)
+                      (match-source? headers-edn match)
+                      ;; Fallback: [bark:<list-id>] in subject matches :list-id
+                      (and bark-lid
+                           (:list-id match)
+                           (str/includes? (str/lower-case bark-lid)
+                                          (str/lower-case (:list-id match)))))
+              name))
+          sources)))
 
 (defn build-source-map
   "Build source-name -> {:admin :list-post :list-id :list-archive :bark-path ...} from config."

@@ -222,9 +222,15 @@
         from-addr     (:email/from-address email)
         ;; Resolve source
         source-name   (or (:email/source email)
-                          (classify-source (:email/headers-edn email) sources))
+                          (classify-source (:email/headers-edn email)
+                                           (:email/subject email)
+                                           sources))
         _             (when (and source-name (not (:email/source email)))
                         (d/transact! conn [{:db/id eid :email/source source-name}]))
+        ;; Strip [bark:<list-id>] prefix from subject if present
+        email         (if-let [bark-lid (re-find #"(?i)^\[bark:[^\]]+\]\s*" (:email/subject email))]
+                        (update email :email/subject #(str/replace-first % bark-lid ""))
+                        email)
         source-cfg    (get source-map source-name)
         roles         (if source-name (get-roles (d/db conn) source-name) {})
         body-text     (email-body-text email)
