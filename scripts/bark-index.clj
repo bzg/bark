@@ -186,8 +186,8 @@
   th[data-sort].desc::after { content: ' ↓'; opacity: 0.7; }
   tr.hidden { display: none; }
   tr.stripe td { background: rgba(115,130,140,.075); }
-  td:nth-child(4) { min-width: 300px; }
-  td:nth-child(5) { max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  td:nth-child(4) { max-width: 700px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  td:nth-child(5) { max-width: 240px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #status { font-size: 0.8rem; margin-bottom: 0.5rem; }
   .vote-badge { display: inline-block; padding: 0.1rem 0.4rem; border-radius: 3px;
                 font-size: 0.7rem; font-weight: 600; margin-left: 0.4em; vertical-align: middle; }
