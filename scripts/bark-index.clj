@@ -85,12 +85,11 @@
 
 (defn- related-link [related]
   (when-let [mids (related-mids related)]
-    [:small.secondary
-     " "
-     [:a {:href "#"
-          :onclick (str "showRelated('m:" mids "'); return false;")
-          :title "Filter related reports"}
-      (str "↳ " (count related) " related")]]))
+    [:a.secondary {:href "#"
+                   :onclick (str "showRelated('m:" mids "'); return false;")
+                   :title "Filter related reports"
+                   :style "font-size:0.75rem"}
+     (str "↳" (count related) " ")]))
 
 (defn- patch-link [patches]
   (when (seq patches)
@@ -101,9 +100,8 @@
                    ;; directory: strip filename from first patch path
                    (str "patches/" (str/replace f #"/[^/]+$" "/"))))
           label (if (= 1 n) "1 patch file" (str n " patch files"))]
-      [:small.secondary
-       " "
-       [:a {:href href :title label :aria-label label} "📎"]])))
+      [:a {:href href :title label :aria-label label
+           :style "font-size:0.75rem"} "📎 "])))
 
 (defn- vote-badge
   "Render a small vote badge with score/total and colored background."
@@ -145,7 +143,9 @@
      [:td [:mark {:data-type type} label]]
      [:td {:data-value (str (or priority 0)) :style "text-align:center"} (or priority 0)]
      [:td {:data-value (or deadline "") :class "due-cell"} ""]
-     [:td (subject-el subject role archived-at closed? close-reason) (related-link related) (patch-link patches) (vote-badge votes)]
+     [:td (patch-link patches) (related-link related)
+      (subject-el subject role archived-at closed? close-reason)
+      (vote-badge votes)]
      [:td.secondary {:title from} (if (= role "maintainer") [:strong author] author)]
      [:td {:data-value iso-date} [:small (or iso-date date "")]]
      [:td {:style "text-align:center"} (or replies 0)]]))
@@ -182,7 +182,7 @@
   th[data-sort].desc::after { content: ' ↓'; opacity: 0.7; }
   tr.hidden { display: none; }
   tr.stripe td { background: rgba(115,130,140,.075); }
-  td:nth-child(4) { max-width: 700px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  td:nth-child(4) { max-width: 700px; }
   td:nth-child(5) { max-width: 240px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #status { font-size: 0.8rem; margin-bottom: 0.5rem; }
   .vote-badge { display: inline-block; padding: 0.1rem 0.4rem; border-radius: 3px;
@@ -247,7 +247,7 @@
          [:div.toolbar
           [:input#si {:type        "search"
                       :placeholder "Search"
-                      :oninput     "filterRows()"}]
+                      :oninput     "onSearchInput()"}]
           [:div.filters
            (for [t types]
              [:button {:data-type t
