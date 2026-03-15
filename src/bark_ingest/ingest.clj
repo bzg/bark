@@ -79,11 +79,12 @@
                                                                     (when data (count data)))}
                                 text-data (assoc :attachment/data text-data))))
                           (remove nil? (:attachments body)))]
-    (cond-> {:email/imap-uid     imap-uid
-             :email/message-id   (:message-id msg)
+    (cond-> {:email/message-id   (:message-id msg)
              :email/subject      (or (:subject msg) "(no subject)")
              :email/content-type (:content-type msg)
              :email/ingested-at  (Date.)}
+
+      imap-uid               (assoc :email/imap-uid imap-uid)
 
       (:address from)      (assoc :email/from-address (:address from))
       (:name from)         (assoc :email/from-name (:name from))
@@ -138,19 +139,22 @@
 (defn store-emails!
   "Store a batch of parsed emails.
   Returns {:stored <count>, :safe-uids <set of UIDs safe to advance past>}.
-  Safe UIDs include both successfully stored and intentionally skipped messages."
+  Safe UIDs include both successfully stored and intentionally skipped messages.
+  Messages that throw during storage are excluded from safe-uids."
   [conn msgs]
   (let [result (reduce (fn [acc msg]
-                         (try
-                           (if (store-email! conn msg)
-                             (-> acc
-                                 (update :stored inc)
-                                 (update :safe-uids conj (:uid msg)))
-                             ;; Skipped (nil mid or duplicate) — safe to advance past
-                             (update acc :safe-uids conj (:uid msg)))
-                           (catch Exception e
-                             (log/warn "Failed to store email UID:" (:uid msg) (.getMessage e))
-                             acc)))
+                         (let [uid (:uid msg)]
+                           (try
+                             (if (store-email! conn msg)
+                               (cond-> (update acc :stored inc)
+                                 uid (update :safe-uids conj uid))
+                               ;; Skipped (nil mid or duplicate) — safe to advance past
+                               (cond-> acc
+                                 uid (update :safe-uids conj uid)))
+                             (catch Exception e
+                               (log/warn e "Failed to store email UID:" uid
+                                        (or (.getMessage e) (str (class e))))
+                               acc))))
                        {:stored 0 :safe-uids #{}} msgs)]
     (log/info "Batch complete. Stored" (:stored result) "of" (count msgs) "emails.")
     result))

@@ -93,12 +93,18 @@
 (defn catch-up-fetch!
   "Fetch messages missed while the process was down.
   - First run (no watermark): fetch the last `initial-limit` messages.
-  - Restart (watermark exists): fetch all messages with UID > watermark."
+  - Restart (watermark exists): fetch all messages with UID > watermark.
+  This is the ONLY place the watermark is advanced.  IDLE does not touch
+  it, so any messages that fail during IDLE will be retried here on the
+  next reconnect."
   [imap-conn db-conn folder initial-limit]
   (when-not (shutting-down?)
     (let [watermark (db/max-imap-uid db-conn)]
       (if (zero? watermark)
         (do (log/info "First run — fetching last" initial-limit "messages")
+            (log/warn "Only the most recent" initial-limit
+                      "messages will be fetched. Older emails are permanently skipped."
+                      "Adjust :initial-fetch in config.edn to change this limit.")
             (let [msgs (fetch/messages imap-conn folder
                                        {:limit        initial-limit
                                         :attachments? true})]
@@ -129,7 +135,7 @@
                                [:host :port :ssl :user
                                 :password :oauth2-token]))
     (catch Exception e
-      (log/error "IMAP connection failed:" (.getMessage e))
+      (log/error e "IMAP connection failed:" (or (.getMessage e) (str (class e))))
       nil)))
 
 ;; ---------------------------------------------------------------------------
@@ -139,7 +145,11 @@
 (def ^:private max-backoff-ms (* 5 60 1000))  ;; cap at 5 minutes
 
 (defn start-idle!
-  "Start IMAP IDLE, storing each new message as it arrives."
+  "Start IMAP IDLE, storing each new message as it arrives.
+  The watermark is NOT advanced here — it is only advanced during
+  catch-up-fetch! (batch mode) on reconnect.  This ensures that if a
+  message fails to store, it will be retried on the next reconnect
+  rather than being silently skipped."
   [imap-conn db-conn folder]
   (log/info "Starting IMAP IDLE on" folder)
   (idle/idle imap-conn folder
@@ -152,22 +162,23 @@
                                "Subject:" (:subject msg))
                      (try
                        (ingest/store-email! db-conn msg)
-                       ;; Advance watermark whether stored or skipped —
-                       ;; only exceptions (caught below) should prevent it.
-                       (when-let [uid (:uid msg)]
-                         (let [current (db/max-imap-uid db-conn)]
-                           (when (> uid current)
-                             (db/save-imap-uid! db-conn uid))))
                        (catch Exception e
-                         (log/error "Error storing message:"
-                                    (.getMessage e))))))))
+                         (log/error e "Error storing IDLE message UID:" (:uid msg)
+                                    (str "(" (.getName (class e)) ": "
+                                         (or (.getMessage e) "no message") ")"))))))))
              {:parse-opts   {:attachments? true}
               :heartbeat-ms (* 20 60 1000)}))
 
 (defn idle-loop!
   "Run IDLE with automatic reconnection and exponential backoff.
-  On each reconnect, performs a catch-up fetch to recover missed messages."
+  On each reconnect, performs a catch-up fetch to recover missed messages.
+  Note: there is a small gap between catch-up completing and IDLE starting
+  where incoming messages are not seen by IDLE.  These are recovered on
+  the next reconnect because the watermark only advances during catch-up,
+  not during IDLE (see start-idle! docstring)."
   [imap-cfg db-conn ingest-cfg]
+  ;; NB: :folder is not passed to connect-imap because fetch-imap opens
+  ;; folders lazily in fetch/ and idle/ calls.
   (let [folder (or (:folder imap-cfg) "INBOX")]
     (loop [backoff-ms 1000]
       (when-not (shutting-down?)
@@ -184,7 +195,7 @@
                 (when-not (shutting-down?)
                   (start-idle! conn db-conn folder))
                 (catch Exception e
-                  (log/error "IDLE interrupted:" (.getMessage e))))
+                  (log/error e "IDLE interrupted:" (or (.getMessage e) (str (class e))))))
               ;; If we get here, IDLE exited (heartbeat or server disconnect)
               (try (imap/disconnect conn) (catch Exception _))
               (when-not (shutting-down?)
