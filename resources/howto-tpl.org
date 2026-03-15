@@ -18,15 +18,15 @@ punctuation mark (=.= =,= =;= =:=).
 Here is a table of available labels and triggers for this BARK
 instance:
 
-| Type         | Subject labels                             | Acked              | Owned   | Closed               |
-|--------------+--------------------------------------------+--------------------+---------+----------------------|
-| bug          | =[BUG]= =[BUG topic]=                          | =Approved= =Confirmed= | =Handled= | =Canceled= =Fixed=       |
-| patch        | =[PATCH]= =[PATCH topic]= =[PATCH topic v2 n/m]= | =Approved= =Reviewed=  | =Handled= | =Canceled= =Applied=     |
-| request      | =[POLL]= =[FR]= =[TODO]= =[FR topic]=              | =Approved=           | =Handled= | =Canceled= =Done= =Closed= |
-|--------------+--------------------------------------------+--------------------+---------+----------------------|
-| announcement | =[ANN]= =[ANNOUNCEMENT]= =[ANN topic]=           |                    |         | =Canceled=             |
-| release      | =[REL version]= =[REL topic version]=          |                    |         | =Canceled=             |
-| change       | =[CHG version]= =[CHG topic version]=          |                    |         | =Canceled=             |
+| Type         | Subject labels                             | Acked              | Owned   | Closed                       |
+|--------------+--------------------------------------------+--------------------+---------+------------------------------|
+| bug          | =[BUG]= =[BUG topic]=                          | =Approved= =Confirmed= | =Handled= | =Canceled= =Expired= =Fixed=       |
+| patch        | =[PATCH]= =[PATCH topic]= =[PATCH topic v2 n/m]= | =Approved= =Reviewed=  | =Handled= | =Canceled= =Expired= =Applied=     |
+| request      | =[POLL]= =[FR]= =[TODO]= =[FR topic]=              | =Approved=           | =Handled= | =Canceled= =Expired= =Done= =Closed= |
+|--------------+--------------------------------------------+--------------------+---------+------------------------------|
+| announcement | =[ANN]= =[ANNOUNCEMENT]= =[ANN topic]=           |                    |         | =Canceled= =Expired=             |
+| release      | =[REL version]= =[REL topic version]=          |                    |         | =Canceled= =Expired=             |
+| change       | =[CHG version]= =[CHG topic version]=          |                    |         | =Canceled= =Expired=             |
 
 Topics can also be set using a colon-delimited prefix in the subject
 after the label: =[BUG] parser: crash on empty input= sets the topic to

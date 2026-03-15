@@ -169,6 +169,7 @@ punctuation mark (=.= =,= =;= =:=):
 | =Closed.=         | closed (request)            |
 | =Canceled.=       | closed (all)                |
 | =Cancelled.=      | closed (all)                |
+| =Expired.=        | closed (all)                |
 | =Urgent.=         | urgent                      |
 | =Important.=      | important                   |
 
@@ -180,7 +181,7 @@ All reports can be in a combination of three states:
 
 - *Acked* --- someone took the next reasonable action (confirmed a bug, reviewed a patch, approved a request).
 - *Owned* --- someone claimed ownership of this report.
-- *Closed* --- the report is resolved (fixed, applied, done, or canceled).
+- *Closed* --- the report is resolved (fixed, applied, done, canceled, or expired).
 
 Announcements, releases, and changes can only be closed.
 

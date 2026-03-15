@@ -377,17 +377,18 @@
 
 (def default-trigger-words
   "Default trigger words per report type and action."
-  {:bug          {:acked ["Approved" "Confirmed"] :owned ["Handled"] :closed ["Canceled" "Fixed"]}
-   :patch        {:acked ["Approved" "Reviewed"]  :owned ["Handled"] :closed ["Canceled" "Applied"]}
-   :request      {:acked ["Approved"]             :owned ["Handled"] :closed ["Canceled" "Done" "Closed"]}
-   :announcement {:closed ["Canceled"]}
-   :release      {:closed ["Canceled"]}
-   :change       {:closed ["Canceled"]}})
+  {:bug          {:acked ["Approved" "Confirmed"] :owned ["Handled"] :closed ["Canceled" "Expired" "Fixed"]}
+   :patch        {:acked ["Approved" "Reviewed"]  :owned ["Handled"] :closed ["Canceled" "Expired" "Applied"]}
+   :request      {:acked ["Approved"]             :owned ["Handled"] :closed ["Canceled" "Expired" "Done" "Closed"]}
+   :announcement {:closed ["Canceled" "Expired"]}
+   :release      {:closed ["Canceled" "Expired"]}
+   :change       {:closed ["Canceled" "Expired"]}})
 
 (def default-close-reasons
   "Map trigger words to close reasons.
   Words not listed here default to :applied (the report was resolved)."
-  {"Canceled" :canceled})
+  {"Canceled" :canceled
+   "Expired"  :expired})
 
 (defn deep-merge-triggers
   "Merge overrides into base trigger-words, merging per-type action maps."
