@@ -140,7 +140,9 @@
           :data-deadline    (or deadline "")
           :data-topic       (str/lower-case (or topic ""))
           :data-search      (str/lower-case (str subject " " from " " author " " iso-date " " topic))}
-     [:td [:mark {:data-type type} label]]
+     [:td [:mark {:data-type type :style "cursor:pointer"
+                  :onclick (str "isolateType('" type "')")}
+            label]]
      [:td {:data-value (str (or priority 0)) :style "text-align:center"} (or priority 0)]
      [:td {:data-value (or deadline "") :class "due-cell"} ""]
      [:td (patch-link patches) (related-link related)
@@ -155,7 +157,7 @@
 ;; ---------------------------------------------------------------------------
 
 (def page-css (str "
-  main.container { max-width: 1600px; }
+  main.container { max-width: 1800px; }
   mark[data-type=bug]          { --pico-mark-background-color: #c0392b22; --pico-mark-color: #c0392b; }
   mark[data-type=announcement] { --pico-mark-background-color: #1a7a8a22; --pico-mark-color: #1a7a8a; }
   mark[data-type=request]      { --pico-mark-background-color: #b8860b22; --pico-mark-color: #b8860b; }
@@ -182,8 +184,8 @@
   th[data-sort].desc::after { content: ' ↓'; opacity: 0.7; }
   tr.hidden { display: none; }
   tr.stripe td { background: rgba(115,130,140,.075); }
-  td:nth-child(4) { max-width: 700px; }
-  td:nth-child(5) { max-width: 240px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  td:nth-child(4) { min-width: 740px; }
+  td:nth-child(5) { max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #status { font-size: 0.8rem; margin-bottom: 0.5rem; }
   .vote-badge { display: inline-block; padding: 0.1rem 0.4rem; border-radius: 3px;
                 font-size: 0.7rem; font-weight: 600; margin-left: 0.4em; vertical-align: middle; }

@@ -208,6 +208,24 @@ function toggleType(type, btn) {
   pushURL();
 }
 
+function syncToolbarButtons() {
+  document.querySelectorAll('.filters button[data-type]').forEach(function(btn) {
+    btn.classList.toggle('outline', !activeTypes[btn.getAttribute('data-type')]);
+  });
+}
+
+function isolateType(type) {
+  var active = allTypes.filter(function(t) { return activeTypes[t]; });
+  if (active.length === 1 && active[0] === type) {
+    allTypes.forEach(function(t) { activeTypes[t] = true; });
+  } else {
+    allTypes.forEach(function(t) { activeTypes[t] = (t === type); });
+  }
+  syncToolbarButtons();
+  filterRows();
+  pushURL();
+}
+
 function toggleAcked(btn) {
   onlyAcked = !onlyAcked;
   btn.classList.toggle('outline');
@@ -340,3 +358,4 @@ window.addEventListener('popstate', function() { restoreFromURL(); });
     else if (days <= 3) td.style.color = 'var(--pico-ins-color, #b8860b)';
   });
 })();
+
