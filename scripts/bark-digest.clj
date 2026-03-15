@@ -302,6 +302,64 @@
             {:created created :threaded threaded :skipped skipped
              :thread-index thread-index :type-index type-index})))))
 
+;; ---------------------------------------------------------------------------
+;; Report expiry
+;; ---------------------------------------------------------------------------
+
+(def ^:private expirable-types #{:announcement :release :change})
+
+(defn- days-between
+  "Number of days between two java.util.Date instances."
+  [^java.util.Date from ^java.util.Date to]
+  (let [ms (- (.getTime to) (.getTime from))]
+    (quot ms 86400000)))
+
+(defn expire-reports!
+  "Close open reports of expirable types (announcement, release, change)
+  when their age exceeds the configured :expiry delay for their source.
+  Sets :report/close-reason to :expired."
+  [conn source-map]
+  (let [now (java.util.Date.)
+        db  (d/db conn)
+        ;; Find open reports of expirable types with their source and date
+        candidates (d/q '[:find ?r ?type ?src ?date
+                          :in $ ?types
+                          :where
+                          [?r :report/type ?type]
+                          [(contains? ?types ?type)]
+                          [?r :report/email ?e]
+                          [?e :email/source ?src]
+                          [?e :email/date-sent ?date]
+                          (not [?r :report/closed _])]
+                        db expirable-types)
+        expired (reduce
+                 (fn [n [rid rtype src date-sent]]
+                   (let [expiry-cfg (:expiry (get source-map src))
+                         delay-days (get expiry-cfg (keyword rtype))]
+                     (if (and delay-days date-sent (> (days-between date-sent now) delay-days))
+                       (let [report-mid (d/q '[:find ?mid . :in $ ?r
+                                               :where [?r :report/message-id ?mid]]
+                                             (d/db conn) rid)
+                             synth-mid  (str "<bark-expired-" report-mid ">")
+                             synth-eid  (or (d/q '[:find ?e . :in $ ?mid
+                                                   :where [?e :email/message-id ?mid]]
+                                                 (d/db conn) synth-mid)
+                                            (do (d/transact! conn [{:email/message-id   synth-mid
+                                                                    :email/from-address "bark-system"
+                                                                    :email/date-sent    now
+                                                                    :email/subject      (str "Auto-expired: " report-mid)}])
+                                                (d/q '[:find ?e . :in $ ?mid
+                                                       :where [?e :email/message-id ?mid]]
+                                                     (d/db conn) synth-mid)))]
+                         (d/transact! conn [[:db/add rid :report/closed synth-eid]
+                                            [:db/add rid :report/close-reason :expired]])
+                         (log/info "Expired" (name rtype) "report:" report-mid)
+                         (inc n))
+                       n)))
+                 0 candidates)]
+    (when (pos? expired)
+      (log/info "Expired" expired "report(s)."))))
+
 (defn cmd-digest! [conn source-map sources process-all?]
   (let [db       (d/db conn)
         last-run (get-last-run db)
@@ -333,7 +391,9 @@
                   sorted)]
       (save-last-run! conn (java.util.Date.))
       (log/info "Created" created "report(s), threaded" threaded
-                    "email(s), skipped" skipped "ignored."))))
+                    "email(s), skipped" skipped "ignored.")
+      ;; --- Expiry pass ---
+      (expire-reports! conn source-map))))
 
 ;; ---------------------------------------------------------------------------
 ;; Main

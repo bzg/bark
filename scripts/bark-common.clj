@@ -263,7 +263,8 @@
         global-st        (:labels config)
         global-tg        (:triggers config)
         global-ef        (:export-formats config)
-        global-er        (:export-reports config)]
+        global-er        (:export-reports config)
+        global-expiry    (:expiry config)]
     (into {}
           (map (fn [src]
                  [(:name src)
@@ -277,7 +278,8 @@
                                                    global-ef
                                                    ["json" "org" "rss"]))
                           :export-reports (when-let [er (or (:export-reports src) global-er)]
-                                           (set (map keyword er)))})]))
+                                           (set (map keyword er)))
+                          :expiry (or (:expiry src) global-expiry)})]))
           (:sources config))))
 
 ;; ---------------------------------------------------------------------------

@@ -69,13 +69,15 @@
 
 (defn- subject-el [subject _role archived-at closed? close-reason]
   (let [canceled? (and closed? (= close-reason "canceled"))
+        expired?  (and closed? (= close-reason "expired"))
         inner     (cond canceled? [:em [:s subject]]
                         closed?   [:em subject]
                         :else     subject)]
     (if archived-at
       [:a (cond-> {:href archived-at}
-             canceled?            (assoc :title "Canceled")
-             (and closed? (not canceled?)) (assoc :title "Resolved"))
+             canceled? (assoc :title "Canceled")
+             expired?  (assoc :title "Expired")
+             (and closed? (not canceled?) (not expired?)) (assoc :title "Resolved"))
        inner]
       inner)))
 
@@ -127,6 +129,7 @@
         flag-a   (if (seq acked) "A" "-")
         flag-o   (if (seq owned) "O" "-")
         flag-c   (cond (= close-reason "canceled") "C"
+                       (= close-reason "expired")  "E"
                        closed?                     "R"
                        :else                       "-")
         flags-str (str flag-a flag-o flag-c)
@@ -138,6 +141,7 @@
                                      (= flag-a "A") (conj "Acked")
                                      (= flag-o "O") (conj "Owned")
                                      (= flag-c "C") (conj "Canceled")
+                                     (= flag-c "E") (conj "Expired")
                                      (= flag-c "R") (conj "Resolved")))]
     [:tr {:data-type        type
           :data-closed      (str closed?)
