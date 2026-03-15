@@ -104,17 +104,17 @@
                                         :attachments? true})]
               (log/info "Fetched" (count msgs) "messages from IMAP")
               (when-not (shutting-down?)
-                (ingest/store-emails! db-conn msgs)
-                (when-let [max-uid (some->> msgs (keep :uid) seq (apply max))]
-                  (db/save-imap-uid! db-conn max-uid)))))
+                (let [{:keys [safe-uids]} (ingest/store-emails! db-conn msgs)]
+                  (when-let [max-uid (some->> safe-uids (remove nil?) seq (apply max))]
+                    (db/save-imap-uid! db-conn max-uid))))))
         (do (log/info "Resuming — fetching UIDs >" watermark)
             (let [msgs (fetch/by-uid-range imap-conn folder
                                            (inc watermark) Long/MAX_VALUE)]
               (log/info "Fetched" (count msgs) "messages since watermark")
               (when (and (seq msgs) (not (shutting-down?)))
-                (ingest/store-emails! db-conn msgs)
-                (when-let [max-uid (some->> msgs (keep :uid) seq (apply max))]
-                  (db/save-imap-uid! db-conn max-uid)))))))))
+                (let [{:keys [safe-uids]} (ingest/store-emails! db-conn msgs)]
+                  (when-let [max-uid (some->> safe-uids (remove nil?) seq (apply max))]
+                    (db/save-imap-uid! db-conn max-uid))))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; IMAP connection
@@ -145,16 +145,22 @@
   (idle/idle imap-conn folder
              (fn [msg]
                (when-not (shutting-down?)
-                 (log/info "New message via IDLE — UID:" (:uid msg)
-                           "Subject:" (:subject msg))
-                 (try
-                   (ingest/store-email! db-conn msg)
-                   (when-let [uid (:uid msg)]
-                     (let [current (db/max-imap-uid db-conn)]
-                       (when (> uid current)
-                         (db/save-imap-uid! db-conn uid))))
-                   (catch Exception e
-                     (log/error "Error storing message:" (.getMessage e))))))
+                 (if (nil? msg)
+                   (log/warn "IDLE delivered nil message, skipping")
+                   (do
+                     (log/info "New message via IDLE — UID:" (:uid msg)
+                               "Subject:" (:subject msg))
+                     (try
+                       (ingest/store-email! db-conn msg)
+                       ;; Advance watermark whether stored or skipped —
+                       ;; only exceptions (caught below) should prevent it.
+                       (when-let [uid (:uid msg)]
+                         (let [current (db/max-imap-uid db-conn)]
+                           (when (> uid current)
+                             (db/save-imap-uid! db-conn uid))))
+                       (catch Exception e
+                         (log/error "Error storing message:"
+                                    (.getMessage e))))))))
              {:parse-opts   {:attachments? true}
               :heartbeat-ms (* 20 60 1000)}))
 

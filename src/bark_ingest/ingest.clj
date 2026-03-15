@@ -136,14 +136,21 @@
               (throw e))))))))
 
 (defn store-emails!
-  "Store a batch of parsed emails. Returns the count of newly stored emails."
+  "Store a batch of parsed emails.
+  Returns {:stored <count>, :safe-uids <set of UIDs safe to advance past>}.
+  Safe UIDs include both successfully stored and intentionally skipped messages."
   [conn msgs]
-  (let [stored (reduce (fn [n msg]
+  (let [result (reduce (fn [acc msg]
                          (try
-                           (if (store-email! conn msg) (inc n) n)
+                           (if (store-email! conn msg)
+                             (-> acc
+                                 (update :stored inc)
+                                 (update :safe-uids conj (:uid msg)))
+                             ;; Skipped (nil mid or duplicate) — safe to advance past
+                             (update acc :safe-uids conj (:uid msg)))
                            (catch Exception e
                              (log/warn "Failed to store email UID:" (:uid msg) (.getMessage e))
-                             n)))
-                       0 msgs)]
-    (log/info "Batch complete. Stored" stored "of" (count msgs) "emails.")
-    stored))
+                             acc)))
+                       {:stored 0 :safe-uids #{}} msgs)]
+    (log/info "Batch complete. Stored" (:stored result) "of" (count msgs) "emails.")
+    result))
