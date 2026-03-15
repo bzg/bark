@@ -1228,4 +1228,79 @@
   :email/in-reply-to "<88@test.org>"
   :email/references "<88@test.org>"
   :email/body-text  "Closed-by: closer@test.org\nImportant-by: closer@test.org\n"}
+
+ ;; =================================================================
+ ;; 90-95: Mixed triggers + directives in single emails
+ ;; =================================================================
+
+ ;; 90 — Bug report (base for mixed trigger + directive tests)
+ {:email/imap-uid    90
+  :email/message-id  "<90@test.org>"
+  :email/subject     "[BUG] Mixed trigger and directive test"
+  :email/content-type "text/plain"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-29T10:00:00"
+  :email/ingested-at #inst "2026-01-29T10:00:00"
+  :email/source      "direct"
+  :email/body-text  "Something is broken.\n"}
+
+ ;; 91 — Maintainer reply with trigger (Confirmed.) + directive (Owned-by)
+ {:email/imap-uid    91
+  :email/message-id  "<91@test.org>"
+  :email/subject     "Re: [BUG] Mixed trigger and directive test"
+  :email/content-type "text/plain"
+  :email/from-address "maint@test.org"
+  :email/date-sent  #inst "2026-01-29T11:00:00"
+  :email/ingested-at #inst "2026-01-29T11:00:00"
+  :email/in-reply-to "<90@test.org>"
+  :email/references "<90@test.org>"
+  :email/body-text  "Confirmed.\nOwned-by: fixer@test.org\n"}
+
+ ;; 92 — Maintainer reply: trigger (Fixed.) + conflicting directive (Unclosed)
+ ;; Directive wins because directives are applied after triggers.
+ {:email/imap-uid    92
+  :email/message-id  "<92@test.org>"
+  :email/subject     "Re: [BUG] Mixed trigger and directive test"
+  :email/content-type "text/plain"
+  :email/from-address "maint@test.org"
+  :email/date-sent  #inst "2026-01-29T12:00:00"
+  :email/ingested-at #inst "2026-01-29T12:00:00"
+  :email/in-reply-to "<90@test.org>"
+  :email/references "<90@test.org>"
+  :email/body-text  "Fixed.\nUnclosed\n"}
+
+ ;; 93 — Bug report (base for deadline + directive test)
+ {:email/imap-uid    93
+  :email/message-id  "<93@test.org>"
+  :email/subject     "[BUG] Deadline with directives test"
+  :email/content-type "text/plain"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-01-30T10:00:00"
+  :email/ingested-at #inst "2026-01-30T10:00:00"
+  :email/source      "direct"
+  :email/body-text  "Another bug here.\n"}
+
+ ;; 94 — Maintainer reply with Deadline + Urgent-by + trigger (Confirmed.)
+ {:email/imap-uid    94
+  :email/message-id  "<94@test.org>"
+  :email/subject     "Re: [BUG] Deadline with directives test"
+  :email/content-type "text/plain"
+  :email/from-address "admin@test.org"
+  :email/date-sent  #inst "2026-01-30T11:00:00"
+  :email/ingested-at #inst "2026-01-30T11:00:00"
+  :email/in-reply-to "<93@test.org>"
+  :email/references "<93@test.org>"
+  :email/body-text  "Confirmed.\nDeadline: 2026-06-01\nUrgent-by: user@test.org\n"}
+
+ ;; 95 — Maintainer reply with trigger (Confirmed.) + Topic directive
+ {:email/imap-uid    95
+  :email/message-id  "<95@test.org>"
+  :email/subject     "Re: [BUG] Mixed trigger and directive test"
+  :email/content-type "text/plain"
+  :email/from-address "maint@test.org"
+  :email/date-sent  #inst "2026-01-29T13:00:00"
+  :email/ingested-at #inst "2026-01-29T13:00:00"
+  :email/in-reply-to "<90@test.org>"
+  :email/references "<90@test.org>"
+  :email/body-text  "Confirmed.\nTopic: regression\n"}
 ]

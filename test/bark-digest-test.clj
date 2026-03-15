@@ -120,6 +120,7 @@
             :report/acked :report/owned :report/closed
             :report/close-reason
             :report/urgent :report/important
+            :report/deadline
             {:report/acked-proxy [:email/from-address]}
             {:report/owned-proxy [:email/from-address]}
             {:report/closed-proxy [:email/from-address]}
@@ -664,6 +665,46 @@
           (assert= "Important-proxy is admin@test.org"
                    "admin@test.org"
                    (get-in r [:report/important-proxy :email/from-address])))
+
+        ;; =================================================================
+        ;; MIXED TRIGGER + DIRECTIVE TESTS (emails 90-95)
+        ;; =================================================================
+
+        ;; --- Bug 90: trigger + directive in same email (email 91) ---
+        (println "\n--- Bug 90: Confirmed trigger + Owned-by directive ---")
+        (let [r (get-report db "<90@test.org>")]
+          (assert-test "Acked via Confirmed trigger"
+                       (some? (:report/acked r)))
+          (assert-test "Owned via Owned-by directive"
+                       (some? (:report/owned r)))
+          (assert= "Owned-proxy is maint@test.org"
+                   "maint@test.org"
+                   (get-in r [:report/owned-proxy :email/from-address])))
+
+        ;; --- Bug 90: Fixed trigger + Unclosed directive conflict (email 92) ---
+        (println "\n--- Bug 90: Fixed trigger + Unclosed directive (directive wins) ---")
+        (let [r (get-report db "<90@test.org>")]
+          (assert-test "NOT closed (Unclosed directive overrides Fixed trigger)"
+                       (nil? (:report/closed r))))
+
+        ;; --- Bug 93: Confirmed trigger + Deadline + Urgent-by (email 94) ---
+        (println "\n--- Bug 93: Confirmed + Deadline + Urgent-by ---")
+        (let [r (get-report db "<93@test.org>")]
+          (assert-test "Acked via Confirmed trigger"
+                       (some? (:report/acked r)))
+          (assert-test "Urgent via Urgent-by directive"
+                       (some? (:report/urgent r)))
+          (assert-test "Deadline is set"
+                       (some? (:report/deadline r)))
+          (assert= "Urgent-proxy is admin@test.org"
+                   "admin@test.org"
+                   (get-in r [:report/urgent-proxy :email/from-address])))
+
+        ;; --- Bug 90: Confirmed trigger + Topic directive (email 95) ---
+        (println "\n--- Bug 90: Confirmed trigger + Topic directive ---")
+        (let [r (get-report db "<90@test.org>")]
+          (assert= "Topic set to 'regression'"
+                   "regression" (:report/topic r)))
 
         ;; --- Summary ---
         (println "\n=== Summary ===")
