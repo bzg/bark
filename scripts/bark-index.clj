@@ -67,19 +67,15 @@
 ;; Hiccup helpers
 ;; ---------------------------------------------------------------------------
 
-(defn- subject-el [subject role archived-at closed? close-reason]
+(defn- subject-el [subject _role archived-at closed? close-reason]
   (let [canceled? (and closed? (= close-reason "canceled"))
-        resolved? (and closed? (not canceled?))
-        inner     (if (#{"admin" "maintainer"} role)
-                    [:strong subject]
-                    subject)
-        inner     (cond canceled? [:s inner]
-                        resolved? [:em inner]
-                        :else     inner)]
+        inner     (cond canceled? [:em [:s subject]]
+                        closed?   [:em subject]
+                        :else     subject)]
     (if archived-at
       [:a (cond-> {:href archived-at}
-             canceled? (assoc :title "Canceled")
-             resolved? (assoc :title "Resolved"))
+             canceled?            (assoc :title "Canceled")
+             (and closed? (not canceled?)) (assoc :title "Resolved"))
        inner]
       inner)))
 
@@ -150,7 +146,7 @@
      [:td {:data-value (str (or priority 0)) :style "text-align:center"} (or priority 0)]
      [:td {:data-value (or deadline "") :class "due-cell"} ""]
      [:td (subject-el subject role archived-at closed? close-reason) (related-link related) (patch-link patches) (vote-badge votes)]
-     [:td.secondary {:title from} (if (> (count author) 25) (str (subs author 0 25) "…") author)]
+     [:td.secondary {:title from} (if (= role "maintainer") [:strong author] author)]
      [:td {:data-value iso-date} [:small (or iso-date date "")]]
      [:td {:style "text-align:center"} (or replies 0)]]))
 
