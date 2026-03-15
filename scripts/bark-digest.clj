@@ -36,7 +36,7 @@
          ;; bark-detect.clj
          detect-report resolve-labels build-patch-entities
          ;; bark-triggers.clj
-         apply-triggers! apply-directives!
+         apply-triggers-and-directives!
          ;; bark-series.clj
          manage-series!)
 
@@ -274,7 +274,6 @@
                                              (d/q '[:find ?t . :in $ ?r
                                                     :where [?r :report/type ?t]]
                                                   (d/db conn) rid))]
-                          (apply-triggers! conn rid rtype email source-map)
                           (let [report-source (d/q '[:find ?src . :in $ ?rid
                                                      :where [?rid :report/email ?e]
                                                      [?e :email/source ?src]]
@@ -282,7 +281,8 @@
                                 report-roles (if report-source
                                                (get-roles (d/db conn) report-source)
                                                roles)]
-                            (apply-directives! conn rid email report-roles))))
+                            (apply-triggers-and-directives!
+                             conn rid rtype email source-map report-roles))))
                       [(+ threaded (count parent-report-eids))
                        (reduce #(index-assoc %1 message-id %2) thread-index parent-report-eids)])
                   [threaded thread-index])]

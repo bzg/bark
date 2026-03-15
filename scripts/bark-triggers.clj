@@ -1,7 +1,8 @@
 ;; bark-triggers.clj — Trigger detection, voting, and application.
 ;;
-;; Pure functions: detect-triggers, detect-vote, build-source-triggers
-;; Effectful:      apply-triggers!, apply-vote!
+;; Pure functions: detect-triggers, detect-vote, detect-directives,
+;;                 resolve-directives, build-source-triggers
+;; Effectful:      apply-triggers-and-directives!
 ;;
 ;; Usage: (load-file "scripts/bark-triggers.clj")
 
@@ -245,70 +246,7 @@
                  :where [?e :email/message-id ?mid]]
                (d/db conn) synthetic-mid)))))
 
-(defn apply-directives!
-  "Apply maintainer proxy directives to a report.
-  `email` is the maintainer's email entity (used as the proxy ref)."
-  [conn report-eid email roles]
-  (let [body-text  (email-body-text email)
-        from-addr  (:email/from-address email)
-        directives (detect-directives body-text)]
-    (when (and (seq directives) (admin-or-maintainer? roles from-addr))
-      (let [{:keys [set unset deadline undeadline? topic]} (resolve-directives directives)
-            report-mid (d/q '[:find ?mid . :in $ ?r
-                              :where [?r :report/message-id ?mid]]
-                            (d/db conn) report-eid)
-            proxy-eid  (:db/id email)
-            current    (d/pull (d/db conn) (conj state-attrs :report/deadline :report/close-reason) report-eid)
-            ;; Build set transactions
-            set-tx (mapcat (fn [[attr addr]]
-                             (let [target-eid (find-or-create-synthetic-email!
-                                               conn addr report-mid attr)]
-                               [[:db/add report-eid attr target-eid]
-                                [:db/add report-eid (proxy-attrs attr) proxy-eid]]))
-                           set)
-            ;; Close-reason for Closed-by directive (always :applied)
-            close-reason-tx (when (contains? set :report/closed)
-                              [[:db/add report-eid :report/close-reason :applied]])
-            ;; Build unset transactions
-            unset-tx (mapcat (fn [attr]
-                               (when-let [cur (get current attr)]
-                                 (let [retract [[:db/retract report-eid attr (ref-eid cur)]]
-                                       proxy-attr (proxy-attrs attr)
-                                       proxy-cur  (get (d/pull (d/db conn) [proxy-attr] report-eid)
-                                                       proxy-attr)]
-                                   (if proxy-cur
-                                     (conj retract [:db/retract report-eid proxy-attr (ref-eid proxy-cur)])
-                                     retract))))
-                             unset)
-            ;; Clear close-reason when Unclosed
-            unclose-reason-tx (when (and (contains? unset :report/closed)
-                                         (:report/close-reason current))
-                                [[:db/retract report-eid :report/close-reason
-                                  (:report/close-reason current)]])
-            ;; Deadline transactions
-            deadline-tx (cond
-                          deadline    [[:db/add report-eid :report/deadline deadline]]
-                          undeadline? (when (:report/deadline current)
-                                        [[:db/retract report-eid :report/deadline
-                                          (:report/deadline current)]])
-                          :else       nil)
-            ;; Topic transaction (overwrites previous topic)
-            topic-tx (when topic [[:db/add report-eid :report/topic topic]])
-            all-tx (vec (concat set-tx close-reason-tx unset-tx unclose-reason-tx
-                                deadline-tx topic-tx))
-            ;; Log description
-            desc (concat (map (fn [[attr addr]] (str (name attr) " -> " addr)) set)
-                         (map #(str "un-" (name %)) unset)
-                         (when deadline [(str "deadline " deadline)])
-                         (when undeadline? ["undeadline"])
-                         (when topic [(str "topic: " topic)]))]
-        (when (seq all-tx)
-          (d/transact! conn all-tx)
-          (log/info "Directives:" (str/join ", " desc)
-                        "(proxy by" from-addr ")"))))))
-
-
-(defn apply-vote! [conn report-eid from-addr body-text]
+(defn- apply-vote! [conn report-eid from-addr body-text]
   ;; NB: read-then-write is safe because cmd-digest! processes emails
   ;; sequentially. If parallelized, this needs a transaction function.
   (when-let [vote (detect-vote body-text)]
@@ -323,29 +261,98 @@
                              [:db/add report-eid :report/voters from-addr]])
           (log/info "Vote" (case vote :up "+1" :down "-1" "0") "by" from-addr))))))
 
-(defn apply-triggers! [conn report-eid report-type email source-map]
-  (let [body-text  (email-body-text email)
-        from-addr  (:email/from-address email)
-        src-name   (d/q '[:find ?src . :in $ ?rid :where
-                          [?rid :report/email ?e] [?e :email/source ?src]]
-                        (d/db conn) report-eid)
-        triggers   (build-source-triggers (get source-map src-name))
-        result     (detect-triggers report-type body-text triggers)]
-    (when (and (= :request report-type) from-addr body-text)
-      (apply-vote! conn report-eid from-addr body-text))
-    (when result
-      (let [eid          (:db/id email)
-            close-reason (:report/close-reason result)
-            ref-result   (dissoc result :report/close-reason)
-            current      (d/pull (d/db conn) state-attrs report-eid)
-            new-sets     (into {} (remove (fn [[k _]] (get current k))) ref-result)
-            set-tx       (when (seq new-sets)
-                           [(into {:db/id report-eid} (map (fn [[k _]] [k eid])) new-sets)])
-            reason-tx    (when (and close-reason (:report/closed new-sets))
-                           [[:db/add report-eid :report/close-reason close-reason]])
-            all-tx       (vec (concat set-tx reason-tx))]
-        (when (seq all-tx)
-          (d/transact! conn all-tx)
-          (log/info (str/join ", " (cond-> (mapv (comp name key) new-sets)
-                                     close-reason (conj (str "close-reason:" (name close-reason)))))
-                        "(by" (:email/message-id email) ")"))))))
+(defn apply-triggers-and-directives!
+  "Detect all triggers, directives, and votes from an email's body text,
+  then apply them in a single pass: triggers first, then directives.
+  `roles` is the roles map for the report's source."
+  [conn report-eid report-type email source-map roles]
+  (let [body-text (email-body-text email)
+        from-addr (:email/from-address email)
+        eid       (:db/id email)]
+    (when body-text
+      ;; --- 1. Detect everything (pure) ---
+      (let [src-name    (d/q '[:find ?src . :in $ ?rid :where
+                               [?rid :report/email ?e] [?e :email/source ?src]]
+                             (d/db conn) report-eid)
+            triggers    (build-source-triggers (get source-map src-name))
+            trig-result (detect-triggers report-type body-text triggers)
+            directives  (detect-directives body-text)
+            is-maintainer? (admin-or-maintainer? roles from-addr)]
+
+        ;; --- 2. Apply votes (requests only) ---
+        (when (and (= :request report-type) from-addr)
+          (apply-vote! conn report-eid from-addr body-text))
+
+        ;; --- 3. Apply triggers ---
+        (when trig-result
+          (let [close-reason (:report/close-reason trig-result)
+                ref-result   (dissoc trig-result :report/close-reason)
+                current      (d/pull (d/db conn) state-attrs report-eid)
+                new-sets     (into {} (remove (fn [[k _]] (get current k))) ref-result)
+                set-tx       (when (seq new-sets)
+                               [(into {:db/id report-eid} (map (fn [[k _]] [k eid])) new-sets)])
+                reason-tx    (when (and close-reason (:report/closed new-sets))
+                               [[:db/add report-eid :report/close-reason close-reason]])
+                all-tx       (vec (concat set-tx reason-tx))]
+            (when (seq all-tx)
+              (d/transact! conn all-tx)
+              (log/info (str/join ", " (cond-> (mapv (comp name key) new-sets)
+                                         close-reason (conj (str "close-reason:" (name close-reason)))))
+                        "(by" (:email/message-id email) ")"))))
+
+        ;; --- 4. Apply directives (maintainer-only) ---
+        (when (and (seq directives) is-maintainer?)
+          (let [{:keys [set unset deadline undeadline? topic]} (resolve-directives directives)
+                report-mid (d/q '[:find ?mid . :in $ ?r
+                                  :where [?r :report/message-id ?mid]]
+                                (d/db conn) report-eid)
+                proxy-eid  eid
+                current    (d/pull (d/db conn) (conj state-attrs :report/deadline :report/close-reason) report-eid)
+                ;; Build set transactions
+                set-tx (mapcat (fn [[attr addr]]
+                                 (let [target-eid (find-or-create-synthetic-email!
+                                                   conn addr report-mid attr)]
+                                   [[:db/add report-eid attr target-eid]
+                                    [:db/add report-eid (proxy-attrs attr) proxy-eid]]))
+                               set)
+                ;; Close-reason for Closed-by directive (always :applied)
+                close-reason-tx (when (contains? set :report/closed)
+                                  [[:db/add report-eid :report/close-reason :applied]])
+                ;; Build unset transactions
+                unset-tx (mapcat (fn [attr]
+                                   (when-let [cur (get current attr)]
+                                     (let [retract [[:db/retract report-eid attr (ref-eid cur)]]
+                                           proxy-attr (proxy-attrs attr)
+                                           proxy-cur  (get (d/pull (d/db conn) [proxy-attr] report-eid)
+                                                           proxy-attr)]
+                                       (if proxy-cur
+                                         (conj retract [:db/retract report-eid proxy-attr (ref-eid proxy-cur)])
+                                         retract))))
+                                 unset)
+                ;; Clear close-reason when Unclosed
+                unclose-reason-tx (when (and (contains? unset :report/closed)
+                                             (:report/close-reason current))
+                                    [[:db/retract report-eid :report/close-reason
+                                      (:report/close-reason current)]])
+                ;; Deadline transactions
+                deadline-tx (cond
+                              deadline    [[:db/add report-eid :report/deadline deadline]]
+                              undeadline? (when (:report/deadline current)
+                                            [[:db/retract report-eid :report/deadline
+                                              (:report/deadline current)]])
+                              :else       nil)
+                ;; Topic transaction (overwrites previous topic)
+                topic-tx (when topic [[:db/add report-eid :report/topic topic]])
+                all-tx (vec (concat set-tx close-reason-tx unset-tx unclose-reason-tx
+                                    deadline-tx topic-tx))
+                ;; Log description
+                desc (concat (map (fn [[attr addr]] (str (name attr) " -> " addr)) set)
+                             (map #(str "un-" (name %)) unset)
+                             (when deadline [(str "deadline " deadline)])
+                             (when undeadline? ["undeadline"])
+                             (when topic [(str "topic: " topic)]))]
+            (when (seq all-tx)
+              (d/transact! conn all-tx)
+              (log/info "Directives:" (str/join ", " desc)
+                        "(proxy by" from-addr ")"))))))))
+
