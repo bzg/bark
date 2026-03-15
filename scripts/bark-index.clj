@@ -123,7 +123,22 @@
   (let [label    (get type-labels type type)
         closed?  (and flags (>= (count flags) 3) (= (nth flags 2 \-) \C))
         iso-date (or (parse-to-iso-date (or date-raw date "")) "")
-        author   (or (when (seq from-name) from-name) from)]
+        author   (or (when (seq from-name) from-name) from)
+        flag-a   (if (seq acked) "A" "-")
+        flag-o   (if (seq owned) "O" "-")
+        flag-c   (cond (= close-reason "canceled") "C"
+                       closed?                     "R"
+                       :else                       "-")
+        flags-str (str flag-a flag-o flag-c)
+        ;; Numeric score for sorting: acked=1, owned=2, open=4 (closed=0)
+        flags-score (+ (if (seq acked) 1 0)
+                       (if (seq owned) 2 0)
+                       (if closed? 0 4))
+        flags-title (str/join ", " (cond-> []
+                                     (= flag-a "A") (conj "Acked")
+                                     (= flag-o "O") (conj "Owned")
+                                     (= flag-c "C") (conj "Canceled")
+                                     (= flag-c "R") (conj "Resolved")))]
     [:tr {:data-type        type
           :data-closed      (str closed?)
           :data-mid         (or message-id "")
@@ -145,6 +160,8 @@
             label]]
      [:td {:data-value (str (or priority 0)) :style "text-align:center"} (or priority 0)]
      [:td {:data-value (or deadline "") :class "due-cell"} ""]
+     [:td {:data-value (str flags-score) :title flags-title
+           :style "text-align:center; font-family:monospace; font-size:0.8rem; letter-spacing:0.1em"} flags-str]
      [:td (patch-link patches) (related-link related)
       (subject-el subject role archived-at closed? close-reason)
       (vote-badge votes)]
@@ -184,8 +201,8 @@
   th[data-sort].desc::after { content: ' ↓'; opacity: 0.7; }
   tr.hidden { display: none; }
   tr.stripe td { background: rgba(115,130,140,.075); }
-  td:nth-child(4) { min-width: 740px; }
-  td:nth-child(5) { max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  td:nth-child(5) { min-width: 740px; }
+  td:nth-child(6) { max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #status { font-size: 0.8rem; margin-bottom: 0.5rem; }
   .vote-badge { display: inline-block; padding: 0.1rem 0.4rem; border-radius: 3px;
                 font-size: 0.7rem; font-weight: 600; margin-left: 0.4em; vertical-align: middle; }
@@ -219,10 +236,11 @@
         cols       [[:th {:data-sort "type"     :onclick "sortTable(0,'type')"}     "Type"]
                     [:th {:data-sort "priority" :onclick "sortTable(1,'priority')"} "Priority"]
                     [:th {:data-sort "due"      :onclick "sortTable(2,'due')"}      "Due"]
-                    [:th {:data-sort "subject"  :onclick "sortTable(3,'subject')"}  "Subject"]
-                    [:th {:data-sort "from"     :onclick "sortTable(4,'from')"}     "Author"]
-                    [:th {:data-sort "date"     :onclick "sortTable(5,'date')"}     "Date"]
-                    [:th {:data-sort "replies"  :onclick "sortTable(6,'replies')"}  "↩"]]]
+                    [:th {:data-sort "flags"    :onclick "sortTable(3,'flags')"}    "Flags"]
+                    [:th {:data-sort "subject"  :onclick "sortTable(4,'subject')"}  "Subject"]
+                    [:th {:data-sort "from"     :onclick "sortTable(5,'from')"}     "Author"]
+                    [:th {:data-sort "date"     :onclick "sortTable(6,'date')"}     "Date"]
+                    [:th {:data-sort "replies"  :onclick "sortTable(7,'replies')"}  "↩"]]]
     (str
      "<!DOCTYPE html>\n"
      (h/html
