@@ -232,7 +232,9 @@
     (if (and from-addr (ignored? roles from-addr))
       (do (log/debug "Ignored" from-addr "—" (:email/subject email))
           (assoc acc :skipped (inc skipped)))
-      (do ;; Role and notify commands (only for direct emails, not mailing list)
+      (do ;; Role and notify commands (not from mailing lists — list emails
+       ;; have both List-Id and List-Post; a manually added List-Id alone
+       ;; does not count).
        (when (and from-addr body-text source-name
                   (not (from-mailing-list? email)))
          (apply-role-commands! conn roles source-name from-addr body-text)

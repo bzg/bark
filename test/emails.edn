@@ -411,7 +411,7 @@
   :email/date-sent  #inst "2026-01-13T10:00:00"
   :email/ingested-at #inst "2026-01-13T10:00:00"
   :email/body-text  "Add maintainer: evil@hacker.org\n"
-  :email/headers-edn "{\"List-Id\" \"<emacs-orgmode.gnu.org>\"}"}
+  :email/headers-edn "{\"List-Id\" \"<emacs-orgmode.gnu.org>\" \"List-Post\" \"<mailto:list@test.org>\"}"}
 
  ;; =========================================================================
  ;; 30 — Bug on list-backed source, correct List-Post (allowed)
@@ -1010,7 +1010,7 @@
   :email/date-sent  #inst "2026-01-24T13:00:00"
   :email/ingested-at #inst "2026-01-24T13:00:00"
   :email/body-text  "Notify: d:1\n"
-  :email/headers-edn "{\"List-Id\" \"<emacs-orgmode.gnu.org>\"}"}
+  :email/headers-edn "{\"List-Id\" \"<emacs-orgmode.gnu.org>\" \"List-Post\" \"<mailto:list@test.org>\"}"}
 
  ;; =========================================================================
  ;; 75 — POLL for vote-format tests

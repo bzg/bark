@@ -201,9 +201,13 @@
 (def announcement-types #{:announcement :release :change})
 
 (defn from-mailing-list?
-  "True if the email was delivered through a mailing list (has List-Id header)."
+  "True if the email was delivered through a mailing list.
+  Requires both List-Id and List-Post headers — a manually added List-Id
+  (for source classification) is not enough."
   [email]
-  (some? (get-header (:email/headers-edn email) "List-Id")))
+  (let [hdrs (:email/headers-edn email)]
+    (and (some? (get-header hdrs "List-Id"))
+         (some? (get-header hdrs "List-Post")))))
 
 (defn- list-post-address
   "Extract the email address from the List-Post header, e.g.
