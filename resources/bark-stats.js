@@ -18,11 +18,12 @@ function barkRenderAll() {
   });
 }
 
-// Patch toggleTheme to also re-render charts
-var _origToggleTheme = typeof toggleTheme === 'function' ? toggleTheme : null;
-toggleTheme = function() {
-  if (_origToggleTheme) _origToggleTheme();
+// Wait for DOMContentLoaded so bark-theme.js has defined toggleTheme.
+// Then wrap it to also re-render charts on theme change.
+document.addEventListener('DOMContentLoaded', function() {
   barkRenderAll();
-};
-
-document.addEventListener('DOMContentLoaded', barkRenderAll);
+  if (typeof toggleTheme === 'function') {
+    var origToggle = toggleTheme;
+    toggleTheme = function() { origToggle(); barkRenderAll(); };
+  }
+});

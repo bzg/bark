@@ -63,6 +63,33 @@ function matchField(fieldVal, terms) {
   return terms.some(function(t) { return fieldVal.indexOf(t) !== -1; });
 }
 
+/* Extract the value after the first ':' in a search token */
+function extractValue(part, lowered) {
+  return part.substring(lowered.indexOf(':') + 1);
+}
+
+/* Check whether lowered starts with any of the given prefixes */
+function startsWithAny(lowered, prefixes) {
+  return prefixes.some(function(pfx) { return lowered.indexOf(pfx) === 0; });
+}
+
+/*
+ * Field map: each entry maps search prefixes to a result key.
+ * parseClause uses this to turn "from:alice" into result.froms = ["alice"].
+ * matchClause uses the dataAttr to look up the corresponding data-* attribute.
+ */
+var fieldMap = [
+  {prefixes: ['message-id:', 'mid:', 'm:'], key: 'mids',      dataAttr: 'mid'},
+  {prefixes: ['from:', 'f:'],               key: 'froms',     dataAttr: 'from'},
+  {prefixes: ['subject:', 's:'],            key: 'subjects',  dataAttr: 'subject'},
+  {prefixes: ['topic:', 't:'],              key: 'topics',    dataAttr: 'topic'},
+  {prefixes: ['acked:', 'a:'],              key: 'acked',     dataAttr: 'acked'},
+  {prefixes: ['owned:', 'o:'],              key: 'owned',     dataAttr: 'owned'},
+  {prefixes: ['closed:', 'c:'],             key: 'closed',    dataAttr: 'closedby'},
+  {prefixes: ['urgent:', 'u:'],             key: 'urgent',    dataAttr: 'urgent'},
+  {prefixes: ['important:', 'i:'],          key: 'important', dataAttr: 'important'}
+];
+
 /* Parse a single AND-clause (no | in it) */
 function parseClause(q) {
   var result = { text: '', mids: [], froms: [], subjects: [],
@@ -73,36 +100,19 @@ function parseClause(q) {
   for (var i = 0; i < parts.length; i++) {
     var p  = parts[i];
     var lp = p.toLowerCase();
-    if (lp.indexOf('message-id:') === 0 || lp.indexOf('mid:') === 0 || lp.indexOf('m:') === 0) {
-      var v = p.substring(lp.indexOf(':') + 1);
-      result.mids = v.toLowerCase().split(',').filter(Boolean);
-    } else if (lp.indexOf('from:') === 0 || lp.indexOf('f:') === 0) {
-      var v = p.substring(lp.indexOf(':') + 1);
-      result.froms = v.toLowerCase().split(',').filter(Boolean);
-    } else if (lp.indexOf('subject:') === 0 || lp.indexOf('s:') === 0) {
-      var v = p.substring(lp.indexOf(':') + 1);
-      result.subjects = v.toLowerCase().split(',').filter(Boolean);
-    } else if (lp.indexOf('topic:') === 0 || lp.indexOf('t:') === 0) {
-      var v = p.substring(lp.indexOf(':') + 1);
-      result.topics = v.toLowerCase().split(',').filter(Boolean);
-    } else if (lp.indexOf('acked:') === 0 || lp.indexOf('a:') === 0) {
-      var v = p.substring(lp.indexOf(':') + 1);
-      result.acked = v.toLowerCase().split(',').filter(Boolean);
-    } else if (lp.indexOf('owned:') === 0 || lp.indexOf('o:') === 0) {
-      var v = p.substring(lp.indexOf(':') + 1);
-      result.owned = v.toLowerCase().split(',').filter(Boolean);
-    } else if (lp.indexOf('closed:') === 0 || lp.indexOf('c:') === 0) {
-      var v = p.substring(lp.indexOf(':') + 1);
-      result.closed = v.toLowerCase().split(',').filter(Boolean);
-    } else if (lp.indexOf('urgent:') === 0 || lp.indexOf('u:') === 0) {
-      var v = p.substring(lp.indexOf(':') + 1);
-      result.urgent = v.toLowerCase().split(',').filter(Boolean);
-    } else if (lp.indexOf('important:') === 0 || lp.indexOf('i:') === 0) {
-      var v = p.substring(lp.indexOf(':') + 1);
-      result.important = v.toLowerCase().split(',').filter(Boolean);
-    } else if (lp.indexOf('priority:') === 0 || lp.indexOf('p:') === 0) {
-      var v = p.substring(lp.indexOf(':') + 1);
-      var n = parseInt(v, 10);
+    // Try each field mapping
+    var matched = false;
+    for (var j = 0; j < fieldMap.length; j++) {
+      if (startsWithAny(lp, fieldMap[j].prefixes)) {
+        result[fieldMap[j].key] = extractValue(p, lp).toLowerCase().split(',').filter(Boolean);
+        matched = true;
+        break;
+      }
+    }
+    if (matched) continue;
+    // Special cases: priority and date (not simple field lookups)
+    if (lp.indexOf('priority:') === 0 || lp.indexOf('p:') === 0) {
+      var n = parseInt(extractValue(p, lp), 10);
       if (!isNaN(n)) result.minPriority = n;
     } else if (lp.indexOf('date:') === 0 || lp.indexOf('d:') === 0) {
       var pfxLen = lp.indexOf('date:') === 0 ? 5 : 2;
@@ -124,15 +134,14 @@ function matchClause(tr, q) {
   if (onlyAcked  && d.acked  === '')     return false;
   if (onlyOwned  && d.owned  === '')     return false;
 
-  if (q.mids.length     > 0 && !matchField((d.mid || '').toLowerCase(), q.mids))     return false;
-  if (q.froms.length    > 0 && !matchField(d.from,                      q.froms))    return false;
-  if (q.subjects.length > 0 && !matchField(d.subject,                   q.subjects)) return false;
-  if (q.topics.length   > 0 && !matchField(d.topic,                     q.topics))   return false;
-  if (q.acked.length     > 0 && !matchField(d.acked,                     q.acked))     return false;
-  if (q.owned.length     > 0 && !matchField(d.owned,                     q.owned))     return false;
-  if (q.closed.length    > 0 && !matchField(d.closedby,                  q.closed))    return false;
-  if (q.urgent.length    > 0 && !matchField(d.urgent,                    q.urgent))    return false;
-  if (q.important.length > 0 && !matchField(d.important,                 q.important)) return false;
+  // Check all field-mapped filters
+  for (var j = 0; j < fieldMap.length; j++) {
+    var f = fieldMap[j];
+    if (q[f.key].length > 0) {
+      var val = (d[f.dataAttr] || '').toLowerCase();
+      if (!matchField(val, q[f.key])) return false;
+    }
+  }
 
   if (q.minPriority !== null) {
     if (parseInt(d.priority || '0', 10) < q.minPriority) return false;
