@@ -102,9 +102,7 @@
     (let [watermark (db/max-imap-uid db-conn)]
       (if (zero? watermark)
         (do (log/info "First run — fetching last" initial-limit "messages")
-            (log/warn "Only the most recent" initial-limit
-                      "messages will be fetched. Older emails are permanently skipped."
-                      "Adjust :initial-fetch in config.edn to change this limit.")
+            (log/warn ":initial-fetch says to fetch only the" initial-limit "most recent messages.")
             (let [msgs (fetch/messages imap-conn folder
                                        {:limit        initial-limit
                                         :attachments? true})]
