@@ -273,7 +273,11 @@ function doSort(colIdx, key, dir) {
     if (isDate.test(av) && isDate.test(bv))
       return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
     var an = parseFloat(av), bn = parseFloat(bv);
-    if (!isNaN(an) && !isNaN(bn)) return dir === 'asc' ? an - bn : bn - an;
+    var aNaN = isNaN(an) || av === '', bNaN = isNaN(bn) || bv === '';
+    if (aNaN !== bNaN)
+      // Push empty/NaN values to the end regardless of sort direction
+      return aNaN ? 1 : -1;
+    if (!aNaN && !bNaN) return dir === 'asc' ? an - bn : bn - an;
     return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
   });
   rows.forEach(function(r) { tbody.appendChild(r); });
