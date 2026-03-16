@@ -107,6 +107,18 @@
  ;; Default: all types (when absent).
  ;; :export-reports #{:bug :patch :request :announcement :release :change}
 
+ ;; Supported report types (optional) — restricts which report types
+ ;; are detected and created during digest.  Emails matching a disabled
+ ;; type are silently ignored (they still thread as descendants).
+ ;; When set per source, it overrides the global value.
+ ;; Default: all types (when absent).
+ ;; :report-types #{:bug :patch :request :announcement :release :change}
+ ;;
+ ;; Example — a source that only tracks bugs and patches:
+ ;; {:name "kernel-patches"
+ ;;  :match {:list-id "lkml.org"}
+ ;;  :report-types #{:bug :patch}}
+
  ;; Logging (optional — logs go to stdout only when absent)
  ;; :logging {:file     "logs/bark.log"    ;; path to log file (optional)
  ;;           :level    :warn              ;; minimum level for file (:debug :info :warn :error)

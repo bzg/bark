@@ -71,7 +71,7 @@
           :opt-un [:source/match :source/admin :source/list-post
                    :source/list-archive :source/triggers :source/labels
                    :source/bark-path :source/export-reports
-                   :source/notifications]))
+                   :source/report-types :source/notifications]))
 
 (s/def :bark/sources
   (s/and (s/coll-of ::source :kind vector? :min-count 1)
@@ -122,6 +122,13 @@
 (s/def :source/export-reports ::export-reports)
 (s/def :bark/export-reports ::export-reports)
 
+;; Report types: which report types are detected during digest.
+;; Default: all types. Per-source overrides global.
+(s/def ::report-types
+  (s/coll-of valid-report-types :kind set? :min-count 1))
+(s/def :source/report-types ::report-types)
+(s/def :bark/report-types ::report-types)
+
 ;; Logging (optional)
 (s/def :logging/file ::non-blank-string)
 (s/def :logging/level #{:debug :info :warn :error})
@@ -141,7 +148,7 @@
 (s/def ::config
   (s/keys :req-un [:bark/admin :bark/imap :bark/sources :bark/db]
           :opt-un [:bark/ingest :bark/notifications :bark/labels :bark/triggers
-                   :bark/export-reports :bark/logging]))
+                   :bark/export-reports :bark/report-types :bark/logging]))
 
 ;; ---------------------------------------------------------------------------
 ;; Validation
@@ -183,6 +190,7 @@
                         (when-let [ml (:list-post src)] (str "list: " ml))
                         (when-let [la (:list-archive src)] (str "archive: " la))
                         (when-let [a (:admin src)] (str "admin: " a))
+                        (when-let [rt (:report-types src)] (str "report-types: " (pr-str rt)))
                         (when (some? (get-in src [:notifications :enable]))
                           (str "notify: " (get-in src [:notifications :enable])))))
             (log/info "  DB path:" (get-in config [:db :path]))
@@ -192,6 +200,8 @@
               (log/info "  Notifications:" (if (:enabled notif) "enabled" "disabled"))
               (when-let [smtp (:smtp notif)]
                 (log/info "  SMTP:" (str (:user smtp) "@" (:host smtp)))))
+            (when-let [rt (:report-types config)]
+              (log/info "  Report types:" (pr-str rt)))
             (when-let [logging (:logging config)]
               (when (:file logging)
                 (log/info "  Log file:" (:file logging)

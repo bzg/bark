@@ -275,6 +275,10 @@
               name))
           sources)))
 
+(def all-report-types
+  "All supported report types."
+  #{:bug :patch :request :announcement :release :change})
+
 (defn build-source-map
   "Build source-name -> {:admin :list-post :list-id :list-archive :bark-path ...} from config."
   [config]
@@ -283,7 +287,8 @@
         global-tg        (:triggers config)
         global-ef        (:export-formats config)
         global-er        (:export-reports config)
-        global-expiry    (:expiry config)]
+        global-expiry    (:expiry config)
+        global-rt        (:report-types config)]
     (into {}
           (map (fn [src]
                  [(:name src)
@@ -298,6 +303,8 @@
                                                    ["json" "org" "rss"]))
                           :export-reports (when-let [er (or (:export-reports src) global-er)]
                                            (set (map keyword er)))
+                          :report-types (when-let [rt (or (:report-types src) global-rt)]
+                                          (set (map keyword rt)))
                           :expiry (or (:expiry src) global-expiry)})]))
           (:sources config))))
 

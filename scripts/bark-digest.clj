@@ -235,7 +235,8 @@
         source-cfg    (get source-map source-name)
         roles         (if source-name (get-roles (d/db conn) source-name) {})
         body-text     (email-body-text email)
-        subj-patterns (resolve-labels (or source-cfg {}))]
+        subj-patterns (resolve-labels (or source-cfg {}))
+        allowed-types (:report-types source-cfg)]
     (if (and from-addr (ignored? roles from-addr))
       (do (log/debug "Ignored" from-addr "—" (:email/subject email))
           (assoc acc :skipped (inc skipped)))
@@ -247,7 +248,7 @@
          (apply-role-commands! conn roles source-name from-addr body-text)
          (apply-notify-commands! conn roles source-name from-addr body-text))
           ;; Detect and create report
-          (let [report-info (detect-report email subj-patterns)
+          (let [report-info (detect-report email subj-patterns allowed-types)
                 permitted?  (and report-info from-addr
                                  (can-create-report? roles from-addr report-info
                                                      email source-cfg))
