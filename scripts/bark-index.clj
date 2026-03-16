@@ -205,6 +205,7 @@
   th[data-sort].desc::after { content: ' ↓'; opacity: 0.7; }
   tr.hidden { display: none; }
   tr.stripe td { background: rgba(115,130,140,.075); }
+  td:nth-child(3) { white-space: nowrap; }
   td:nth-child(5) { min-width: 740px; }
   td:nth-child(6) { max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #status { font-size: 0.8rem; margin-bottom: 0.5rem; }

@@ -364,7 +364,7 @@ window.addEventListener('popstate', function() { restoreFromURL(); });
     var deadlineMs = new Date(+parts[0], +parts[1]-1, +parts[2]).getTime();
     var days = Math.round((deadlineMs - todayMs) / msPerDay);
     td.setAttribute('data-value', String(days));
-    td.textContent = String(days);
+    td.textContent = 'In ' + days + ' d.';
     td.title = dl;
     td.style.textAlign = 'center';
     if (days < 0) td.style.color = 'var(--pico-del-color, #c0392b)';
