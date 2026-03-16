@@ -9,8 +9,8 @@
 (require '[clojure.string :as str])
 
 ;; Defined in bark-common.clj / bark-roles.clj; forward-declared for clj-kondo.
-(declare default-trigger-words default-close-reasons
-         resolve-triggers-map deep-merge-triggers
+(declare default-triggers close-reasons
+         resolve-triggers-map
          email-body-text report-priority admin-or-maintainer?)
 
 ;; ---------------------------------------------------------------------------
@@ -24,44 +24,38 @@
   (into {} (keep (fn [[k p]] (when (re-find p body-text) [(keyword "report" (name k)) true]))) triggers))
 
 (defn- detect-close-reason
-  "Given the :closed trigger words for a report type, find which word
-  matched in body-text and return the corresponding close-reason keyword.
-  Returns :canceled if the matched word is in default-close-reasons,
-  :applied otherwise, or nil if no closed trigger matched."
-  [action-words body-text]
-  (when-let [words (get action-words :closed)]
+  "Find which :closed trigger word matched in body-text and return
+  the corresponding close-reason keyword from `close-reasons`.
+  Returns :resolved for words not in the map, or nil if none matched."
+  [closed-words body-text]
+  (when (seq closed-words)
     (let [pattern (re-pattern
-                   (str "(?m)^(" (str/join "|" (map #(java.util.regex.Pattern/quote %) words))
+                   (str "(?m)^(" (str/join "|" (map #(java.util.regex.Pattern/quote %) closed-words))
                         ")(?:[.,;:]|$)"))]
       (when-let [[_ matched] (re-find pattern body-text)]
-        (get default-close-reasons matched :applied)))))
+        (get close-reasons matched :resolved)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Trigger defaults and compilation
 ;; ---------------------------------------------------------------------------
 
-;; default-trigger-words and deep-merge-triggers are defined in bark-common.clj
+;; default-triggers is defined in bark-common.clj
 
 (defn- compile-trigger-words
   "Compile a map of action->word-lists into action->regex-patterns."
   [action-map]
   (update-vals action-map #(apply trigger-pattern %)))
 
-(defn- compile-triggers-by-type
-  "Compile a full type->action->words map into type->action->pattern."
-  [tw]
-  (update-vals tw compile-trigger-words))
-
-(def default-triggers-by-type (compile-triggers-by-type default-trigger-words))
+(def default-compiled-triggers (compile-trigger-words default-triggers))
 
 (defn build-source-triggers
   "Merge triggers for a source: defaults -> global -> per-source.
-  Returns {:compiled type->action->pattern, :words type->action->word-list}."
+  Returns {:compiled action->pattern, :words action->word-list}."
   [source-cfg]
   (let [merged (resolve-triggers-map source-cfg)]
-    {:compiled (if (= merged default-trigger-words)
-                 default-triggers-by-type
-                 (compile-triggers-by-type merged))
+    {:compiled (if (= merged default-triggers)
+                 default-compiled-triggers
+                 (compile-trigger-words merged))
      :words    merged}))
 
 ;; ---------------------------------------------------------------------------
@@ -73,24 +67,32 @@
 
 (def report-types-with-priority #{:bug :patch :request})
 
+(def report-types-actionable
+  "Report types that support :acked and :owned states.
+  Announcements, releases, and changes can only be closed."
+  #{:bug :patch :request})
+
 ;; ---------------------------------------------------------------------------
 ;; Trigger detection (pure)
 ;; ---------------------------------------------------------------------------
 
 (defn detect-triggers
-  "Detect trigger words in body text for a given report type.
-  `source-triggers` is {:compiled type->action->pattern, :words type->action->word-list}.
+  "Detect trigger words in body text.
+  `source-triggers` is {:compiled action->pattern, :words action->word-list}.
   Returns a map of {attr true/value ...} or nil.
-  When :report/closed is detected, also includes :report/close-reason."
+  When :report/closed is detected, also includes :report/close-reason.
+  Acked/owned are only detected for actionable report types (bug, patch, request)."
   [report-type body-text source-triggers]
   (when body-text
-    (let [compiled (:compiled source-triggers)
-          sets     (when-let [t (compiled report-type)] (match-triggers t body-text))
-          priority (when (report-types-with-priority report-type) (match-triggers report-priority-triggers body-text))
-          reason   (when (:report/closed sets)
-                     (detect-close-reason (get-in source-triggers [:words report-type]) body-text))
-          all-sets (cond-> (merge sets priority)
-                     reason (assoc :report/close-reason reason))]
+    (let [compiled   (:compiled source-triggers)
+          actionable? (report-types-actionable report-type)
+          sets       (cond-> (match-triggers compiled body-text)
+                       (not actionable?) (dissoc :report/acked :report/owned))
+          priority   (when (report-types-with-priority report-type) (match-triggers report-priority-triggers body-text))
+          reason     (when (:report/closed sets)
+                       (detect-close-reason (get-in source-triggers [:words :closed]) body-text))
+          all-sets   (cond-> (merge sets priority)
+                       reason (assoc :report/close-reason reason))]
       (when (seq all-sets) all-sets))))
 
 ;; ---------------------------------------------------------------------------
@@ -315,9 +317,9 @@
                                    [[:db/add report-eid attr target-eid]
                                     [:db/add report-eid (proxy-attrs attr) proxy-eid]]))
                                set)
-                ;; Close-reason for Closed-by directive (always :applied)
+                ;; Close-reason for Closed-by directive (always :resolved)
                 close-reason-tx (when (contains? set :report/closed)
-                                  [[:db/add report-eid :report/close-reason :applied]])
+                                  [[:db/add report-eid :report/close-reason :resolved]])
                 ;; Build unset transactions
                 unset-tx (mapcat (fn [attr]
                                    (when-let [cur (get current attr)]

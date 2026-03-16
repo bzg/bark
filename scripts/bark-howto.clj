@@ -15,7 +15,7 @@
          '[hiccup2.core :as h])
 
 ;; Forward-declared for clj-kondo (provided at runtime by load-file calls below).
-(declare default-labels default-trigger-words resolve-labels-map
+(declare default-labels default-triggers resolve-labels-map
          resolve-triggers-map parse-cli-args load-config build-source-map
          pico-cdn bark-description footer-css bark-footer wrap-js
          theme-toggle-btn theme-toggle-js nav-bar)
@@ -27,7 +27,7 @@
 ;; Defaults — canonical definitions in bark-common.clj
 ;; ---------------------------------------------------------------------------
 
-;; default-labels and default-trigger-words are defined in bark-common.clj
+;; default-labels and default-triggers are defined in bark-common.clj
 
 ;; ---------------------------------------------------------------------------
 ;; Resolve labels & triggers with config merge chain
@@ -71,12 +71,15 @@
   (let [types-upper [:bug :patch :request]
         types-lower [:announcement :release :change]
         all-types   (concat types-upper types-lower)
+        acked-str   (fmt-trigger-words (:acked triggers))
+        owned-str   (fmt-trigger-words (:owned triggers))
+        closed-str  (fmt-trigger-words (:closed triggers))
         rows  (mapv (fn [rtype]
                       {:type    (name rtype)
                        :labels  (fmt-label-tags (get labels rtype) rtype)
-                       :acked   (fmt-trigger-words (get-in triggers [rtype :acked]))
-                       :owned   (fmt-trigger-words (get-in triggers [rtype :owned]))
-                       :closed  (fmt-trigger-words (get-in triggers [rtype :closed]))})
+                       :acked   acked-str
+                       :owned   owned-str
+                       :closed  closed-str})
                     all-types)
         w-type   (apply max (count "Type")           (map #(count (:type %)) rows))
         w-labels (apply max (count "Subject labels") (map #(count (:labels %)) rows))
@@ -354,7 +357,7 @@
       source-map  (when config (build-source-map config))
       source-cfg  (get source-map source-name)
       labels      (if source-cfg (howto-labels source-cfg) default-labels)
-      triggers    (if source-cfg (howto-triggers source-cfg) default-trigger-words)
+      triggers    (if source-cfg (howto-triggers source-cfg) default-triggers)
       out-file    (or out-file
                       (if source-name
                         (str "public/" source-name "/web/howto.html")

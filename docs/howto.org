@@ -1,4 +1,4 @@
-* 🐕 BARK --- Bug And Report Keeper
+* BARK --- BARK is Another Report Keeper
 
 BARK monitors a mailbox and converts incoming emails into reports.
 Subsequent emails in the same thread can update the status of that
@@ -7,6 +7,7 @@ update reports by writing directly to the monitored inbox, manage
 roles, and receive periodic digest emails.
 
 * As a user
+
 ** Bug, Patch, Request
 
 As a user, you can report bugs, propose patches and make other
@@ -157,31 +158,37 @@ State changes are detected by trigger keywords within the body of a
 response down the thread, at the beginning of the line, followed by a
 punctuation mark (=.= =,= =;= =:=):
 
-| Trigger keyword | Effect on report            |
-|-----------------+-----------------------------|
-| =Approved.=       | acked (bug, patch, request) |
-| =Confirmed.=      | acked (bug)                 |
-| =Reviewed.=       | acked (patch)               |
-| =Handled.=        | owned                       |
-| =Fixed.=          | closed (bug)                |
-| =Applied.=        | closed (patch)              |
-| =Done.=           | closed (request)            |
-| =Closed.=         | closed (request)            |
-| =Canceled.=       | closed (all)                |
-| =Cancelled.=      | closed (all)                |
-| =Expired.=        | closed (all)                |
-| =Urgent.=         | urgent                      |
-| =Important.=      | important                   |
+| Trigger keyword | Effect on report          |
+|-----------------+---------------------------|
+| =Acked.=          | acked                     |
+| =Confirmed.=      | acked                     |
+| =Reviewed.=       | acked                     |
+| =Approved.=       | acked                     |
+| =Owned.=          | owned                     |
+| =Handled.=        | owned                     |
+| =Assigned.=       | owned                     |
+| =Canceled.=       | closed (reason: canceled) |
+| =Cancelled.=      | closed (reason: canceled) |
+| =Expired.=        | closed (reason: expired)  |
+| =Resolved.=       | closed (reason: resolved) |
+| =Applied.=        | closed (reason: resolved) |
+| =Done.=           | closed (reason: resolved) |
+| =Fixed.=          | closed (reason: resolved) |
+| =Closed.=         | closed (reason: resolved) |
+| =Urgent.=         | urgent                    |
+| =Important.=      | important                 |
 
 You can use multiple keywords in the same email, one per line.
+
+All trigger keywords work on all report types.
 
 ** Report statuses and priority
 
 All reports can be in a combination of three states:
 
-- *Acked* --- someone took the next reasonable action (confirmed a bug, reviewed a patch, approved a request).
+- *Acked* --- someone took the next sensible action (confirmed a bug, reviewed a patch, approved a request).
 - *Owned* --- someone claimed ownership of this report.
-- *Closed* --- the report is resolved (fixed, applied, done, canceled, or expired).
+- *Closed* --- the report is resolved, canceled, or expired.
 
 Announcements, releases, and changes can only be closed.
 
@@ -211,8 +218,8 @@ So an important and urgent report is =1+2 = 3=.
 
 You can customize trigger keywords globally or per source:
 
- : :triggers {:bug {:closed ["Canceled" "Fixed" "Resolved"]}
- :            :patch {:acked ["Approved" "Reviewed" "LGTM"]}}
+ : :triggers {:closed ["Canceled" "Fixed" "Resolved" "Wontfix"]
+ :            :acked  ["Approved" "Reviewed" "LGTM"]}
 
 * Exploring reports
 
@@ -224,20 +231,20 @@ A web interface let you navigate Bark reports.
 
 The search field has a minimal syntax:
 
-| Long form                   | Short | Explanation                            |
-|-----------------------------+-------+----------------------------------------|
-| from:me@example.org         | f:    | Reports from me@example.org            |
-| acked:me@example.org        | a:    | Reports acked by me@example.org        |
-| owned:me@example.org        | o:    | Reports owned by me@example.org        |
-| closed:me@example.org       | c:    | Reports closed by me@example.org       |
-| urgent:me@example.org       | u:    | Reports marked urgent by me@example.org    |
-| important:me@example.org    | i:    | Reports marked important by me@example.org |
-| subject:match               | s:    | Reports matching subject               |
-| priority:[0-4]              | p:    | Reports matching priority level 0 to 4 |
-| mid:<messageid>             | m:    | Report open with <messageid>           |
-| date:3d..                   | d:    | Reports from 3 days ago                |
-| date:2023-01-01..2023-12-31 | d:    | Reports from 2023-01-01 to 2023-12-31  |
-| match1 \vert match2             |       | Reports matching "match1" or "match2"  |
+| Long form                   | Short | Explanation                                           |
+|-----------------------------+-------+-------------------------------------------------------|
+| from:me@example.org         | f:    | Reports from me@example.org                           |
+| acked:me@example.org        | a:    | Reports acked by me@example.org                       |
+| owned:me@example.org        | o:    | Reports owned by me@example.org                       |
+| closed:me@example.org       | c:    | Reports closed by me@example.org                      |
+| urgent:me@example.org       | u:    | Reports marked urgent by me@example.org               |
+| important:me@example.org    | i:    | Reports marked important by me@example.org            |
+| subject:match               | s:    | Reports matching subject                              |
+| priority:[0-4]              | p:    | Reports matching priority level 0 to 4                |
+| mid:<messageid>             | m:    | Report open with <messageid>                          |
+| date:3d..                   | d:    | Reports from 3 days ago                               |
+| date:2023-01-01..2023-12-31 | d:    | Reports from 2023-01-01 to 2023-12-31                 |
+| match1 \vert match2             |       | Reports matching "match1" or "match2"                 |
 | *                           |       | Wildcard for from/acked/owned/closed/urgent/important |
 
 ** The =bone= CLI tool and =gnus-bone.el=

@@ -72,20 +72,18 @@
  ;;   :change       ["CHG" "CHANGE"]
 
  ;; Global triggers (optional) — override built-in body trigger words.
- ;; Merged on top of defaults; specify only the types/actions you want to change.
+ ;; Merged on top of defaults; specify only the actions you want to change.
  ;; When set per source, it overrides the global value.
  ;;
  ;; Example:
- ;; :triggers {:bug {:closed ["Canceled" "Fixed" "Resolved"]}
- ;;            :patch {:acked ["Approved" "Reviewed" "LGTM"]}}
+ ;; :triggers {:closed ["Canceled" "Fixed" "Resolved" "Wontfix"]
+ ;;            :acked  ["Approved" "Reviewed" "LGTM"]}
  ;;
  ;; Defaults:
- ;;   :bug          {:acked ["Approved" "Confirmed"] :owned ["Handled"] :closed ["Canceled" "Fixed"]}
- ;;   :patch        {:acked ["Approved" "Reviewed"]  :owned ["Handled"] :closed ["Canceled" "Applied"]}
- ;;   :request      {:acked ["Approved"]             :owned ["Handled"] :closed ["Canceled" "Done" "Closed"]}
- ;;   :announcement {:closed ["Canceled"]}
- ;;   :release      {:closed ["Canceled"]}
- ;;   :change       {:closed ["Canceled"]}
+ ;;   :acked  ["Acked" "Confirmed" "Reviewed" "Approved"]
+ ;;   :owned  ["Owned" "Handled" "Assigned"]
+ ;;   :closed ["Canceled" "Cancelled" "Resolved" "Applied"
+ ;;            "Done" "Fixed" "Closed" "Expired"]
 
  ;; Expiry delay (optional) — auto-close open reports after N days.
  ;; Only applies to announcements, releases, and changes.

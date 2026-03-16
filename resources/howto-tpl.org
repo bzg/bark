@@ -1,4 +1,4 @@
-* 🐕 BARK --- Bug And Report Keeper
+* BARK --- BARK is Another Report Keeper
 
 BARK monitors a mailbox and converts incoming emails into reports.
 Subsequent emails in the same thread can update the status of that
@@ -8,45 +8,60 @@ roles, and receive periodic digest emails.
 
 For admin and maintainers, see the full [[https://codeberg.org/bzg/bark/src/branch/main/docs/howto.org][BARK documentation]].
 
-** Labels and trigger keywords
+** Subject labels
 
-Subject labels create reports. Replies to these reports can update
-them by using trigger keywords such as =applied.=, etc. Trigger keywords
-should be placed at the beginning of the line and followed by a
-punctuation mark (=.= =,= =;= =:=).
+Subject labels create reports:
 
-Here is a table of available labels and triggers for this BARK
-instance:
+| Type         | Subject labels                             |
+|--------------+--------------------------------------------|
+| bug          | =[BUG]= =[BUG topic]=                          |
+| patch        | =[PATCH]= =[PATCH topic]= =[PATCH topic v2 n/m]= |
+| request      | =[POLL]= =[FR]= =[TODO]= =[FR topic]=              |
+|--------------+--------------------------------------------|
+| announcement | =[ANN]= =[ANNOUNCEMENT]= =[ANN topic]=           |
+| release      | =[REL version]= =[REL topic version]=          |
+| change       | =[CHG version]= =[CHG topic version]=          |
 
-| Type         | Subject labels                             | Acked              | Owned   | Closed                       |
-|--------------+--------------------------------------------+--------------------+---------+------------------------------|
-| bug          | =[BUG]= =[BUG topic]=                          | =Approved= =Confirmed= | =Handled= | =Canceled= =Expired= =Fixed=       |
-| patch        | =[PATCH]= =[PATCH topic]= =[PATCH topic v2 n/m]= | =Approved= =Reviewed=  | =Handled= | =Canceled= =Expired= =Applied=     |
-| request      | =[POLL]= =[FR]= =[TODO]= =[FR topic]=              | =Approved=           | =Handled= | =Canceled= =Expired= =Done= =Closed= |
-|--------------+--------------------------------------------+--------------------+---------+------------------------------|
-| announcement | =[ANN]= =[ANNOUNCEMENT]= =[ANN topic]=           |                    |         | =Canceled= =Expired=             |
-| release      | =[REL version]= =[REL topic version]=          |                    |         | =Canceled= =Expired=             |
-| change       | =[CHG version]= =[CHG topic version]=          |                    |         | =Canceled= =Expired=             |
+Replies to these reports can update them by using trigger keywords
+such as =Resolved.=, etc. Trigger keywords should be placed at the
+beginning of the line and followed by a punctuation mark (=.= =,= =;= =:=).
+
+** Status triggers
+
+All trigger keywords work on all report types:
+
+| Effect on report  | Trigger keyword                    |
+|-------------------+------------------------------------|
+| acked             | =Acked= =Confirmed= =Reviewed= =Approved=  |
+| owned             | =Owned= =Handled= =Assigned=             |
+| closed (canceled) | =Canceled= =Cancelled=                 |
+| closed (expired)  | =Expired=                            |
+| closed (resolved) | =Resolved= =Applied= =Done= =Fixed= =Closed= |
 
 Topics can also be set using a colon-delimited prefix in the subject
 after the label: =[BUG] parser: crash on empty input= sets the topic to
-"parser". Multiple colons are supported: =[FR] auth: oauth: add refresh=
-sets the topic to "auth: oauth".
+"parser".
 
-** Priority trigger keywords
+*** Priority triggers
 
 On top of trigger keywords to update the status of a report, users can
-tell if a report is important (=Important.=) and/or urgent (=Urgent.=).
+tell if a report is important and/or urgent.
+
+| Effect on report | Trigger keyword |
+|------------------+-----------------|
+| urgent           | =Urgent=          |
+| important        | =Important=       |
 
 They cannot set the priority directly: priority is computed as the sum
 of important (+1) and urgent (+2).
 
-** Combining trigger keywords
+*** Combining triggers
 
-You can combine several triggers in a single email:
+You can combine several status/priority triggers in a single email:
 
 #+begin_example
 Confirmed.
+Handled.
 Urgent.
 Important.
 #+end_example

@@ -375,27 +375,19 @@
    :release      ["REL" "RELEASE"]
    :change       ["CHG" "CHANGE"]})
 
-(def default-trigger-words
-  "Default trigger words per report type and action."
-  {:bug          {:acked ["Approved" "Confirmed"] :owned ["Handled"] :closed ["Canceled" "Expired" "Fixed"]}
-   :patch        {:acked ["Approved" "Reviewed"]  :owned ["Handled"] :closed ["Canceled" "Expired" "Applied"]}
-   :request      {:acked ["Approved"]             :owned ["Handled"] :closed ["Canceled" "Expired" "Done" "Closed"]}
-   :announcement {:closed ["Canceled" "Expired"]}
-   :release      {:closed ["Canceled" "Expired"]}
-   :change       {:closed ["Canceled" "Expired"]}})
+(def default-triggers
+  "Default trigger words per action. Flat — applies to all report types."
+  {:acked  ["Acked" "Confirmed" "Reviewed" "Approved"]
+   :owned  ["Owned" "Handled" "Assigned"]
+   :closed ["Canceled" "Cancelled" "Resolved" "Applied"
+            "Done" "Fixed" "Closed" "Expired"]})
 
-(def default-close-reasons
-  "Map trigger words to close reasons.
-  Words not listed here default to :applied (the report was resolved)."
-  {"Canceled" :canceled
-   "Expired"  :expired})
-
-(defn deep-merge-triggers
-  "Merge overrides into base trigger-words, merging per-type action maps."
-  [base overrides]
-  (reduce-kv (fn [acc rtype actions]
-               (assoc acc rtype (merge (get acc rtype) actions)))
-             base overrides))
+(def close-reasons
+  "Map closed trigger words to close reasons.
+  Words not listed here default to :resolved."
+  {"Canceled"  :canceled
+   "Cancelled" :canceled
+   "Expired"   :expired})
 
 (defn resolve-labels-map
   "Resolve labels for a source-map entry: defaults -> global -> per-source.
@@ -409,9 +401,9 @@
   "Resolve triggers for a source-map entry: defaults -> global -> per-source.
   Returns a (non-compiled) trigger-words map."
   [source-cfg]
-  (cond-> default-trigger-words
-    (:global-triggers source-cfg) (deep-merge-triggers (:global-triggers source-cfg))
-    (:triggers source-cfg)        (deep-merge-triggers (:triggers source-cfg))))
+  (cond-> default-triggers
+    (:global-triggers source-cfg) (merge (:global-triggers source-cfg))
+    (:triggers source-cfg)        (merge (:triggers source-cfg))))
 
 ;; ---------------------------------------------------------------------------
 ;; Shared schema (used by bark-export, bark-notify, bark-stats, bark-digest)

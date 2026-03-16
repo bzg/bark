@@ -101,11 +101,10 @@
 
 ;; Per-source triggers (optional)
 (s/def ::trigger-words (s/coll-of ::non-blank-string :kind vector? :min-count 1))
-(s/def ::action-triggers (s/map-of #{:acked :owned :closed} ::trigger-words))
-(s/def :source/triggers (s/map-of keyword? ::action-triggers))
+(s/def :source/triggers (s/map-of #{:acked :owned :closed} ::trigger-words))
 
 ;; Global triggers (optional) — same shape as per-source triggers
-(s/def :bark/triggers (s/map-of keyword? ::action-triggers))
+(s/def :bark/triggers (s/map-of #{:acked :owned :closed} ::trigger-words))
 
 ;; Subject triggers: map of report-type keyword -> vector of tag strings
 ;; e.g. {:bug ["BUG" "DEFECT"] :request ["POLL" "FR" "TODO"]}

@@ -206,7 +206,7 @@
       (when (seq open-chgs)
         (d/transact! conn (mapv (fn [r] {:db/id r
                                           :report/closed release-email-eid
-                                          :report/close-reason :applied})
+                                          :report/close-reason :resolved})
                                 open-chgs))
         (log/info "Auto-closed" (count open-chgs)
                       "[CHG" version "] (superseded by release)")))))
