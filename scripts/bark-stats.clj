@@ -77,6 +77,24 @@
                 (subs entry (inc idx)))))
           entries)))
 
+(defn- maintainers-without-since
+  "Count current maintainers who have no :roles/maintainer-since entry.
+  These are config-seeded without :since or directive-added — they've
+  been maintainers 'forever' and should always appear in the chart."
+  [db]
+  (let [all-maints  (set (d/q '[:find [?a ...]
+                                :where [_ :roles/maintainers ?a]]
+                              db))
+        since-entries (d/q '[:find [?s ...]
+                             :where [_ :roles/maintainer-since ?s]]
+                           db)
+        with-since  (set (keep (fn [entry]
+                                 (let [idx (str/last-index-of entry ":")]
+                                   (when (and idx (pos? idx))
+                                     (subs entry 0 idx))))
+                               since-entries))]
+    (count (remove with-since all-maints))))
+
 ;; ---------------------------------------------------------------------------
 ;; Time helpers
 ;; ---------------------------------------------------------------------------
@@ -189,8 +207,11 @@
 
 (defn maintainers-by-month
   "Cumulative maintainer count per month over the last 12 months.
-  `since-dates` is a seq of \"yyyy-MM-dd\" strings from :roles/maintainer-since."
-  [since-dates]
+  `since-dates` is a seq of \"yyyy-MM-dd\" strings from :roles/maintainer-since.
+  `n-always` is the count of current maintainers with no since-date
+  (config-seeded without :since or directive-added) — they are counted
+  as present in every month."
+  [since-dates n-always]
   (let [by-ym (->> since-dates
                    (keep (fn [d] (when (>= (count d) 7) (subs d 0 7))))
                    frequencies)
@@ -201,10 +222,12 @@
                             m     (inc (mod total 12))]
                         (format "%04d-%02d" y m))))
         first-month (first months)
-        base (->> by-ym
-                  (filter (fn [[ym _]] (neg? (compare ym first-month))))
-                  (map val)
-                  (reduce + 0))
+        ;; Maintainers registered before the 12-month window + always-present ones
+        base (+ n-always
+                (->> by-ym
+                     (filter (fn [[ym _]] (neg? (compare ym first-month))))
+                     (map val)
+                     (reduce + 0)))
         new-per-month (map #(get by-ym % 0) months)
         cumulative (rest (reductions + base new-per-month))]
     (mapv vector months cumulative)))
@@ -292,7 +315,8 @@
          total-emails  (when db (total-emails db))
          contributors  (when db (all-contributors db))
          n-maintainers (when db (total-maintainers db))
-         maint-since   (when db (all-maintainer-since-dates db))]
+         maint-since   (when db (all-maintainer-since-dates db))
+         n-always      (when db (maintainers-without-since db))]
      (cond->
        {:generated-at      (str (java.util.Date.))
         :reports-per-type  (reports-per-type reports)
@@ -308,7 +332,8 @@
        contributors  (assoc :contributors-by-month (contributors-by-month contributors)
                             :total-contributors (count contributors))
        n-maintainers (assoc :total-maintainers n-maintainers)
-       maint-since   (assoc :maintainers-by-month (maintainers-by-month maint-since))))))
+       maint-since   (assoc :maintainers-by-month
+                           (maintainers-by-month maint-since (or n-always 0)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; HTML / Vega-Lite rendering
