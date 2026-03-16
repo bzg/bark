@@ -211,6 +211,44 @@
                                 open-chgs))
         (log/info "Auto-closed" (count open-chgs)
                       "[CHG" version "] (superseded by release)")))))
+
+(defn- parse-version-number
+  "Parse \"v3\" -> 3, or nil."
+  [v]
+  (when v
+    (when-let [[_ n] (re-find #"^v(\d+)$" v)]
+      (parse-long n))))
+
+(defn close-patch-previous-version!
+  "When a [PATCH v<n> topic ...] report is created, close the nearest
+  ancestor [PATCH v<n-1> topic] if it is open and has matching topic.
+  When the new patch has no topic, any open v<n-1> patch among the
+  nearest ancestors is closed."
+  [conn report-info email-eid nearest-report-eids]
+  (let [new-version (:version report-info)
+        new-topic   (:topic report-info)
+        n           (parse-version-number new-version)]
+    (when (and n (> n 1))
+      (let [prev-version (str "v" (dec n))
+            db           (d/db conn)]
+        (doseq [rid nearest-report-eids]
+          (let [r (d/pull db [:report/type :report/version :report/topic :report/closed
+                              :report/message-id] rid)]
+            (when (and (= :patch (:report/type r))
+                       (= prev-version (:report/version r))
+                       (not (:report/closed r))
+                       ;; Topic must match when both are present
+                       (or (and (nil? new-topic) (nil? (:report/topic r)))
+                           (and new-topic
+                                (= (str/lower-case new-topic)
+                                   (str/lower-case (or (:report/topic r) ""))))))
+              (d/transact! conn [{:db/id rid
+                                  :report/closed email-eid
+                                  :report/close-reason :canceled}])
+              (log/info "Auto-closed [PATCH" prev-version
+                        (or (:report/topic r) "") "]"
+                        (str "(" (:report/message-id r) ")")
+                        "(superseded by" new-version ")"))))))))
 ;; ---------------------------------------------------------------------------
 ;; Digest orchestration
 ;; ---------------------------------------------------------------------------
@@ -299,6 +337,12 @@
             ;; Post-creation: link related reports + manage series + store patches
             (when (and report-eid (seq parent-report-eids))
               (link-related-reports! conn report-eid parent-report-eids))
+            ;; Auto-close previous patch version (v<n> supersedes v<n-1>)
+            (when (and report-eid
+                       (= :patch (:type report-info))
+                       (:version report-info)
+                       (seq nearest-report-eids))
+              (close-patch-previous-version! conn report-info eid nearest-report-eids))
             (when (and report-eid (= :patch (:type report-info))
                        (:patch-seq report-info))
               (manage-series! conn report-eid eid report-info
