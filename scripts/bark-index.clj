@@ -161,8 +161,9 @@
           :data-search      (str/lower-case (str subject " " from " " author " " iso-date " " topic))}
      [:td [:mark {:data-type type :style "cursor:pointer"
                   :onclick (str "isolateType('" type "')")}
-            label]]
-     [:td {:data-value (str (or priority 0)) :style "text-align:center"} (or priority 0)]
+           label]]
+     [:td {:data-value (str (or priority 0)) :style "text-align:center"}
+      (case (str (or priority 0)) "3" "A" "2" "B" "1" "C" " ")]
      [:td {:data-value (or deadline "") :class "due-cell"} ""]
      [:td {:data-value (str flags-score) :title flags-title
            :style "text-align:center; font-family:monospace; font-size:0.8rem; letter-spacing:0.1em"} flags-str]
