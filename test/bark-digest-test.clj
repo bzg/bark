@@ -751,6 +751,23 @@
           (assert-test "Deadline is set"
                        (some? (:report/deadline r))))
 
+        ;; --- Bug 100: In-Reply-To source resolution (emails 100-101) ---
+        (println "\n--- Bug 100: In-Reply-To source resolution ---")
+        (let [r (get-report db "<100@test.org>")]
+          (assert= "Type is :bug" :bug (:report/type r))
+          (assert-test "Acked via off-list reply (source from In-Reply-To)"
+                       (some? (:report/acked r)))
+          (assert= "1 descendant (off-list reply threaded)"
+                   1 (count (:report/descendants r))))
+        ;; Verify the off-list reply got stamped with the resolved source
+        (let [src (d/q '[:find ?src .
+                         :in $ ?mid
+                         :where [?e :email/message-id ?mid]
+                                [?e :email/source ?src]]
+                       db "<101@test.org>")]
+          (assert= "Off-list reply source stamped as 'direct'"
+                   "direct" src))
+
         ;; --- Summary ---
         (println "\n=== Summary ===")
         (let [{:keys [pass fail]} @*test-counts*]

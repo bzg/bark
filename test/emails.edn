@@ -1350,4 +1350,32 @@
   :email/in-reply-to "<98@test.org>"
   :email/references "<98@test.org>"
   :email/body-text  "Deadline: 2026-08-15\n"}
+
+ ;; =========================================================================
+ ;; 100 — Bug report (base for in-reply-to source resolution test)
+ ;; =========================================================================
+ {:email/imap-uid    100
+  :email/message-id  "<100@test.org>"
+  :email/subject     "[BUG] In-reply-to source test"
+  :email/content-type "text/plain"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-02-01T10:00:00"
+  :email/ingested-at #inst "2026-02-01T10:00:00"
+  :email/source      "direct"
+  :email/body-text  "A bug to test off-list replies.\n"}
+
+ ;; =========================================================================
+ ;; 101 — Maintainer replies off-list: no :email/source, no List-Id, no [bark:*]
+ ;;       Source should be resolved from In-Reply-To -> email 100 -> "direct"
+ ;; =========================================================================
+ {:email/imap-uid    101
+  :email/message-id  "<101@test.org>"
+  :email/subject     "Re: [BUG] In-reply-to source test"
+  :email/content-type "text/plain"
+  :email/from-address "maint@test.org"
+  :email/date-sent  #inst "2026-02-01T11:00:00"
+  :email/ingested-at #inst "2026-02-01T11:00:00"
+  :email/in-reply-to "<100@test.org>"
+  :email/references "<100@test.org>"
+  :email/body-text  "Confirmed.\n"}
 ]
