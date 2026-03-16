@@ -169,7 +169,7 @@
      [:td (patch-link patches) (related-link related)
       (subject-el subject role archived-at closed? close-reason)
       (vote-badge votes)]
-     [:td.secondary {:title from} (if (= role "maintainer") [:strong author] author)]
+     [:td.secondary {:title from} (if (#{"maintainer" "admin"} role) [:strong author] author)]
      [:td {:data-value iso-date} [:small (or iso-date date "")]]
      [:td {:style "text-align:center"} (or replies 0)]]))
 
