@@ -10,7 +10,7 @@ For admin and maintainers, see the full [[https://codeberg.org/bzg/bark/src/bran
 
 ** Subject labels
 
-Subject labels create reports:
+Subject labels create reports, optionally with a topic/version:
 
 | Type         | Subject labels                             |
 |--------------+--------------------------------------------|
@@ -26,33 +26,26 @@ Replies to these reports can update them by using trigger keywords
 such as =Resolved.=, etc. Trigger keywords should be placed at the
 beginning of the line and followed by a punctuation mark (=.= =,= =;= =:=).
 
-** Status triggers
-
-All trigger keywords work on all report types:
-
-| Effect on report  | Trigger keyword                    |
-|-------------------+------------------------------------|
-| acked             | =Acked= =Confirmed= =Reviewed= =Approved=  |
-| owned             | =Owned= =Handled= =Assigned=             |
-| closed (canceled) | =Canceled= =Cancelled=                 |
-| closed (expired)  | =Expired=                            |
-| closed (resolved) | =Resolved= =Applied= =Done= =Fixed= =Closed= |
-
 Topics can also be set using a colon-delimited prefix in the subject
 after the label: =[BUG] parser: crash on empty input= sets the topic to
 "parser".
 
-*** Priority triggers
+** Status & priority triggers
+
+All status/priority trigger keywords work on all report types:
+
+| Effect on report          | Trigger keyword                    | Type     |
+|---------------------------+------------------------------------+----------|
+| Mark as acked             | =Acked= =Confirmed= =Reviewed= =Approved=  | Status   |
+| Mark as owned             | =Owned= =Handled= =Assigned=             | Status   |
+| Mark as closed (canceled) | =Canceled= =Cancelled=                 | Status   |
+| Mark as closed (expired)  | =Expired=                            | Status   |
+| Mark as closed (resolved) | =Resolved= =Applied= =Done= =Fixed= =Closed= | Status   |
+| Mark as urgent            | =Urgent=                             | Priority |
+| Mark asimportant          | =Important=                          | Priority |
 
 Users don't set the priority directly: it is computed as the sum of
 important (+1) and urgent (+2).
-
-| Effect on report  | Trigger keyword |
-|-------------------+-----------------|
-| Mark as urgent    | =Urgent=          |
-| Mark as important | =Important=       |
-
-*** Combining triggers
 
 You can combine several status/priority triggers in a single email:
 

@@ -99,26 +99,31 @@
     (str/join "\n" (concat [header hline] upper [hline] lower))))
 
 (defn build-triggers-table-org
-  "Build the flat triggers org table."
+  "Build the merged status+priority triggers org table (3 columns)."
   [triggers]
-  (let [rows [["acked"             (fmt-trigger-words (:acked triggers))]
-              ["owned"             (fmt-trigger-words (:owned triggers))]
-              ["closed (canceled)" (fmt-trigger-words (filterv #(contains? #{"Canceled" "Cancelled"} %)
-                                                               (:closed triggers)))]
-              ["closed (expired)"  (fmt-trigger-words (filterv #(= "Expired" %)
-                                                               (:closed triggers)))]
-              ["closed (resolved)" (fmt-trigger-words (filterv #(not (contains? #{"Canceled" "Cancelled" "Expired"} %))
-                                                               (:closed triggers)))]]
-        w-effect  (apply max (count "Effect on report")  (map #(count (first %)) rows))
-        w-trigger (apply max (count "Trigger keyword")   (map #(count (second %)) rows))
+  (let [rows [["Mark as acked"             (fmt-trigger-words (:acked triggers))  "Status"]
+              ["Mark as owned"             (fmt-trigger-words (:owned triggers))  "Status"]
+              ["Mark as closed (canceled)" (fmt-trigger-words (filterv #(contains? #{"Canceled" "Cancelled"} %)
+                                                                       (:closed triggers))) "Status"]
+              ["Mark as closed (expired)"  (fmt-trigger-words (filterv #(= "Expired" %)
+                                                                       (:closed triggers))) "Status"]
+              ["Mark as closed (resolved)" (fmt-trigger-words (filterv #(not (contains? #{"Canceled" "Cancelled" "Expired"} %))
+                                                                       (:closed triggers))) "Status"]
+              ["Mark as urgent"            (fmt-trigger-words ["Urgent"])    "Priority"]
+              ["Mark as important"         (fmt-trigger-words ["Important"]) "Priority"]]
+        w-effect  (apply max (count "Effect on report")  (map #(count (nth % 0)) rows))
+        w-trigger (apply max (count "Trigger keyword")   (map #(count (nth % 1)) rows))
+        w-type    (apply max (count "Type")              (map #(count (nth % 2)) rows))
         pad       (fn [s w] (str s (apply str (repeat (max 0 (- w (count s))) " "))))
         hline     (str "|-" (apply str (repeat w-effect "-")) "-+-"
-                       (apply str (repeat w-trigger "-")) "-|")
-        row-str   (fn [[effect trigger]]
-                    (str "| " (pad effect w-effect) " | " (pad trigger w-trigger) " |"))
-        header    (row-str ["Effect on report" "Trigger keyword"])]
-    (str/join "\n" [header hline (row-str (nth rows 0)) (row-str (nth rows 1))
-                    (row-str (nth rows 2)) (row-str (nth rows 3)) (row-str (nth rows 4))])))
+                       (apply str (repeat w-trigger "-")) "-+-"
+                       (apply str (repeat w-type "-")) "-|")
+        row-str   (fn [[effect trigger typ]]
+                    (str "| " (pad effect w-effect)
+                         " | " (pad trigger w-trigger)
+                         " | " (pad typ w-type) " |"))
+        header    (row-str ["Effect on report" "Trigger keyword" "Type"])]
+    (str/join "\n" (concat [header hline] (map row-str rows)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Template substitution — detect and replace org table blocks
