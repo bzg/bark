@@ -20,23 +20,25 @@
   (let [v (get roles attr)]
     (if (nil? v) #{} (set (if (string? v) [v] v)))))
 
+(defn- has-role?
+  "True if addr (case-insensitive) appears in the multi-valued role attr."
+  [roles attr addr]
+  (let [addrs (roles-set roles attr)]
+    (boolean (some #(= (str/lower-case %) (str/lower-case addr)) addrs))))
+
 (defn admin? [roles addr]
   (and addr (:roles/admin roles)
        (= (str/lower-case (:roles/admin roles))
           (str/lower-case addr))))
 
 (defn maintainer? [roles addr]
-  (and addr
-       (let [maints (roles-set roles :roles/maintainers)]
-         (some #(= (str/lower-case %) (str/lower-case addr)) maints))))
+  (and addr (has-role? roles :roles/maintainers addr)))
 
 (defn admin-or-maintainer? [roles addr]
   (or (admin? roles addr) (maintainer? roles addr)))
 
 (defn ignored? [roles addr]
-  (and addr
-       (let [ignored (roles-set roles :roles/ignored)]
-         (some #(= (str/lower-case %) (str/lower-case addr)) ignored))))
+  (and addr (has-role? roles :roles/ignored addr)))
 
 ;; ---------------------------------------------------------------------------
 ;; Role DB operations
@@ -236,5 +238,5 @@
         (let [lp (list-post-address email)]
           (when (and lp (not= lp ml-email))
             (log/warn "List-post mismatch: expected" ml-email "got" lp))
-          (= lp ml-email))))))
+          (boolean (= lp ml-email)))))))
 

@@ -249,8 +249,9 @@
                (d/db conn) synthetic-mid)))))
 
 (defn- apply-vote! [conn report-eid from-addr body-text]
-  ;; NB: read-then-write is safe because cmd-digest! processes emails
-  ;; sequentially. If parallelized, this needs a transaction function.
+  ;; SAFETY INVARIANT: cmd-digest! processes emails sequentially.
+  ;; This read-then-write is safe only under single-threaded digest.
+  ;; If parallelized, replace with a Datalevin transaction function.
   (when-let [vote (detect-vote body-text)]
     (let [db      (d/db conn)
           current (d/pull db [:report/voters :report/votes-up :report/votes-down

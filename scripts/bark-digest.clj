@@ -28,6 +28,7 @@
 (declare ;; bark-common.clj
          load-datalevin-pod! classify-source email-body-text
          load-config build-source-map get-header bark-schema
+         days-between
          ;; bark-roles.clj
          get-roles ignored? admin-or-maintainer?
          ensure-source-roles! ensure-notify-defaults!
@@ -316,11 +317,7 @@
 
 (def ^:private expirable-types #{:announcement :release :change})
 
-(defn- days-between
-  "Number of days between two java.util.Date instances."
-  [^java.util.Date from ^java.util.Date to]
-  (let [ms (- (.getTime to) (.getTime from))]
-    (quot ms 86400000)))
+;; days-between is defined in bark-common.clj
 
 (defn expire-reports!
   "Close open reports of expirable types (announcement, release, change)

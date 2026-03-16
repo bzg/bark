@@ -222,31 +222,21 @@
         (str/replace "&" "&amp;")
         (str/replace "<" "&lt;")
         (str/replace ">" "&gt;")
-        (str/replace "\"" "&quot;"))))
+        (str/replace "\"" "&quot;")
+        (str/replace "'" "&apos;"))))
 
 ;; ---------------------------------------------------------------------------
 ;; Filtering
 ;; ---------------------------------------------------------------------------
 
-(defn- filter-by-source
-  "Filter reports to only those from the given source name."
-  [reports source-name]
-  (filter #(= source-name (get-in % [:report/email :email/source])) reports))
-
-(defn- filter-by-priority
-  "Keep only reports with priority >= min-p."
-  [reports min-p]
-  (filter #(>= (report-priority %) min-p) reports))
-
-(defn- filter-by-status
-  "Keep only reports with status >= min-s."
-  [reports min-s]
-  (filter #(>= (report-status %) min-s) reports))
-
-(defn- filter-by-type
-  "Keep only reports of the given type keyword."
-  [reports rtype]
-  (filter #(= rtype (:report/type %)) reports))
+(defn- filter-reports
+  "Filter reports by optional criteria: source name, type, min priority/status."
+  [reports {:keys [source type min-priority min-status]}]
+  (cond->> reports
+    source       (filter #(= source (get-in % [:report/email :email/source])))
+    type         (filter #(= type (:report/type %)))
+    min-priority (filter #(>= (report-priority %) min-priority))
+    min-status   (filter #(>= (report-status %) min-status))))
 
 (defn- open-reports
   "Keep only reports that are not closed."
@@ -285,18 +275,23 @@
      (log/info "Wrote" (count data) "reports to" filename))))
 
 (defn- rfc822-date
-  "RFC 822 date from a java.util.Date#toString string."
+  "RFC 822 date from a java.util.Date#toString string.
+  java.util.Date#toString always produces 'EEE MMM dd HH:mm:ss zzz yyyy'
+  in English, but we guard against nil and unexpected formats."
   [date-str]
-  (try
-    (let [in-fmt  (doto (java.text.SimpleDateFormat. "EEE MMM dd HH:mm:ss zzz yyyy"
-                                                     java.util.Locale/ENGLISH)
-                    (.setLenient true))
-          d       (.parse in-fmt (str date-str))
-          out-fmt (doto (java.text.SimpleDateFormat. "EEE, dd MMM yyyy HH:mm:ss Z"
-                                                     java.util.Locale/ENGLISH)
-                    (.setTimeZone (java.util.TimeZone/getTimeZone "UTC")))]
-      (.format out-fmt d))
-    (catch Exception _ nil)))
+  (when (and date-str (not (str/blank? (str date-str))))
+    (try
+      (let [in-fmt  (doto (java.text.SimpleDateFormat. "EEE MMM dd HH:mm:ss zzz yyyy"
+                                                       java.util.Locale/ENGLISH)
+                      (.setLenient true))
+            d       (.parse in-fmt (str date-str))
+            out-fmt (doto (java.text.SimpleDateFormat. "EEE, dd MMM yyyy HH:mm:ss Z"
+                                                       java.util.Locale/ENGLISH)
+                      (.setTimeZone (java.util.TimeZone/getTimeZone "UTC")))]
+        (.format out-fmt d))
+      (catch Exception _
+        (log/debug "Could not parse date for RSS:" date-str)
+        nil))))
 
 (defn- rss-author [m]
   (let [email (:from m)
@@ -481,7 +476,7 @@
 
 (defn dump-howto!
   "Generate howto.html for a single source."
-  [base-dir _ source-name]
+  [base-dir source-name]
   (apply process/shell "bb" "scripts/bark-howto.clj"
          "-o" (str base-dir "/howto.html")
          "--dir" base-dir
@@ -510,7 +505,7 @@
   "Export per-type JSON, Org, and RSS files for all report types present."
   [reports reports-dir source-name source-map maintainers-map fmts]
   (doseq [rtype report-types
-          :let [typed (filter-by-type reports rtype)
+          :let [typed (filter-reports reports {:type rtype})
                 plural (type->plural rtype)]
           :when (seq typed)]
     (when (fmts "json")
@@ -547,7 +542,7 @@
                         "patches" (dump-patches! reports patches-dir)
                         "html"    (do (dump-json! reports reports-dir source-name source-map maintainers-map)
                                       (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"json"})
-                                      (dump-howto! base-dir _ source-name)
+                                      (dump-howto! base-dir source-name)
                                       (dump-html! base-dir reports-dir cli-extra))
                         "stats"   (dump-stats! base-dir reports-dir source-name "json" cli-extra)))]
     (if (= format "all")
@@ -556,7 +551,7 @@
           (when (ef "org")  (dump-org!  reports reports-dir source-name source-map maintainers-map))
           (dump-per-type! reports reports-dir source-name source-map maintainers-map ef)
           (dump-patches! reports patches-dir)
-          (dump-howto! base-dir _ source-name)
+          (dump-howto! base-dir source-name)
           (dump-html! base-dir reports-dir cli-extra)
           (dump-stats! base-dir reports-dir source-name "json" cli-extra)
           (dump-stats! base-dir reports-dir source-name "html" cli-extra))
@@ -599,9 +594,9 @@
                             (mapv :name (:sources config)))
           cli-extra       (remove #{format "-n" source-name} (rest *command-line-args*))]
       (doseq [src-name source-names]
-        (let [reports (filter-by-source all-reps src-name)
-              reports (if min-priority (filter-by-priority reports min-priority) reports)
-              reports (if min-status   (filter-by-status reports min-status) reports)
+        (let [reports (filter-reports all-reps {:source       src-name
+                                               :min-priority min-priority
+                                               :min-status   min-status})
               er      (resolve-export-reports src-name source-map)
               reports (if er (filter #(contains? er (:report/type %)) reports) reports)
               base-dir (str "public/" (slugify src-name))]

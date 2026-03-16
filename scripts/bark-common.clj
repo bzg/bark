@@ -13,13 +13,14 @@
 (log/merge-config! {:min-level :info})
 
 (defn- parse-size
-  "Parse a size string like \"10MB\" into bytes."
+  "Parse a size string like \"10MB\" into bytes.
+  Returns nil if the numeric part is not a valid integer."
   [s]
   (let [s (str/upper-case (str/trim (str s)))]
     (cond
-      (str/ends-with? s "GB") (* (parse-long (str/replace s #"GB$" "")) 1024 1024 1024)
-      (str/ends-with? s "MB") (* (parse-long (str/replace s #"MB$" "")) 1024 1024)
-      (str/ends-with? s "KB") (* (parse-long (str/replace s #"KB$" "")) 1024)
+      (str/ends-with? s "GB") (some-> (parse-long (str/replace s #"GB$" "")) (* 1024 1024 1024))
+      (str/ends-with? s "MB") (some-> (parse-long (str/replace s #"MB$" "")) (* 1024 1024))
+      (str/ends-with? s "KB") (some-> (parse-long (str/replace s #"KB$" "")) (* 1024))
       :else                   (parse-long s))))
 
 (defn- rotate-log!
@@ -327,17 +328,17 @@
 ;; ---------------------------------------------------------------------------
 
 (defn report-priority [report]
-  (+ (if (some? (:report/urgent report)) 2 0)
-     (if (some? (:report/important report)) 1 0)))
+  (+ (if (:report/urgent report) 2 0)
+     (if (:report/important report) 1 0)))
 
 (defn report-status
   "Compute a numeric status score for filtering.
   Higher = more active: open (4) > closed (0), +2 if owned, +1 if acked.
   E.g. --min-status 4 filters to open reports only."
   [report]
-  (+ (if-not (some? (:report/closed report)) 4 0)
-     (if (some? (:report/owned report)) 2 0)
-     (if (some? (:report/acked report)) 1 0)))
+  (+ (if-not (:report/closed report) 4 0)
+     (if (:report/owned report) 2 0)
+     (if (:report/acked report) 1 0)))
 
 (defn report-descendant-count [report]
   (let [d (:report/descendants report)]
@@ -410,4 +411,18 @@
 ;; ---------------------------------------------------------------------------
 
 (def bark-schema
-  (edn/read-string (slurp "resources/bark-schema.edn")))
+  (let [f (clojure.java.io/file "resources/bark-schema.edn")]
+    (if (.exists f)
+      (edn/read-string (slurp f))
+      (throw (ex-info "resources/bark-schema.edn not found" {:path (.getAbsolutePath f)})))))
+
+;; ---------------------------------------------------------------------------
+;; Shared date arithmetic (used by bark-digest, bark-stats)
+;; ---------------------------------------------------------------------------
+
+(defn days-between
+  "Number of whole days between two java.util.Date instances (absolute)."
+  [^java.util.Date a ^java.util.Date b]
+  (when (and a b)
+    (quot (Math/abs (- (.getTime b) (.getTime a)))
+          86400000)))

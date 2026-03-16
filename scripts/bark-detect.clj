@@ -179,18 +179,30 @@
 
 (defn detect-report
   "Detect report type from an email. Returns a map with :type and optional
-  :version, :topic, :patch-seq, :patch-source — or nil if no report detected."
+  :version, :topic, :patch-seq, :patch-source — or nil if no report detected.
+  Emails with no subject can still be detected as patches if they carry
+  patch attachments or inline diffs."
   ([email] (detect-report email default-compiled-labels))
   ([email patterns]
-   (when-let [subject (:email/subject email)]
-     (let [attachments (:email/attachments email)
-           body-text   (email-body-text email)]
-       (or (detect-bug subject patterns)
-           (detect-patch subject attachments body-text patterns)
-           (detect-request subject patterns)
-           (detect-announcement subject patterns)
-           (detect-release subject patterns)
-           (detect-change subject patterns))))))
+   (let [subject     (:email/subject email)
+         attachments (:email/attachments email)
+         body-text   (email-body-text email)]
+     (or (when subject
+           (or (detect-bug subject patterns)
+               (detect-patch subject attachments body-text patterns)
+               (detect-request subject patterns)
+               (detect-announcement subject patterns)
+               (detect-release subject patterns)
+               (detect-change subject patterns)))
+         ;; Fallback: no subject tag matched, but email has patch content
+         (when-not subject
+           (let [from-att (when (has-patch-attachment? attachments) :attachment)
+                 from-inl (when (has-inline-patch? body-text) :inline)
+                 sources  (cond-> #{}
+                            from-att (conj :attachment)
+                            from-inl (conj :inline))]
+             (when (seq sources)
+               {:type :patch :patch-source sources})))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Patch content extraction (pure)
@@ -269,4 +281,4 @@
                          (filter #(and (patch-file? (:attachment/filename %))
                                        (:attachment/data %)))
                          (mapv #(patch-entity (:attachment/filename %) :attachment (:attachment/data %))))]
-    (into (vec inline) att-patches)))
+    (into (or inline []) att-patches)))

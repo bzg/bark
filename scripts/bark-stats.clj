@@ -22,7 +22,7 @@
          format-date format-date-iso parse-cli-args load-config
          pico-cdn bark-description bark-repo-url footer-css
          bark-footer wrap-js theme-toggle-js bark-schema
-         nav-bar theme-toggle-btn)
+         nav-bar theme-toggle-btn html-head)
 
 (load-file "scripts/bark-common.clj")
 (load-file "scripts/bark-html.clj")
@@ -74,7 +74,9 @@
 (defn within-last-year? [inst]
   (when inst (> (.getTime inst) (- (now-ms) one-year-ms))))
 
-(defn days-between [a b]
+;; days-between (integer, shared) is in bark-common.clj.
+;; This variant returns fractional days for statistical averaging.
+(defn- days-between-frac [a b]
   (when (and a b)
     (/ (Math/abs (- (.getTime b) (.getTime a)))
        (* 24.0 60 60 1000))))
@@ -90,8 +92,8 @@
 (defn report-author [r] (get-in r [:report/email :email/from-address]))
 
 (defn open->close-days [r]
-  (days-between (report-date r)
-                (get-in r [:report/closed :email/date-sent])))
+  (days-between-frac (report-date r)
+                     (get-in r [:report/closed :email/date-sent])))
 
 (defn median [sorted-nums]
   (let [n (count sorted-nums)]
@@ -112,8 +114,10 @@
        (group-by #(some-> (:report/type %) name))
        (into {} (map (fn [[t rs]] [t (count rs)])))))
 
-(def ^:private ym-formatter
-  "Locale-independent yyyy-MM formatter (UTC)."
+(defn- make-ym-formatter
+  "Create a locale-independent yyyy-MM formatter (UTC).
+  SimpleDateFormat is not thread-safe, so create a fresh instance each time."
+  ^java.text.SimpleDateFormat []
   (doto (java.text.SimpleDateFormat. "yyyy-MM" java.util.Locale/ENGLISH)
     (.setTimeZone (java.util.TimeZone/getTimeZone "UTC"))))
 
@@ -122,13 +126,13 @@
   Returns nil on failure."
   [date]
   (when date
-    (try (.format ym-formatter date)
+    (try (.format (make-ym-formatter) date)
          (catch Exception _ nil))))
 
 (defn- current-ym
   "Return [year month] for right now, locale-independent."
   []
-  (let [s (.format ym-formatter (java.util.Date.))
+  (let [s (.format (make-ym-formatter) (java.util.Date.))
         [year month] (str/split s #"-")]
     [(parse-long year) (parse-long month)]))
 
@@ -445,27 +449,19 @@
         n-yr (reduce + (vals reports-per-type))
         pct  #(when % (str (Math/round (* 100.0 %)) "%"))
         nav-html (str (h/html (nav-bar "BARK — Data" "data")))
-        data-section (render-data-section out-dir)]
+        data-section (render-data-section out-dir)
+        vega-scripts (str "<script src=\"https://cdn.jsdelivr.net/npm/vega@5/build/vega.min.js\"></script>\n"
+                          "<script src=\"https://cdn.jsdelivr.net/npm/vega-lite@5/build/vega-lite.min.js\"></script>\n"
+                          "<script src=\"https://cdn.jsdelivr.net/npm/vega-embed@6/build/vega-embed.min.js\"></script>\n"
+                          "<script>\n" (wrap-js theme-toggle-js) "\n</script>\n"
+                          "<script>\n" (wrap-js stats-js) "\n</script>\n")]
     (str
      "<!DOCTYPE html>\n"
      "<html lang=\"en\" data-theme=\"light\">\n"
-     "<head>\n"
-     "<meta charset=\"UTF-8\">\n"
-     "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
-     "<meta name=\"color-scheme\" content=\"light dark\">\n"
-     "<meta name=\"description\" content=\"" bark-description "\">\n"
-     "<meta property=\"og:title\" content=\"BARK — Data\">\n"
-     "<meta property=\"og:description\" content=\"" bark-description "\">\n"
-     "<meta property=\"og:type\" content=\"website\">\n"
-     "<link rel=\"stylesheet\" href=\"" pico-cdn "\">\n"
-     "<script src=\"https://cdn.jsdelivr.net/npm/vega@5/build/vega.min.js\"></script>\n"
-     "<script src=\"https://cdn.jsdelivr.net/npm/vega-lite@5/build/vega-lite.min.js\"></script>\n"
-     "<script src=\"https://cdn.jsdelivr.net/npm/vega-embed@6/build/vega-embed.min.js\"></script>\n"
-     "<title>BARK — Data</title>\n"
-     "<style>" stats-css "</style>\n"
-     "<script>\n" (wrap-js theme-toggle-js) "\n</script>\n"
-     "<script>\n" (wrap-js stats-js) "\n</script>\n"
-     "</head>\n<body>\n"
+     (html-head {:title      "BARK — Data"
+                 :css        stats-css
+                 :extra-head vega-scripts})
+     "<body>\n"
      "<main class=\"container\">\n"
      nav-html "\n"
      "<p class=\"meta\">Generated " generated-at "</p>\n"

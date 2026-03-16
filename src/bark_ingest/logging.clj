@@ -14,13 +14,14 @@
 ;; ---------------------------------------------------------------------------
 
 (defn parse-size
-  "Parse a size string like \"10MB\" into bytes. Supports KB, MB, GB."
+  "Parse a size string like \"10MB\" into bytes. Supports KB, MB, GB.
+  Returns nil if the numeric part is not a valid integer."
   [s]
   (let [s (str/upper-case (str/trim (str s)))]
     (cond
-      (str/ends-with? s "GB") (* (parse-long (str/replace s #"GB$" "")) 1024 1024 1024)
-      (str/ends-with? s "MB") (* (parse-long (str/replace s #"MB$" "")) 1024 1024)
-      (str/ends-with? s "KB") (* (parse-long (str/replace s #"KB$" "")) 1024)
+      (str/ends-with? s "GB") (some-> (parse-long (str/replace s #"GB$" "")) (* 1024 1024 1024))
+      (str/ends-with? s "MB") (some-> (parse-long (str/replace s #"MB$" "")) (* 1024 1024))
+      (str/ends-with? s "KB") (some-> (parse-long (str/replace s #"KB$" "")) (* 1024))
       :else                   (parse-long s))))
 
 ;; ---------------------------------------------------------------------------
