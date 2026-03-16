@@ -44,16 +44,13 @@ after the label: =[BUG] parser: crash on empty input= sets the topic to
 
 *** Priority triggers
 
-On top of trigger keywords to update the status of a report, users can
-tell if a report is important and/or urgent.
+Users don't set the priority directly: it is computed as the sum of
+important (+1) and urgent (+2).
 
-| Effect on report | Trigger keyword |
-|------------------+-----------------|
-| urgent           | =Urgent=          |
-| important        | =Important=       |
-
-They cannot set the priority directly: priority is computed as the sum
-of important (+1) and urgent (+2).
+| Effect on report  | Trigger keyword |
+|-------------------+-----------------|
+| Mark as urgent    | =Urgent=          |
+| Mark as important | =Important=       |
 
 *** Combining triggers
 

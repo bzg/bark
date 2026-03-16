@@ -47,15 +47,24 @@
 (defn- fmt-label-tags
   "Format label tags as org =code= entries for a given report type."
   [tags rtype]
-  (let [versioned? #{:bug :patch :release :change}]
+  (let [versioned?  #{:bug :patch :release :change}
+        with-topic? #{:request :announcement}]
     (str/join " "
-              (if (versioned? rtype)
+              (cond
+                (versioned? rtype)
                 (mapcat (fn [t]
                           (case rtype
                             :bug   [(str "=[" t "]=") (str "=[" t " version]=")]
                             :patch [(str "=[" t "]=") (str "=[" t " n/m]=") (str "=[" t " topic n/m]=")]
                             [(str "=[" t "]=") (str "=[" t " version]=")]))
                         tags)
+
+                (with-topic? rtype)
+                (mapcat (fn [t]
+                          [(str "=[" t "]=") (str "=[" t " topic]=")])
+                        tags)
+
+                :else
                 (map #(str "=[" % "]=") tags)))))
 
 (defn- fmt-trigger-words
@@ -65,74 +74,93 @@
     (str/join " " (map #(str "=" % "=") words))
     ""))
 
-(defn build-table-org
-  "Build the unified labels+triggers org table."
-  [labels triggers]
+(defn build-labels-table-org
+  "Build the labels-only org table."
+  [labels]
   (let [types-upper [:bug :patch :request]
         types-lower [:announcement :release :change]
         all-types   (concat types-upper types-lower)
-        acked-str   (fmt-trigger-words (:acked triggers))
-        owned-str   (fmt-trigger-words (:owned triggers))
-        closed-str  (fmt-trigger-words (:closed triggers))
         rows  (mapv (fn [rtype]
-                      {:type    (name rtype)
-                       :labels  (fmt-label-tags (get labels rtype) rtype)
-                       :acked   acked-str
-                       :owned   owned-str
-                       :closed  closed-str})
+                      {:type   (name rtype)
+                       :labels (fmt-label-tags (get labels rtype) rtype)})
                     all-types)
         w-type   (apply max (count "Type")           (map #(count (:type %)) rows))
         w-labels (apply max (count "Subject labels") (map #(count (:labels %)) rows))
-        w-acked  (apply max (count "Acked")          (map #(count (:acked %)) rows))
-        w-owned  (apply max (count "Owned")          (map #(count (:owned %)) rows))
-        w-closed (apply max (count "Closed")         (map #(count (:closed %)) rows))
         pad      (fn [s w] (str s (apply str (repeat (max 0 (- w (count s))) " "))))
         hline    (str "|-" (apply str (repeat w-type "-")) "-+-"
-                      (apply str (repeat w-labels "-")) "-+-"
-                      (apply str (repeat w-acked "-")) "-+-"
-                      (apply str (repeat w-owned "-")) "-+-"
-                      (apply str (repeat w-closed "-")) "-|")
-        row-str  (fn [{:keys [type labels acked owned closed]}]
+                      (apply str (repeat w-labels "-")) "-|")
+        row-str  (fn [{:keys [type labels]}]
                    (str "| " (pad type w-type)
-                        " | " (pad labels w-labels)
-                        " | " (pad acked w-acked)
-                        " | " (pad owned w-owned)
-                        " | " (pad closed w-closed) " |"))
-        header   (row-str {:type "Type" :labels "Subject labels"
-                           :acked "Acked" :owned "Owned" :closed "Closed"})
+                        " | " (pad labels w-labels) " |"))
+        header   (row-str {:type "Type" :labels "Subject labels"})
         upper    (map row-str (take 3 rows))
         lower    (map row-str (drop 3 rows))]
     (str/join "\n" (concat [header hline] upper [hline] lower))))
 
+(defn build-triggers-table-org
+  "Build the flat triggers org table."
+  [triggers]
+  (let [rows [["acked"             (fmt-trigger-words (:acked triggers))]
+              ["owned"             (fmt-trigger-words (:owned triggers))]
+              ["closed (canceled)" (fmt-trigger-words (filterv #(contains? #{"Canceled" "Cancelled"} %)
+                                                               (:closed triggers)))]
+              ["closed (expired)"  (fmt-trigger-words (filterv #(= "Expired" %)
+                                                               (:closed triggers)))]
+              ["closed (resolved)" (fmt-trigger-words (filterv #(not (contains? #{"Canceled" "Cancelled" "Expired"} %))
+                                                               (:closed triggers)))]]
+        w-effect  (apply max (count "Effect on report")  (map #(count (first %)) rows))
+        w-trigger (apply max (count "Trigger keyword")   (map #(count (second %)) rows))
+        pad       (fn [s w] (str s (apply str (repeat (max 0 (- w (count s))) " "))))
+        hline     (str "|-" (apply str (repeat w-effect "-")) "-+-"
+                       (apply str (repeat w-trigger "-")) "-|")
+        row-str   (fn [[effect trigger]]
+                    (str "| " (pad effect w-effect) " | " (pad trigger w-trigger) " |"))
+        header    (row-str ["Effect on report" "Trigger keyword"])]
+    (str/join "\n" [header hline (row-str (nth rows 0)) (row-str (nth rows 1))
+                    (row-str (nth rows 2)) (row-str (nth rows 3)) (row-str (nth rows 4))])))
+
 ;; ---------------------------------------------------------------------------
-;; Template substitution — detect and replace the org table block
+;; Template substitution — detect and replace org table blocks
 ;; ---------------------------------------------------------------------------
 
 (defn- table-line? [s] (str/starts-with? (str/trim s) "|"))
 
+(defn- find-table-blocks
+  "Return a seq of [start-idx end-idx] for each contiguous table block."
+  [lines]
+  (loop [i 0, blocks [], in-table? false, start nil]
+    (if (>= i (count lines))
+      (if in-table? (conj blocks [start (dec i)]) blocks)
+      (if (table-line? (nth lines i))
+        (recur (inc i) blocks true (or start i))
+        (if in-table?
+          (recur (inc i) (conj blocks [start (dec i)]) false nil)
+          (recur (inc i) blocks false nil))))))
+
 (defn substitute-template
-  "Replace the first org table block in org-text with the resolved table."
+  "Replace the first two org table blocks in org-text:
+  the first with the resolved labels table, the second with the triggers table."
   [org-text labels triggers]
-  (let [table-org (build-table-org labels triggers)
-        lines     (str/split-lines org-text)
-        ;; Find first and last indices of the table block
-        first-tl  (first (keep-indexed (fn [i l] (when (table-line? l) i)) lines))
-        last-tl   (last  (keep-indexed (fn [i l] (when (and first-tl
-                                                            (>= i first-tl)
-                                                            (table-line? l)
-                                                            ;; stop at first gap
-                                                            (every? #(or (table-line? (nth lines %))
-                                                                         false)
-                                                                    (range first-tl (inc i))))
-                                                   i))
-                                       lines))]
-    (if (and first-tl last-tl)
-      (str/join "\n"
-                (concat (take first-tl lines)
-                        [table-org]
-                        (drop (inc last-tl) lines)))
-      ;; No table found — return as-is
-      org-text)))
+  (let [lines  (str/split-lines org-text)
+        blocks (find-table-blocks lines)]
+    (if (>= (count blocks) 2)
+      (let [[t2-start t2-end] (nth blocks 1)
+            [t1-start t1-end] (nth blocks 0)]
+        ;; Replace second table first (so indices stay valid)
+        (str/join "\n"
+                  (concat (take t1-start lines)
+                          [(build-labels-table-org labels)]
+                          (subvec (vec lines) (inc t1-end) t2-start)
+                          [(build-triggers-table-org triggers)]
+                          (drop (inc t2-end) lines))))
+      ;; Fallback: only one table — replace with labels only
+      (if (seq blocks)
+        (let [[t1-start t1-end] (first blocks)]
+          (str/join "\n"
+                    (concat (take t1-start lines)
+                            [(build-labels-table-org labels)]
+                            (drop (inc t1-end) lines))))
+        org-text))))
 
 ;; ---------------------------------------------------------------------------
 ;; Minimal org -> HTML conversion

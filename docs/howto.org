@@ -158,25 +158,13 @@ State changes are detected by trigger keywords within the body of a
 response down the thread, at the beginning of the line, followed by a
 punctuation mark (=.= =,= =;= =:=):
 
-| Trigger keyword | Effect on report          |
-|-----------------+---------------------------|
-| =Acked.=          | acked                     |
-| =Confirmed.=      | acked                     |
-| =Reviewed.=       | acked                     |
-| =Approved.=       | acked                     |
-| =Owned.=          | owned                     |
-| =Handled.=        | owned                     |
-| =Assigned.=       | owned                     |
-| =Canceled.=       | closed (reason: canceled) |
-| =Cancelled.=      | closed (reason: canceled) |
-| =Expired.=        | closed (reason: expired)  |
-| =Resolved.=       | closed (reason: resolved) |
-| =Applied.=        | closed (reason: resolved) |
-| =Done.=           | closed (reason: resolved) |
-| =Fixed.=          | closed (reason: resolved) |
-| =Closed.=         | closed (reason: resolved) |
-| =Urgent.=         | urgent                    |
-| =Important.=      | important                 |
+| Effect on report  | Trigger keyword                    |
+|-------------------+------------------------------------|
+| acked             | =Acked= =Confirmed= =Reviewed= =Approved=  |
+| owned             | =Owned= =Handled= =Assigned=             |
+| closed (canceled) | =Canceled= =Cancelled=                 |
+| closed (expired)  | =Expired=                            |
+| closed (resolved) | =Resolved= =Applied= =Done= =Fixed= =Closed= |
 
 You can use multiple keywords in the same email, one per line.
 
