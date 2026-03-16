@@ -258,14 +258,25 @@
 ;; Digest orchestration
 ;; ---------------------------------------------------------------------------
 
+(defn- source-from-in-reply-to
+  "Resolve source by looking up the email referenced by In-Reply-To.
+  Returns the source name if the parent email has one, nil otherwise."
+  [db in-reply-to]
+  (when in-reply-to
+    (d/q '[:find ?src .
+           :in $ ?mid
+           :where [?e :email/message-id ?mid] [?e :email/source ?src]]
+         db in-reply-to)))
+
 (defn- process-email!
   "Process a single email during digest. Returns updated accumulator."
   [conn source-map sources {:keys [created threaded skipped thread-index type-index] :as acc} email]
   (let [message-id    (:email/message-id email)
         eid           (:db/id email)
         from-addr     (:email/from-address email)
-        ;; Resolve source
+        ;; Resolve source: in-reply-to first, then List-Id / [bark:*], then catch-all
         source-name   (or (:email/source email)
+                          (source-from-in-reply-to (d/db conn) (:email/in-reply-to email))
                           (classify-source (:email/headers-edn email)
                                            (:email/subject email)
                                            sources))
