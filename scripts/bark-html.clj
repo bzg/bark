@@ -118,3 +118,16 @@
    [:a {:href "reports/all.json"} "JSON"]
    " — "
    [:a {:href "reports/all.org"} "Org"]])
+
+;; ---------------------------------------------------------------------------
+;; Org-mode inline link conversion (shared by bark-howto, bark-stats)
+;; ---------------------------------------------------------------------------
+
+(defn org-inline-links
+  "Convert org-mode links to HTML anchors.
+  [[url][label]] -> <a href=\"url\">label</a>
+  [[url]]        -> <a href=\"url\">url</a>"
+  [s]
+  (-> s
+      (str/replace #"\[\[([^\]]+)\]\[([^\]]+)\]\]" "<a href=\"$1\">$2</a>")
+      (str/replace #"\[\[([^\]]+)\]\]" "<a href=\"$1\">$1</a>")))

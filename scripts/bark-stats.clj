@@ -22,7 +22,7 @@
          format-date format-date-iso parse-cli-args load-config
          pico-cdn bark-description bark-repo-url footer-css
          bark-footer wrap-js theme-toggle-js bark-schema
-         nav-bar theme-toggle-btn html-head)
+         nav-bar theme-toggle-btn html-head org-inline-links)
 
 (load-file "scripts/bark-common.clj")
 (load-file "scripts/bark-html.clj")
@@ -167,19 +167,33 @@
         [year month] (str/split s #"-")]
     [(parse-long year) (parse-long month)]))
 
+(defn- last-12-months
+  "Return a vector of 12 \"yyyy-MM\" strings ending with the current month."
+  []
+  (let [[cy cm] (current-ym)]
+    (vec (for [i (range 11 -1 -1)]
+           (let [total (+ (* cy 12) (dec cm) (- i))]
+             (format "%04d-%02d" (quot total 12) (inc (mod total 12))))))))
+
+(defn- cumulative-by-month
+  "Given a {\"yyyy-MM\" count} frequency map and a base count (entries before
+  the 12-month window), return [[month cumulative] ...] over the last 12 months."
+  [by-ym base-count]
+  (let [months      (last-12-months)
+        first-month (first months)
+        base        (+ base-count
+                       (->> by-ym
+                            (filter (fn [[ym _]] (neg? (compare ym first-month))))
+                            (map val)
+                            (reduce + 0)))
+        cumulative  (rest (reductions + base (map #(get by-ym % 0) months)))]
+    (mapv vector months cumulative)))
+
 (defn reports-by-month [reports]
-  (let [;; Group all reports by yyyy-MM (local time, matching what users see)
-        counts (->> reports
+  (let [counts (->> reports
                     (keep (fn [r] (date->ym (report-date r))))
                     frequencies)
-        ;; Generate the last 12 month labels
-        [cy cm] (current-ym)
-        months  (vec (for [i (range 11 -1 -1)]
-                       (let [total (+ (* cy 12) (dec cm) (- i))
-                             y     (quot total 12)
-                             m     (inc (mod total 12))]
-                         (format "%04d-%02d" y m))))]
-    ;; Return eager vector of [month count] pairs
+        months (last-12-months)]
     (mapv (fn [m] [m (get counts m 0)]) months)))
 
 (defn contributors-by-month
@@ -188,22 +202,8 @@
   [contributors]
   (let [by-ym (->> contributors
                    (keep (fn [[_ _ since]] (date->ym since)))
-                   frequencies)
-        [cy cm] (current-ym)
-        months (vec (for [i (range 11 -1 -1)]
-                      (let [total (+ (* cy 12) (dec cm) (- i))
-                            y     (quot total 12)
-                            m     (inc (mod total 12))]
-                        (format "%04d-%02d" y m))))
-        first-month (first months)
-        ;; Contributors registered before the 12-month window
-        base (->> by-ym
-                  (filter (fn [[ym _]] (neg? (compare ym first-month))))
-                  (map val)
-                  (reduce + 0))
-        new-per-month (map #(get by-ym % 0) months)
-        cumulative (rest (reductions + base new-per-month))]
-    (mapv vector months cumulative)))
+                   frequencies)]
+    (cumulative-by-month by-ym 0)))
 
 (defn maintainers-by-month
   "Cumulative maintainer count per month over the last 12 months.
@@ -214,23 +214,8 @@
   [since-dates n-always]
   (let [by-ym (->> since-dates
                    (keep (fn [d] (when (>= (count d) 7) (subs d 0 7))))
-                   frequencies)
-        [cy cm] (current-ym)
-        months (vec (for [i (range 11 -1 -1)]
-                      (let [total (+ (* cy 12) (dec cm) (- i))
-                            y     (quot total 12)
-                            m     (inc (mod total 12))]
-                        (format "%04d-%02d" y m))))
-        first-month (first months)
-        ;; Maintainers registered before the 12-month window + always-present ones
-        base (+ n-always
-                (->> by-ym
-                     (filter (fn [[ym _]] (neg? (compare ym first-month))))
-                     (map val)
-                     (reduce + 0)))
-        new-per-month (map #(get by-ym % 0) months)
-        cumulative (rest (reductions + base new-per-month))]
-    (mapv vector months cumulative)))
+                   frequencies)]
+    (cumulative-by-month by-ym n-always)))
 
 (defn email-vs-reports-ratio [reports total-email-count]
   (let [n (count (filter #(within-last-year? (report-date %)) reports))]
@@ -453,11 +438,6 @@
 ;; data.org rendering (reuses org table parser from bark-howto logic)
 ;; ---------------------------------------------------------------------------
 
-(defn- org-inline-data [s]
-  (-> s
-      (str/replace #"\[\[([^\]]+)\]\[([^\]]+)\]\]" "<a href=\"$1\">$2</a>")
-      (str/replace #"\[\[([^\]]+)\]\]" "<a href=\"$1\">$1</a>")))
-
 (defn- parse-data-table
   "Parse org table lines into an HTML table string."
   [lines]
@@ -471,11 +451,11 @@
       (let [header (first rows)
             body   (rest rows)]
         (str "<table>\n<thead><tr>"
-             (str/join (map #(str "<th>" (org-inline-data %) "</th>") header))
+             (str/join (map #(str "<th>" (org-inline-links %) "</th>") header))
              "</tr></thead>\n<tbody>\n"
              (str/join (map (fn [r]
                               (str "<tr>"
-                                   (str/join (map #(str "<td>" (org-inline-data %) "</td>") r))
+                                   (str/join (map #(str "<td>" (org-inline-links %) "</td>") r))
                                    "</tr>\n"))
                             body))
              "</tbody></table>")))))
@@ -582,17 +562,20 @@
                         (if html? "public/web/data.html" "public/reports/stats.json"))
         out-dir     (or (:out-dir opts)
                         (.getParent (io/file out-file)))
-        conn        (d/get-conn db-path bark-schema {:wal? false})
-        db          (d/db conn)
-        all-reps    (all-reports db)
-        reports     (if source-name
-                      (filter #(= source-name (get-in % [:report/email :email/source])) all-reps)
-                      all-reps)
-        stats       (compute-stats reports db)]
-    (io/make-parents out-file)
-    (if html?
-      (do (spit out-file (render-html stats out-dir))
-          (log/info "Wrote" out-file "(HTML," (count reports) "reports)"))
-      (do (spit out-file (json/generate-string stats {:pretty true}))
-          (log/info "Wrote" out-file "(JSON," (count reports) "reports)")))))
+        conn        (d/get-conn db-path bark-schema {:wal? false})]
+    (try
+      (let [db       (d/db conn)
+            all-reps (all-reports db)
+            reports  (if source-name
+                       (filter #(= source-name (get-in % [:report/email :email/source])) all-reps)
+                       all-reps)
+            stats    (compute-stats reports db)]
+        (io/make-parents out-file)
+        (if html?
+          (do (spit out-file (render-html stats out-dir))
+              (log/info "Wrote" out-file "(HTML," (count reports) "reports)"))
+          (do (spit out-file (json/generate-string stats {:pretty true}))
+              (log/info "Wrote" out-file "(JSON," (count reports) "reports)"))))
+      (finally
+        (d/close conn)))))
 (apply -main *command-line-args*)
