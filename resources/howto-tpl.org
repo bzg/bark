@@ -60,18 +60,18 @@ Important.
 
 | Long form                   | Short     | Explanation                                           |
 |-----------------------------+-----------+-------------------------------------------------------|
-| from:me@example.org         | f:        | Reports from me@example.org                           |
-| acked:me@example.org        | a:        | Reports acked by me@example.org                       |
-| owned:me@example.org        | o:        | Reports owned by me@example.org                       |
-| closed:me@example.org       | c:        | Reports closed by me@example.org                      |
-| urgent:me@example.org       | u:        | Reports marked urgent by me@example.org               |
-| important:me@example.org    | i:        | Reports marked important by me@example.org            |
-| subject:match               | s:        | Reports matching subject                              |
-| priority:[0-4]              | p:        | Reports matching priority level 0 to 4                |
-| mid:<...>                   | m:        | Report open with message-id <...>                     |
-| date:3d..                   | d:        | Reports from 3 days ago                               |
-| date:2023-01-01..2023-12-31 | d:        | Reports from 2023-01-01 to 2023-12-31                 |
+| from:me@example.org         | =f:=        | Reports from me@example.org                           |
+| acked:me@example.org        | =a:=        | Reports acked by me@example.org                       |
+| owned:me@example.org        | =o:=        | Reports owned by me@example.org                       |
+| closed:me@example.org       | =c:=        | Reports closed by me@example.org                      |
+| urgent:me@example.org       | =u:=        | Reports marked urgent by me@example.org               |
+| important:me@example.org    | =i:=        | Reports marked important by me@example.org            |
+| subject:match               | =s:=        | Reports matching subject                              |
+| priority:[0-4]              | =p:=        | Reports matching priority level 0 to 4                |
+| mid:<...>                   | =m:=        | Report open with message-id <...>                     |
+| date:3d..                   | =d:=        | Reports from 3 days ago                               |
+| date:2023-01-01..2023-12-31 | =d:=        | Reports from 2023-01-01 to 2023-12-31                 |
 | match1 \vert match2             |           | Reports matching "match1" or "match2"                 |
-| from:* acked:* …            | f:* a:* … | Wildcard for from/acked/owned/closed/urgent/important |
+| from:* acked:* …            | =f:*= =a:*= … | Wildcard for from/acked/owned/closed/urgent/important |
 
 
