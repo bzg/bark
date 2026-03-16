@@ -66,12 +66,21 @@
 (s/def :source-notif/enable boolean?)
 (s/def :source/notifications (s/keys :req-un [:source-notif/enable]))
 
+;; Per-source maintainers (optional) — seed maintainers with since-dates.
+;; Directive "Add/Remove maintainer:" overrides these at runtime.
+(s/def :maintainer/email ::email)
+(s/def :maintainer/since (s/and ::non-blank-string #(re-matches #"\d{4}-\d{2}-\d{2}" %)))
+(s/def ::maintainer-entry (s/keys :req-un [:maintainer/email]
+                                  :opt-un [:maintainer/since]))
+(s/def :source/maintainers (s/coll-of ::maintainer-entry :kind vector? :min-count 1))
+
 (s/def ::source
   (s/keys :req-un [:source/name]
           :opt-un [:source/match :source/admin :source/list-post
                    :source/list-archive :source/triggers :source/labels
                    :source/bark-path :source/export-reports
-                   :source/report-types :source/notifications]))
+                   :source/report-types :source/maintainers
+                   :source/notifications]))
 
 (s/def :bark/sources
   (s/and (s/coll-of ::source :kind vector? :min-count 1)
@@ -191,6 +200,11 @@
                         (when-let [la (:list-archive src)] (str "archive: " la))
                         (when-let [a (:admin src)] (str "admin: " a))
                         (when-let [rt (:report-types src)] (str "report-types: " (pr-str rt)))
+                        (when-let [ms (:maintainers src)]
+                          (str "maintainers: "
+                               (str/join ", " (map #(str (:email %)
+                                                         (when (:since %) (str " (since " (:since %) ")")))
+                                                   ms))))
                         (when (some? (get-in src [:notifications :enable]))
                           (str "notify: " (get-in src [:notifications :enable])))))
             (log/info "  DB path:" (get-in config [:db :path]))

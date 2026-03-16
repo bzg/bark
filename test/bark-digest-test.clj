@@ -96,10 +96,12 @@
         conn    (d/get-conn db-path schema)]
     ;; Setup roles for "direct" source
     (d/transact! conn [{:roles/source "direct"
-                        :roles/admin  "admin@test.org"}])
+                        :roles/admin  "admin@test.org"
+                        :roles/maintainers "admin@test.org"}])
     ;; Setup roles for "public-list" source (list-backed)
     (d/transact! conn [{:roles/source "public-list"
-                        :roles/admin  "admin@test.org"}])
+                        :roles/admin  "admin@test.org"
+                        :roles/maintainers "admin@test.org"}])
     ;; Insert test emails
     (let [emails (edn/read-string (slurp "test/emails.edn"))]
       (doseq [email emails]
@@ -338,7 +340,7 @@
         (assert-test "No report for wrong List-Post"
                      (not (report-exists? db "<32@test.org>")))
 
-        ;; --- Email 33: admin direct to list-backed source (allowed, admin bypass) ---
+        ;; --- Email 33: admin (who is also maintainer) direct to list-backed source ---
         (println "\n--- Email 33: admin bypasses List-Post check ---")
         (let [r (get-report db "<33@test.org>")]
           (assert= "Type is :bug" :bug (:report/type r)))

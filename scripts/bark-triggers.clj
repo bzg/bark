@@ -280,7 +280,7 @@
             triggers    (build-source-triggers (get source-map src-name))
             trig-result (detect-triggers report-type body-text triggers)
             directives  (detect-directives body-text)
-            is-maintainer? (maintainer? roles from-addr)]
+            is-maintainer? (maintainer? roles from-addr (:email/date-sent email))]
 
         ;; --- 2. Apply votes (requests only) ---
         (when (and (= :request report-type) from-addr)

@@ -27,6 +27,17 @@
 	    ;; The Bark admin of this monitored mailbox
             :admin              "lead@example.org"
             ;;
+            ;; Maintainers (optional) — seed initial maintainers.
+            ;; :since restricts the maintainer to emails dated on or after
+            ;; that date (useful when adding someone retroactively without
+            ;; granting privileges on older emails).  Omit :since for
+            ;; immediate effect on all emails.
+            ;; "Add maintainer:" / "Remove maintainer:" directives in
+            ;; emails override this list at runtime.
+            ;; Note: the admin is NOT automatically a maintainer.
+            ;; :maintainers [{:email "lead@example.org" :since "2025-01-01"}
+            ;;               {:email "co-maint@example.org"}]
+            ;;
             ;; Base URL where this source's public/ directory is served (optional)
             :bark-path "https://bark.example.org/public/public-list/"
             ;;

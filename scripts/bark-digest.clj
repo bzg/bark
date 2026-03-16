@@ -283,7 +283,8 @@
        ;; does not count).
        (when (and from-addr body-text source-name
                   (not (from-mailing-list? email)))
-         (apply-role-commands! conn roles source-name from-addr body-text)
+         (apply-role-commands! conn roles source-name from-addr body-text
+                              (:email/date-sent email))
          (apply-notify-commands! conn roles source-name from-addr body-text))
           ;; Detect and create report
           (let [report-info (detect-report email subj-patterns allowed-types)

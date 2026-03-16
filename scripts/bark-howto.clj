@@ -394,25 +394,40 @@
                      db k)]
       (when-not (str/blank? n) n))))
 
+(defn- parse-since-map
+  "Parse :roles/maintainer-since entries into {lower-email -> \"yyyy-MM-dd\"}."
+  [roles]
+  (let [entries (let [v (:roles/maintainer-since roles)]
+                  (cond (nil? v) #{} (string? v) #{v} :else (set v)))]
+    (into {}
+          (keep (fn [entry]
+                  (let [idx (str/last-index-of entry ":")]
+                    (when (and idx (pos? idx))
+                      [(subs entry 0 idx) (subs entry (inc idx))]))))
+          entries)))
+
 (defn build-maintainers-html
-  "Build an HTML section listing admin and maintainers by display name.
-  Falls back to email if no contributor name is found."
+  "Build an HTML section listing admin and maintainers by display name,
+  with since-dates when available. Only current maintainers are shown."
   [db source-name source-cfg]
   (when source-name
     (let [dp          (resolve 'pod.huahaiy.datalevin/pull)
           admin-email (:admin source-cfg)
-          roles       (dp db '[:roles/admin :roles/maintainers]
+          roles       (dp db '[:roles/admin :roles/maintainers :roles/maintainer-since]
                           [:roles/source source-name])
           maint-v     (:roles/maintainers roles)
           maint-emails (cond (nil? maint-v) []
                              (string? maint-v) [maint-v]
                              :else maint-v)
-          ;; Collect all privileged emails, admin first, deduped
-          all-emails  (distinct (remove nil? (cons admin-email maint-emails)))
+          since-map   (parse-since-map roles)
           entries     (mapv (fn [email]
-                              (or (contributor-name db source-name email)
-                                  email))
-                            all-emails)]
+                              (let [name  (or (contributor-name db source-name email)
+                                              email)
+                                    since (get since-map (str/lower-case email))]
+                                (if since
+                                  (str name " <small>(since " since ")</small>")
+                                  name)))
+                            maint-emails)]
       (when (seq entries)
         (str "<h2 id=\"maintainers\">Maintainers</h2>\n<ul>\n"
              (str/join "\n" (map #(str "<li>" % "</li>") entries))

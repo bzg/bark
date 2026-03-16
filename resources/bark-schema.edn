@@ -115,6 +115,12 @@
  :roles/admin            {:db/valueType :db.type/string}
  :roles/maintainers      {:db/valueType   :db.type/string
                           :db/cardinality :db.cardinality/many}
+ ;; Temporal constraints for config-seeded maintainers.
+ ;; Each entry is "email:yyyy-MM-dd" — the maintainer is only active
+ ;; for emails dated on or after that date.  Directive-added maintainers
+ ;; have no entry here (meaning no temporal constraint).
+ :roles/maintainer-since {:db/valueType   :db.type/string
+                          :db/cardinality :db.cardinality/many}
  :roles/ignored          {:db/valueType   :db.type/string
                           :db/cardinality :db.cardinality/many}
 

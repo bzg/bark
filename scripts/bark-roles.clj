@@ -31,8 +31,41 @@
        (= (str/lower-case (:roles/admin roles))
           (str/lower-case addr))))
 
-(defn maintainer? [roles addr]
-  (and addr (has-role? roles :roles/maintainers addr)))
+(defn- parse-maintainer-since
+  "Parse :roles/maintainer-since entries (\"email:yyyy-MM-dd\") into a map
+  of lower-cased email -> java.util.Date."
+  [roles]
+  (let [entries (roles-set roles :roles/maintainer-since)]
+    (into {}
+          (keep (fn [entry]
+                  (let [idx (str/last-index-of entry ":")]
+                    (when (and idx (pos? idx))
+                      (let [email    (str/lower-case (subs entry 0 idx))
+                            date-str (subs entry (inc idx))]
+                        (try
+                          (let [fmt (java.text.SimpleDateFormat. "yyyy-MM-dd")]
+                            (.setTimeZone fmt (java.util.TimeZone/getTimeZone "UTC"))
+                            [email (.parse fmt date-str)])
+                          (catch Exception _ nil)))))))
+          entries)))
+
+(defn maintainer?
+  "True if addr is a maintainer.  When `as-of` (a java.util.Date) is
+  provided, config-seeded maintainers are only active on or after their
+  :since date.  Directive-added maintainers (no :since entry) are active
+  at any date."
+  ([roles addr]
+   (and addr (has-role? roles :roles/maintainers addr)))
+  ([roles addr as-of]
+   (and addr
+        (has-role? roles :roles/maintainers addr)
+        (if as-of
+          (let [since-map (parse-maintainer-since roles)
+                since     (get since-map (str/lower-case addr))]
+            ;; No since entry = directive-added or config without :since → always active
+            (or (nil? since)
+                (not (.before ^java.util.Date as-of since))))
+          true))))
 
 (defn admin-or-maintainer? [roles addr]
   (or (admin? roles addr) (maintainer? roles addr)))
@@ -45,13 +78,19 @@
 ;; ---------------------------------------------------------------------------
 
 (defn get-roles [db source-name]
-  (or (d/pull db '[:roles/admin :roles/maintainers :roles/ignored]
+  (or (d/pull db '[:roles/admin :roles/maintainers :roles/maintainer-since :roles/ignored]
               [:roles/source source-name])
       {}))
 
+(defn- roles-eid [conn source-name]
+  (d/q '[:find ?e .
+         :in $ ?src
+         :where [?e :roles/source ?src]]
+       (d/db conn) source-name))
+
 (defn ensure-source-roles! [conn config]
   (let [default-admin (:admin config)]
-    (doseq [{:keys [name admin]} (:sources config)]
+    (doseq [{:keys [name admin maintainers]} (:sources config)]
       (let [admin    (or admin default-admin)
             existing (d/q '[:find ?e .
                             :in $ ?src
@@ -60,13 +99,22 @@
         (d/transact! conn [{:roles/source name
                             :roles/admin  admin}])
         (when-not existing
-          (log/info "Initialized roles for source" name "(admin:" admin ")"))))))
-
-(defn- roles-eid [conn source-name]
-  (d/q '[:find ?e .
-         :in $ ?src
-         :where [?e :roles/source ?src]]
-       (d/db conn) source-name))
+          (log/info "Initialized roles for source" name "(admin:" admin ")"))
+        ;; Seed config-declared maintainers
+        (when (seq maintainers)
+          (let [eid (roles-eid conn name)]
+            (when eid
+              (doseq [{:keys [email since]} maintainers]
+                (when email
+                  (let [addr (str/lower-case email)]
+                    ;; Add to :roles/maintainers if not already present
+                    (when-not (has-role? (get-roles (d/db conn) name) :roles/maintainers addr)
+                      (d/transact! conn [[:db/add eid :roles/maintainers addr]])
+                      (log/info "Config maintainer:" addr "(for" name ")"))
+                    ;; Set since-date constraint if provided
+                    (when since
+                      (let [since-entry (str addr ":" since)]
+                        (d/transact! conn [[:db/add eid :roles/maintainer-since since-entry]])))))))))))))
 
 (defn- add-role! [conn source-name attr addresses]
   (when-let [eid (roles-eid conn source-name)]
@@ -103,7 +151,30 @@
    "Add maintainer"    {:requires :maint  :attr :roles/maintainers :action :add}
    "Ignore"            {:requires :maint  :attr :roles/ignored     :action :add}})
 
-(defn apply-role-commands! [conn roles source-name from-addr body-text]
+(defn- set-maintainer-since!
+  "Set :roles/maintainer-since for the given addresses to the specified date.
+  Removes any existing entry first, then adds the new one."
+  [conn source-name addresses date]
+  (when-let [eid (roles-eid conn source-name)]
+    (let [roles   (get-roles (d/db conn) source-name)
+          entries (roles-set roles :roles/maintainer-since)]
+      (doseq [addr addresses]
+        (let [prefix (str (str/lower-case addr) ":")]
+          ;; Remove old entry
+          (doseq [entry entries]
+            (when (str/starts-with? entry prefix)
+              (d/transact! conn [[:db/retract eid :roles/maintainer-since entry]])))
+          ;; Add new entry with date
+          (when date
+            (let [date-str (if (string? date)
+                             date
+                             (let [fmt (java.text.SimpleDateFormat. "yyyy-MM-dd")]
+                               (.setTimeZone fmt (java.util.TimeZone/getTimeZone "UTC"))
+                               (.format fmt date)))]
+              (d/transact! conn [[:db/add eid :roles/maintainer-since
+                                  (str (str/lower-case addr) ":" date-str)]]))))))))
+
+(defn apply-role-commands! [conn roles source-name from-addr body-text email-date]
   (let [commands  (parse-role-commands body-text)
         is-admin  (admin? roles from-addr)
         is-maint  (admin-or-maintainer? roles from-addr)]
@@ -112,6 +183,10 @@
         (if (case requires :admin is-admin :maint is-maint)
           (do ((case action :add add-role! :remove remove-role!)
                conn source-name attr addresses)
+              ;; Update since-date for maintainer changes
+              (when (= attr :roles/maintainers)
+                (set-maintainer-since! conn source-name addresses
+                                       (when (= action :add) email-date)))
               (log/info (str/lower-case command) ":"
                         (str/join " " addresses) "(for" source-name ")"))
           (log/warn "Denied:" from-addr "lacks permission for:" command))))))
@@ -220,25 +295,26 @@
 
 (defn can-create-report?
   "Check if from-addr is allowed to create this report.
-  Announcements require maintainer status.
+  Announcements require maintainer status (time-aware).
   On list-backed sources, non-privileged users must send through
   the list (List-Post header matches :list-post).
   Note: admin does not imply maintainer — the admin must be explicitly
   added as a maintainer to gain maintainer privileges."
   [roles from-addr report-info email source-cfg]
-  (cond
-    (announcement-types (:type report-info))
-    (maintainer? roles from-addr)
+  (let [as-of (:email/date-sent email)]
+    (cond
+      (announcement-types (:type report-info))
+      (maintainer? roles from-addr as-of)
 
-    (maintainer? roles from-addr)
-    true
+      (maintainer? roles from-addr as-of)
+      true
 
-    :else
-    (let [ml-email (:list-post source-cfg)]
-      (if (nil? ml-email)
-        true
-        (let [lp (list-post-address email)]
-          (when (and lp (not= lp ml-email))
-            (log/warn "List-post mismatch: expected" ml-email "got" lp))
-          (boolean (= lp ml-email)))))))
+      :else
+      (let [ml-email (:list-post source-cfg)]
+        (if (nil? ml-email)
+          true
+          (let [lp (list-post-address email)]
+            (when (and lp (not= lp ml-email))
+              (log/warn "List-post mismatch: expected" ml-email "got" lp))
+            (boolean (= lp ml-email))))))))
 
