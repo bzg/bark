@@ -17,6 +17,7 @@
 ;; Forward-declared for clj-kondo (provided at runtime by load-file calls below).
 (declare default-labels default-triggers resolve-labels-map
          resolve-triggers-map parse-cli-args load-config build-source-map
+         load-datalevin-pod! bark-schema
          pico-cdn bark-description footer-css bark-footer wrap-js
          theme-toggle-btn theme-toggle-js nav-bar)
 
@@ -377,6 +378,47 @@
            (str/join "\n")))))
 
 ;; ---------------------------------------------------------------------------
+;; Maintainers section
+;; ---------------------------------------------------------------------------
+
+(defn- contributor-name
+  "Look up a contributor's display name by email for a given source.
+  Returns the name if found and non-blank, otherwise nil."
+  [db source-name email]
+  (let [dq (resolve 'pod.huahaiy.datalevin/q)
+        k  (str source-name ":" (str/lower-case email))]
+    (when-let [n (dq '[:find ?n .
+                       :in $ ?k
+                       :where [?e :contributor/key ?k]
+                       [?e :contributor/name ?n]]
+                     db k)]
+      (when-not (str/blank? n) n))))
+
+(defn build-maintainers-html
+  "Build an HTML section listing admin and maintainers by display name.
+  Falls back to email if no contributor name is found."
+  [db source-name source-cfg]
+  (when source-name
+    (let [dp          (resolve 'pod.huahaiy.datalevin/pull)
+          admin-email (:admin source-cfg)
+          roles       (dp db '[:roles/admin :roles/maintainers]
+                          [:roles/source source-name])
+          maint-v     (:roles/maintainers roles)
+          maint-emails (cond (nil? maint-v) []
+                             (string? maint-v) [maint-v]
+                             :else maint-v)
+          ;; Collect all privileged emails, admin first, deduped
+          all-emails  (distinct (remove nil? (cons admin-email maint-emails)))
+          entries     (mapv (fn [email]
+                              (or (contributor-name db source-name email)
+                                  email))
+                            all-emails)]
+      (when (seq entries)
+        (str "<h2 id=\"maintainers\">Maintainers</h2>\n<ul>\n"
+             (str/join "\n" (map #(str "<li>" % "</li>") entries))
+             "\n</ul>")))))
+
+;; ---------------------------------------------------------------------------
 ;; Main
 ;; ---------------------------------------------------------------------------
 
@@ -393,11 +435,19 @@
       ;; Infer out-dir from out-file when not given explicitly
       effective-dir (or out-dir
                        (.getParent (clojure.java.io/file out-file)))
+      ;; Load DB for maintainer names
+      db-path     (or (System/getenv "BARK_DB") "data/bark-db")
+      _           (load-datalevin-pod!)
+      conn        ((resolve 'pod.huahaiy.datalevin/get-conn) db-path bark-schema {:wal? false})
+      db          ((resolve 'pod.huahaiy.datalevin/db) conn)
+      maint-html  (build-maintainers-html db source-name source-cfg)
       org-text    (-> (slurp "resources/howto-tpl.org")
                       (substitute-template labels triggers)
                       (filter-feed-links effective-dir))
-      body-html   (org->html org-text)
+      body-html   (cond-> (org->html org-text)
+                    maint-html (str "\n" maint-html))
       html        (howto-page body-html)]
+  ((resolve 'pod.huahaiy.datalevin/close) conn)
   (.mkdirs (.getParentFile (clojure.java.io/file out-file)))
   (spit out-file html)
   (binding [*out* *err*]
