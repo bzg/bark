@@ -132,9 +132,13 @@
                     "Subject:" (truncate (:email/subject txdata) 60))
           true
           (catch Exception e
-            (if (str/includes? (str (.getMessage e)) "MDB_KEYEXIST")
-              (do (log/debug "Duplicate Message-ID (race):" message-id) false)
-              (throw e))))))))
+            ;; If the message-id now exists, another process (e.g. bb digest)
+            ;; inserted it between our exists? check and the transact — harmless race.
+            (let [now-exists? (try (db/message-id-exists? conn message-id)
+                                  (catch Exception _ false))]
+              (if now-exists?
+                (do (log/debug "Duplicate Message-ID (race):" message-id) false)
+                (throw e)))))))))
 
 (defn store-emails!
   "Store a batch of parsed emails.
