@@ -30,7 +30,7 @@
          load-config build-source-map get-header bark-schema
          days-between
          ;; bark-roles.clj
-         get-roles ignored? admin-or-maintainer?
+         get-roles ignored?
          ensure-source-roles! ensure-notify-defaults!
          apply-role-commands! apply-notify-commands!
          from-mailing-list? can-create-report?

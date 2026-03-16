@@ -220,15 +220,17 @@
 
 (defn can-create-report?
   "Check if from-addr is allowed to create this report.
-  Announcements require admin/maintainer.
+  Announcements require maintainer status.
   On list-backed sources, non-privileged users must send through
-  the list (List-Post header matches :list-post)."
+  the list (List-Post header matches :list-post).
+  Note: admin does not imply maintainer — the admin must be explicitly
+  added as a maintainer to gain maintainer privileges."
   [roles from-addr report-info email source-cfg]
   (cond
     (announcement-types (:type report-info))
-    (admin-or-maintainer? roles from-addr)
+    (maintainer? roles from-addr)
 
-    (admin-or-maintainer? roles from-addr)
+    (maintainer? roles from-addr)
     true
 
     :else
