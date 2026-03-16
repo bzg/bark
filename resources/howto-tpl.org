@@ -68,7 +68,7 @@ Important.
 | important:me@example.org    | i:        | Reports marked important by me@example.org            |
 | subject:match               | s:        | Reports matching subject                              |
 | priority:[0-4]              | p:        | Reports matching priority level 0 to 4                |
-| mid:<messageid>             | m:        | Report open with <messageid>                          |
+| mid:<...>                   | m:        | Report open with message-id <...>                     |
 | date:3d..                   | d:        | Reports from 3 days ago                               |
 | date:2023-01-01..2023-12-31 | d:        | Reports from 2023-01-01 to 2023-12-31                 |
 | match1 \vert match2             |           | Reports matching "match1" or "match2"                 |
