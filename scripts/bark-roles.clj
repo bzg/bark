@@ -10,7 +10,7 @@
 (require '[clojure.string :as str])
 
 ;; Defined in bark-common.clj; forward-declared for clj-kondo.
-(declare get-header)
+(declare get-header parse-maintainer-since-entries)
 
 ;; ---------------------------------------------------------------------------
 ;; Role queries and checks (pure, given a roles map)
@@ -32,21 +32,16 @@
           (str/lower-case addr))))
 
 (defn- parse-maintainer-since
-  "Parse :roles/maintainer-since entries (\"email:yyyy-MM-dd\") into a map
-  of lower-cased email -> java.util.Date."
+  "Parse :roles/maintainer-since entries into a map of lower-cased email -> java.util.Date.
+  Uses the shared parse-maintainer-since-entries for string splitting."
   [roles]
-  (let [entries (roles-set roles :roles/maintainer-since)]
+  (let [fmt     (doto (java.text.SimpleDateFormat. "yyyy-MM-dd")
+                  (.setTimeZone (java.util.TimeZone/getTimeZone "UTC")))
+        entries (parse-maintainer-since-entries roles)]
     (into {}
-          (keep (fn [entry]
-                  (let [idx (str/last-index-of entry ":")]
-                    (when (and idx (pos? idx))
-                      (let [email    (str/lower-case (subs entry 0 idx))
-                            date-str (subs entry (inc idx))]
-                        (try
-                          (let [fmt (java.text.SimpleDateFormat. "yyyy-MM-dd")]
-                            (.setTimeZone fmt (java.util.TimeZone/getTimeZone "UTC"))
-                            [email (.parse fmt date-str)])
-                          (catch Exception _ nil)))))))
+          (keep (fn [[email date-str]]
+                  (try [email (.parse fmt date-str)]
+                       (catch Exception _ nil))))
           entries)))
 
 (defn maintainer?
@@ -107,14 +102,18 @@
               (doseq [{:keys [email since]} maintainers]
                 (when email
                   (let [addr (str/lower-case email)]
-                    ;; Add to :roles/maintainers if not already present
+                    ;; Add to :roles/maintainers if not already present.
+                    ;; Since-date is only set on first seed — directive
+                    ;; "Add/Remove maintainer:" overrides config and clears
+                    ;; the since-constraint, so we must not restore it here.
                     (when-not (has-role? (get-roles (d/db conn) name) :roles/maintainers addr)
                       (d/transact! conn [[:db/add eid :roles/maintainers addr]])
-                      (log/info "Config maintainer:" addr "(for" name ")"))
-                    ;; Set since-date constraint if provided
-                    (when since
-                      (let [since-entry (str addr ":" since)]
-                        (d/transact! conn [[:db/add eid :roles/maintainer-since since-entry]])))))))))))))
+                      (when since
+                        (d/transact! conn [[:db/add eid :roles/maintainer-since
+                                            (str addr ":" since)]]))
+                      (log/info "Config maintainer:" addr
+                                (if since (str "(since " since ")") "")
+                                "(for" name ")"))))))))))))
 
 (defn- add-role! [conn source-name attr addresses]
   (when-let [eid (roles-eid conn source-name)]
@@ -153,7 +152,9 @@
 
 (defn- set-maintainer-since!
   "Set :roles/maintainer-since for the given addresses to the specified date.
-  Removes any existing entry first, then adds the new one."
+  Removes any existing entry first, then adds the new one.
+  Re-reads roles from DB to get current entries — acceptable since this
+  runs at most once per role-command email, not in a hot loop."
   [conn source-name addresses date]
   (when-let [eid (roles-eid conn source-name)]
     (let [roles   (get-roles (d/db conn) source-name)
@@ -175,6 +176,12 @@
                                   (str (str/lower-case addr) ":" date-str)]]))))))))
 
 (defn apply-role-commands! [conn roles source-name from-addr body-text email-date]
+  ;; Permission check uses the non-temporal admin-or-maintainer? deliberately:
+  ;; role management is an administrative operation, so config-seeded
+  ;; maintainers can issue role commands regardless of their :since date.
+  ;; Note: `roles` is read once before the doseq — if one command changes
+  ;; who is a maintainer, subsequent commands still use the original snapshot.
+  ;; This is safe because the sender's own permission doesn't change mid-email.
   (let [commands  (parse-role-commands body-text)
         is-admin  (admin? roles from-addr)
         is-maint  (admin-or-maintainer? roles from-addr)]

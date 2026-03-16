@@ -223,7 +223,12 @@
   "When a [PATCH v<n> topic ...] report is created, close the nearest
   ancestor [PATCH v<n-1> topic] if it is open and has matching topic.
   When the new patch has no topic, any open v<n-1> patch among the
-  nearest ancestors is closed."
+  nearest ancestors is closed.
+
+  Design note: we iterate `nearest-report-eids` (thread ancestors)
+  rather than querying the full DB for v<n-1> patches.  This scopes
+  the auto-close to the same conversation thread, avoiding accidental
+  closure of an unrelated patch that happens to share version+topic."
   [conn report-info email-eid nearest-report-eids]
   (let [new-version (:version report-info)
         new-topic   (:topic report-info)

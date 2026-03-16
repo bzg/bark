@@ -275,9 +275,24 @@
               name))
           sources)))
 
-(def all-report-types
-  "All supported report types."
-  #{:bug :patch :request :announcement :release :change})
+;; ---------------------------------------------------------------------------
+;; Maintainer-since parsing (shared by bark-roles, bark-howto)
+;; ---------------------------------------------------------------------------
+
+(defn parse-maintainer-since-entries
+  "Parse :roles/maintainer-since entries (\"email:yyyy-MM-dd\") into a map
+  of lower-cased email -> date-string.
+  The separator is the *last* colon, which is safe because email addresses
+  cannot contain colons (RFC 5321)."
+  [roles]
+  (let [entries (let [v (:roles/maintainer-since roles)]
+                  (cond (nil? v) #{} (string? v) #{v} :else (set v)))]
+    (into {}
+          (keep (fn [entry]
+                  (let [idx (str/last-index-of entry ":")]
+                    (when (and idx (pos? idx))
+                      [(subs entry 0 idx) (subs entry (inc idx))]))))
+          entries)))
 
 (defn build-source-map
   "Build source-name -> {:admin :list-post :list-id :list-archive :bark-path ...} from config."
@@ -294,7 +309,8 @@
                  [(:name src)
                   (merge {:admin (or (:admin src) default-admin)}
                          (select-keys src [:list-post :triggers :labels :notifications
-                                           :archive-format-string :list-archive :bark-path])
+                                           :archive-format-string :list-archive :bark-path
+                                           :maintainers])
                          (when-let [lid (get-in src [:match :list-id])] {:list-id lid})
                          (when global-st {:global-labels global-st})
                          (when global-tg {:global-triggers global-tg})

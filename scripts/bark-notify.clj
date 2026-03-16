@@ -22,7 +22,9 @@
 ;; Forward-declared for clj-kondo (provided at runtime by load-file below).
 (declare load-datalevin-pod! get-header format-date format-date-iso
          report-priority report-status report-descendant-count
-         all-reports report-pull-pattern load-config build-source-map bark-schema)
+         all-reports report-pull-pattern load-config build-source-map bark-schema
+         ;; bark-roles.clj
+         get-roles admin-or-maintainer?)
 
 (load-file "scripts/bark-common.clj")
 
@@ -30,6 +32,8 @@
 (pods/load-pod 'tzzh/mail "0.0.3")
 
 (require '[pod.tzzh.mail :as mail])
+
+(load-file "scripts/bark-roles.clj")
 
 ;; ---------------------------------------------------------------------------
 ;; Report queries (all-reports and report-pull-pattern loaded from bark-common.clj)
@@ -60,18 +64,11 @@
         (>= (- (.getTime now) (.getTime last-sent)) interval-ms))))
 
 (defn- still-privileged?
-  "Confirm the subscriber is still admin or maintainer for the source."
+  "Confirm the subscriber is still admin or maintainer for the source.
+  Uses the non-temporal check (current state, not as-of a specific date)."
   [db notify]
-  (let [roles (or (d/pull db '[:roles/admin :roles/maintainers]
-                          [:roles/source (:notify/source notify)])
-                  {})
-        addr-lc (str/lower-case (:notify/email notify))
-        admin-lc (some-> (:roles/admin roles) str/lower-case)
-        maints-lc (let [v (:roles/maintainers roles)]
-                    (cond (nil? v) #{} (string? v) #{(str/lower-case v)}
-                          :else (set (map str/lower-case v))))]
-    (or (= addr-lc admin-lc)
-        (contains? maints-lc addr-lc))))
+  (let [roles (get-roles db (:notify/source notify))]
+    (admin-or-maintainer? roles (:notify/email notify))))
 
 ;; ---------------------------------------------------------------------------
 ;; Report formatting

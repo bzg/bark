@@ -17,7 +17,7 @@
 ;; Forward-declared for clj-kondo (provided at runtime by load-file calls below).
 (declare default-labels default-triggers resolve-labels-map
          resolve-triggers-map parse-cli-args load-config build-source-map
-         load-datalevin-pod! bark-schema
+         load-datalevin-pod! bark-schema parse-maintainer-since-entries
          pico-cdn bark-description footer-css bark-footer wrap-js
          theme-toggle-btn theme-toggle-js nav-bar)
 
@@ -394,17 +394,17 @@
                      db k)]
       (when-not (str/blank? n) n))))
 
-(defn- parse-since-map
-  "Parse :roles/maintainer-since entries into {lower-email -> \"yyyy-MM-dd\"}."
-  [roles]
-  (let [entries (let [v (:roles/maintainer-since roles)]
-                  (cond (nil? v) #{} (string? v) #{v} :else (set v)))]
-    (into {}
-          (keep (fn [entry]
-                  (let [idx (str/last-index-of entry ":")]
-                    (when (and idx (pos? idx))
-                      [(subs entry 0 idx) (subs entry (inc idx))]))))
-          entries)))
+(defn- html-escape
+  "Escape HTML special characters in a string."
+  [s]
+  (when s
+    (-> s
+        (str/replace "&" "&amp;")
+        (str/replace "<" "&lt;")
+        (str/replace ">" "&gt;")
+        (str/replace "\"" "&quot;"))))
+
+;; parse-maintainer-since-entries is in bark-common.clj
 
 (defn build-maintainers-html
   "Build an HTML section listing admin and maintainers by display name,
@@ -412,21 +412,21 @@
   [db source-name source-cfg]
   (when source-name
     (let [dp          (resolve 'pod.huahaiy.datalevin/pull)
-          admin-email (:admin source-cfg)
           roles       (dp db '[:roles/admin :roles/maintainers :roles/maintainer-since]
                           [:roles/source source-name])
           maint-v     (:roles/maintainers roles)
           maint-emails (cond (nil? maint-v) []
                              (string? maint-v) [maint-v]
                              :else maint-v)
-          since-map   (parse-since-map roles)
+          since-map   (parse-maintainer-since-entries roles)
           entries     (mapv (fn [email]
-                              (let [name  (or (contributor-name db source-name email)
-                                              email)
-                                    since (get since-map (str/lower-case email))]
+                              (let [display (html-escape
+                                            (or (contributor-name db source-name email)
+                                                email))
+                                    since   (get since-map (str/lower-case email))]
                                 (if since
-                                  (str name " <small>(since " since ")</small>")
-                                  name)))
+                                  (str display " <small>(since " since ")</small>")
+                                  display)))
                             maint-emails)]
       (when (seq entries)
         (str "<h2 id=\"maintainers\">Maintainers</h2>\n<ul>\n"
