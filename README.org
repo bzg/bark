@@ -1,4 +1,4 @@
-* BARK — is Another Report Keeper
+* BARK! Another Report Keeper
 
 BARK is an email-driven report tracker - see the [[docs/rationale.org][rationale]].
 
