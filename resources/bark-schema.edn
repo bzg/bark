@@ -65,6 +65,13 @@
  :report/close-reason    {:db/valueType :db.type/keyword}
  :report/deadline        {:db/valueType :db.type/instant}
  :report/digested-at     {:db/valueType :db.type/instant}
+ :report/updated-at     {:db/valueType :db.type/instant}
+
+ ;; --- Global metadata (export change tracking) ---
+ :meta/ident             {:db/valueType :db.type/string
+                          :db/unique    :db.unique/identity}
+ :meta/last-modified     {:db/valueType :db.type/instant}
+ :meta/last-export       {:db/valueType :db.type/instant}
  :report/votes-up        {:db/valueType :db.type/long}
  :report/votes-down      {:db/valueType :db.type/long}
  :report/votes-null      {:db/valueType :db.type/long}

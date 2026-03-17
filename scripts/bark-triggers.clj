@@ -11,7 +11,8 @@
 ;; Defined in bark-common.clj / bark-roles.clj; forward-declared for clj-kondo.
 (declare default-triggers close-reasons
          resolve-triggers-map
-         email-body-text report-priority maintainer?)
+         email-body-text report-priority maintainer?
+         bump-report-updated!)
 
 ;; ---------------------------------------------------------------------------
 ;; Trigger pattern compilation
@@ -262,6 +263,7 @@
               n    (or (get current attr) 0)]
           (d/transact! conn [[:db/add report-eid attr (inc n)]
                              [:db/add report-eid :report/voters from-addr]])
+          (bump-report-updated! conn report-eid)
           (log/info "Vote" (case vote :up "+1" :down "-1" "0") "by" from-addr))))))
 
 (defn apply-triggers-and-directives!
@@ -299,6 +301,7 @@
                 all-tx       (vec (concat set-tx reason-tx))]
             (when (seq all-tx)
               (d/transact! conn all-tx)
+              (bump-report-updated! conn report-eid)
               (log/info (str/join ", " (cond-> (mapv (comp name key) new-sets)
                                          close-reason (conj (str "close-reason:" (name close-reason)))))
                         "(by" (:email/message-id email) ")"))))
@@ -356,6 +359,7 @@
                              (when topic [(str "topic: " topic)]))]
             (when (seq all-tx)
               (d/transact! conn all-tx)
+              (bump-report-updated! conn report-eid)
               (log/info "Directives:" (str/join ", " desc)
                         "(proxy by" from-addr ")"))))))))
 

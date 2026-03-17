@@ -168,7 +168,7 @@
     {:report/important-proxy [:email/from-address]}
     :report/close-reason
     :report/votes-up :report/votes-down :report/votes-null
-    :report/deadline :report/descendants :report/digested-at
+    :report/deadline :report/descendants :report/digested-at :report/updated-at
     {:report/related [:report/type :report/message-id
                       {:report/email [:email/headers-edn]}]}
     {:report/series [:series/id :series/expected :series/closed
@@ -331,12 +331,13 @@
 (defn parse-cli-args
   "Parse common CLI flags into a map.
   Recognises: -o/--output, -n/--source, -p/--min-priority, -s/--min-status,
-  --json (path to all.json), --dir (output directory).
+  --json (path to all.json), --dir (output directory), --all (force full export).
   Any leading non-flag token is captured as :format."
   [args]
   (loop [opts {} [a & [v & r :as more]] args]
     (cond
       (nil? a)                        opts
+      (#{"--all"} a)                  (recur (assoc opts :force-all? true) more)
       (#{"-o" "--output"} a)          (if v (recur (assoc opts :out-file v) r) opts)
       (#{"--json"} a)                 (if v (recur (assoc opts :json-file v) r) opts)
       (#{"--dir"} a)                  (if v (recur (assoc opts :out-dir v) r) opts)
@@ -438,6 +439,64 @@
     (if (.exists f)
       (edn/read-string (slurp f))
       (throw (ex-info "resources/bark-schema.edn not found" {:path (.getAbsolutePath f)})))))
+
+;; ---------------------------------------------------------------------------
+;; Export change tracking
+;; ---------------------------------------------------------------------------
+
+(defn bump-report-updated!
+  "Set :report/updated-at and :meta/last-modified to now.
+  `report-eid` can be a single eid or a collection of eids."
+  [conn report-eid]
+  (let [dt!  (resolve 'pod.huahaiy.datalevin/transact!)
+        now  (java.util.Date.)
+        eids (if (coll? report-eid) report-eid [report-eid])
+        tx   (into [{:meta/ident "global" :meta/last-modified now}]
+                   (map (fn [eid] {:db/id eid :report/updated-at now}))
+                   eids)]
+    (dt! conn tx)))
+
+(defn bump-global-modified!
+  "Bump :meta/last-modified without targeting a specific report.
+  Use when a mutation (e.g. expiry) already transacted report changes
+  and you just need the global flag."
+  [conn]
+  (let [dt! (resolve 'pod.huahaiy.datalevin/transact!)]
+    (dt! conn [{:meta/ident "global" :meta/last-modified (java.util.Date.)}])))
+
+(defn get-last-modified
+  "Return the global :meta/last-modified instant, or nil."
+  [db]
+  (let [dq (resolve 'pod.huahaiy.datalevin/q)]
+    (dq '[:find ?t .
+           :where [?e :meta/ident "global"] [?e :meta/last-modified ?t]]
+        db)))
+
+(defn get-last-export
+  "Return the :meta/last-export instant, or nil."
+  [db]
+  (let [dq (resolve 'pod.huahaiy.datalevin/q)]
+    (dq '[:find ?t .
+           :where [?e :meta/ident "global"] [?e :meta/last-export ?t]]
+        db)))
+
+(defn save-last-export!
+  "Record the export timestamp."
+  [conn ts]
+  (let [dt! (resolve 'pod.huahaiy.datalevin/transact!)]
+    (dt! conn [{:meta/ident "global" :meta/last-export ts}])))
+
+(defn changed-report-types-since
+  "Return the set of :report/type keywords that have been updated since `since-ts`."
+  [db since-ts]
+  (let [dq (resolve 'pod.huahaiy.datalevin/q)]
+    (set (dq '[:find [?t ...]
+               :in $ ?since
+               :where
+               [?r :report/updated-at ?u]
+               [(> ?u ?since)]
+               [?r :report/type ?t]]
+             db since-ts))))
 
 ;; ---------------------------------------------------------------------------
 ;; Shared date arithmetic (used by bark-digest, bark-stats)

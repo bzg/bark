@@ -29,6 +29,7 @@
          load-datalevin-pod! classify-source email-body-text
          load-config build-source-map get-header bark-schema
          days-between
+         bump-report-updated! bump-global-modified!
          ;; bark-roles.clj
          get-roles ignored?
          ensure-source-roles! ensure-notify-defaults!
@@ -209,6 +210,7 @@
                                           :report/closed release-email-eid
                                           :report/close-reason :resolved})
                                 open-chgs))
+        (bump-report-updated! conn open-chgs)
         (log/info "Auto-closed" (count open-chgs)
                       "[CHG" version "] (superseded by release)")))))
 
@@ -250,6 +252,7 @@
               (d/transact! conn [{:db/id rid
                                   :report/closed email-eid
                                   :report/close-reason :canceled}])
+              (bump-report-updated! conn rid)
               (log/info "Auto-closed [PATCH" prev-version
                         (or (:report/topic r) "") "]"
                         (str "(" (:report/message-id r) ")")
@@ -318,6 +321,7 @@
                         (close-changes-for-release! conn (:version report-info) eid))
                       (let [rid (d/q '[:find ?r . :in $ ?mid :where [?r :report/message-id ?mid]]
                                      (d/db conn) message-id)]
+                        (bump-report-updated! conn rid)
                         [(inc created)
                          (index-assoc thread-index message-id rid)
                          (assoc type-index rid (:type report-info))
@@ -351,6 +355,9 @@
                       [(+ threaded (count parent-report-eids))
                        (reduce #(index-assoc %1 message-id %2) thread-index parent-report-eids)])
                   [threaded thread-index])]
+            ;; Bump updated-at for all touched reports
+            (when (seq parent-report-eids)
+              (bump-report-updated! conn parent-report-eids))
             ;; Post-creation: link related reports + manage series + store patches
             (when (and report-eid (seq parent-report-eids))
               (link-related-reports! conn report-eid parent-report-eids))
@@ -420,6 +427,7 @@
                                                      (d/db conn) synth-mid)))]
                          (d/transact! conn [[:db/add rid :report/closed synth-eid]
                                             [:db/add rid :report/close-reason :expired]])
+                         (bump-report-updated! conn rid)
                          (log/info "Expired" (name rtype) "report:" report-mid)
                          (inc n))
                        n)))

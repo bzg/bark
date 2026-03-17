@@ -14,14 +14,15 @@
 ;;   public/<source-name>/patches/<mid-hash>/<file>
 ;;
 ;; Usage:
-;;   bb export               — export all sources, all formats
+;;   bb export               — incremental export (skip if nothing changed)
 ;;   bb export json          — export all.json for each source
 ;;   bb export rss           — export all.xml for each source
 ;;   bb export org           — export all.org for each source
 ;;   bb export html          — generate index.html for each source
 ;;   bb export stats         — generate stats.json for each source
 ;;   bb export patches       — export patch files for each source
-;;   bb export all           — all of the above
+;;   bb export all           — all formats (still incremental)
+;;   bb export --all         — force full export, ignore timestamps
 ;;   bb export json -n src   — export only source "src"
 ;;   bb export json -p 2     — only priority >= 2
 ;;   bb export json -s 3     — only status >= 3
@@ -33,13 +34,16 @@
          '[cheshire.core :as json]
          '[clojure.string :as str]
          '[clojure.edn :as edn]
-         '[clojure.java.io :as io])
+         '[clojure.java.io :as io]
+         '[clojure.set])
 
 ;; Forward-declared for clj-kondo (provided at runtime by load-file below).
 (declare load-datalevin-pod! get-header slugify mid-hash email-body-text
          format-date format-date-iso report-priority report-status
          report-descendant-count all-reports report-pull-pattern
-         parse-cli-args load-config build-source-map bark-schema)
+         parse-cli-args load-config build-source-map bark-schema
+         get-last-modified get-last-export save-last-export!
+         changed-report-types-since)
 
 (load-file "scripts/bark-common.clj")
 
@@ -563,7 +567,7 @@
 
 (def formats #{"json" "rss" "org" "html" "all" "stats" "patches"})
 
-(let [{:keys [format source-name min-priority min-status]
+(let [{:keys [format source-name min-priority min-status force-all?]
        :or {format "all"}}
       (parse-cli-args *command-line-args*)
       db-path (or (System/getenv "BARK_DB") "data/bark-db")
@@ -580,30 +584,59 @@
       (log/error "Invalid --min-status:" min-status "(must be 1–7)")
       (System/exit 1))
     (let [db              (d/db conn)
-          config          (load-config)
-          source-map      (if config (build-source-map config) {})
-          maintainers-map (if config (build-maintainers db source-map) {})
-          all-reps        (all-reports-by-date db)
-          source-names    (if source-name
-                            (if (contains? source-map source-name)
-                              [source-name]
-                              (do (log/error "No source named" (str "'" source-name "'"))
-                                  (log/error "Available:"
-                                                (str/join ", " (keys source-map)))
-                                  (System/exit 1)))
-                            (mapv :name (:sources config)))
-          cli-extra       (remove #{format "-n" source-name} (rest *command-line-args*))]
-      (doseq [src-name source-names]
-        (let [reports (filter-reports all-reps {:source       src-name
-                                               :min-priority min-priority
-                                               :min-status   min-status})
-              er      (resolve-export-reports src-name source-map)
-              reports (if er (filter #(contains? er (:report/type %)) reports) reports)
-              base-dir (str "public/" (slugify src-name))]
-          (log/info (str "[" src-name "]") (count reports) "report(s)")
-          (if (empty? reports)
-            (log/info "No reports for source" (str "'" src-name "'") ", skipping.")
-            (export-source! format reports base-dir src-name
-                            source-map maintainers-map cli-extra)))))
+          last-modified   (get-last-modified db)
+          last-export     (get-last-export db)
+          ;; Incremental: skip entirely when nothing changed since last export.
+          ;; --all bypasses this; so does requesting a specific format.
+          incremental?    (and (not force-all?)
+                               (= format "all")
+                               last-export last-modified)
+          skip?           (and incremental?
+                               (<= (.getTime ^java.util.Date last-modified)
+                                   (.getTime ^java.util.Date last-export)))]
+      (if skip?
+        (log/info "Nothing changed since last export, skipping.")
+        (let [changed-types   (when (and incremental? last-export)
+                                (changed-report-types-since db last-export))
+              config          (load-config)
+              source-map      (if config (build-source-map config) {})
+              maintainers-map (if config (build-maintainers db source-map) {})
+              all-reps        (all-reports-by-date db)
+              source-names    (if source-name
+                                (if (contains? source-map source-name)
+                                  [source-name]
+                                  (do (log/error "No source named" (str "'" source-name "'"))
+                                      (log/error "Available:"
+                                                    (str/join ", " (keys source-map)))
+                                      (System/exit 1)))
+                                (mapv :name (:sources config)))
+              cli-extra       (remove #{format "-n" source-name "--all"}
+                                      (rest *command-line-args*))]
+          (when (and incremental? (seq changed-types))
+            (log/info "Incremental: changed types:" (str/join ", " (map name changed-types))))
+          (doseq [src-name source-names]
+            (let [reports  (filter-reports all-reps {:source       src-name
+                                                    :min-priority min-priority
+                                                    :min-status   min-status})
+                  er       (resolve-export-reports src-name source-map)
+                  reports  (if er (filter #(contains? er (:report/type %)) reports) reports)
+                  ;; When incremental, check if any changed type is present in this source
+                  src-types (when incremental? (set (map :report/type reports)))
+                  skip-src? (and incremental? (seq changed-types)
+                                  (empty? (clojure.set/intersection changed-types src-types)))
+                  base-dir (str "public/" (slugify src-name))]
+              (cond
+                skip-src?
+                (log/info (str "[" src-name "]") "no changed types, skipping.")
+
+                (empty? reports)
+                (log/info "No reports for source" (str "'" src-name "'") ", skipping.")
+
+                :else
+                (do (log/info (str "[" src-name "]") (count reports)
+                              (if incremental? "report(s) (incremental)" "report(s)"))
+                    (export-source! format reports base-dir src-name
+                                    source-map maintainers-map cli-extra)))))
+          (save-last-export! conn (java.util.Date.)))))
     (finally
       (d/close conn))))
