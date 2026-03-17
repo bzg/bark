@@ -1,9 +1,16 @@
-| Type          | Format         |
-|---------------+----------------|
-| All reports   | [[reports/all.json][json]], [[reports/all.xml][rss]], [[reports/all.org][org]] |
-| Announcements | [[reports/announcements.json][json]], [[reports/announcements.xml][rss]], [[reports/announcements.org][org]] |
-| Bugs          | [[reports/bugs.json][json]], [[reports/bugs.xml][rss]], [[reports/bugs.org][org]] |
-| Changes       | [[reports/changes.json][json]], [[reports/changes.xml][rss]], [[reports/changes.org][org]] |
-| Patches       | [[reports/patches.json][json]], [[reports/patches.xml][rss]], [[reports/patches.org][org]] |
-| Releases      | [[reports/releases.json][json]], [[reports/releases.xml][rss]], [[reports/releases.org][org]] |
-| Requests      | [[reports/requests.json][json]], [[reports/requests.xml][rss]], [[reports/requests.org][org]] |
+| Type                 | Format         |
+|----------------------+----------------|
+| All reports          | [[reports/all.json][json]], [[reports/all.xml][rss]], [[reports/all.org][org]] |
+| All reports (open)   | [[reports/all-open.json][json]], [[reports/all-open.rss][rss]], [[reports/all-open.org][org]] |
+| Announcements        | [[reports/announcements.json][json]], [[reports/announcements.xml][rss]], [[reports/announcements.org][org]] |
+| Announcements (open) | [[reports/announcements-open.json][json]], [[reports/announcements-open.rss][rss]], [[reports/announcements-open.org][org]] |
+| Bugs                 | [[reports/bugs.json][json]], [[reports/bugs.xml][rss]], [[reports/bugs.org][org]] |
+| Bugs (open)          | [[reports/bugs-open.json][json]], [[reports/bugs-open.rss][rss]], [[reports/bugs-open.org][org]] |
+| Changes              | [[reports/changes.json][json]], [[reports/changes.xml][rss]], [[reports/changes.org][org]] |
+| Changes (open)       | [[reports/changes-open.json][json]], [[reports/changes-open.rss][rss]], [[reports/changes-open.org][org]] |
+| Patches              | [[reports/patches.json][json]], [[reports/patches.xml][rss]], [[reports/patches.org][org]] |
+| Patches (open)       | [[reports/patches-open.json][json]], [[reports/patches-open.rss][rss]], [[reports/patches-open.org][org]] |
+| Releases             | [[reports/releases.json][json]], [[reports/releases.xml][rss]], [[reports/releases.org][org]] |
+| Releases (open)      | [[reports/releases-open.json][json]], [[reports/releases-open.rss][rss]], [[reports/releases-open.org][org]] |
+| Requests             | [[reports/requests.json][json]], [[reports/requests.xml][rss]], [[reports/requests.org][org]] |
+| Requests (open)      | [[reports/requests-open.json][json]], [[reports/requests-open.rss][rss]], [[reports/requests-open.org][org]] |

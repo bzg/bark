@@ -22,7 +22,8 @@
 ;;   bb export stats         — generate stats.json for each source
 ;;   bb export patches       — export patch files for each source
 ;;   bb export all           — all formats (still incremental)
-;;   bb export --all         — force full export, ignore timestamps
+;;   bb export --force       — force full export, ignore timestamps
+;;   bb export --only-open   — also export -open files (all-open.json, etc.)
 ;;   bb export json -n src   — export only source "src"
 ;;   bb export json -p 2     — only priority >= 2
 ;;   bb export json -s 3     — only status >= 3
@@ -522,14 +523,35 @@
       (dump-rss! typed reports-dir source-name source-map maintainers-map
                  (str plural ".xml") plural))))
 
-;; ---------------------------------------------------------------------------
-;; Per-source export orchestration
-;; ---------------------------------------------------------------------------
+(defn- dump-open!
+  "Export open-only reports as -open suffixed files (JSON and Org only, no RSS).
+  Produces all-open.json, all-open.org, bugs-open.json, etc."
+  [reports reports-dir source-name source-map maintainers-map fmts]
+  (let [open (open-reports reports)]
+    (when (seq open)
+      (when (fmts "json")
+        (dump-json! open reports-dir source-name source-map maintainers-map
+                    "all-open.json"))
+      (when (fmts "org")
+        (dump-org! open reports-dir source-name source-map maintainers-map
+                   "all-open.org" "open reports"))
+      (doseq [rtype report-types
+              :let [typed (filter-reports open {:type rtype})
+                    plural (type->plural rtype)]
+              :when (seq typed)]
+        (when (fmts "json")
+          (dump-json! typed reports-dir source-name source-map maintainers-map
+                      (str plural "-open.json")))
+        (when (fmts "org")
+          (dump-org! typed reports-dir source-name source-map maintainers-map
+                     (str plural "-open.org") (str plural " (open)")))))))
 
 (defn export-source!
   "Export a single source in the given format(s).
-  When format is \"all\", per-type feeds respect :export-formats from config."
-  [format reports base-dir source-name source-map maintainers-map cli-extra]
+  When format is \"all\", per-type feeds respect :export-formats from config.
+  When only-open? is true, also export -open files with only open reports."
+  [format reports base-dir source-name source-map maintainers-map cli-extra
+   only-open?]
   (let [reports-dir (str base-dir "/reports")
         patches-dir (str base-dir "/patches")
         _           (doseq [d [reports-dir patches-dir]]
@@ -538,14 +560,20 @@
         do-format   (fn [fmt]
                       (case fmt
                         "json"    (do (dump-json! reports reports-dir source-name source-map maintainers-map)
-                                      (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"json"}))
+                                      (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"json"})
+                                      (when only-open?
+                                        (dump-open! reports reports-dir source-name source-map maintainers-map #{"json"})))
                         "rss"     (do (dump-rss!  reports reports-dir source-name source-map maintainers-map)
                                       (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"rss"}))
                         "org"     (do (dump-org!  reports reports-dir source-name source-map maintainers-map)
-                                      (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"org"}))
+                                      (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"org"})
+                                      (when only-open?
+                                        (dump-open! reports reports-dir source-name source-map maintainers-map #{"org"})))
                         "patches" (dump-patches! reports patches-dir)
                         "html"    (do (dump-json! reports reports-dir source-name source-map maintainers-map)
                                       (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"json"})
+                                      (when only-open?
+                                        (dump-open! reports reports-dir source-name source-map maintainers-map #{"json"}))
                                       (dump-howto! base-dir source-name)
                                       (dump-html! base-dir reports-dir cli-extra))
                         "stats"   (dump-stats! base-dir reports-dir source-name "json" cli-extra)))]
@@ -554,6 +582,8 @@
           (when (ef "rss")  (dump-rss!  reports reports-dir source-name source-map maintainers-map))
           (when (ef "org")  (dump-org!  reports reports-dir source-name source-map maintainers-map))
           (dump-per-type! reports reports-dir source-name source-map maintainers-map ef)
+          (when only-open?
+            (dump-open! reports reports-dir source-name source-map maintainers-map ef))
           (dump-patches! reports patches-dir)
           (dump-howto! base-dir source-name)
           (dump-html! base-dir reports-dir cli-extra)
@@ -567,7 +597,7 @@
 
 (def formats #{"json" "rss" "org" "html" "all" "stats" "patches"})
 
-(let [{:keys [format source-name min-priority min-status force-all?]
+(let [{:keys [format source-name min-priority min-status force-all? only-open?]
        :or {format "all"}}
       (parse-cli-args *command-line-args*)
       db-path (or (System/getenv "BARK_DB") "data/bark-db")
@@ -587,7 +617,7 @@
           last-modified   (get-last-modified db)
           last-export     (get-last-export db)
           ;; Incremental: skip entirely when nothing changed since last export.
-          ;; --all bypasses this; so does requesting a specific format.
+          ;; --force bypasses this; so does requesting a specific format.
           incremental?    (and (not force-all?)
                                (= format "all")
                                last-export last-modified)
@@ -610,7 +640,7 @@
                                                     (str/join ", " (keys source-map)))
                                       (System/exit 1)))
                                 (mapv :name (:sources config)))
-              cli-extra       (remove #{format "-n" source-name "--all"}
+              cli-extra       (remove #{format "-n" source-name "--force" "--only-open"}
                                       (rest *command-line-args*))]
           (when (and incremental? (seq changed-types))
             (log/info "Incremental: changed types:" (str/join ", " (map name changed-types))))
@@ -633,10 +663,14 @@
                 (log/info "No reports for source" (str "'" src-name "'") ", skipping.")
 
                 :else
-                (do (log/info (str "[" src-name "]") (count reports)
-                              (if incremental? "report(s) (incremental)" "report(s)"))
+                (do (log/info (str "[" src-name "] " (count reports) " report(s)"
+                                   (if only-open?
+                                     (str " (" (count (open-reports reports)) " open)")
+                                     "")
+                                   (if incremental? " (incremental)" "")))
                     (export-source! format reports base-dir src-name
-                                    source-map maintainers-map cli-extra)))))
+                                    source-map maintainers-map cli-extra
+                                    only-open?)))))
           (save-last-export! conn (java.util.Date.)))))
     (finally
       (d/close conn))))

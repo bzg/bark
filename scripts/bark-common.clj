@@ -331,13 +331,15 @@
 (defn parse-cli-args
   "Parse common CLI flags into a map.
   Recognises: -o/--output, -n/--source, -p/--min-priority, -s/--min-status,
-  --json (path to all.json), --dir (output directory), --all (force full export).
+  --json (path to all.json), --dir (output directory), --force (force full
+  export), --only-open (also export -open files with only open reports).
   Any leading non-flag token is captured as :format."
   [args]
   (loop [opts {} [a & [v & r :as more]] args]
     (cond
       (nil? a)                        opts
-      (#{"--all"} a)                  (recur (assoc opts :force-all? true) more)
+      (#{"--force"} a)                (recur (assoc opts :force-all? true) more)
+      (#{"--only-open"} a)            (recur (assoc opts :only-open? true) more)
       (#{"-o" "--output"} a)          (if v (recur (assoc opts :out-file v) r) opts)
       (#{"--json"} a)                 (if v (recur (assoc opts :json-file v) r) opts)
       (#{"--dir"} a)                  (if v (recur (assoc opts :out-dir v) r) opts)
