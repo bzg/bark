@@ -34,8 +34,16 @@ As a BARK user, you want to read the [[file:docs/howto.org][HOWTO]].
 # 1. Copy and edit config
 cp config.edn.example config.edn
 
-# 2. Start ingesting emails
+# 2a. Start ingesting emails (dev)
 clj -M:run
+
+# 2b. Or build an uberjar and run it (production)
+mkdir -p classes
+clj -M -e "(compile 'bark-ingest.main)"
+clj -M:uberdeps --main-class bark_ingest.main
+java --add-opens=java.base/java.nio=ALL-UNNAMED \
+     --add-opens=java.base/sun.nio.ch=ALL-UNNAMED \
+     -jar target/bark.jar
 
 # 3. Digest new emails into reports
 bb digest          # incremental
