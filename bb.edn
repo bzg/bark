@@ -5,13 +5,14 @@
               :task (apply shell "bb scripts/bark-export.clj" *command-line-args*)}
   notify     {:doc  "Send notification emails: bb notify [--dry-run]"
               :task (apply shell "bb scripts/bark-notify.clj" *command-line-args*)}
-  clean      {:doc  "Remove all files in public/"
-              :task (let [dir (clojure.java.io/file "public")]
-                     (when (.exists dir)
+  clean      {:doc  "Remove all files in classes/ and public/"
+              :task (doseq [d ["public" "classes" "target"]]
+                     (let [dir (clojure.java.io/file d)]
+                      (when (.exists dir)
                        (doseq [f (reverse (file-seq dir))]
-                         (when-not (= f dir)
-                           (.delete f)
-                           (println "Deleted" (.getPath f))))))}
+                        (when-not (= f dir)
+                         (.delete f)
+                         (println "Deleted" (.getPath f)))))))}
   test-config {:doc  "Validate config.edn (pass path as arg, default: ./config.edn)"
                :task (apply shell "bb scripts/validate-config.clj" *command-line-args*)}
   test-digest {:doc  "Run bark-digest integration tests"
