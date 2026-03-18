@@ -6,7 +6,7 @@ report using predefined trigger keywords. Admins and maintainers can
 update reports by writing directly to the monitored inbox, manage
 roles, and receive periodic digest emails.
 
-For admin and maintainers, see the full [[https://codeberg.org/bzg/bark/src/branch/main/docs/howto.org][BARK documentation]].
+For admin and maintainers, see the full [[https://codeberg.org/bzg/bark/src/branch/main/docs/bark-manual.org][BARK manual]].
 
 ** Subject labels
 

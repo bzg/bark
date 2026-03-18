@@ -5,7 +5,7 @@
 ;; Each source gets its own directory tree under public/:
 ;;   public/<source-name>/index.html
 ;;   public/<source-name>/data.html
-;;   public/<source-name>/howto.html
+;;   public/<source-name>/docs.html
 ;;   public/<source-name>/reports/all.json
 ;;   public/<source-name>/reports/all.xml
 ;;   public/<source-name>/reports/all.org
@@ -479,11 +479,11 @@
            "-n" source-name
            cli-args)))
 
-(defn dump-howto!
-  "Generate howto.html for a single source."
+(defn dump-docs!
+  "Generate docs.html for a single source."
   [base-dir source-name]
-  (apply process/shell "bb" "scripts/bark-howto.clj"
-         "-o" (str base-dir "/howto.html")
+  (apply process/shell "bb" "scripts/bark-docs.clj"
+         "-o" (str base-dir "/docs.html")
          "--dir" base-dir
          (when source-name ["-n" source-name])))
 
@@ -574,7 +574,7 @@
                                       (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"json"})
                                       (when only-open?
                                         (dump-open! reports reports-dir source-name source-map maintainers-map #{"json"}))
-                                      (dump-howto! base-dir source-name)
+                                      (dump-docs! base-dir source-name)
                                       (dump-html! base-dir reports-dir cli-extra))
                         "stats"   (dump-stats! base-dir reports-dir source-name "json" cli-extra)))]
     (if (= format "all")
@@ -585,7 +585,7 @@
           (when only-open?
             (dump-open! reports reports-dir source-name source-map maintainers-map ef))
           (dump-patches! reports patches-dir)
-          (dump-howto! base-dir source-name)
+          (dump-docs! base-dir source-name)
           (dump-html! base-dir reports-dir cli-extra)
           (dump-stats! base-dir reports-dir source-name "json" cli-extra)
           (dump-stats! base-dir reports-dir source-name "html" cli-extra))

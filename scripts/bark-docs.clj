@@ -1,15 +1,15 @@
 #!/usr/bin/env bb
 
-;; bark-howto.clj — Generate public/<source>/howto.html from resources/howto-tpl.org.
+;; bark-docs.clj — Generate public/<source>/docs.html from resources/docs-tpl.org.
 ;;
 ;; Reads the org template and substitutes source-specific labels and
 ;; triggers into the unified table, based on merged config
 ;; (defaults -> global -> per-source).
 ;;
 ;; Usage:
-;;   bb scripts/bark-howto.clj -n my-source              -> public/my-source/howto.html
-;;   bb scripts/bark-howto.clj -n my-source -o out.html  -> writes out.html
-;;   bb scripts/bark-howto.clj                           -> public/howto.html (defaults)
+;;   bb scripts/bark-docs.clj -n my-source              -> public/my-source/docs.html
+;;   bb scripts/bark-docs.clj -n my-source -o out.html  -> writes out.html
+;;   bb scripts/bark-docs.clj                           -> public/docs.html (defaults)
 
 (require '[clojure.string :as str]
          '[hiccup2.core :as h])
@@ -35,10 +35,10 @@
 ;; (using shared resolve-labels-map / resolve-triggers-map from bark-common)
 ;; ---------------------------------------------------------------------------
 
-(defn howto-labels [source-cfg]
+(defn docs-labels [source-cfg]
   (resolve-labels-map source-cfg))
 
-(defn howto-triggers [source-cfg]
+(defn docs-triggers [source-cfg]
   (resolve-triggers-map source-cfg))
 
 ;; ---------------------------------------------------------------------------
@@ -286,7 +286,7 @@
 ;; Page assembly
 ;; ---------------------------------------------------------------------------
 
-(def howto-css (str "
+(def docs-css (str "
   main.container { max-width: 1600px; }
   table { font-size: 0.9rem; }
   pre { font-size: 0.85rem; padding: 1rem; }
@@ -294,8 +294,8 @@
   .meta { font-size: 0.78rem; color: var(--pico-muted-color); margin-bottom: 2rem; }
 " footer-css))
 
-(defn howto-page [body-html]
-  (let [title        "BARK — How-to"
+(defn docs-page [body-html]
+  (let [title        "BARK — Docs"
         generated-at (str (java.util.Date.))]
     (str
      "<!DOCTYPE html>\n"
@@ -311,10 +311,10 @@
         [:meta {:property "og:type" :content "website"}]
         [:link {:rel "stylesheet" :href pico-cdn}]
         [:title title]
-        [:style (h/raw howto-css)]]
+        [:style (h/raw docs-css)]]
        [:body
         [:main.container
-         (nav-bar title "howto")
+         (nav-bar title "docs")
          [:p.meta (str "Generated " generated-at)]
          (h/raw body-html)
          [:script (h/raw (wrap-js theme-toggle-js))]]
@@ -459,12 +459,12 @@
       config      (load-config)
       source-map  (when config (build-source-map config))
       source-cfg  (get source-map source-name)
-      labels      (if source-cfg (howto-labels source-cfg) default-labels)
-      triggers    (if source-cfg (howto-triggers source-cfg) default-triggers)
+      labels      (if source-cfg (docs-labels source-cfg) default-labels)
+      triggers    (if source-cfg (docs-triggers source-cfg) default-triggers)
       out-file    (or out-file
                       (if source-name
-                        (str "public/" source-name "/web/howto.html")
-                        "public/web/howto.html"))
+                        (str "public/" source-name "/web/docs.html")
+                        "public/web/docs.html"))
       ;; Infer out-dir from out-file when not given explicitly
       effective-dir (or out-dir
                         (.getParent (clojure.java.io/file out-file)))
@@ -474,12 +474,12 @@
       conn        ((resolve 'pod.huahaiy.datalevin/get-conn) db-path bark-schema {:wal? false})
       db          ((resolve 'pod.huahaiy.datalevin/db) conn)
       maint-html  (build-maintainers-html db source-name source-cfg)
-      org-text    (-> (slurp "resources/howto-tpl.org")
+      org-text    (-> (slurp "resources/docs-tpl.org")
                       (substitute-template labels triggers)
                       (filter-feed-links effective-dir))
       body-html   (cond-> (org->html org-text)
                     maint-html (str "\n" maint-html))
-      html        (howto-page body-html)]
+      html        (docs-page body-html)]
   ((resolve 'pod.huahaiy.datalevin/close) conn)
   (.mkdirs (.getParentFile (clojure.java.io/file out-file)))
   (spit out-file html)

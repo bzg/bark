@@ -276,7 +276,7 @@
           sources)))
 
 ;; ---------------------------------------------------------------------------
-;; Maintainer-since parsing (shared by bark-roles, bark-howto)
+;; Maintainer-since parsing (shared by bark-roles, bark-docs)
 ;; ---------------------------------------------------------------------------
 
 (defn parse-maintainer-since-entries
@@ -390,7 +390,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Shared label/trigger defaults and merge logic
-;; (canonical definitions used by bark-detect, bark-triggers, bark-howto)
+;; (canonical definitions used by bark-detect, bark-triggers, bark-docs)
 ;; ---------------------------------------------------------------------------
 
 (def default-labels

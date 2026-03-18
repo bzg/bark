@@ -83,11 +83,11 @@
 (def nav-pages
   "Navigation pages in display order: [id label href]."
   [["reports" "Reports" "index.html"]
-   ["howto"   "How-to"  "howto.html"]
+   ["docs"   "Docs"  "docs.html"]
    ["data"    "Data"    "data.html"]])
 
 (defn nav-bar
-  "Render a <nav> with BARK title and Reports/How-to/Data links.
+  "Render a <nav> with BARK title and Reports/Docs/Data links.
   `current` is the id of the active page (bolded)."
   [title current]
   [:nav
@@ -120,7 +120,7 @@
    [:a {:href "reports/all.org"} "Org"]])
 
 ;; ---------------------------------------------------------------------------
-;; Org-mode inline link conversion (shared by bark-howto, bark-stats)
+;; Org-mode inline link conversion (shared by bark-docs, bark-stats)
 ;; ---------------------------------------------------------------------------
 
 (defn org-inline-links

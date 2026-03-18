@@ -435,7 +435,7 @@
   (str "<div class=\"box\">" (chart-div id spec) "</div>"))
 
 ;; ---------------------------------------------------------------------------
-;; data.org rendering (reuses org table parser from bark-howto logic)
+;; data.org rendering (reuses org table parser from bark-docs logic)
 ;; ---------------------------------------------------------------------------
 
 (defn- parse-data-table
