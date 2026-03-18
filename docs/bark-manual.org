@@ -18,25 +18,39 @@ requests:
 - You can also create a =[POLL]=, share a feature request =[FR]= or a
   =[TODO]=.
 
-See below the list of [[#report types][report types]].
+See below the list of [[#report-types][report types]].
+
+** Setting a topic
+
+Topics can be set in two ways:
+
+- *Inside the label*: =[BUG parser]= sets topic to "parser".
+- *Colon prefix after the label*: =[BUG] parser: crash on empty input=
+  also sets topic to "parser" (the first colon-delimited segment after
+  the closing bracket).
+
+A maintainer can also change the topic of an existing report by
+replying with:
+
+: Topic: new-topic.
 
 ** Updating reports
 
 State changes occur when a reply in the same thread contains a
-case-senstive trigger keyword at the start of a line, followed by a
+case-sensitive trigger keyword at the start of a line, followed by a
 punctuation mark (=.= =,= =;= =:=). For example, a reply to a bug report with
 a line starting with =Confirmed.= marks the bug as "acked"; a reply to a
-patch with a line starting with =Applied.= marks the bug as "closed".
+patch with a line starting with =Applied.= marks the patch as "closed".
 
-See the [[#Triggers keywords][Triggers keywords]] below for the full list.
+See the [[#trigger-keywords][trigger keywords]] below for the full list.
 
 ** Voting on requests
 
-Requests (=[POLL]=, =[FR]=, =[TODO]=, etc.) support voting: 
+Requests (=[POLL]=, =[FR]=, =[TODO]=, etc.) support voting:
 
 - =+1= or =1+= means "I support"
 - =-1= or =1-= means "I don't support"
-- =-0=, =0-=, =+0= or =-0= means "I abstain"
+- =+0=, =0+=, =-0= or =0-= means "I abstain"
 
 * As a maintainer or admin
 ** Announcements, releases, changes
@@ -113,6 +127,9 @@ Unignore: user@example.com             (admin only)
 #+end_example
 
 * Report types
+  :PROPERTIES:
+  :CUSTOM_ID: report-types
+  :END:
 
 Reports are detected from email subject labels:
 
@@ -125,9 +142,9 @@ Reports are detected from email subject labels:
 | =[REL <topic> <version>]= =[RELEASE <topic> <version>]= | release      |
 | =[CHG <topic> <version>]= =[CHANGE <topic> <version>]=  | change       |
 
-All =<…>= parts are optional and positional. For release and change, a
+All =<…>= parts are optional and positional.  For release and change, a
 single value is interpreted as =<version>=: =[REL 2.0]= sets version to
-"2.0". Use both for topic and version: =[REL parser 2.0]=. For patch,
+"2.0".  Use both for topic and version: =[REL parser 2.0]=.  For patch,
 =<version>= is a =v\d+= token (e.g. =v2=) and =<n/m>= is a sequence marker
 (e.g. =3/5=).
 
@@ -136,7 +153,18 @@ reports with the same version are automatically closed.
 
 Announcements, releases and changes require maintainer permission.
 
+** Patch series
+
+When patches include a sequence marker (=<n/m>=), BARK groups them
+into a series.  A cover letter (=0/m=) or a new =1/m= patch from the
+same sender and topic automatically closes the previous series and
+starts a fresh one.  This allows version superseding: sending
+=[PATCH parser v2 0/3]= closes the earlier =v1= series for that topic.
+
 ** Customising subject labels
+   :PROPERTIES:
+   :CUSTOM_ID: customising-subject-labels
+   :END:
 
 The subject labels in the table above are the built-in defaults. You
 can override them globally or per source in =config.edn= via =:labels=.
@@ -159,10 +187,15 @@ Per-source settings take precedence over the global =:labels=, which in
 turn take precedence over the built-in defaults.
 
 * Trigger keywords
+  :PROPERTIES:
+  :CUSTOM_ID: trigger-keywords
+  :END:
 
 State changes are detected by trigger keywords within the body of a
 response down the thread, at the beginning of the line, followed by a
 punctuation mark (=.= =,= =;= =:=):
+
+** Status triggers
 
 | Effect on report  | Trigger keyword                    |
 |-------------------+------------------------------------|
@@ -172,9 +205,21 @@ punctuation mark (=.= =,= =;= =:=):
 | closed (expired)  | =Expired=                            |
 | closed (resolved) | =Resolved= =Applied= =Done= =Fixed= =Closed= |
 
+** Priority triggers
+
+| Effect on report | Trigger keyword |
+|------------------+-----------------|
+| urgent           | =Urgent=          |
+| important        | =Important=       |
+
+Priority is never set directly: it is computed as the sum of
+important (=+1=) and urgent (=+2=), giving a value between 0 and 3.
+
 You can use multiple keywords in the same email, one per line.
 
-All trigger keywords work on all report types.
+All trigger keywords work on all report types.  However, only bugs,
+patches, and requests support the acked, owned, urgent, and important
+states.  Announcements, releases, and changes can only be closed.
 
 ** Report statuses and priority
 
@@ -183,8 +228,6 @@ All reports can be in a combination of three states:
 - *Acked* --- someone took the next sensible action (confirmed a bug, reviewed a patch, approved a request).
 - *Owned* --- someone claimed ownership of this report.
 - *Closed* --- the report is resolved, canceled, or expired.
-
-Announcements, releases, and changes can only be closed.
 
 ** Status (as number)
 
@@ -195,13 +238,9 @@ this:
 | (Un)owned  | (0)2 |
 | (Un)closed | (4)0 |
 
-So a acked, unowned and open report is =1+0+4 = 5=.
+So an acked, unowned and open report is =1+0+4 = 5=.
 
 ** Priority (as number)
-
-Prority is never set directly, it is derived from whether the report
-is marked as urgent or important. When the prority is represented as a
-numeric value, it is computed like this:
 
 | (Un)important | (0)1 |
 | (Un)urgent    | (0)2 |
@@ -209,6 +248,9 @@ numeric value, it is computed like this:
 So an important and urgent report is =1+2 = 3=.
 
 ** Customising trigger keywords
+   :PROPERTIES:
+   :CUSTOM_ID: customising-trigger-keywords
+   :END:
 
 You can customize trigger keywords globally or per source:
 
@@ -217,11 +259,38 @@ You can customize trigger keywords globally or per source:
 
 * Exploring reports
 
-The BARK instance can expose reports as HTML, JSON and Org formats.
+The BARK instance can expose reports as HTML, JSON, Org and RSS.
+
+** Exported pages and feeds
+
+Running =bb export all= generates, for each source:
+
+- =index.html= --- the main reports table (filterable, sortable).
+- =stats.html= --- report statistics and charts.
+- =docs.html= --- a user-facing documentation page (from =docs-tpl.org=).
+- =all.json=, =all.org=, =all.xml= --- full exports in JSON, Org and RSS.
+- Per-type feeds: =bugs.json=, =patches.xml=, etc.
+- =patches/= --- a directory with attached and inline patch files.
+
+RSS feeds contain up to 50 items, most recent first.
+
+Export is incremental: only sources modified since the last export are
+re-generated.  Use =bb export all --all= to force a full re-export.
+
+You can also export a single format:
+
+: bb export json
+: bb export rss
+: bb export org
+: bb export html
+: bb export stats
+
+Use =-n <source>= to restrict to one source, =-p <N>= to filter by
+minimum priority, and =-s <N>= to filter by minimum status.
 
 ** Browsing Bark reports online
 
-A web interface let you navigate Bark reports.
+A web interface lets you navigate Bark reports.
 
 The search field has a minimal syntax:
 
@@ -234,19 +303,22 @@ The search field has a minimal syntax:
 | urgent:me@example.org       | u:    | Reports marked urgent by me@example.org               |
 | important:me@example.org    | i:    | Reports marked important by me@example.org            |
 | subject:match               | s:    | Reports matching subject                              |
+| topic:match                 | t:    | Reports matching topic                                |
 | priority:[0-4]              | p:    | Reports matching priority level 0 to 4                |
-| mid:<messageid>             | m:    | Report open with <messageid>                          |
+| mid:<messageid>             | m:    | Report with message-id <messageid>                    |
 | date:3d..                   | d:    | Reports from 3 days ago                               |
 | date:2023-01-01..2023-12-31 | d:    | Reports from 2023-01-01 to 2023-12-31                 |
 | match1 \vert match2             |       | Reports matching "match1" or "match2"                 |
 | *                           |       | Wildcard for from/acked/owned/closed/urgent/important |
 
-** The =bone= CLI tool and =gnus-bone.el=
+** The =bone= CLI tool, =gnus-bone.el= and =notmuch-bone.el=
 
 [[https://codeberg.org/bzg/bone][bone]] lets you browse and filter BARK reports interactively from the
 terminal.
 
 [[https://codeberg.org/bzg/gnus-bone][gnus-bone.el]] lets you explore BARK reports from within [[https://gnus.org/][Emacs Gnus]].
+
+[[https://codeberg.org/bzg/notmuch-bone][notmuch-bone.el]] provides the same integration for [[https://notmuchmail.org/][notmuch]].
 
 * Notifications
 
@@ -255,9 +327,10 @@ with a summary of open reports. Notifications are never sent to
 regular users.
 
 Notifications require SMTP configuration (see [[#config][Config]]) and are sent via
-=bb notify=, typically from a cron job. Each notification email contains
-two sections: open bugs/patches/requests owned by the recipient, and
-all unacked & unowned bugs/patches/requests by anyone.
+=bb notify=, typically from a cron job.  Use =bb notify --dry-run= to
+preview without sending.  Each notification email contains two
+sections: open bugs/patches/requests owned by the recipient, and all
+unacked & unowned bugs/patches/requests by anyone.
 
 ** (Un)subscribing
 
@@ -280,13 +353,13 @@ Notify: on
 Notification preferences are set via the same =Notify:= command.
 Parameters can be combined on a single line:
 
-| Parameter | Description                        | Default |
-|-----------+------------------------------------+---------|
-| =d:N=       | Receive notifications every N days |      30 |
-| =p:N=       | Minimum priority (0--3)            |       1 |
-| =s:N=       | Minimum status (0--7)              |       1 |
-| m:<match> | Restrict to subject <match>        |         |
-| t:<topic> | Restrict to subject <topic>        |         |
+| Parameter   | Description                        | Default |
+|-------------+------------------------------------+---------|
+| =d:N=         | Receive notifications every N days |      30 |
+| =p:N=         | Minimum priority (0--3)            |       1 |
+| =s:N=         | Minimum status (0--7)              |       1 |
+| =m:<match>=   | Restrict to subject <match>        |         |
+| =t:<topic>=   | Restrict to topic <topic>          |         |
 
 Examples:
 
@@ -300,3 +373,132 @@ Notify: d:3 s:4 p:2         — every 3 days, only open reports with priority >=
 Like role commands, =Notify:= commands are only processed from direct
 emails, not from the mailing list.
 
+* Config
+  :PROPERTIES:
+  :CUSTOM_ID: config
+  :END:
+
+BARK is configured via a =config.edn= file.  Use =bb test-config= to
+validate it.
+
+** Minimal example
+
+#+begin_src edn
+{:admin "admin@example.com"
+
+ :imap {:host     "imap.example.com"
+        :port     993
+        :ssl      true
+        :user     "imap-login@example.com"
+        :password "secret"
+        :folder   "INBOX"}
+
+ :db {:path "data/bark-db"}
+
+ :sources [{:name       "my-list"
+            :match      {:list-id "my-list.example.org"}
+            :admin      "lead@example.org"
+            :list-post  "my-list@example.org"}]}
+#+end_src
+
+** Source matching
+
+Each source has a =:match= key that determines which emails belong to
+it.  Two strategies are supported:
+
+- =:list-id= --- matches the =List-Id= header (the identifier inside
+  angle brackets, e.g. ="my-list.example.org"=).
+- =:delivered-to= --- matches the =Delivered-To= header (useful for
+  aliases or dedicated mailboxes).
+
+As a fallback, a maintainer can add =[bark:<list-id>]= to the subject
+of an email sent directly to the BARK inbox.  This is useful when the
+email lacks the usual =List-Id= or =Delivered-To= headers.
+
+** Source options
+
+| Key                     | Description                                                      |
+|-------------------------+------------------------------------------------------------------|
+| =:name=                   | Source identifier (required)                                     |
+| =:match=                  | ={:list-id "…"}= or ={:delivered-to "…"}= (required)               |
+| =:admin=                  | Admin email for this source (required)                           |
+| =:list-post=              | Mailing list posting address (for on-list/off-list distinction)  |
+| =:list-archive=           | URL of the list archive (shown in HTML reports)                  |
+| =:archive-format-string=  | URL template for message-ids (=%s= is replaced), used when the    |
+|                         | =Archived-At= header is absent                                    |
+| =:bark-path=              | Base URL where this source's public directory is served           |
+| =:labels=                 | Per-source label overrides (see [[#customising-subject-labels]])      |
+| =:triggers=               | Per-source trigger overrides (see [[#customising-trigger-keywords]])  |
+| =:maintainers=            | Initial maintainers, e.g. =[{:email "dev@example.org" :since "2025-01-01"}]= |
+| =:report-types=           | Restrict detected types, e.g. =#{:bug :patch}=                    |
+| =:export-formats=         | Output formats, e.g. =["json" "rss"]=  (default: =["json" "org" "rss"]=) |
+| =:export-reports=         | Restrict exported types, e.g. =#{:bug :patch :request}=           |
+| =:expiry=                 | Auto-close delays in days (see below)                            |
+
+The =:since= date on a maintainer entry restricts their privileges to
+emails dated on or after that date.  Omit =:since= for immediate
+effect on all emails.  Note: the admin is NOT automatically a
+maintainer.
+
+** Report expiry
+
+Announcements, releases, and changes can be automatically closed
+after a configurable number of days.  The close reason is set to
+"expired".
+
+#+begin_src edn
+:expiry {:announcement 30
+         :release      60
+         :change       14}
+#+end_src
+
+This can be set globally or per source.
+
+** Notifications (SMTP)
+
+#+begin_src edn
+:notifications {:enabled true
+                :smtp {:host     "smtp.example.com"
+                       :port     587
+                       :tls      true
+                       :user     "notify@example.com"
+                       :password "secret"
+                       :from     "bark@example.com"}}
+#+end_src
+
+** Logging
+
+#+begin_src edn
+:logging {:file     "logs/bark.log"
+          :level    :warn
+          :max-size "10MB"
+          :backlog  5
+          :email    {:to    "admin@example.com"
+                     :level :error}}
+#+end_src
+
+Log file rotation is automatic.  Email alerts require SMTP to be
+configured.
+
+* CLI reference
+
+All commands are run via [[https://babashka.org/][Babashka]]:
+
+| Command              | Description                                              |
+|----------------------+----------------------------------------------------------|
+| =bb digest=            | Ingest new emails and create/update reports              |
+| =bb digest --all=      | Re-process all emails from scratch                       |
+| =bb export all=        | Export all formats for all sources                       |
+| =bb export html=       | Export HTML pages only                                   |
+| =bb export json=       | Export JSON feeds only                                   |
+| =bb export rss=        | Export RSS feeds only                                    |
+| =bb export org=        | Export Org feeds only                                    |
+| =bb export stats=      | Export stats pages only                                  |
+| =bb notify=            | Send notification emails                                 |
+| =bb notify --dry-run=  | Preview notifications without sending                    |
+| =bb clean=             | Remove all generated files (=public/=, =classes/=, =target/=) |
+| =bb test-config=       | Validate =config.edn=                                     |
+| =bb test-smtp=         | Test SMTP configuration (=--to addr=, =--dry-run=)          |
+
+Export accepts flags: =-n <source>= (restrict to one source), =-p <N>=
+(minimum priority), =-s <N>= (minimum status).
