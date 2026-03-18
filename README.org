@@ -6,13 +6,15 @@ BARK monitors a single IMAP mailbox, classifies incoming emails into
 sources by header matching, detects report types from subject tags,
 applies state triggers from email body, and manages roles per source.
 
-To browse BARK reports from the command line, use [[https://codeberg.org/bzg/bone][bone]].
+BARK reports can be read with other tools:
 
-To highlight BARK reports from Emacs [[https://gnus.org/][Gnus]], use [[https://codeberg.org/bzg/gnus-bone][gnus-bone.el]]. 
+- As a CLI based on fzf: [[https://codeberg.org/bzg/bone][bone]]
+- Via GNU Emacs [[https://gnus.org/][Gnus]]: [[https://codeberg.org/bzg/gnus-bone][gnus-bone]]
+- Via GNU Emacs [[https://notmuchmail.org/notmuch-emacs/][notmuch]]: [[https://codeberg.org/bzg/notmuch-bone][notmuch-bone]]
 
-** User documentation
+** BARK manual
 
-As a BARK user, you want to read this quick [[resources/docs.org][documentation]].
+For a more extensive documentation, please read the [[docs/bark-manual.org][BARK manual]].
 
 ** How it works
 
