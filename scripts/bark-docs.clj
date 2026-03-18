@@ -48,22 +48,18 @@
 (defn- fmt-label-tags
   "Format label tags as org =code= entries for a given report type."
   [tags rtype]
-  (let [versioned?  #{:bug :patch :release :change}
-        with-topic? #{:request :announcement}]
+  (let [versioned?  #{:release :change}
+        with-topic? #{:bug :request :announcement}]
     (str/join " "
               (cond
+                (= rtype :patch)
+                (map (fn [t] (str "=[" t " <topic> <version> <n/m>]=")) tags)
+
                 (versioned? rtype)
-                (mapcat (fn [t]
-                          (case rtype
-                            :bug   [(str "=[" t "]=") (str "=[" t " version]=")]
-                            :patch [(str "=[" t "]=") (str "=[" t " n/m]=") (str "=[" t " topic n/m]=")]
-                            [(str "=[" t "]=") (str "=[" t " version]=")]))
-                        tags)
+                (map (fn [t] (str "=[" t " <topic> <version>]=")) tags)
 
                 (with-topic? rtype)
-                (mapcat (fn [t]
-                          [(str "=[" t "]=") (str "=[" t " topic]=")])
-                        tags)
+                (map (fn [t] (str "=[" t " <topic>]=")) tags)
 
                 :else
                 (map #(str "=[" % "]=") tags)))))
@@ -175,7 +171,14 @@
 (defn- org-inline [s]
   (-> s
       org-inline-links
-      (str/replace #"=([^=\n\"<>]+)=" "<code>$1</code>")
+      (str/replace #"=([^=\n\"]+)="
+                   (fn [[_ inner]]
+                     (str "<code>"
+                          (-> inner
+                              (str/replace "&" "&amp;")
+                              (str/replace "<" "&lt;")
+                              (str/replace ">" "&gt;"))
+                          "</code>")))
       (str/replace #"(?<=\s|^)\*([^*\n]+)\*(?=[\s.,;:!?)]|$)" "<strong>$1</strong>")
       (str/replace "\\vert" "|")))
 

@@ -12,25 +12,29 @@ For admin and maintainers, see the full [[https://codeberg.org/bzg/bark/src/bran
 
 Subject labels create reports, optionally with a topic/version:
 
-| Type         | Subject labels                             |
-|--------------+--------------------------------------------|
-| bug          | =[BUG]= =[BUG topic]=                          |
-| patch        | =[PATCH]= =[PATCH topic]= =[PATCH topic v2 n/m]= |
-| request      | =[POLL]= =[FR]= =[TODO]= =[FR topic]=              |
-|--------------+--------------------------------------------|
-| announcement | =[ANN]= =[ANNOUNCEMENT]= =[ANN topic]=           |
-| release      | =[REL version]= =[REL topic version]=          |
-| change       | =[CHG version]= =[CHG topic version]=          |
+| Type         | Subject labels                                      |
+|--------------+-----------------------------------------------------|
+| bug          | =[BUG <topic>]=                                       |
+| patch        | =[PATCH <topic> <version> <n/m>]=                     |
+| request      | =[POLL <topic>]= =[FR <topic>]= =[TODO <topic>]=          |
+|--------------+-----------------------------------------------------|
+| announcement | =[ANN <topic>]= =[ANNOUNCEMENT <topic>]=                |
+| release      | =[REL <topic> <version>]= =[RELEASE <topic> <version>]= |
+| change       | =[CHG <topic> <version>]= =[CHANGE <topic> <version>]=  |
 
-Replies to these reports can update them by using trigger keywords
-such as =Resolved.=, etc. Trigger keywords should be placed at the
-beginning of the line and followed by a punctuation mark (=.= =,= =;= =:=).
+All =<…>= parts are optional and positional.  For release and change,
+a single value is interpreted as =<version>=: =[REL 2.0]= sets
+version to "2.0".  Use both for topic and version: =[REL parser 2.0]=.
 
 Topics can also be set using a colon-delimited prefix in the subject
 after the label: =[BUG] parser: crash on empty input= sets the topic to
 "parser".
 
 ** Status & priority triggers
+
+Replies to reports can update them by using trigger keywords such as
+=Resolved.=, etc. Trigger keywords should be placed at the beginning of
+the line and followed by a punctuation mark (=.= =,= =;= =:=).
 
 All status/priority trigger keywords work on all report types:
 
@@ -73,5 +77,3 @@ Important.
 | date:2023-01-01..2023-12-31 | =d:=        | Reports from 2023-01-01 to 2023-12-31                 |
 | match1 \vert match2             |           | Reports matching "match1" or "match2"                 |
 | from:* acked:* …            | =f:*= =a:*= … | Wildcard for from/acked/owned/closed/urgent/important |
-
-

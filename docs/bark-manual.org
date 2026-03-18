@@ -116,17 +116,23 @@ Unignore: user@example.com             (admin only)
 
 Reports are detected from email subject labels:
 
-| Tag                                             | Type           |
-|-------------------------------------------------+----------------|
-| =[BUG]= =[BUG version]=                             | bug            |
-| =[PATCH]= =[PATCH n/m]= =[PATCH topic n/m]=           | patch          |
-| =[POLL]= =[FR]= =[TODO]=                              | request        |
-| =[ANN]= =[ANNOUNCEMENT]=                            | announcement   |
-| =[REL]= =[RELEASE]= =[REL version]= =[RELEASE version]= | release        |
-| =[CHG]= =[CHANGE]= =[CHG version]= =[CHANGE version]=   | change         |
+| Tag                                                 | Type         |
+|-----------------------------------------------------+--------------|
+| =[BUG <topic>]=                                       | bug          |
+| =[PATCH <topic> <version> <n/m>]=                     | patch        |
+| =[POLL <topic>]= =[FR <topic>]= =[TODO <topic>]=          | request      |
+| =[ANN <topic>]= =[ANNOUNCEMENT <topic>]=                | announcement |
+| =[REL <topic> <version>]= =[RELEASE <topic> <version>]= | release      |
+| =[CHG <topic> <version>]= =[CHANGE <topic> <version>]=  | change       |
 
-When a =[REL version]= report is created, any open =[CHG version]= reports
-with the same version are automatically closed.
+All =<…>= parts are optional and positional. For release and change, a
+single value is interpreted as =<version>=: =[REL 2.0]= sets version to
+"2.0". Use both for topic and version: =[REL parser 2.0]=. For patch,
+=<version>= is a =v\d+= token (e.g. =v2=) and =<n/m>= is a sequence marker
+(e.g. =3/5=).
+
+When a =[REL <version>]= report is created, any open =[CHG <version>]=
+reports with the same version are automatically closed.
 
 Announcements, releases and changes require maintainer permission.
 
