@@ -1,4 +1,4 @@
-* BARK — BARK! Another Report Keeper
+* BARK! Another Report Keeper
 
 BARK monitors a mailbox and converts incoming emails into reports.
 Subsequent emails in the same thread can update the status of that
