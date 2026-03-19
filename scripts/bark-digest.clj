@@ -31,7 +31,7 @@
          days-between
          bump-report-updated! bump-global-modified!
          ;; bark-roles.clj
-         get-roles ignored?
+         get-roles ignored? admin?
          ensure-source-roles! ensure-notify-defaults!
          apply-role-commands! apply-notify-commands!
          from-mailing-list? can-create-report?
@@ -299,9 +299,11 @@
           (assoc acc :skipped (inc skipped)))
       (do ;; Role and notify commands (not from mailing lists — list emails
        ;; have both List-Id and List-Post; a manually added List-Id alone
-       ;; does not count).
+       ;; does not count).  Admin can always issue role commands, even on
+       ;; list-backed sources.
        (when (and from-addr body-text source-name
-                  (not (from-mailing-list? email)))
+                  (or (admin? roles from-addr)
+                      (not (from-mailing-list? email))))
          (apply-role-commands! conn roles source-name from-addr body-text
                               (:email/date-sent email))
          (apply-notify-commands! conn roles source-name from-addr body-text))

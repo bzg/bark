@@ -194,6 +194,8 @@
               (when (= attr :roles/maintainers)
                 (set-maintainer-since! conn source-name addresses
                                        (when (= action :add) email-date)))
+              ;; Signal change so bb export sees it
+              (bump-global-modified! conn)
               (log/info (str/lower-case command) ":"
                         (str/join " " addresses) "(for" source-name ")"))
           (log/warn "Denied:" from-addr "lacks permission for:" command))))))

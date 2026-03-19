@@ -152,14 +152,14 @@ Only the types you specify are overridden; others keep their defaults.
 
 Default tags:
 
-| Type           | Default tags                        |
-|----------------+-------------------------------------|
-| =:bug=         | =BUG=                               |
-| =:patch=       | =PATCH=                             |
-| =:request=     | =POLL= =FR= =TODO=                  |
-| =:announcement= | =ANN= =ANNOUNCEMENT=               |
-| =:release=     | =REL= =RELEASE=                     |
-| =:change=      | =CHG= =CHANGE=                      |
+| Type          | Default tags     |
+|---------------+------------------|
+| =:bug=          | =BUG=              |
+| =:patch=        | =PATCH=            |
+| =:request=      | =POLL= =FR= =TODO=     |
+| =:announcement= | =ANN= =ANNOUNCEMENT= |
+| =:release=      | =REL= =RELEASE=      |
+| =:change=       | =CHG= =CHANGE=       |
 
 Example (global, in =config.edn=):
 
