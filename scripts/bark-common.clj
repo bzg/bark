@@ -312,6 +312,7 @@
                                            :archive-format-string :list-archive :bark-path
                                            :maintainers])
                          (when-let [lid (get-in src [:match :list-id])] {:list-id lid})
+                         (when-let [dt (get-in src [:match :delivered-to])] {:delivered-to dt})
                          (when global-st {:global-labels global-st})
                          (when global-cmd {:global-commands global-cmd})
                          {:export-formats (set (or (:export-formats src)
@@ -403,8 +404,8 @@
    :change       ["CHG" "CHANGE"]})
 
 (def default-commands
-  "Default command words per action. Flat — applies to all report types.
-  Configurable via :commands in config.edn."
+  "Default trigger words per action. Flat — applies to all report types.
+  Configurable via :commands (or legacy :triggers) in config.edn."
   {:acked     ["Acked" "Confirmed" "Reviewed" "Approved"]
    :owned     ["Owned" "Handled" "Assigned"]
    :closed    ["Canceled" "Cancelled" "Resolved" "Applied"
@@ -413,7 +414,7 @@
    :important ["Important"]})
 
 (def close-reasons
-  "Map closed command words to close reasons.
+  "Map closed trigger words to close reasons.
   Words not listed here default to :resolved."
   {"Canceled"  :canceled
    "Cancelled" :canceled
@@ -428,11 +429,12 @@
     (:labels source-cfg)        (merge (:labels source-cfg))))
 
 (defn resolve-commands-map
-  "Resolve command words for a source-map entry: defaults -> global -> per-source.
+  "Resolve trigger words for a source-map entry: defaults -> global -> per-source.
+  Supports both :commands and legacy :triggers config keys.
   Returns a (non-compiled) word-list map."
   [source-cfg]
-  (let [global (:global-commands source-cfg)
-        local  (:commands source-cfg)]
+  (let [global (or (:global-commands source-cfg) (:global-triggers source-cfg))
+        local  (or (:commands source-cfg) (:triggers source-cfg))]
     (cond-> default-commands
       global (merge global)
       local  (merge local))))

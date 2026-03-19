@@ -16,7 +16,8 @@
 (declare default-commands close-reasons
          resolve-commands-map
          email-body-text report-priority maintainer?
-         bump-report-updated!)
+         bump-report-updated!
+         get-header extract-list-id from-mailing-list?)
 
 ;; ---------------------------------------------------------------------------
 ;; Trailing punctuation (shared across all command patterns)
@@ -391,26 +392,47 @@
                  :where [?e :email/message-id ?mid]]
                (d/db conn) synthetic-mid)))))
 
-(defn- apply-vote! [conn report-eid from-addr body-text]
+(defn- vote-allowed?
+  "Check that a vote comes through the right channel.
+  On list-id sources, the vote email must have List-Id and List-Post.
+  On delivered-to sources, the vote email must have the same Delivered-To."
+  [email source-cfg]
+  (let [hdrs (:email/headers-edn email)]
+    (cond
+      (:list-id source-cfg)
+      (and (some? (get-header hdrs "List-Id"))
+           (some? (get-header hdrs "List-Post")))
+
+      (:delivered-to source-cfg)
+      (when-let [dt (get-header hdrs "Delivered-To")]
+        (= (str/lower-case dt)
+           (str/lower-case (:delivered-to source-cfg))))
+
+      :else true)))
+
+(defn- apply-vote! [conn report-eid from-addr body-text email source-cfg]
   ;; SAFETY INVARIANT: cmd-digest! processes emails sequentially.
   ;; This read-then-write is safe only under single-threaded digest.
   ;; If parallelized, replace with a Datalevin transaction function.
   (when-let [vote (detect-vote body-text)]
-    (let [db      (d/db conn)
-          current (d/pull db [:report/voters :report/votes-up :report/votes-down
-                              :report/votes-null] report-eid)
-          voters  (set (:report/voters current))]
-      (when-not (contains? voters from-addr)
-        (let [attr (case vote :up :report/votes-up :down :report/votes-down :report/votes-null)
-              n    (or (get current attr) 0)]
-          (d/transact! conn [[:db/add report-eid attr (inc n)]
-                             [:db/add report-eid :report/voters from-addr]])
-          (bump-report-updated! conn report-eid)
-          (log/info "Vote" (case vote :up "+1" :down "-1" "0") "by" from-addr))))))
+    (if-not (vote-allowed? email source-cfg)
+      (log/info "Vote ignored (private email on public source)" from-addr)
+      (let [db      (d/db conn)
+            current (d/pull db [:report/voters :report/votes-up :report/votes-down
+                                :report/votes-null] report-eid)
+            voters  (set (:report/voters current))]
+        (when-not (contains? voters from-addr)
+          (let [attr (case vote :up :report/votes-up :down :report/votes-down :report/votes-null)
+                n    (or (get current attr) 0)]
+            (d/transact! conn [[:db/add report-eid attr (inc n)]
+                               [:db/add report-eid :report/voters from-addr]])
+            (bump-report-updated! conn report-eid)
+            (log/info "Vote" (case vote :up "+1" :down "-1" "0") "by" from-addr)))))))
 
 (defn apply-commands!
   "Detect all commands and votes from an email's body text,
   then apply them: triggers first, then directives.
+  On closed reports, only the Unclosed directive (maintainer) is allowed.
   `roles` is the roles map for the report's source."
   [conn report-eid report-type email source-map roles]
   (let [body-text (email-body-text email)
@@ -421,35 +443,61 @@
       (let [src-name    (d/q '[:find ?src . :in $ ?rid :where
                                [?rid :report/email ?e] [?e :email/source ?src]]
                              (d/db conn) report-eid)
-            src-cmds    (build-source-commands (get source-map src-name))
+            source-cfg  (get source-map src-name)
+            src-cmds    (build-source-commands source-cfg)
             trig-result (detect-triggers report-type body-text src-cmds)
             directives  (detect-directives body-text)
-            is-maintainer? (maintainer? roles from-addr (:email/date-sent email))]
+            is-maintainer? (maintainer? roles from-addr (:email/date-sent email))
+            closed?     (some? (:report/closed
+                                (d/pull (d/db conn) [:report/closed] report-eid)))]
 
-        ;; --- 2. Apply votes (requests only) ---
-        (when (and (= :request report-type) from-addr)
-          (apply-vote! conn report-eid from-addr body-text))
+        ;; --- 2. Apply votes (requests only, not on closed reports) ---
+        (when (and (= :request report-type) from-addr (not closed?))
+          (apply-vote! conn report-eid from-addr body-text email source-cfg))
 
-        ;; --- 3. Apply triggers ---
-        (when trig-result
-          (let [close-reason (:report/close-reason trig-result)
-                ref-result   (dissoc trig-result :report/close-reason)
-                current      (d/pull (d/db conn) state-attrs report-eid)
-                new-sets     (into {} (remove (fn [[k _]] (get current k))) ref-result)
-                set-tx       (when (seq new-sets)
-                               [(into {:db/id report-eid} (map (fn [[k _]] [k eid])) new-sets)])
-                reason-tx    (when (and close-reason (:report/closed new-sets))
-                               [[:db/add report-eid :report/close-reason close-reason]])
-                all-tx       (vec (concat set-tx reason-tx))]
-            (when (seq all-tx)
-              (d/transact! conn all-tx)
-              (bump-report-updated! conn report-eid)
-              (log/info (str/join ", " (cond-> (mapv (comp name key) new-sets)
-                                         close-reason (conj (str "close-reason:" (name close-reason)))))
-                        "(by" (:email/message-id email) ")"))))
+        (if closed?
+          ;; --- Closed report: only Unclosed directive allowed (maintainer) ---
+          (when (and (seq directives) is-maintainer?)
+            (let [{:keys [unset]} (resolve-commands directives)]
+              (when (contains? unset :report/closed)
+                (let [current (d/pull (d/db conn) [:report/closed :report/close-reason] report-eid)
+                      retract-tx (when-let [cur (:report/closed current)]
+                                   [[:db/retract report-eid :report/closed (ref-eid cur)]])
+                      proxy-cur  (get (d/pull (d/db conn) [:report/closed-proxy] report-eid)
+                                      :report/closed-proxy)
+                      proxy-tx   (when proxy-cur
+                                   [[:db/retract report-eid :report/closed-proxy (ref-eid proxy-cur)]])
+                      reason-tx  (when (:report/close-reason current)
+                                   [[:db/retract report-eid :report/close-reason
+                                     (:report/close-reason current)]])
+                      all-tx     (vec (concat retract-tx proxy-tx reason-tx))]
+                  (when (seq all-tx)
+                    (d/transact! conn all-tx)
+                    (bump-report-updated! conn report-eid)
+                    (log/info "Commands: un-closed (proxy by" from-addr ")"))))))
 
-        ;; --- 4. Apply directives (maintainer-only) ---
-        (when (and (seq directives) is-maintainer?)
+          ;; --- Open report: apply triggers then directives ---
+          (do
+            ;; --- 3. Apply triggers ---
+            (when trig-result
+              (let [close-reason (:report/close-reason trig-result)
+                    ref-result   (dissoc trig-result :report/close-reason)
+                    current      (d/pull (d/db conn) state-attrs report-eid)
+                    new-sets     (into {} (remove (fn [[k _]] (get current k))) ref-result)
+                    set-tx       (when (seq new-sets)
+                                   [(into {:db/id report-eid} (map (fn [[k _]] [k eid])) new-sets)])
+                    reason-tx    (when (and close-reason (:report/closed new-sets))
+                                   [[:db/add report-eid :report/close-reason close-reason]])
+                    all-tx       (vec (concat set-tx reason-tx))]
+                (when (seq all-tx)
+                  (d/transact! conn all-tx)
+                  (bump-report-updated! conn report-eid)
+                  (log/info (str/join ", " (cond-> (mapv (comp name key) new-sets)
+                                             close-reason (conj (str "close-reason:" (name close-reason)))))
+                            "(by" (:email/message-id email) ")"))))
+
+            ;; --- 4. Apply directives (maintainer-only) ---
+            (when (and (seq directives) is-maintainer?)
           (let [{:keys [set unset deadline undeadline? topic]} (resolve-commands directives)
                 report-mid (d/q '[:find ?mid . :in $ ?r
                                   :where [?r :report/message-id ?mid]]
@@ -503,4 +551,4 @@
               (d/transact! conn all-tx)
               (bump-report-updated! conn report-eid)
               (log/info "Commands:" (str/join ", " desc)
-                        "(proxy by" from-addr ")"))))))))
+                        "(proxy by" from-addr ")"))))))))))
