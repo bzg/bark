@@ -9,10 +9,10 @@
 ;;   2. Apply role/notify commands
 ;;   3. Detect report type
 ;;   4. Create report or thread as descendant
-;;   5. Apply triggers to nearest ancestor
+;;   5. Apply commands to nearest ancestor
 ;;   6. Manage patch series
 ;;
-;; Detection, triggers, roles, and series logic are in separate modules.
+;; Detection, commands, roles, and series logic are in separate modules.
 ;;
 ;; Usage:
 ;;   bb digest [--all]   — scan new emails (or all with --all)
@@ -37,8 +37,8 @@
          from-mailing-list? can-create-report?
          ;; bark-detect.clj
          detect-report resolve-labels build-patch-entities
-         ;; bark-triggers.clj
-         apply-triggers-and-directives!
+         ;; bark-commands.clj
+         apply-commands!
          ;; bark-series.clj
          manage-series!)
 
@@ -48,7 +48,7 @@
 
 (load-file "scripts/bark-roles.clj")
 (load-file "scripts/bark-detect.clj")
-(load-file "scripts/bark-triggers.clj")
+(load-file "scripts/bark-commands.clj")
 (load-file "scripts/bark-series.clj")
 
 ;; bark-schema is defined in bark-common.clj
@@ -111,7 +111,7 @@
             #{} mids)))
 
 (defn find-nearest-report
-  "Return the report eids of the nearest ancestor only (for trigger application).
+  "Return the report eids of the nearest ancestor only (for command application).
   Walks ancestor-mids from nearest to oldest, checks batch index then DB."
   [email thread-index db]
   (some (fn [mid]
@@ -297,13 +297,11 @@
     (if (and from-addr (ignored? roles from-addr))
       (do (log/debug "Ignored" from-addr "—" (:email/subject email))
           (assoc acc :skipped (inc skipped)))
-      (do ;; Role and notify commands (not from mailing lists — list emails
-       ;; have both List-Id and List-Post; a manually added List-Id alone
-       ;; does not count).  Admin can always issue role commands, even on
-       ;; list-backed sources.
+      (do ;; Role and notify commands — blocked when the email came through
+       ;; a mailing list (has both List-Id and List-Post), regardless of
+       ;; sender, to prevent replay attacks.
        (when (and from-addr body-text source-name
-                  (or (admin? roles from-addr)
-                      (not (from-mailing-list? email))))
+                  (not (from-mailing-list? email)))
          (apply-role-commands! conn roles source-name from-addr body-text
                               (:email/date-sent email))
          (apply-notify-commands! conn roles source-name from-addr body-text))
@@ -352,7 +350,7 @@
                                 report-roles (if report-source
                                                (get-roles (d/db conn) report-source)
                                                roles)]
-                            (apply-triggers-and-directives!
+                            (apply-commands!
                              conn rid rtype email source-map report-roles))))
                       [(+ threaded (count parent-report-eids))
                        (reduce #(index-assoc %1 message-id %2) thread-index parent-report-eids)])

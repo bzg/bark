@@ -3,7 +3,7 @@
 ;; bark-docs.clj — Generate public/<source>/docs.html from resources/docs-tpl.org.
 ;;
 ;; Reads the org template and substitutes source-specific labels and
-;; triggers into the unified table, based on merged config
+;; commands into the unified table, based on merged config
 ;; (defaults -> global -> per-source).
 ;;
 ;; Usage:
@@ -15,8 +15,9 @@
          '[hiccup2.core :as h])
 
 ;; Forward-declared for clj-kondo (provided at runtime by load-file calls below).
-(declare default-labels default-triggers resolve-labels-map
-         resolve-triggers-map parse-cli-args load-config build-source-map
+(declare default-labels default-commands
+         resolve-labels-map resolve-commands-map
+         parse-cli-args load-config build-source-map
          load-datalevin-pod! bark-schema parse-maintainer-since-entries
          pico-cdn bark-description footer-css bark-footer wrap-js
          theme-toggle-btn theme-toggle-js nav-bar org-inline-links)
@@ -28,21 +29,21 @@
 ;; Defaults — canonical definitions in bark-common.clj
 ;; ---------------------------------------------------------------------------
 
-;; default-labels and default-triggers are defined in bark-common.clj
+;; default-labels and default-commands are defined in bark-common.clj
 
 ;; ---------------------------------------------------------------------------
-;; Resolve labels & triggers with config merge chain
-;; (using shared resolve-labels-map / resolve-triggers-map from bark-common)
+;; Resolve labels & commands with config merge chain
+;; (using shared resolve-labels-map / resolve-commands-map from bark-common)
 ;; ---------------------------------------------------------------------------
 
 (defn docs-labels [source-cfg]
   (resolve-labels-map source-cfg))
 
-(defn docs-triggers [source-cfg]
-  (resolve-triggers-map source-cfg))
+(defn docs-commands [source-cfg]
+  (resolve-commands-map source-cfg))
 
 ;; ---------------------------------------------------------------------------
-;; Build the org table from resolved labels + triggers
+;; Build the org table from resolved labels + commands
 ;; ---------------------------------------------------------------------------
 
 (defn- fmt-label-tags
@@ -64,8 +65,8 @@
                 :else
                 (map #(str "=[" % "]=") tags)))))
 
-(defn- fmt-trigger-words
-  "Format trigger words as org =code= entries."
+(defn- fmt-command-words
+  "Format command words as org =code= entries."
   [words]
   (if (seq words)
     (str/join " " (map #(str "=" % "=") words))
@@ -94,31 +95,31 @@
         lower    (map row-str (drop 3 rows))]
     (str/join "\n" (concat [header hline] upper [hline] lower))))
 
-(defn build-triggers-table-org
-  "Build the merged status+priority triggers org table (3 columns)."
-  [triggers]
-  (let [rows [["Mark as acked"             (fmt-trigger-words (:acked triggers))  "Status"]
-              ["Mark as owned"             (fmt-trigger-words (:owned triggers))  "Status"]
-              ["Mark as closed (canceled)" (fmt-trigger-words (filterv #(contains? #{"Canceled" "Cancelled"} %)
-                                                                       (:closed triggers))) "Status"]
-              ["Mark as closed (expired)"  (fmt-trigger-words (filterv #(= "Expired" %)
-                                                                       (:closed triggers))) "Status"]
-              ["Mark as closed (resolved)" (fmt-trigger-words (filterv #(not (contains? #{"Canceled" "Cancelled" "Expired"} %))
-                                                                       (:closed triggers))) "Status"]
-              ["Mark as urgent"            (fmt-trigger-words ["Urgent"])    "Priority"]
-              ["Mark as important"         (fmt-trigger-words ["Important"]) "Priority"]]
+(defn build-commands-table-org
+  "Build the merged status+priority commands org table (3 columns)."
+  [cmds]
+  (let [rows [["Mark as acked"             (fmt-command-words (:acked cmds))  "Status"]
+              ["Mark as owned"             (fmt-command-words (:owned cmds))  "Status"]
+              ["Mark as closed (canceled)" (fmt-command-words (filterv #(contains? #{"Canceled" "Cancelled"} %)
+                                                                       (:closed cmds))) "Status"]
+              ["Mark as closed (expired)"  (fmt-command-words (filterv #(= "Expired" %)
+                                                                       (:closed cmds))) "Status"]
+              ["Mark as closed (resolved)" (fmt-command-words (filterv #(not (contains? #{"Canceled" "Cancelled" "Expired"} %))
+                                                                       (:closed cmds))) "Status"]
+              ["Mark as urgent"            (fmt-command-words ["Urgent"])    "Priority"]
+              ["Mark as important"         (fmt-command-words ["Important"]) "Priority"]]
         w-effect  (apply max (count "Effect on report")  (map #(count (nth % 0)) rows))
-        w-trigger (apply max (count "Trigger keyword")   (map #(count (nth % 1)) rows))
+        w-command (apply max (count "Command keyword")   (map #(count (nth % 1)) rows))
         w-type    (apply max (count "Type")              (map #(count (nth % 2)) rows))
         pad       (fn [s w] (str s (apply str (repeat (max 0 (- w (count s))) " "))))
         hline     (str "|-" (apply str (repeat w-effect "-")) "-+-"
-                       (apply str (repeat w-trigger "-")) "-+-"
+                       (apply str (repeat w-command "-")) "-+-"
                        (apply str (repeat w-type "-")) "-|")
-        row-str   (fn [[effect trigger typ]]
+        row-str   (fn [[effect command typ]]
                     (str "| " (pad effect w-effect)
-                         " | " (pad trigger w-trigger)
+                         " | " (pad command w-command)
                          " | " (pad typ w-type) " |"))
-        header    (row-str ["Effect on report" "Trigger keyword" "Type"])]
+        header    (row-str ["Effect on report" "Command keyword" "Type"])]
     (str/join "\n" (concat [header hline] (map row-str rows)))))
 
 ;; ---------------------------------------------------------------------------
@@ -141,8 +142,8 @@
 
 (defn substitute-template
   "Replace the first two org table blocks in org-text:
-  the first with the resolved labels table, the second with the triggers table."
-  [org-text labels triggers]
+  the first with the resolved labels table, the second with the commands table."
+  [org-text labels cmds]
   (let [lines  (str/split-lines org-text)
         blocks (find-table-blocks lines)]
     (if (>= (count blocks) 2)
@@ -153,7 +154,7 @@
                   (concat (take t1-start lines)
                           [(build-labels-table-org labels)]
                           (subvec (vec lines) (inc t1-end) t2-start)
-                          [(build-triggers-table-org triggers)]
+                          [(build-commands-table-org cmds)]
                           (drop (inc t2-end) lines))))
       ;; Fallback: only one table — replace with labels only
       (if (seq blocks)
@@ -463,7 +464,7 @@
       source-map  (when config (build-source-map config))
       source-cfg  (get source-map source-name)
       labels      (if source-cfg (docs-labels source-cfg) default-labels)
-      triggers    (if source-cfg (docs-triggers source-cfg) default-triggers)
+      cmds        (if source-cfg (docs-commands source-cfg) default-commands)
       out-file    (or out-file
                       (if source-name
                         (str "public/" source-name "/web/docs.html")
@@ -478,7 +479,7 @@
       db          ((resolve 'pod.huahaiy.datalevin/db) conn)
       maint-html  (build-maintainers-html db source-name source-cfg)
       org-text    (-> (slurp "resources/docs-tpl.org")
-                      (substitute-template labels triggers)
+                      (substitute-template labels cmds)
                       (filter-feed-links effective-dir))
       body-html   (cond-> (org->html org-text)
                     maint-html (str "\n" maint-html))

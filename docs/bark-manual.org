@@ -2,9 +2,9 @@
 
 BARK monitors a mailbox and converts incoming emails into reports.
 Subsequent emails in the same thread can update the status of that
-report using predefined trigger keywords. Admins and maintainers can
-update reports by writing directly to the monitored inbox, manage
-roles, and receive periodic digest emails.
+report using predefined commands. Admins and maintainers can update
+reports by writing directly to the monitored inbox, manage roles, and
+receive periodic digest emails.
 
 * As a user
 
@@ -37,12 +37,13 @@ replying with:
 ** Updating reports
 
 State changes occur when a reply in the same thread contains a
-case-sensitive trigger keyword at the start of a line, followed by a
-punctuation mark (=.= =,= =;= =:=). For example, a reply to a bug report with
-a line starting with =Confirmed.= marks the bug as "acked"; a reply to a
-patch with a line starting with =Applied.= marks the patch as "closed".
+case-sensitive command keyword at the start of a line, followed by a
+punctuation mark (=.= =,= =;= =:= =?= =!=). For example, a reply to a bug report
+with a line starting with =Confirmed.= marks the bug as "acked"; a reply
+to a patch with a line starting with =Applied.= marks the patch as
+"closed".
 
-See the [[#trigger-keywords][trigger keywords]] below for the full list.
+See the [[#command-keywords][command keywords]] below for the full list.
 
 ** Voting on requests
 
@@ -53,6 +54,7 @@ Requests (=[POLL]=, =[FR]=, =[TODO]=, etc.) support voting:
 - =+0=, =0+=, =-0= or =0-= means "I abstain"
 
 * As a maintainer or admin
+
 ** Announcements, releases, changes
 
 In addition to bugs, patches, and requests, maintainers can make
@@ -72,14 +74,14 @@ Maintainers can also "undo" an update:
 
 ** Setting a deadline
 
-Maintainers can set a deadline on a report by writing the following
-in the body of a reply:
+Maintainers can set a deadline on a report by writing the following in
+the body of a reply:
 
 : Deadline: 2026-03-10.
 
-The date must be in =yyyy-MM-dd= format, followed by a punctuation
-mark.  The deadline appears in JSON exports, Org output (as a proper
-=DEADLINE:= line), and notification emails.
+The date must be in =yyyy-MM-dd= format, followed by an optional
+punctuation mark. The deadline appears in JSON exports, Org output (as
+a proper =DEADLINE:= line), and notification emails.
 
 To remove a deadline:
 
@@ -142,9 +144,9 @@ Reports are detected from email subject labels:
 | =[REL <topic> <version>]= =[RELEASE <topic> <version>]= | release      |
 | =[CHG <topic> <version>]= =[CHANGE <topic> <version>]=  | change       |
 
-All =<…>= parts are optional and positional.  For release and change, a
+All =<…>= parts are optional and positional. For release and change, a
 single value is interpreted as =<version>=: =[REL 2.0]= sets version to
-"2.0".  Use both for topic and version: =[REL parser 2.0]=.  For patch,
+"2.0". Use both for topic and version: =[REL parser 2.0]=. For patch,
 =<version>= is a =v\d+= token (e.g. =v2=) and =<n/m>= is a sequence marker
 (e.g. =3/5=).
 
@@ -155,11 +157,11 @@ Announcements, releases and changes require maintainer permission.
 
 ** Patch series
 
-When patches include a sequence marker (=<n/m>=), BARK groups them
-into a series.  A cover letter (=0/m=) or a new =1/m= patch from the
-same sender and topic automatically closes the previous series and
-starts a fresh one.  This allows version superseding: sending
-=[PATCH parser v2 0/3]= closes the earlier =v1= series for that topic.
+When patches include a sequence marker (=<n/m>=), BARK groups them into
+a series. A cover letter (=0/m=) or a new =1/m= patch from the same sender
+and topic automatically closes the previous series and starts a fresh
+one. This allows version superseding: sending =[PATCH parser v2 0/3]=
+closes the earlier =v1= series for that topic.
 
 ** Customising subject labels
    :PROPERTIES:
@@ -186,18 +188,18 @@ their defaults.
 Per-source settings take precedence over the global =:labels=, which in
 turn take precedence over the built-in defaults.
 
-* Trigger keywords
+* Commands
   :PROPERTIES:
-  :CUSTOM_ID: trigger-keywords
+  :CUSTOM_ID: command-keywords
   :END:
 
-State changes are detected by trigger keywords within the body of a
+State changes are detected by command keywords within the body of a
 response down the thread, at the beginning of the line, followed by a
-punctuation mark (=.= =,= =;= =:=):
+punctuation mark (=.= =,= =;= =:= =?= =!=):
 
-** Status triggers
+** Status commands
 
-| Effect on report  | Trigger keyword                    |
+| Effect on report  | Command keyword                    |
 |-------------------+------------------------------------|
 | acked             | =Acked= =Confirmed= =Reviewed= =Approved=  |
 | owned             | =Owned= =Handled= =Assigned=             |
@@ -205,9 +207,9 @@ punctuation mark (=.= =,= =;= =:=):
 | closed (expired)  | =Expired=                            |
 | closed (resolved) | =Resolved= =Applied= =Done= =Fixed= =Closed= |
 
-** Priority triggers
+** Priority commands
 
-| Effect on report | Trigger keyword |
+| Effect on report | Command keyword |
 |------------------+-----------------|
 | urgent           | =Urgent=          |
 | important        | =Important=       |
@@ -217,7 +219,7 @@ important (=+1=) and urgent (=+2=), giving a value between 0 and 3.
 
 You can use multiple keywords in the same email, one per line.
 
-All trigger keywords work on all report types.  However, only bugs,
+All command keywords work on all report types.  However, only bugs,
 patches, and requests support the acked, owned, urgent, and important
 states.  Announcements, releases, and changes can only be closed.
 
@@ -247,14 +249,14 @@ So an acked, unowned and open report is =1+0+4 = 5=.
 
 So an important and urgent report is =1+2 = 3=.
 
-** Customising trigger keywords
+** Customising command keywords
    :PROPERTIES:
-   :CUSTOM_ID: customising-trigger-keywords
+   :CUSTOM_ID: customising-command-keywords
    :END:
 
-You can customize trigger keywords globally or per source:
+You can customize command keywords globally or per source:
 
- : :triggers {:closed ["Canceled" "Fixed" "Resolved" "Wontfix"]
+ : :commands {:closed ["Canceled" "Fixed" "Resolved" "Wontfix"]
  :            :acked  ["Approved" "Reviewed" "LGTM"]}
 
 * Exploring reports
@@ -428,7 +430,7 @@ email lacks the usual =List-Id= or =Delivered-To= headers.
 |                         | =Archived-At= header is absent                                    |
 | =:bark-path=              | Base URL where this source's public directory is served           |
 | =:labels=                 | Per-source label overrides (see [[#customising-subject-labels]])      |
-| =:triggers=               | Per-source trigger overrides (see [[#customising-trigger-keywords]])  |
+| =:commands=               | Per-source command overrides (see [[#customising-command-keywords]])  |
 | =:maintainers=            | Initial maintainers, e.g. =[{:email "dev@example.org" :since "2025-01-01"}]= |
 | =:report-types=           | Restrict detected types, e.g. =#{:bug :patch}=                    |
 | =:export-formats=         | Output formats, e.g. =["json" "rss"]=  (default: =["json" "org" "rss"]=) |
@@ -511,9 +513,9 @@ Export accepts flags: =-n <source>= (restrict to one source), =-p <N>=
 - *Email-native and immutable* :: BARK has no web form, no API endpoint,
   users don't have to create an account. Users report bugs and request
   features by sending an email to a list. Maintainers act by replying
-  to that same thread: an =Acked:= line closes the report. Because every
-  state change is encoded in an email, the entire tracker state can be
-  reconstructed at any time by replaying the mailbox from scratch.
+  to that same thread: an =Acked.= line marks the bug as acked. Because
+  every state change is encoded in an email, the entire tracker state
+  can be reconstructed at any time by replaying the mailbox from scratch.
 
 - *Statuses and priorities are derived, not asserted* :: BARK provides a
   short fixed vocabulary: =acked=, =owned=, =closed= for status; =urgency= and
@@ -523,7 +525,7 @@ Export accepts flags: =-n <source>= (restrict to one source), =-p <N>=
 - *No catch-all inbox* :: Most trackers (GitHub Issues being the
   canonical example) accept anything and leave triage as an exercise
   for the maintainer. BARK only ingests messages that match explicit
-  subject- or body-trigger rules defined in =config.edn=. Most noise
+  subject- or body-command rules defined in =config.edn=. Most noise
   stays out of the tracker by design, not by discipline.
 
 - *Local-first, workflow-agnostic* :: BARK exports to JSON, RSS, Org.

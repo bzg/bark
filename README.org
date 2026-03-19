@@ -4,7 +4,7 @@ BARK is an email-driven report tracker - see the [[docs/bark-manual.org#rational
 
 BARK monitors a single IMAP mailbox, classifies incoming emails into
 sources by header matching, detects report types from subject tags,
-applies state triggers from email body, and manages roles per source.
+applies commands from email body, and manages roles per source.
 
 BARK reports can be read with other tools:
 
@@ -111,7 +111,7 @@ as a catch-all.
 | =:match=     | no       | Header matching rules (see below)        |
 | =:list-post= | no       | Associated mailing list address          |
 | =:admin=     | no       | Admin for this source (fallback: global) |
-| =:triggers=  | no       | Body-trigger word overrides (per action) |
+| =:commands=  | no       | Command keyword overrides (per action)   |
 | =:labels=    | no       | Report label overrides (per report type) |
 
 Match rules (all optional, all must match if present):

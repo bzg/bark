@@ -2,7 +2,7 @@
 
 BARK monitors a mailbox and converts incoming emails into reports.
 Subsequent emails in the same thread can update the status of that
-report using predefined trigger keywords. Admins and maintainers can
+report using predefined commands. Admins and maintainers can
 update reports by writing directly to the monitored inbox, manage
 roles, and receive periodic digest emails.
 
@@ -30,15 +30,15 @@ Topics can also be set using a colon-delimited prefix in the subject
 after the label: =[BUG] parser: crash on empty input= sets the topic to
 "parser".
 
-** Status & priority triggers
+** Status & priority commands
 
-Replies to reports can update them by using trigger keywords such as
-=Resolved.=, etc. Trigger keywords should be placed at the beginning of
-the line and followed by a punctuation mark (=.= =,= =;= =:=).
+Replies to reports can update them by using command keywords such as
+=Resolved.=, etc. Command keywords should be placed at the beginning of
+the line and followed by a punctuation mark (=.= =,= =;= =:= =?= =!=).
 
-All status/priority trigger keywords work on all report types:
+All status/priority command keywords work on all report types:
 
-| Effect on report          | Trigger keyword                    | Type     |
+| Effect on report          | Command keyword                    | Type     |
 |---------------------------+------------------------------------+----------|
 | Mark as acked             | =Acked= =Confirmed= =Reviewed= =Approved=  | Status   |
 | Mark as owned             | =Owned= =Handled= =Assigned=             | Status   |
@@ -51,7 +51,7 @@ All status/priority trigger keywords work on all report types:
 Users don't set the priority directly: it is computed as the sum of
 important (+1) and urgent (+2).
 
-You can combine several status/priority triggers in a single email:
+You can combine several status/priority commands in a single email:
 
 #+begin_example
 Confirmed.

@@ -299,7 +299,7 @@
   [config]
   (let [default-admin    (:admin config)
         global-st        (:labels config)
-        global-tg        (:triggers config)
+        global-cmd       (:commands config)
         global-ef        (:export-formats config)
         global-er        (:export-reports config)
         global-expiry    (:expiry config)
@@ -308,17 +308,17 @@
           (map (fn [src]
                  [(:name src)
                   (merge {:admin (or (:admin src) default-admin)}
-                         (select-keys src [:list-post :triggers :labels :notifications
+                         (select-keys src [:list-post :commands :labels :notifications
                                            :archive-format-string :list-archive :bark-path
                                            :maintainers])
                          (when-let [lid (get-in src [:match :list-id])] {:list-id lid})
                          (when global-st {:global-labels global-st})
-                         (when global-tg {:global-triggers global-tg})
+                         (when global-cmd {:global-commands global-cmd})
                          {:export-formats (set (or (:export-formats src)
                                                    global-ef
                                                    ["json" "org" "rss"]))
                           :export-reports (when-let [er (or (:export-reports src) global-er)]
-                                           (set (map keyword er)))
+                                            (set (map keyword er)))
                           :report-types (when-let [rt (or (:report-types src) global-rt)]
                                           (set (map keyword rt)))
                           :expiry (or (:expiry src) global-expiry)})]))
@@ -389,8 +389,8 @@
       (.format fmt date))))
 
 ;; ---------------------------------------------------------------------------
-;; Shared label/trigger defaults and merge logic
-;; (canonical definitions used by bark-detect, bark-triggers, bark-docs)
+;; Shared label/command defaults and merge logic
+;; (canonical definitions used by bark-detect, bark-commands, bark-docs)
 ;; ---------------------------------------------------------------------------
 
 (def default-labels
@@ -402,15 +402,18 @@
    :release      ["REL" "RELEASE"]
    :change       ["CHG" "CHANGE"]})
 
-(def default-triggers
-  "Default trigger words per action. Flat — applies to all report types."
-  {:acked  ["Acked" "Confirmed" "Reviewed" "Approved"]
-   :owned  ["Owned" "Handled" "Assigned"]
-   :closed ["Canceled" "Cancelled" "Resolved" "Applied"
-            "Done" "Fixed" "Closed" "Expired"]})
+(def default-commands
+  "Default command words per action. Flat — applies to all report types.
+  Configurable via :commands in config.edn."
+  {:acked     ["Acked" "Confirmed" "Reviewed" "Approved"]
+   :owned     ["Owned" "Handled" "Assigned"]
+   :closed    ["Canceled" "Cancelled" "Resolved" "Applied"
+               "Done" "Fixed" "Closed" "Expired"]
+   :urgent    ["Urgent"]
+   :important ["Important"]})
 
 (def close-reasons
-  "Map closed trigger words to close reasons.
+  "Map closed command words to close reasons.
   Words not listed here default to :resolved."
   {"Canceled"  :canceled
    "Cancelled" :canceled
@@ -424,13 +427,15 @@
     (:global-labels source-cfg) (merge (:global-labels source-cfg))
     (:labels source-cfg)        (merge (:labels source-cfg))))
 
-(defn resolve-triggers-map
-  "Resolve triggers for a source-map entry: defaults -> global -> per-source.
-  Returns a (non-compiled) trigger-words map."
+(defn resolve-commands-map
+  "Resolve command words for a source-map entry: defaults -> global -> per-source.
+  Returns a (non-compiled) word-list map."
   [source-cfg]
-  (cond-> default-triggers
-    (:global-triggers source-cfg) (merge (:global-triggers source-cfg))
-    (:triggers source-cfg)        (merge (:triggers source-cfg))))
+  (let [global (:global-commands source-cfg)
+        local  (:commands source-cfg)]
+    (cond-> default-commands
+      global (merge global)
+      local  (merge local))))
 
 ;; ---------------------------------------------------------------------------
 ;; Shared schema (used by bark-export, bark-notify, bark-stats, bark-digest)

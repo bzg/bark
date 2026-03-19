@@ -77,7 +77,7 @@
 (s/def ::source
   (s/keys :req-un [:source/name]
           :opt-un [:source/match :source/admin :source/list-post
-                   :source/list-archive :source/triggers :source/labels
+                   :source/list-archive :source/commands :source/labels
                    :source/bark-path :source/export-reports
                    :source/report-types :source/maintainers
                    :source/notifications]))

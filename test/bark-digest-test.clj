@@ -3,7 +3,7 @@
 ;; test/bark-digest-test.clj — Integration tests for bark-digest.
 ;;
 ;; Creates a temporary datalevin DB, inserts test emails, runs cmd-digest!,
-;; and verifies reports, triggers, threading, votes, roles, and permissions.
+;; and verifies reports, commands, threading, votes, roles, and permissions.
 ;;
 ;; Usage:
 ;;   bb test/bark-digest-test.clj
@@ -95,12 +95,12 @@
   (let [db-path (str "/tmp/bark-test-" (System/currentTimeMillis))
         conn    (d/get-conn db-path schema)]
     ;; Setup roles for "direct" source
-    (d/transact! conn [{:roles/source "direct"
-                        :roles/admin  "admin@test.org"
+    (d/transact! conn [{:roles/source      "direct"
+                        :roles/admin       "admin@test.org"
                         :roles/maintainers "admin@test.org"}])
     ;; Setup roles for "public-list" source (list-backed)
-    (d/transact! conn [{:roles/source "public-list"
-                        :roles/admin  "admin@test.org"
+    (d/transact! conn [{:roles/source      "public-list"
+                        :roles/admin       "admin@test.org"
                         :roles/maintainers "admin@test.org"}])
     ;; Insert test emails
     (let [emails (edn/read-string (slurp "test/emails.edn"))]
@@ -167,9 +167,10 @@
                  "public-list" {:admin              "admin@test.org"
                                 :list-post "list@test.org"}})
 
-(def sources [{:name "direct"}
-              {:name "public-list"
-               :list-post "list@test.org"}])
+(def sources [{:name "public-list"
+               :match {:list-id "list.test.org"}
+               :list-post "list@test.org"}
+              {:name "direct"}])
 
 ;; ---------------------------------------------------------------------------
 ;; Tests
@@ -340,7 +341,7 @@
         (assert-test "No report for wrong List-Post"
                      (not (report-exists? db "<32@test.org>")))
 
-        ;; --- Email 33: admin (who is also maintainer) direct to list-backed source ---
+        ;; --- Email 33: admin direct to list-backed source (allowed, admin bypass) ---
         (println "\n--- Email 33: admin bypasses List-Post check ---")
         (let [r (get-report db "<33@test.org>")]
           (assert= "Type is :bug" :bug (:report/type r)))
@@ -427,14 +428,14 @@
                        (not (contains? (set (:roles/maintainers roles))
                                        "user@test.org"))))
 
-        ;; --- Trigger with semicolon (emails 48-49) ---
-        (println "\n--- Emails 48-49: trigger with semicolon ---")
+        ;; --- Command with semicolon (emails 48-49) ---
+        (println "\n--- Emails 48-49: command with semicolon ---")
         (let [r (get-report db "<48@test.org>")]
           (assert= "Type is :bug" :bug (:report/type r))
           (assert-test "Acked via Approved;" (some? (:report/acked r))))
 
-        ;; --- Inline trigger ignored (emails 50-51) ---
-        (println "\n--- Emails 50-51: inline trigger ignored ---")
+        ;; --- Inline command ignored (emails 50-51) ---
+        (println "\n--- Emails 50-51: inline command ignored ---")
         (let [r (get-report db "<50@test.org>")]
           (assert= "Type is :bug" :bug (:report/type r))
           (assert-test "NOT closed (inline 'Fixed.' ignored)"
@@ -446,8 +447,8 @@
           (assert= "Type is :request" :request (:report/type r))
           (assert-test "Closed via Closed." (some? (:report/closed r))))
 
-        ;; --- Triggers on announcement (emails 54-55) ---
-        (println "\n--- Emails 54-55: triggers on announcement ---")
+        ;; --- Commands on announcement (emails 54-55) ---
+        (println "\n--- Emails 54-55: commands on announcement ---")
         (let [r (get-report db "<54@test.org>")]
           (assert= "Type is :announcement" :announcement (:report/type r))
           (assert-test "NOT acked (announcements can't be acked)"
@@ -481,7 +482,7 @@
         (println "\n--- Email 74: notify via mailing list ---")
         (let [k    "direct:maint@test.org"
               pref (d/pull db '[:notify/interval-days]
-                            [:notify/key k])]
+                           [:notify/key k])]
           (assert= "Interval still 7 (list notify ignored)"
                    7 (:notify/interval-days pref)))
 
@@ -511,7 +512,7 @@
                        (some? (:report/acked r))))
 
         ;; --- Deep thread (email 62) ---
-        (println "\n--- Email 62: deep thread trigger ---")
+        (println "\n--- Email 62: deep thread command ---")
         (let [r (get-report db "<59@test.org>")]
           (assert-test "Bug 59 closed via grandchild reply"
                        (some? (:report/closed r)))
@@ -535,7 +536,7 @@
         (println "\n--- Emails 65-66: body-text-from-html fallback ---")
         (let [r (get-report db "<65@test.org>")]
           (assert= "Type is :bug" :bug (:report/type r))
-          (assert-test "Acked via html body trigger"
+          (assert-test "Acked via html body command"
                        (some? (:report/acked r))))
 
         ;; --- Maintainer ignores address (email 67) ---
@@ -595,11 +596,11 @@
         ;; --- Unit tests: detect-directives ---
         (println "\n--- detect-directives unit tests ---")
         (assert= "Acked-by parsed"
-                 [{:action :set :attr :report/acked :addr "a@b.com"}]
+                 [{:action :set :attr :report/acked :email-address "a@b.com"}]
                  (detect-directives "Acked-by: a@b.com\n"))
         (assert= "Multiple directives parsed in order"
-                 [{:action :set :attr :report/owned :addr "x@y.com"}
-                  {:action :set :attr :report/urgent :addr "x@y.com"}]
+                 [{:action :set :attr :report/owned :email-address "x@y.com"}
+                  {:action :set :attr :report/urgent :email-address "x@y.com"}]
                  (detect-directives "Owned-by: x@y.com\nUrgent-by: x@y.com\n"))
         (assert= "Unacked parsed"
                  [{:action :unset :attr :report/acked}]
@@ -620,38 +621,38 @@
                  [{:action :set-topic :topic "my-topic"}]
                  (detect-directives "Topic: my-topic\n"))
         (assert= "Mixed directives + deadline + topic in order"
-                 [{:action :set :attr :report/acked :addr "a@b.com"}
+                 [{:action :set :attr :report/acked :email-address "a@b.com"}
                   {:action :set-deadline :date (parse-date-iso "2026-07-01")}
                   {:action :set-topic :topic "urgent-fix"}]
                  (detect-directives "Acked-by: a@b.com\nDeadline: 2026-07-01\nTopic: urgent-fix\n"))
         (assert= "Directive lines mixed with plain text"
-                 [{:action :set :attr :report/owned :addr "x@y.com"}]
+                 [{:action :set :attr :report/owned :email-address "x@y.com"}]
                  (detect-directives "Thanks for the report.\nOwned-by: x@y.com\nWill look into it.\n"))
         (assert= "No directives in plain text"
                  [] (detect-directives "Just a normal reply.\n"))
         (assert= "nil body" nil (detect-directives nil))
 
-        ;; --- Unit tests: resolve-directives (last-one-wins) ---
-        (println "\n--- resolve-directives unit tests ---")
+        ;; --- Unit tests: resolve-commands (last-one-wins) ---
+        (println "\n--- resolve-commands unit tests ---")
         (assert= "Last-one-wins: set then unset"
                  {:set {} :unset #{:report/acked}}
-                 (resolve-directives [{:action :set :attr :report/acked :addr "a@b.com"}
+                 (resolve-commands [{:action :set :attr :report/acked :email-address "a@b.com"}
                                       {:action :unset :attr :report/acked}]))
         (assert= "Last-one-wins: unset then set"
                  {:set {:report/acked "a@b.com"} :unset #{}}
-                 (resolve-directives [{:action :unset :attr :report/acked}
-                                      {:action :set :attr :report/acked :addr "a@b.com"}]))
+                 (resolve-commands [{:action :unset :attr :report/acked}
+                                      {:action :set :attr :report/acked :email-address "a@b.com"}]))
         (assert= "Deadline then undeadline"
                  {:set {} :unset #{} :undeadline? true}
-                 (resolve-directives [{:action :set-deadline :date (parse-date-iso "2026-06-01")}
+                 (resolve-commands [{:action :set-deadline :date (parse-date-iso "2026-06-01")}
                                       {:action :unset-deadline}]))
         (assert= "Undeadline then deadline (deadline wins)"
                  {:set {} :unset #{} :deadline (parse-date-iso "2026-06-01")}
-                 (resolve-directives [{:action :unset-deadline}
+                 (resolve-commands [{:action :unset-deadline}
                                       {:action :set-deadline :date (parse-date-iso "2026-06-01")}]))
         (assert= "Topic last-one-wins"
                  {:set {} :unset #{} :topic "second"}
-                 (resolve-directives [{:action :set-topic :topic "first"}
+                 (resolve-commands [{:action :set-topic :topic "first"}
                                       {:action :set-topic :topic "second"}]))
 
         ;; --- Bug 81: Acked-by directive (email 82) ---
@@ -751,22 +752,18 @@
           (assert-test "Deadline is set"
                        (some? (:report/deadline r))))
 
-        ;; --- Bug 100: In-Reply-To source resolution (emails 100-101) ---
-        (println "\n--- Bug 100: In-Reply-To source resolution ---")
-        (let [r (get-report db "<100@test.org>")]
-          (assert= "Type is :bug" :bug (:report/type r))
-          (assert-test "Acked via off-list reply (source from In-Reply-To)"
-                       (some? (:report/acked r)))
-          (assert= "1 descendant (off-list reply threaded)"
-                   1 (count (:report/descendants r))))
-        ;; Verify the off-list reply got stamped with the resolved source
-        (let [src (d/q '[:find ?src .
-                         :in $ ?mid
-                         :where [?e :email/message-id ?mid]
-                                [?e :email/source ?src]]
-                       db "<101@test.org>")]
-          (assert= "Off-list reply source stamped as 'direct'"
-                   "direct" src))
+        ;; --- Email 100: [bark:<list-id>] subject prefix ---
+        (println "\n--- Email 100: [bark:list.test.org] subject prefix ---")
+        (let [r   (get-report db "<100@test.org>")
+              eid (d/q '[:find ?e . :in $ ?mid
+                         :where [?e :email/message-id ?mid]]
+                       db "<100@test.org>")
+              src (when eid (:email/source (d/pull db '[:email/source] eid)))]
+          (assert-test "Report exists" (some? r))
+          (assert= "Type is :bug (prefix stripped for detection)"
+                   :bug (:report/type r))
+          (assert= "Classified under public-list via bark prefix"
+                   "public-list" src))
 
         ;; --- Summary ---
         (println "\n=== Summary ===")

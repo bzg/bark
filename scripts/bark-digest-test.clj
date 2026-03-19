@@ -3,7 +3,7 @@
 ;; test/bark-digest-test.clj — Integration tests for bark-digest.
 ;;
 ;; Creates a temporary datalevin DB, inserts test emails, runs cmd-digest!,
-;; and verifies reports, triggers, threading, votes, roles, and permissions.
+;; and verifies reports, commands, threading, votes, roles, and permissions.
 ;;
 ;; Usage:
 ;;   bb test/bark-digest-test.clj
@@ -426,7 +426,7 @@
                        (not (contains? (set (:roles/maintainers roles))
                                        "user@test.org"))))
 
-        ;; --- Trigger with semicolon (emails 48-49) ---
+        ;; --- Command with semicolon (emails 48-49) ---
         (println "\n--- Emails 48-49: trigger with semicolon ---")
         (let [r (get-report db "<48@test.org>")]
           (assert= "Type is :bug" :bug (:report/type r))
@@ -445,8 +445,8 @@
           (assert= "Type is :request" :request (:report/type r))
           (assert-test "Closed via Closed." (some? (:report/closed r))))
 
-        ;; --- Triggers on announcement (emails 54-55) ---
-        (println "\n--- Emails 54-55: triggers on announcement ---")
+        ;; --- Commands on announcement (emails 54-55) ---
+        (println "\n--- Emails 54-55: commands on announcement ---")
         (let [r (get-report db "<54@test.org>")]
           (assert= "Type is :announcement" :announcement (:report/type r))
           (assert-test "NOT acked (announcements can't be acked)"
@@ -480,7 +480,7 @@
         (println "\n--- Email 74: notify via mailing list ---")
         (let [k    "direct:maint@test.org"
               pref (d/pull db '[:notify/interval-days]
-                            [:notify/key k])]
+                           [:notify/key k])]
           (assert= "Interval still 7 (list notify ignored)"
                    7 (:notify/interval-days pref)))
 
