@@ -168,8 +168,8 @@
      [:td {:data-value (str flags-score) :title flags-title
            :style "text-align:center; font-family:monospace; font-size:0.8rem; letter-spacing:0.1em"} flags-str]
      [:td (patch-link patches) (related-link related)
-      (subject-el subject role archived-at closed? close-reason)
-      (vote-badge votes)]
+      (vote-badge votes)
+      (subject-el subject role archived-at closed? close-reason)]
      [:td.secondary {:title from} (if (#{"maintainer" "admin"} role) [:strong author] author)]
      [:td {:data-value iso-date} [:small (or iso-date date "")]]
      [:td {:style "text-align:center"} (or replies 0)]]))
