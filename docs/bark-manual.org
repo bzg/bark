@@ -288,9 +288,9 @@ You can also export a single format:
 Use =-n <source>= to restrict to one source, =-p <N>= to filter by
 minimum priority, and =-s <N>= to filter by minimum status.
 
-** Browsing Bark reports online
+** Browsing BARK reports online
 
-A web interface lets you navigate Bark reports.
+A web interface lets you navigate BARK reports.
 
 The search field has a minimal syntax:
 

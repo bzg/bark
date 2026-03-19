@@ -89,7 +89,7 @@
                                     :password password
                                     :from     from
                                     :to       [to]
-                                    :subject  (str "[Bark] " level-str " — " (:?ns-str data))
+                                    :subject  (str "[BARK] " level-str " — " (:?ns-str data))
                                     :text     (str (force (:timestamp_ data)) " "
                                                    level-str " " (:?ns-str data)
                                                    " — " msg)}))

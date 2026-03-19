@@ -108,7 +108,7 @@
 
 (defn bark-footer []
   [:footer.bark-footer
-   [:a {:href bark-repo-url} "Bark"]
+   [:a {:href bark-repo-url} "BARK"]
    " is "
    [:a {:href "https://www.gnu.org/philosophy/free-sw.html"}
     "Free Software"]

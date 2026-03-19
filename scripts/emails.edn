@@ -1359,7 +1359,7 @@
  ;; Should be classified under "public-list" source, with prefix stripped.
  {:email/imap-uid    100
   :email/message-id  "<100@test.org>"
-  :email/subject     "[bark:list.test.org] [BUG] Bark prefix source test"
+  :email/subject     "[bark:list.test.org] [BUG] BARK prefix source test"
   :email/content-type "text/plain"
   :email/from-address "admin@test.org"
   :email/date-sent  #inst "2026-02-01T10:00:00"

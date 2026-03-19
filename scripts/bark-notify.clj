@@ -213,7 +213,7 @@
                      :password password
                      :from     from
                      :to       [to-addr]
-                     :subject  "[Bark] Reports"
+                     :subject  "[BARK] Reports"
                      :text     body})))
 
 ;; ---------------------------------------------------------------------------
