@@ -210,8 +210,8 @@
   td:nth-child(5) { min-width: 740px; }
   td:nth-child(6) { max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #status { font-size: 0.8rem; margin-bottom: 0.5rem; }
-  .vote-badge { display: inline-block; padding: 0.1rem 0.4rem; border-radius: 3px;
-                font-size: 0.7rem; font-weight: 600; margin-left: 0.4em; vertical-align: middle; }
+  .vote-badge { display: inline-block; padding: 0.1rem 0.4rem; border-radius: 3px; font-size: 0.7rem;
+                font-weight: 600; margin-left: 0.4em; margin-right: 0.4em; vertical-align: middle; }
   .vote-pos { background: #27ae6033; color: #27ae60; }
   .vote-neg { background: #c0392b33; color: #c0392b; }
   .vote-zero { background: #95a5a622; color: #7f8c8d; }
