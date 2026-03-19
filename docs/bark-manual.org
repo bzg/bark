@@ -2,9 +2,9 @@
 
 BARK monitors a mailbox and converts incoming emails into reports.
 Subsequent emails in the same thread can update the status of that
-report using predefined commands. Admins and maintainers can update
-reports by writing directly to the monitored inbox, manage roles, and
-receive periodic digest emails.
+report using predefined commands. Admins and maintainers can also
+update reports by writing directly to the monitored inbox, manage
+roles, and receive periodic digest emails.
 
 * As a user
 
@@ -14,9 +14,9 @@ As a user, you can report bugs, propose patches and make other
 requests:
 
 - You create a bug report by adding =[BUG]= to the subject.
-- You send a patch by adding an inline or attached patch.
-- You can also create a =[POLL]=, share a feature request =[FR]= or a
-  =[TODO]=.
+- You send a patch by adding an inline or attached patch, usually with
+  [PATCH] in the subject.
+- You can also create a =[POLL]=, share a feature request =[FR]= or a =[TODO]=.
 
 See below the list of [[#report-types][report types]].
 
@@ -93,10 +93,8 @@ Also, maintainers can write directly to the watched inbox to update a
 report without notifying the list.
 
 For example, the maintainer can clean up old issues by marking them as
-=Cancelled= in the body of a reply sent to the monitored inbox, rather
-than to the entire list. This is also useful for reclassifying emails:
-if someone forgot the =[BUG]= prefix, a maintainer can edit the subject
-and resend the email to the BARK inbox.
+=Canceled= in the body of a reply sent to the monitored inbox, rather
+than to the entire list.
 
 ** Acting as an update proxy
 
@@ -115,16 +113,16 @@ Here is how the permissions work:
 
 - There is only one admin per source.
 - The admin and maintainers can promote users as maintainers.
-- The admin can demote maintainers as users.
 - The admin and maintainers can ignore users.
+- The admin can demote maintainers as users.
 - The admin can "unignore" users.
 
 Roles and permissions are set by writing to the BARK inbox:
 
 #+begin_example
 Add maintainer: dev@example.com        (admin or maintainer)
-Remove maintainer: dev@example.com     (admin only)
 Ignore: spammer@example.com            (admin or maintainer)
+Remove maintainer: dev@example.com     (admin only)
 Unignore: user@example.com             (admin only)
 #+end_example
 
@@ -199,31 +197,13 @@ punctuation mark (=.= =,= =;= =:= =?= =!=):
 
 ** Status commands
 
-| Effect on report  | Command keyword                    |
-|-------------------+------------------------------------|
-| acked             | =Acked= =Confirmed= =Reviewed= =Approved=  |
-| owned             | =Owned= =Handled= =Assigned=             |
-| closed (canceled) | =Canceled= =Cancelled=                 |
-| closed (expired)  | =Expired=                            |
-| closed (resolved) | =Resolved= =Applied= =Done= =Fixed= =Closed= |
-
-** Priority commands
-
-| Effect on report | Command keyword |
-|------------------+-----------------|
-| urgent           | =Urgent=          |
-| important        | =Important=       |
-
-Priority is never set directly: it is computed as the sum of
-important (=+1=) and urgent (=+2=), giving a value between 0 and 3.
-
-You can use multiple keywords in the same email, one per line.
-
-All command keywords work on all report types.  However, only bugs,
-patches, and requests support the acked, owned, urgent, and important
-states.  Announcements, releases, and changes can only be closed.
-
-** Report statuses and priority
+| Command keyword                    | Effect on report  |
+|------------------------------------+-------------------|
+| =Acked= =Confirmed= =Reviewed= =Approved=  | acked             |
+| =Owned= =Handled= =Assigned=             | owned             |
+| =Canceled= =Cancelled=                 | closed (canceled) |
+| =Expired=                            | closed (expired)  |
+| =Resolved= =Applied= =Done= =Fixed= =Closed= | closed (resolved) |
 
 All reports can be in a combination of three states:
 
@@ -231,10 +211,7 @@ All reports can be in a combination of three states:
 - *Owned* --- someone claimed ownership of this report.
 - *Closed* --- the report is resolved, canceled, or expired.
 
-** Status (as number)
-
-When the status is represented as a numeric value, it is computed like
-this:
+When the status is represented as a number, it is computed like this:
 
 | (Un)acked  | (0)1 |
 | (Un)owned  | (0)2 |
@@ -242,12 +219,37 @@ this:
 
 So an acked, unowned and open report is =1+0+4 = 5=.
 
-** Priority (as number)
+Note that only bugs, patches, and requests support the acked, owned,
+urgent, and important states. Announcements, releases, and changes can
+only be closed.
+
+** Priority commands
+
+| Command keyword | Effect on report |
+|-----------------+------------------|
+| =Urgent=          | urgent           |
+| =Important=       | important        |
+
+These values are used to calculate the "priority" sum:
 
 | (Un)important | (0)1 |
 | (Un)urgent    | (0)2 |
 
 So an important and urgent report is =1+2 = 3=.
+
+** Multiple commands
+
+You can use multiple keywords in the same email, one per line.
+
+: From: x@y.z
+: Date: Thu, 19 Mar 2026 16:45:00 +0100
+: Subject: BARK is too good!
+: 
+: > I have too much free time now.
+: 
+: Confirmed.
+: Urgent.
+: Important.
 
 ** Customising command keywords
    :PROPERTIES:
@@ -277,7 +279,7 @@ Running =bb export all= generates, for each source:
 RSS feeds contain up to 50 items, most recent first.
 
 Export is incremental: only sources modified since the last export are
-re-generated.  Use =bb export all --all= to force a full re-export.
+re-generated. Use =bb export all --all= to force a full re-export.
 
 You can also export a single format:
 
@@ -315,12 +317,9 @@ The search field has a minimal syntax:
 
 ** The =bone= CLI tool, =gnus-bone.el= and =notmuch-bone.el=
 
-[[https://codeberg.org/bzg/bone][bone]] lets you browse and filter BARK reports interactively from the
-terminal.
-
-[[https://codeberg.org/bzg/gnus-bone][gnus-bone.el]] lets you explore BARK reports from within [[https://gnus.org/][Emacs Gnus]].
-
-[[https://codeberg.org/bzg/notmuch-bone][notmuch-bone.el]] provides the same integration for [[https://notmuchmail.org/][notmuch]].
+- [[https://codeberg.org/bzg/bone][bone]] lets you browse and filter BARK reports interactively from the terminal.
+- [[https://codeberg.org/bzg/gnus-bone][gnus-bone.el]] lets you explore BARK reports from within [[https://gnus.org/][Emacs Gnus]].
+- [[https://codeberg.org/bzg/notmuch-bone][notmuch-bone.el]] provides the same integration for [[https://notmuchmail.org/][notmuch]].
 
 * Notifications
 
@@ -329,8 +328,8 @@ with a summary of open reports. Notifications are never sent to
 regular users.
 
 Notifications require SMTP configuration (see [[#config][Config]]) and are sent via
-=bb notify=, typically from a cron job.  Use =bb notify --dry-run= to
-preview without sending.  Each notification email contains two
+=bb notify=, typically from a cron job. Use =bb notify --dry-run= to
+preview without sending. Each notification email contains two
 sections: open bugs/patches/requests owned by the recipient, and all
 unacked & unowned bugs/patches/requests by anyone.
 
