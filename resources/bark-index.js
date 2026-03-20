@@ -151,6 +151,9 @@ function matchRow(tr, raw) {
 
 /* ── Display ───────────────────────────────────────────────── */
 
+/* Post-restripe hooks — called after stripe classes change */
+var _restripeHooks = [];
+
 function restripe() {
   var i = 0;
   document.querySelectorAll('tbody tr').forEach(function(tr) {
@@ -160,6 +163,7 @@ function restripe() {
       tr.classList.remove('stripe');
     }
   });
+  _restripeHooks.forEach(function(fn) { fn(); });
 }
 
 function updateStatus() {
@@ -168,7 +172,8 @@ function updateStatus() {
   rows.forEach(function(tr) {
     if (!tr.classList.contains('hidden')) visible++;
   });
-  document.getElementById('status').textContent = visible + '/' + barkConfig.total + ' reports';
+  var base = onlyOpen ? barkConfig.openCount : barkConfig.total;
+  document.getElementById('status').textContent = visible + '/' + base + ' reports';
 }
 
 function filterRows() {
@@ -288,6 +293,7 @@ function loadClosedReports(callback) {
   fetch(barkConfig.closedJsonUrl)
     .then(function(resp) { return resp.json(); })
     .then(function(data) {
+      if (closedLoaded) return; // guard against double resolution
       var reports = data.reports || [];
       var tbody = document.querySelector('tbody');
       var fragment = document.createDocumentFragment();
@@ -478,4 +484,68 @@ window.addEventListener('popstate', function() { restoreFromURL(); });
 
 /* Compute "Due" column for server-rendered rows */
 computeDueCells(document);
+
+/* ── Subject fold/unfold ───────────────────────────────────── */
+(function() {
+  var style = document.createElement('style');
+  style.textContent =
+    'td:nth-child(5) { position: relative; white-space: nowrap; overflow: hidden; max-width: 740px; }' +
+    'td:nth-child(5).expanded { white-space: normal; overflow: visible; }' +
+    '.unfold { position: absolute; right: 0; top: 50%; transform: translateY(-50%);' +
+    '  cursor: pointer; color: var(--pico-primary); font-weight: 700; font-size: 1em;' +
+    '  padding: 0.1em 0.4em 0.1em 0.6em; user-select: none; z-index: 1; }';
+  document.head.appendChild(style);
+
+  function isTruncated(td) {
+    return td.scrollWidth > td.clientWidth + 1;
+  }
+
+  function setupToggles(container) {
+    container.querySelectorAll('td:nth-child(5)').forEach(function(td) {
+      if (td.querySelector('.unfold') || td.classList.contains('expanded')) return;
+      var toggle = document.createElement('span');
+      toggle.className = 'unfold';
+      toggle.textContent = '\u2026';
+      toggle.style.display = 'none';
+      toggle.onmousedown = function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+      };
+      toggle.onclick = function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        td.classList.add('expanded');
+        toggle.remove();
+      };
+      td.appendChild(toggle);
+    });
+  }
+
+  function showTogglesIfNeeded() {
+    document.querySelectorAll('td:nth-child(5) .unfold').forEach(function(toggle) {
+      var td = toggle.parentElement;
+      if (isTruncated(td)) {
+        toggle.style.display = '';
+        toggle.style.backgroundColor = getComputedStyle(td).backgroundColor;
+      } else {
+        toggle.style.display = 'none';
+      }
+    });
+  }
+
+  setupToggles(document);
+  requestAnimationFrame(showTogglesIfNeeded);
+  window.addEventListener('resize', showTogglesIfNeeded);
+  _restripeHooks.push(function() {
+    requestAnimationFrame(showTogglesIfNeeded);
+  });
+
+  var tbody = document.querySelector('tbody');
+  if (window.MutationObserver) {
+    new MutationObserver(function() {
+      setupToggles(tbody);
+      requestAnimationFrame(showTogglesIfNeeded);
+    }).observe(tbody, { childList: true });
+  }
+})();
 
