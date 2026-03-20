@@ -491,15 +491,54 @@
                 top-openers email-ratio closed-cancel
                 contributors-by-month maintainers-by-month
                 total-contributors total-maintainers]} stats
-        n-yr (reduce + (vals reports-per-type))
-        pct  #(when % (str (Math/round (* 100.0 %)) "%"))
         nav-html (str (h/html (nav-bar "BARK — Data" "data")))
         data-section (render-data-section out-dir)
         vega-scripts (str "<script src=\"https://cdn.jsdelivr.net/npm/vega@5/build/vega.min.js\"></script>\n"
                           "<script src=\"https://cdn.jsdelivr.net/npm/vega-lite@5/build/vega-lite.min.js\"></script>\n"
                           "<script src=\"https://cdn.jsdelivr.net/npm/vega-embed@6/build/vega-embed.min.js\"></script>\n"
                           "<script>\n" (wrap-js theme-toggle-js) "\n</script>\n"
-                          "<script>\n" (wrap-js stats-js) "\n</script>\n")]
+                          "<script>\n" (wrap-js stats-js) "\n</script>\n")
+        n-yr (reduce + (vals reports-per-type))
+        pct  #(when % (str (Math/round (* 100.0 %)) "%"))
+        ;; JS that fetches stats.json and replaces the KPI area
+        kpi-loader-js (wrap-js "
+(function() {
+  function kpi(v, l, s) {
+    return '<div class=\"kpi\"><div class=\"kpi-v\">' + v + '</div>' +
+           '<div class=\"kpi-l\">' + l + '</div>' +
+           (s ? '<div class=\"kpi-s\">' + s + '</div>' : '') + '</div>';
+  }
+  fetch('reports/stats.json')
+    .then(function(r) { return r.json(); })
+    .then(function(s) {
+      var el = document.getElementById('kpi-area');
+      if (!el) return;
+      var rpt = s['reports-per-type'] || {};
+      var nYr = Object.keys(rpt).reduce(function(a, k) { return a + rpt[k]; }, 0);
+      var ocr = s['open-closed-ratio'] || {};
+      var ttc = s['time-to-close'];
+      var er  = s['email-ratio'];
+      var openYr = s['open-last-year'] || 0;
+      var totalC = s['total-contributors'];
+      var totalM = s['total-maintainers'];
+      var pct = (ocr.open + ocr.closed) > 0
+                ? Math.round(100 * ocr.ratio) + '%' : '';
+      var h = '';
+      h += kpi(nYr, 'Reports (last year)', openYr + ' still open');
+      h += kpi(ocr.open, 'Open (all time)', pct + ' of all');
+      h += kpi(ocr.closed, 'Closed (all time)');
+      if (ttc) h += kpi(ttc['median-days'] + 'd', 'Median to close',
+                        'avg ' + ttc['avg-days'] + 'd');
+      if (er)  h += kpi(er.ratio || '\\u2014', 'Report/email ratio',
+                        er['reports-last-year'] + ' reports / ' +
+                        er['total-emails'] + ' emails');
+      if (totalC) h += kpi(totalC, 'Contributors',
+                           totalM ? totalM + ' maintainers' : '');
+      el.innerHTML = h;
+    })
+    .catch(function(e) { console.error('Failed to load stats.json:', e); });
+})();
+")]
     (str
      "<!DOCTYPE html>\n"
      "<html lang=\"en\" data-theme=\"light\">\n"
@@ -514,7 +553,8 @@
      (when data-section (str data-section "\n"))
 
      "<h3>Statistics</h3>\n"
-     "<div class=\"kpis\">\n"
+     "<div id=\"kpi-area\" class=\"kpis\">\n"
+     ;; Baked fallback (replaced by stats.json fetch when served over HTTP)
      (kpi n-yr "Reports (last year)"
           (str open-last-year " still open"))
      (kpi (:open open-closed-ratio) "Open (all time)"
@@ -546,6 +586,7 @@
        (chart-box "chart-cancel" (chart-cancel-breakdown closed-cancel)))
      "</div>\n"
 
+     "<script>\n" kpi-loader-js "\n</script>\n"
      "</main>\n"
      (h/html (bark-footer))
      "</body>\n</html>\n")))

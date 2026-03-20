@@ -459,9 +459,11 @@
       (log/info "Wrote" total "patch file(s)"))))
 
 (defn dump-html!
-  "Generate index.html for a single source."
+  "Generate index.html for a single source.
+  Uses all-open.json so only open reports are server-rendered;
+  closed reports are lazy-loaded by the client from all-closed.json."
   [base-dir reports-dir cli-args]
-  (let [json-file (str reports-dir "/all.json")]
+  (let [json-file (str reports-dir "/all-open.json")]
     (apply process/shell "bb" "scripts/bark-index.clj"
            "-o" (str base-dir "/index.html")
            "--json" json-file
@@ -524,35 +526,78 @@
                  (str plural ".xml") plural))))
 
 (defn- dump-open-closed!
-  "Export all-open.json and all-closed.json with summary counts.
+  "Export open/closed split files and meta.json with summary counts.
   all-open.json is loaded by index.html on first paint (fast).
   all-closed.json is lazy-loaded when user deactivates the Open filter.
-  Both include :total, :open-count, :closed-count in the envelope.
-  Also produces per-type -open files when fmts allows."
+  meta.json contains summary counts per type, used by data.html for KPIs.
+  Produces per-type -open and -closed files in all enabled formats."
   [reports reports-dir source-name source-map maintainers-map fmts]
   (let [open       (vec (open-reports reports))
         closed     (vec (filter :report/closed reports))
         counts     {:total        (count reports)
                     :open-count   (count open)
-                    :closed-count (count closed)}]
+                    :closed-count (count closed)}
+        ;; Per-type breakdown for meta.json
+        by-type    (group-by :report/type reports)
+        type-counts (into {}
+                          (map (fn [[t rs]]
+                                 [(name t) {:total  (count rs)
+                                            :open   (count (remove :report/closed rs))
+                                            :closed (count (filter :report/closed rs))}]))
+                          by-type)
+        meta-data  (merge counts
+                          {:bark-format bark-format
+                           :source      source-name
+                           :generated   (str (java.util.Date.))
+                           :by-type     type-counts}
+                          (source-metadata source-name source-map))]
+    ;; meta.json
+    (spit (str reports-dir "/meta.json")
+          (json/generate-string meta-data {:pretty true}))
+    (log/info "Wrote meta.json")
+    ;; --- Open ---
     (dump-json! open reports-dir source-name source-map maintainers-map
                 "all-open.json" counts)
+    (when (fmts "rss")
+      (dump-rss! open reports-dir source-name source-map maintainers-map
+                 "all-open.xml" "open reports"))
+    (when (fmts "org")
+      (dump-org! open reports-dir source-name source-map maintainers-map
+                 "all-open.org" "open reports"))
+    ;; --- Closed ---
     (dump-json! closed reports-dir source-name source-map maintainers-map
                 "all-closed.json" counts)
-    (when (seq open)
-      (when (fmts "org")
-        (dump-org! open reports-dir source-name source-map maintainers-map
-                   "all-open.org" "open reports"))
-      (doseq [rtype report-types
-              :let [typed (filter-reports open {:type rtype})
-                    plural (type->plural rtype)]
-              :when (seq typed)]
+    (when (fmts "rss")
+      (dump-rss! closed reports-dir source-name source-map maintainers-map
+                 "all-closed.xml" "closed reports"))
+    (when (fmts "org")
+      (dump-org! closed reports-dir source-name source-map maintainers-map
+                 "all-closed.org" "closed reports"))
+    ;; --- Per-type open & closed ---
+    (doseq [rtype report-types
+            :let [plural (type->plural rtype)
+                  t-open   (filter-reports open {:type rtype})
+                  t-closed (filter-reports closed {:type rtype})]]
+      (when (seq t-open)
         (when (fmts "json")
-          (dump-json! typed reports-dir source-name source-map maintainers-map
+          (dump-json! t-open reports-dir source-name source-map maintainers-map
                       (str plural "-open.json")))
+        (when (fmts "rss")
+          (dump-rss! t-open reports-dir source-name source-map maintainers-map
+                     (str plural "-open.xml") (str plural " (open)")))
         (when (fmts "org")
-          (dump-org! typed reports-dir source-name source-map maintainers-map
-                     (str plural "-open.org") (str plural " (open)")))))))
+          (dump-org! t-open reports-dir source-name source-map maintainers-map
+                     (str plural "-open.org") (str plural " (open)"))))
+      (when (seq t-closed)
+        (when (fmts "json")
+          (dump-json! t-closed reports-dir source-name source-map maintainers-map
+                      (str plural "-closed.json")))
+        (when (fmts "rss")
+          (dump-rss! t-closed reports-dir source-name source-map maintainers-map
+                     (str plural "-closed.xml") (str plural " (closed)")))
+        (when (fmts "org")
+          (dump-org! t-closed reports-dir source-name source-map maintainers-map
+                     (str plural "-closed.org") (str plural " (closed)")))))))
 (defn export-source!
   "Export a single source in the given format(s).
   Always produces all-open.json and all-closed.json (used by index.html).
