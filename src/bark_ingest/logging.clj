@@ -11,6 +11,9 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Size parsing
+;; SYNC: parse-size, rotate-log!, configure-file-logging! are mirrored in
+;; scripts/bark-common.clj (bb version, no locking — single-threaded).
+;; Keep both in sync when changing the log format or rotation logic.
 ;; ---------------------------------------------------------------------------
 
 (defn parse-size

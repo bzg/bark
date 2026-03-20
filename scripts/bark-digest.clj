@@ -146,7 +146,7 @@
   (d/q '[:find ?t . :where [?e :digest/id "watermark"] [?e :digest/last-run ?t]] db))
 
 (defn save-last-run! [conn ts]
-  (d/transact! conn [{:digest/id "watermark" :digest/last-run ts}]))
+  (d/transact! conn [{:digest/id digest-watermark-id :digest/last-run ts}]))
 
 (def email-pull-pattern
   '[:db/id :email/imap-uid :email/source :email/subject :email/message-id
@@ -285,117 +285,162 @@
            :where [?e :email/message-id ?mid] [?e :email/source ?src]]
          db in-reply-to)))
 
+(defn- resolve-email-source!
+  "Classify the email's source. Persists source to DB if newly resolved.
+  Strips [bark:list-id] prefix from subject in the returned email map
+  (in-memory only — the DB retains the original subject for re-classification
+  on --all re-runs).
+  Returns [source-name email] where email may have an updated subject."
+  [conn email sources]
+  (let [eid       (:db/id email)
+        mid       (:email/message-id email)
+        existing  (:email/source email)
+        irt-src   (when-not existing
+                    (source-from-in-reply-to (d/db conn) (:email/in-reply-to email)))
+        hdr-src   (when (and irt-src (not existing))
+                    (classify-source (:email/headers-edn email)
+                                     (:email/subject email) sources))
+        _         (when (and irt-src hdr-src (not= irt-src hdr-src))
+                    (log/warn "Source mismatch for" mid
+                              "— In-Reply-To says" irt-src
+                              "but headers say" hdr-src "(using" irt-src ")"))
+        src-name  (or existing irt-src hdr-src
+                      (classify-source (:email/headers-edn email)
+                                       (:email/subject email) sources))
+        _         (when (and src-name (not existing))
+                    (d/transact! conn [{:db/id eid :email/source src-name}]))
+        ;; Strip [bark:<list-id>] prefix from subject (in-memory only).
+        ;; Not persisted to DB: the original subject is needed for source
+        ;; re-classification on --all re-runs, and persisting triggers a
+        ;; Datalevin pod transit serialization issue with Indexable values.
+        email     (if-let [bark-lid (re-find #"(?i)^\[bark:[^\]]+\]\s*" (:email/subject email))]
+                    (update email :email/subject #(str/replace-first % bark-lid ""))
+                    email)]
+    [src-name email]))
+
+(defn- try-create-report!
+  "Detect report type from email, check permissions, create if new.
+  Returns [created thread-index type-index report-eid]."
+  [conn email eid message-id from-addr source-name source-cfg roles
+   {:keys [created thread-index type-index]}]
+  (let [subj-patterns (resolve-labels (or source-cfg {}))
+        allowed-types (:report-types source-cfg)
+        report-info   (detect-report email subj-patterns allowed-types)
+        permitted?    (and report-info from-addr
+                           (can-create-report? roles from-addr report-info
+                                               email source-cfg))
+        new-report?   (and permitted? (not (report-exists? (d/db conn) message-id)))]
+    (if new-report?
+      (do (log/info (str "[" (name (:type report-info)) "]") (:email/subject email))
+          (create-report! conn eid message-id report-info)
+          (ensure-contributor! conn source-name from-addr
+                               (:email/from-name email) (:email/date-sent email))
+          (let [rid (d/q '[:find ?r . :in $ ?mid :where [?r :report/message-id ?mid]]
+                         (d/db conn) message-id)]
+            (bump-report-updated! conn rid)
+            {:created      (inc created)
+             :thread-index (index-assoc thread-index message-id rid)
+             :type-index   (assoc type-index rid (:type report-info))
+             :report-eid   rid
+             :report-info  report-info}))
+      (do (when (and report-info (not permitted?))
+            (log/warn "Denied:" from-addr "cannot create" (name (:type report-info))))
+          {:created created :thread-index thread-index :type-index type-index
+           :report-eid nil :report-info report-info}))))
+
+(defn- thread-descendants!
+  "Link email as descendant of ancestor reports, apply commands to nearest.
+  Returns [threaded thread-index]."
+  [conn email eid message-id from-addr source-name roles source-map
+   {:keys [threaded thread-index type-index]}]
+  (let [parent-eids  (find-reports-for-email email thread-index (d/db conn))
+        nearest-eids (find-nearest-report email thread-index (d/db conn))]
+    (if (seq parent-eids)
+      (do (doseq [rid parent-eids]
+            (add-descendant! conn rid eid))
+          (ensure-contributor! conn source-name from-addr
+                               (:email/from-name email) (:email/date-sent email))
+          (doseq [rid nearest-eids]
+            (when-let [rtype (or (type-index rid)
+                                 (d/q '[:find ?t . :in $ ?r
+                                        :where [?r :report/type ?t]]
+                                      (d/db conn) rid))]
+              (let [rsrc  (d/q '[:find ?src . :in $ ?rid
+                                 :where [?rid :report/email ?e]
+                                 [?e :email/source ?src]]
+                               (d/db conn) rid)
+                    rroles (if rsrc (get-roles (d/db conn) rsrc) roles)]
+                (apply-commands! conn rid rtype email source-map rroles))))
+          (bump-report-updated! conn parent-eids)
+          {:threaded     (+ threaded (count parent-eids))
+           :thread-index (reduce #(index-assoc %1 message-id %2)
+                                 thread-index parent-eids)
+           :parent-eids  parent-eids
+           :nearest-eids nearest-eids})
+      {:threaded threaded :thread-index thread-index
+       :parent-eids #{} :nearest-eids nil})))
+
+(defn- post-creation-hooks!
+  "Run hooks after report creation: related links, auto-close, series, patches."
+  [conn email eid report-eid report-info from-addr parent-eids nearest-eids]
+  (when report-eid
+    (when (seq parent-eids)
+      (link-related-reports! conn report-eid parent-eids))
+    (let [rtype (:type report-info)]
+      ;; Auto-close [CHG x] when [REL x] is created
+      (when (and (= :release rtype) (:version report-info))
+        (close-changes-for-release! conn (:version report-info) eid report-eid))
+      ;; Auto-close previous patch version (v<n> supersedes v<n-1>)
+      (when (and (= :patch rtype) (:version report-info) (seq nearest-eids))
+        (close-patch-previous-version! conn report-info eid nearest-eids))
+      ;; Series management
+      (when (and (= :patch rtype) (:patch-seq report-info))
+        (manage-series! conn report-eid eid report-info from-addr parent-eids))
+      ;; Store patch content
+      (when (= :patch rtype)
+        (let [patches (build-patch-entities email)]
+          (when (seq patches)
+            (d/transact! conn [{:db/id report-eid :report/patches patches}])
+            (log/info (count patches) "patch file(s) stored")))))))
+
 (defn- process-email!
   "Process a single email during digest. Returns updated accumulator."
   [conn source-map sources {:keys [created threaded skipped thread-index type-index] :as acc} email]
-  (let [message-id    (:email/message-id email)
-        eid           (:db/id email)
-        from-addr     (:email/from-address email)
-        ;; Resolve source: in-reply-to first, then List-Id / [bark:*], then catch-all
-        source-name   (or (:email/source email)
-                          (source-from-in-reply-to (d/db conn) (:email/in-reply-to email))
-                          (classify-source (:email/headers-edn email)
-                                           (:email/subject email)
-                                           sources))
-        _             (when (and source-name (not (:email/source email)))
-                        (d/transact! conn [{:db/id eid :email/source source-name}]))
-        ;; Strip [bark:<list-id>] prefix from subject if present
-        email         (if-let [bark-lid (re-find #"(?i)^\[bark:[^\]]+\]\s*" (:email/subject email))]
-                        (update email :email/subject #(str/replace-first % bark-lid ""))
-                        email)
-        source-cfg    (get source-map source-name)
-        roles         (if source-name (get-roles (d/db conn) source-name) {})
-        body-text     (email-body-text email)
-        subj-patterns (resolve-labels (or source-cfg {}))
-        allowed-types (:report-types source-cfg)]
+  (let [message-id (:email/message-id email)
+        eid        (:db/id email)
+        from-addr  (:email/from-address email)
+        ;; 1. Classify source
+        [source-name email] (resolve-email-source! conn email sources)
+        source-cfg (get source-map source-name)
+        roles      (if source-name (get-roles (d/db conn) source-name) {})]
+    ;; 2. Check ignored
     (if (and from-addr (ignored? roles from-addr))
       (do (log/debug "Ignored" from-addr "—" (:email/subject email))
           (assoc acc :skipped (inc skipped)))
-      (do ;; Role and notify controls — blocked when the email came through
-          ;; a mailing list (has both List-Id and List-Post), regardless of
-          ;; sender, to prevent replay attacks.
-       (when (and from-addr body-text source-name
-                  (not (from-mailing-list? email)))
-         (apply-role-controls! conn roles source-name from-addr body-text
-                               (:email/date-sent email))
-         (apply-notify-controls! conn roles source-name from-addr body-text))
-          ;; Detect and create report
-          (let [report-info (detect-report email subj-patterns allowed-types)
-                permitted?  (and report-info from-addr
-                                 (can-create-report? roles from-addr report-info
-                                                     email source-cfg))
-                new-report? (and permitted? (not (report-exists? (d/db conn) message-id)))
-                [created thread-index type-index report-eid]
-                (if new-report?
-                  (do (log/info (str "[" (name (:type report-info)) "]") (:email/subject email))
-                      (create-report! conn eid message-id report-info)
-                      (ensure-contributor! conn source-name from-addr
-                                           (:email/from-name email) (:email/date-sent email))
-                      (let [rid (d/q '[:find ?r . :in $ ?mid :where [?r :report/message-id ?mid]]
-                                     (d/db conn) message-id)]
-                        (bump-report-updated! conn rid)
-                        [(inc created)
-                         (index-assoc thread-index message-id rid)
-                         (assoc type-index rid (:type report-info))
-                         rid]))
-                  (do (when (and report-info (not permitted?))
-                        (log/warn "Denied:" from-addr "cannot create" (name (:type report-info))))
-                      [created thread-index type-index nil]))
-                ;; Threading
-                parent-report-eids (find-reports-for-email email thread-index (d/db conn))
-                nearest-report-eids (find-nearest-report email thread-index (d/db conn))
-                [threaded thread-index]
-                (if (seq parent-report-eids)
-                  (do (doseq [rid parent-report-eids]
-                        (add-descendant! conn rid eid))
-                      (ensure-contributor! conn source-name from-addr
-                                           (:email/from-name email) (:email/date-sent email))
-                      (doseq [rid nearest-report-eids]
-                        (when-let [rtype (or (type-index rid)
-                                             (d/q '[:find ?t . :in $ ?r
-                                                    :where [?r :report/type ?t]]
-                                                  (d/db conn) rid))]
-                          (let [report-source (d/q '[:find ?src . :in $ ?rid
-                                                     :where [?rid :report/email ?e]
-                                                     [?e :email/source ?src]]
-                                                   (d/db conn) rid)
-                                report-roles (if report-source
-                                               (get-roles (d/db conn) report-source)
-                                               roles)]
-                            (apply-commands!
-                             conn rid rtype email source-map report-roles))))
-                      [(+ threaded (count parent-report-eids))
-                       (reduce #(index-assoc %1 message-id %2) thread-index parent-report-eids)])
-                  [threaded thread-index])]
-            ;; Bump updated-at for all touched reports
-            (when (seq parent-report-eids)
-              (bump-report-updated! conn parent-report-eids))
-            ;; Post-creation: link related reports + manage series + store patches
-            (when (and report-eid (seq parent-report-eids))
-              (link-related-reports! conn report-eid parent-report-eids))
-            ;; Auto-close [CHG x] when [REL x] is created (+ cross-thread relation)
-            (when (and report-eid
-                       (= :release (:type report-info))
-                       (:version report-info))
-              (close-changes-for-release! conn (:version report-info) eid report-eid))
-            ;; Auto-close previous patch version (v<n> supersedes v<n-1>)
-            (when (and report-eid
-                       (= :patch (:type report-info))
-                       (:version report-info)
-                       (seq nearest-report-eids))
-              (close-patch-previous-version! conn report-info eid nearest-report-eids))
-            (when (and report-eid (= :patch (:type report-info))
-                       (:patch-seq report-info))
-              (manage-series! conn report-eid eid report-info
-                              from-addr parent-report-eids))
-            (when (and report-eid (= :patch (:type report-info)))
-              (let [patches (build-patch-entities email)]
-                (when (seq patches)
-                  (d/transact! conn [{:db/id report-eid
-                                      :report/patches patches}])
-                  (log/info (count patches) "patch file(s) stored"))))
-            {:created created :threaded threaded :skipped skipped
-             :thread-index thread-index :type-index type-index})))))
+      (do ;; 3. Role & notify controls (blocked on mailing list emails)
+          (let [body-text (email-body-text email)]
+            (when (and from-addr body-text source-name
+                       (not (from-mailing-list? email)))
+              (apply-role-controls! conn roles source-name from-addr
+                                    body-text (:email/date-sent email))
+              (apply-notify-controls! conn roles source-name from-addr body-text)))
+          ;; 4. Detect & create report
+          (let [{:keys [report-eid report-info] r-created :created
+                 r-ti :thread-index r-tyi :type-index}
+                (try-create-report! conn email eid message-id from-addr
+                                    source-name source-cfg roles acc)
+                ;; 5. Thread descendants
+                {:keys [parent-eids nearest-eids] t-threaded :threaded
+                 t-ti :thread-index}
+                (thread-descendants! conn email eid message-id from-addr
+                                     source-name roles source-map
+                                     {:threaded threaded :thread-index r-ti
+                                      :type-index r-tyi})]
+            ;; 6. Post-creation hooks
+            (post-creation-hooks! conn email eid report-eid report-info
+                                  from-addr parent-eids nearest-eids)
+            {:created r-created :threaded t-threaded :skipped skipped
+             :thread-index t-ti :type-index r-tyi})))))
 
 ;; ---------------------------------------------------------------------------
 ;; Report expiry
@@ -437,6 +482,7 @@
                                                  (d/db conn) synth-mid)
                                             (do (d/transact! conn [{:email/message-id   synth-mid
                                                                     :email/from-address "bark-system"
+                                                                    :email/source       src
                                                                     :email/date-sent    now
                                                                     :email/subject      (str "Auto-expired: " report-mid)}])
                                                 (d/q '[:find ?e . :in $ ?mid

@@ -8,6 +8,9 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Logging config
+;; SYNC: parse-size, rotate-log!, configure-file-logging! are mirrored in
+;; src/bark_ingest/logging.clj (JVM version adds locking for thread-safety).
+;; Keep both in sync when changing the log format or rotation logic.
 ;; ---------------------------------------------------------------------------
 
 (log/merge-config! {:min-level :info})
@@ -64,6 +67,7 @@
     ((resolve 'pods/load-pod) 'tzzh/mail "0.0.3")
     (require '[pod.tzzh.mail :as mail])))
 
+;; SYNC: mirrored in src/bark_ingest/main.clj (JVM version uses postal).
 (defn configure-email-logging!
   "Add a Timbre email appender using the SMTP config from :notifications.
   Loads the tzzh/mail pod on first use."
@@ -135,6 +139,14 @@
   over :email/body-text-from-html. Returns nil if neither is present."
   [email]
   (or (:email/body-text email) (:email/body-text-from-html email)))
+
+(defn ensure-set
+  "Coerce a Datalevin cardinality/many value to a set.
+  Handles nil, a single value, or a collection."
+  [v]
+  (cond (nil? v)  #{}
+        (coll? v) (set v)
+        :else     #{v}))
 
 ;; ---------------------------------------------------------------------------
 ;; Datalevin pod — single version definition
@@ -391,8 +403,9 @@
   (let [s (str (or date ""))]
     (subs s 0 (min 16 (count s)))))
 
-(def ^:private iso-date-fmt
-  "Shared yyyy-MM-dd formatter (safe in single-threaded bb)."
+(defn- iso-date-formatter
+  "Create a yyyy-MM-dd formatter in UTC (new instance each call — thread-safe)."
+  ^java.text.SimpleDateFormat []
   (doto (java.text.SimpleDateFormat. "yyyy-MM-dd")
     (.setTimeZone (java.util.TimeZone/getTimeZone "UTC"))))
 
@@ -400,7 +413,7 @@
   "Format a java.util.Date as yyyy-MM-dd (ISO 8601 date only)."
   [date]
   (when date
-    (.format iso-date-fmt date)))
+    (.format (iso-date-formatter) date)))
 
 ;; ---------------------------------------------------------------------------
 ;; Shared label/command defaults and merge logic
@@ -497,13 +510,16 @@
 ;; Export change tracking
 ;; ---------------------------------------------------------------------------
 
+(def ^:const meta-ident "global")
+(def ^:const digest-watermark-id "watermark")
+
 (defn bump-report-updated!
   "Set :report/updated-at and :meta/last-modified to now.
   `report-eid` can be a single eid or a collection of eids."
   [conn report-eid]
   (let [now  (java.util.Date.)
         eids (if (coll? report-eid) report-eid [report-eid])
-        tx   (into [{:meta/ident "global" :meta/last-modified now}]
+        tx   (into [{:meta/ident meta-ident :meta/last-modified now}]
                    (map (fn [eid] {:db/id eid :report/updated-at now}))
                    eids)]
     (dt! conn tx)))
@@ -513,7 +529,7 @@
   Use when a mutation (e.g. expiry) already transacted report changes
   and you just need the global flag."
   [conn]
-  (dt! conn [{:meta/ident "global" :meta/last-modified (java.util.Date.)}]))
+  (dt! conn [{:meta/ident meta-ident :meta/last-modified (java.util.Date.)}]))
 
 (defn get-last-modified
   "Return the global :meta/last-modified instant, or nil."
@@ -532,7 +548,7 @@
 (defn save-last-export!
   "Record the export timestamp."
   [conn ts]
-  (dt! conn [{:meta/ident "global" :meta/last-export ts}]))
+  (dt! conn [{:meta/ident meta-ident :meta/last-export ts}]))
 
 (defn changed-report-types-since
   "Return the set of :report/type keywords that have been updated since `since-ts`."

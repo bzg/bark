@@ -429,9 +429,10 @@
            (some? (get-header hdrs "List-Post")))
 
       (:delivered-to source-cfg)
-      (when-let [dt (get-header hdrs "Delivered-To")]
+      (if-let [dt (get-header hdrs "Delivered-To")]
         (= (str/lower-case dt)
-           (str/lower-case (:delivered-to source-cfg))))
+           (str/lower-case (:delivered-to source-cfg)))
+        false)
 
       :else true)))
 

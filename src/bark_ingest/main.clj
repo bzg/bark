@@ -30,6 +30,7 @@
 
 ;; parse-size, rotate-log!, and configure-file-logging! are in bark-ingest.logging
 
+;; SYNC: mirrored in scripts/bark-common.clj (bb version uses tzzh/mail pod).
 (defn configure-email-logging!
   "Add a Timbre email appender using Postal and the SMTP config from :notifications."
   [smtp-cfg {:keys [to level] :or {level :error}}]
@@ -90,6 +91,30 @@
 ;; Catch-up fetch
 ;; ---------------------------------------------------------------------------
 
+(defn- max-contiguous-safe-uid
+  "Return the highest UID from `all-uids` (sorted ascending) such that
+  every preceding UID is also in `safe-uids`.  Stops at the first gap
+  so that failed messages are retried on the next reconnect instead of
+  being permanently skipped."
+  [all-uids safe-uids]
+  (reduce (fn [acc uid]
+            (if (contains? safe-uids uid)
+              uid
+              (reduced acc)))
+          nil all-uids))
+
+(defn- advance-watermark!
+  "Advance the IMAP watermark only up to the last contiguous safe UID.
+  If any message in the batch failed to store, the watermark stops just
+  before the first failure so it will be retried on next reconnect."
+  [db-conn msgs safe-uids]
+  (let [all-uids (->> msgs (keep :uid) sort)]
+    (when-let [new-wm (max-contiguous-safe-uid all-uids safe-uids)]
+      (when (not= new-wm (some->> all-uids last))
+        (log/warn "Watermark stopped at UID" new-wm
+                  "(some messages failed — will retry on next reconnect)"))
+      (db/save-imap-uid! db-conn new-wm))))
+
 (defn catch-up-fetch!
   "Fetch messages missed while the process was down.
   - First run (no watermark): fetch the last `initial-limit` messages.
@@ -109,16 +134,14 @@
               (log/info "Fetched" (count msgs) "messages from IMAP")
               (when-not (shutting-down?)
                 (let [{:keys [safe-uids]} (ingest/store-emails! db-conn msgs)]
-                  (when-let [max-uid (some->> safe-uids (remove nil?) seq (apply max))]
-                    (db/save-imap-uid! db-conn max-uid))))))
+                  (advance-watermark! db-conn msgs safe-uids)))))
         (do (log/info "Resuming — fetching UIDs >" watermark)
             (let [msgs (fetch/by-uid-range imap-conn folder
                                            (inc watermark) Long/MAX_VALUE)]
               (log/info "Fetched" (count msgs) "messages since watermark")
               (when (and (seq msgs) (not (shutting-down?)))
                 (let [{:keys [safe-uids]} (ingest/store-emails! db-conn msgs)]
-                  (when-let [max-uid (some->> safe-uids (remove nil?) seq (apply max))]
-                    (db/save-imap-uid! db-conn max-uid))))))))))
+                  (advance-watermark! db-conn msgs safe-uids)))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; IMAP connection

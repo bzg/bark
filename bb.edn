@@ -11,8 +11,7 @@
                         (when (.exists dir)
                           (doseq [f (reverse (file-seq dir))]
                             (when-not (or (= f dir)
-                                          (re-matches (re-pattern "^.*\\.org$")
-                                                      (.getPath f)))
+                                          (.endsWith (.getPath f) ".org"))
                               (.delete f)
                               (println "Deleted" (.getPath f)))))))}
   test-config {:doc  "Validate config.edn (pass path as arg, default: ./config.edn)"

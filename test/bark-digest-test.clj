@@ -35,6 +35,18 @@
   (assert-test (str label " — expected: " (pr-str expected) " got: " (pr-str actual))
                (= expected actual)))
 
+(defn assert-some
+  "Assert that value is non-nil."
+  [label actual]
+  (assert-test (str label " — expected non-nil, got: " (pr-str actual))
+               (some? actual)))
+
+(defn assert-nil
+  "Assert that value is nil."
+  [label actual]
+  (assert-test (str label " — expected nil, got: " (pr-str actual))
+               (nil? actual)))
+
 ;; ---------------------------------------------------------------------------
 ;; Load bark-digest functions (everything except the main block)
 ;; ---------------------------------------------------------------------------
@@ -203,11 +215,11 @@
         (let [r (get-report db "<02@test.org>")]
           (assert= "Type is :bug" :bug (:report/type r))
           (assert= "Topic is 9.7" "9.7" (:report/topic r))
-          (assert-test "Acked (Confirmed)" (some? (:report/acked r)))
-          (assert-test "Owned (Handled)" (some? (:report/owned r)))
-          (assert-test "Closed (Fixed)" (some? (:report/closed r)))
+          (assert-some "Acked (Confirmed)" (:report/acked r))
+          (assert-some "Owned (Handled)" (:report/owned r))
+          (assert-some "Closed (Fixed)" (:report/closed r))
           (assert= "Close-reason is :resolved" :resolved (:report/close-reason r))
-          (assert-test "Urgent still set (unsetting reserved to maintainer directives)" (some? (:report/urgent r)))
+          (assert-some "Urgent still set (unsetting reserved to maintainer directives)" (:report/urgent r))
           (assert= "3 descendants" 3
                    (count (:report/descendants r))))
 
@@ -225,8 +237,8 @@
           (assert= "Seq" "1/2" (:report/patch-seq r))
           (assert-test ":subject in patch-source"
                        (contains? (set (:report/patch-source r)) :subject))
-          (assert-test "Acked (Reviewed)" (some? (:report/acked r)))
-          (assert-test "Closed (Applied)" (some? (:report/closed r)))
+          (assert-some "Acked (Reviewed)" (:report/acked r))
+          (assert-some "Closed (Applied)" (:report/closed r))
           (assert= "Close-reason is :resolved" :resolved (:report/close-reason r)))
 
         ;; --- Patch 08: attachment detection ---
@@ -257,14 +269,14 @@
         (println "\n--- TODO 15: request lifecycle ---")
         (let [r (get-report db "<15@test.org>")]
           (assert= "Type is :request" :request (:report/type r))
-          (assert-test "Closed (Done)" (some? (:report/closed r)))
+          (assert-some "Closed (Done)" (:report/closed r))
           (assert= "Close-reason is :resolved" :resolved (:report/close-reason r)))
 
         ;; --- ANN 17: canceled ---
         (println "\n--- ANN 17: announcement canceled ---")
         (let [r (get-report db "<17@test.org>")]
           (assert= "Type is :announcement" :announcement (:report/type r))
-          (assert-test "Closed (Canceled)" (some? (:report/closed r)))
+          (assert-some "Closed (Canceled)" (:report/closed r))
           (assert= "Close-reason is :canceled" :canceled (:report/close-reason r)))
 
         ;; --- ANN 18: denied (user cannot create announcements) ---
@@ -278,7 +290,7 @@
               rel (get-report db "<20@test.org>")]
           (assert= "CHG type" :change (:report/type chg))
           (assert= "CHG version" "9.8" (:report/version chg))
-          (assert-test "CHG auto-closed" (some? (:report/closed chg)))
+          (assert-some "CHG auto-closed" (:report/closed chg))
           (assert= "CHG close-reason is :resolved" :resolved (:report/close-reason chg))
           (assert= "REL type" :release (:report/type rel))
           (assert= "REL version" "9.8" (:report/version rel))
@@ -300,7 +312,7 @@
         (println "\n--- Bug 23: important set (no user unset) ---")
         (let [r (get-report db "<23@test.org>")]
           (assert= "Type is :bug" :bug (:report/type r))
-          (assert-test "Important still set (unsetting reserved to maintainer directives)" (some? (:report/important r)))
+          (assert-some "Important still set (unsetting reserved to maintainer directives)" (:report/important r))
           (assert= "3 descendants" 3
                    (count (:report/descendants r))))
 
@@ -363,20 +375,20 @@
                    (get-in v1 [:series/cover-letter :email/message-id]))
           (assert= "v1 has 3 patches" 3
                    (series-patch-count db "parser|user@test.org|3"))
-          (assert-test "v1 is closed (superseded by v2)"
-                       (some? (:series/closed v1))))
+          (assert-some "v1 is closed (superseded by v2)"
+                       (:series/closed v1)))
 
         (let [r35 (get-report db "<35@test.org>")]
-          (assert-test "Patch 1/3 has series ref"
-                       (some? (:report/series r35)))
+          (assert-some "Patch 1/3 has series ref"
+                       (:report/series r35))
           (assert= "Patch 1/3 seq" "1/3" (:report/patch-seq r35)))
 
         ;; --- Series v2: emails 38-39 ---
         (println "\n--- Series v2: new series after restart ---")
         (let [v2 (get-series-by-id db "parser|user@test.org|3#2")]
-          (assert-test "v2 series exists" (some? (:series/id v2)))
-          (assert-test "v2 series is not closed"
-                       (nil? (:series/closed v2)))
+          (assert-some "v2 series exists" (:series/id v2))
+          (assert-nil "v2 series is not closed"
+                       (:series/closed v2))
           (assert= "v2 expected 3" 3 (:series/expected v2))
           (assert= "v2 cover letter" "<38@test.org>"
                    (get-in v2 [:series/cover-letter :email/message-id]))
@@ -385,7 +397,7 @@
 
         (let [r39 (get-report db "<39@test.org>")
               s   (:report/series r39)]
-          (assert-test "v2 patch has series ref" (some? s))
+          (assert-some "v2 patch has series ref" s)
           (assert= "v2 patch seq" "1/3" (:report/patch-seq r39)))
 
         ;; --- Email 40: patch related to bug 23 ---
@@ -440,31 +452,31 @@
         (println "\n--- Emails 48-49: command with semicolon ---")
         (let [r (get-report db "<48@test.org>")]
           (assert= "Type is :bug" :bug (:report/type r))
-          (assert-test "Acked via Approved;" (some? (:report/acked r))))
+          (assert-some "Acked via Approved;" (:report/acked r)))
 
         ;; --- Inline command ignored (emails 50-51) ---
         (println "\n--- Emails 50-51: inline command ignored ---")
         (let [r (get-report db "<50@test.org>")]
           (assert= "Type is :bug" :bug (:report/type r))
-          (assert-test "NOT closed (inline 'Fixed.' ignored)"
-                       (nil? (:report/closed r))))
+          (assert-nil "NOT closed (inline 'Fixed.' ignored)"
+                       (:report/closed r)))
 
         ;; --- Closed. on request (emails 52-53) ---
         (println "\n--- Emails 52-53: Closed. on request ---")
         (let [r (get-report db "<52@test.org>")]
           (assert= "Type is :request" :request (:report/type r))
-          (assert-test "Closed via Closed." (some? (:report/closed r))))
+          (assert-some "Closed via Closed." (:report/closed r)))
 
         ;; --- Commands on announcement (emails 54-55) ---
         (println "\n--- Emails 54-55: commands on announcement ---")
         (let [r (get-report db "<54@test.org>")]
           (assert= "Type is :announcement" :announcement (:report/type r))
-          (assert-test "NOT acked (announcements can't be acked)"
-                       (nil? (:report/acked r)))
-          (assert-test "NOT owned (announcements can't be owned)"
-                       (nil? (:report/owned r)))
-          (assert-test "Urgent (applies to all report types)"
-                       (some? (:report/urgent r))))
+          (assert-nil "NOT acked (announcements can't be acked)"
+                       (:report/acked r))
+          (assert-nil "NOT owned (announcements can't be owned)"
+                       (:report/owned r))
+          (assert-some "Urgent (applies to all report types)"
+                       (:report/urgent r)))
 
         ;; --- Notify off then on with prefs (emails 56-57) ---
         (println "\n--- Emails 56-57: notify off then on with prefs ---")
@@ -483,8 +495,8 @@
                           :in $ ?k
                           :where [?e :notify/key ?k]]
                         db k)]
-          (assert-test "No notify pref created for regular user"
-                       (nil? pref)))
+          (assert-nil "No notify pref created for regular user"
+                       pref))
 
         ;; --- Notify via mailing list (email 74) ---
         (println "\n--- Email 74: notify via mailing list ---")
@@ -516,14 +528,14 @@
         ;; --- References-only threading (email 61) ---
         (println "\n--- Email 61: threading via References only ---")
         (let [r (get-report db "<59@test.org>")]
-          (assert-test "Bug 59 acked via References-only reply"
-                       (some? (:report/acked r))))
+          (assert-some "Bug 59 acked via References-only reply"
+                       (:report/acked r)))
 
         ;; --- Deep thread (email 62) ---
         (println "\n--- Email 62: deep thread command ---")
         (let [r (get-report db "<59@test.org>")]
-          (assert-test "Bug 59 closed via grandchild reply"
-                       (some? (:report/closed r)))
+          (assert-some "Bug 59 closed via grandchild reply"
+                       (:report/closed r))
           (assert-test "Bug 59 has >= 2 descendants"
                        (>= (count (:report/descendants r)) 2)))
 
@@ -544,8 +556,8 @@
         (println "\n--- Emails 65-66: body-text-from-html fallback ---")
         (let [r (get-report db "<65@test.org>")]
           (assert= "Type is :bug" :bug (:report/type r))
-          (assert-test "Acked via html body command"
-                       (some? (:report/acked r))))
+          (assert-some "Acked via html body command"
+                       (:report/acked r)))
 
         ;; --- Maintainer ignores address (email 67) ---
         (println "\n--- Email 67: maintainer ignores address ---")
@@ -562,10 +574,10 @@
           (assert= "Patch 68 type" :patch (:report/type r68))
           (assert= "Patch 68 seq" "1/2" (:report/patch-seq r68))
           (assert= "Patch 69 seq" "2/2" (:report/patch-seq r69))
-          (assert-test "Patch 68 has series"
-                       (some? (:report/series r68)))
-          (assert-test "Patch 69 has series"
-                       (some? (:report/series r69))))
+          (assert-some "Patch 68 has series"
+                       (:report/series r68))
+          (assert-some "Patch 69 has series"
+                       (:report/series r69)))
 
         ;; --- Different sender same topic (email 70) ---
         (println "\n--- Email 70: different sender same topic ---")
@@ -667,13 +679,13 @@
         (println "\n--- Bug 81: Acked-by directive ---")
         (let [r (get-report db "<81@test.org>")]
           ;; After email 85 (Unacked), acked should be nil
-          (assert-test "Acked retracted by Unacked directive"
-                       (nil? (:report/acked r)))
-          (assert-test "Acked-proxy retracted too"
-                       (nil? (:report/acked-proxy r)))
+          (assert-nil "Acked retracted by Unacked directive"
+                       (:report/acked r))
+          (assert-nil "Acked-proxy retracted too"
+                       (:report/acked-proxy r))
           ;; Owned-by and Urgent-by from email 83 should persist
-          (assert-test "Owned is set" (some? (:report/owned r)))
-          (assert-test "Urgent is set" (some? (:report/urgent r)))
+          (assert-some "Owned is set" (:report/owned r))
+          (assert-some "Urgent is set" (:report/urgent r))
           (assert= "Owned-proxy is maint@test.org"
                    "maint@test.org"
                    (get-in r [:report/owned-proxy :email/from-address]))
@@ -684,21 +696,21 @@
         ;; --- Bug 81: regular user directive denied (email 84) ---
         (println "\n--- Bug 81: user directive denied ---")
         (let [r (get-report db "<81@test.org>")]
-          (assert-test "NOT closed (user can't use Closed-by)"
-                       (nil? (:report/closed r))))
+          (assert-nil "NOT closed (user can't use Closed-by)"
+                       (:report/closed r)))
 
         ;; --- Bug 86: last-one-wins in same email (email 87) ---
         (println "\n--- Bug 86: last-one-wins in same email ---")
         (let [r (get-report db "<86@test.org>")]
-          (assert-test "NOT acked (Acked-by then Unacked -> unset wins)"
-                       (nil? (:report/acked r))))
+          (assert-nil "NOT acked (Acked-by then Unacked -> unset wins)"
+                       (:report/acked r)))
 
         ;; --- Bug 88: Closed-by + Important-by (email 89) ---
         (println "\n--- Bug 88: Closed-by + Important-by ---")
         (let [r (get-report db "<88@test.org>")]
-          (assert-test "Closed is set" (some? (:report/closed r)))
+          (assert-some "Closed is set" (:report/closed r))
           (assert= "Close-reason is :resolved (via Closed-by directive)" :resolved (:report/close-reason r))
-          (assert-test "Important is set" (some? (:report/important r)))
+          (assert-some "Important is set" (:report/important r))
           (assert= "Closed-proxy is admin@test.org"
                    "admin@test.org"
                    (get-in r [:report/closed-proxy :email/from-address]))
@@ -713,10 +725,10 @@
         ;; --- Bug 90: trigger + directive in same email (email 91) ---
         (println "\n--- Bug 90: Confirmed trigger + Owned-by directive ---")
         (let [r (get-report db "<90@test.org>")]
-          (assert-test "Acked via Confirmed trigger"
-                       (some? (:report/acked r)))
-          (assert-test "Owned via Owned-by directive"
-                       (some? (:report/owned r)))
+          (assert-some "Acked via Confirmed trigger"
+                       (:report/acked r))
+          (assert-some "Owned via Owned-by directive"
+                       (:report/owned r))
           (assert= "Owned-proxy is maint@test.org"
                    "maint@test.org"
                    (get-in r [:report/owned-proxy :email/from-address])))
@@ -724,18 +736,18 @@
         ;; --- Bug 90: Fixed trigger + Unclosed directive conflict (email 92) ---
         (println "\n--- Bug 90: Fixed trigger + Unclosed directive (directive wins) ---")
         (let [r (get-report db "<90@test.org>")]
-          (assert-test "NOT closed (Unclosed directive overrides Fixed trigger)"
-                       (nil? (:report/closed r))))
+          (assert-nil "NOT closed (Unclosed directive overrides Fixed trigger)"
+                       (:report/closed r)))
 
         ;; --- Bug 93: Confirmed trigger + Urgent-by (email 94) ---
         ;; Note: deadline from email 94 is overridden then removed by emails 96-97,
         ;; so we test deadline persistence separately on bug 98.
         (println "\n--- Bug 93: Confirmed + Urgent-by ---")
         (let [r (get-report db "<93@test.org>")]
-          (assert-test "Acked via Confirmed trigger"
-                       (some? (:report/acked r)))
-          (assert-test "Urgent via Urgent-by directive"
-                       (some? (:report/urgent r)))
+          (assert-some "Acked via Confirmed trigger"
+                       (:report/acked r))
+          (assert-some "Urgent via Urgent-by directive"
+                       (:report/urgent r))
           (assert= "Urgent-proxy is admin@test.org"
                    "admin@test.org"
                    (get-in r [:report/urgent-proxy :email/from-address])))
@@ -751,14 +763,14 @@
         ;; email 97 removes it with Undeadline.
         (println "\n--- Bug 93: Undeadline removes deadline ---")
         (let [r (get-report db "<93@test.org>")]
-          (assert-test "Deadline removed by Undeadline"
-                       (nil? (:report/deadline r))))
+          (assert-nil "Deadline removed by Undeadline"
+                       (:report/deadline r)))
 
         ;; --- Bug 98: Standalone deadline (email 99, no undeadline) ---
         (println "\n--- Bug 98: Standalone deadline ---")
         (let [r (get-report db "<98@test.org>")]
-          (assert-test "Deadline is set"
-                       (some? (:report/deadline r))))
+          (assert-some "Deadline is set"
+                       (:report/deadline r)))
 
         ;; --- Email 100: [bark:<list-id>] subject prefix ---
         (println "\n--- Email 100: [bark:list.test.org] subject prefix ---")
@@ -767,7 +779,7 @@
                          :where [?e :email/message-id ?mid]]
                        db "<100@test.org>")
               src (when eid (:email/source (d/pull db '[:email/source] eid)))]
-          (assert-test "Report exists" (some? r))
+          (assert-some "Report exists" r)
           (assert= "Type is :bug (prefix stripped for detection)"
                    :bug (:report/type r))
           (assert= "Classified under public-list via bark prefix"
@@ -779,8 +791,8 @@
               chg2 (get-report db "<103@test.org>")
               rel  (get-report db "<104@test.org>")
               rel-related-mids (set (map :report/message-id (:report/related rel)))]
-          (assert-test "CHG 102 auto-closed" (some? (:report/closed chg1)))
-          (assert-test "CHG 103 auto-closed" (some? (:report/closed chg2)))
+          (assert-some "CHG 102 auto-closed" (:report/closed chg1))
+          (assert-some "CHG 103 auto-closed" (:report/closed chg2))
           (assert= "CHG 102 close-reason" :resolved (:report/close-reason chg1))
           (assert= "CHG 103 close-reason" :resolved (:report/close-reason chg2))
           ;; REL is related to both CHGs

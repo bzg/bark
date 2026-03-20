@@ -40,7 +40,7 @@
 
 ;; Forward-declared for clj-kondo (provided at runtime by load-file below).
 (declare load-datalevin-pod! get-header slugify mid-hash email-body-text
-         format-date format-date-iso report-priority report-status
+         ensure-set format-date format-date-iso report-priority report-status
          report-descendant-count all-reports report-pull-pattern
          parse-cli-args load-config build-source-map bark-schema bark-format
          get-last-modified get-last-export save-last-export!
@@ -89,12 +89,9 @@
   (into {}
         (map (fn [[source-name _]]
                (let [roles (d/pull db '[:roles/maintainers]
-                                   [:roles/source source-name])
-                     v     (:roles/maintainers roles)
-                     maints (cond (nil? v) #{}
-                                  (string? v) #{(str/lower-case v)}
-                                  :else (set (map str/lower-case v)))]
-                 [source-name maints])))
+                                   [:roles/source source-name])]
+                 [source-name (set (map str/lower-case
+                                        (ensure-set (:roles/maintainers roles))))])))
         source-map))
 
 ;; ---------------------------------------------------------------------------
@@ -382,7 +379,7 @@
   (when s (str/replace s #"^<|>$" "")))
 
 (defn- report->org-entry [m]
-  (let [todo    (if (= (nth (:flags m "---") 2 \-) \C) "DONE" "TODO")
+  (let [todo    (if (= (get (:flags m "---") 2 \-) \C) "DONE" "TODO")
         prio    (case (:priority m 0)
                   3 "[#A] " 2 "[#B] " 1 "[#C] " "")
         subject (:subject m "")
@@ -482,10 +479,10 @@
 (defn dump-docs!
   "Generate docs.html for a single source."
   [base-dir source-name]
-  (apply process/shell "bb" "scripts/bark-docs.clj"
-         "-o" (str base-dir "/docs.html")
-         "--dir" base-dir
-         (when source-name ["-n" source-name])))
+  (apply process/shell (cond-> ["bb" "scripts/bark-docs.clj"
+                                "-o" (str base-dir "/docs.html")
+                                "--dir" base-dir]
+                         source-name (into ["-n" source-name]))))
 
 ;; ---------------------------------------------------------------------------
 ;; Per-type export

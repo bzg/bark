@@ -10,15 +10,14 @@
 (require '[clojure.string :as str])
 
 ;; Defined in bark-common.clj; forward-declared for clj-kondo.
-(declare get-header parse-maintainer-since-entries)
+(declare get-header parse-maintainer-since-entries ensure-set)
 
 ;; ---------------------------------------------------------------------------
 ;; Role queries and checks (pure, given a roles map)
 ;; ---------------------------------------------------------------------------
 
 (defn- roles-set [roles attr]
-  (let [v (get roles attr)]
-    (if (nil? v) #{} (set (if (string? v) [v] v)))))
+  (ensure-set (get roles attr)))
 
 (defn- has-role?
   "True if addr (case-insensitive) appears in the multi-valued role attr."
@@ -95,26 +94,28 @@
                             :roles/admin  admin}])
         (when-not existing
           (log/info "Initialized roles for source" name "(admin:" admin ")"))
-        ;; Seed config-declared maintainers
+        ;; Seed config-declared maintainers (batched)
         (when (seq maintainers)
-          (let [eid (roles-eid conn name)]
+          (let [eid     (roles-eid conn name)
+                current (ensure-set (:roles/maintainers (get-roles (d/db conn) name)))]
             (when eid
-              (doseq [{:keys [email since]} maintainers]
-                (when email
-                  (let [addr (str/lower-case email)]
-                    ;; Add to :roles/maintainers if not already present.
-                    ;; Since-date is only set on first seed — directive
-                    ;; "Add/Remove maintainer:" overrides config and clears
-                    ;; the since-constraint, so we must not restore it here.
-                    (when-not (has-role? (get-roles (d/db conn) name) :roles/maintainers addr)
-                      (d/transact! conn [[:db/add eid :roles/maintainers addr]])
-                      (when since
-                        (d/transact! conn [[:db/add eid :roles/maintainer-since
-                                            (str addr ":" since)]]))
-                      (log/info "Config maintainer:" addr
+              (let [new-maints (remove (fn [{:keys [email]}]
+                                         (or (nil? email)
+                                             (contains? current (str/lower-case email))))
+                                       maintainers)]
+                (when (seq new-maints)
+                  (let [tx (into []
+                                 (mapcat (fn [{:keys [email since]}]
+                                           (let [addr (str/lower-case email)]
+                                             (cond-> [[:db/add eid :roles/maintainers addr]]
+                                               since (conj [:db/add eid :roles/maintainer-since
+                                                            (str addr ":" since)])))))
+                                 new-maints)]
+                    (d/transact! conn tx)
+                    (doseq [{:keys [email since]} new-maints]
+                      (log/info "Config maintainer:" (str/lower-case email)
                                 (if since (str "(since " since ")") "")
                                 "(for" name ")"))))))))))))
-
 (defn- add-role! [conn source-name attr addresses]
   (when-let [eid (roles-eid conn source-name)]
     (doseq [addr addresses]
@@ -242,8 +243,7 @@
   "Create default notify prefs for admin+maintainers who don't have one yet."
   [conn source-name roles]
   (let [admin  (:roles/admin roles)
-        maints (let [v (:roles/maintainers roles)]
-                 (cond (nil? v) [] (string? v) [v] :else v))
+        maints (ensure-set (:roles/maintainers roles))
         emails (distinct (remove nil? (cons admin maints)))]
     (doseq [email emails]
       (let [k (notify-key source-name email)]
