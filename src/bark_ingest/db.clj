@@ -42,6 +42,15 @@
                   :where [?e :email/message-id ?mid]]
                 (d/db conn) message-id))))
 
+(defn imap-uid-exists?
+  "Check if an email with the given IMAP UID already exists."
+  [conn imap-uid]
+  (when imap-uid
+    (some? (d/q '[:find ?e .
+                  :in $ ?uid
+                  :where [?e :email/imap-uid ?uid]]
+                (d/db conn) imap-uid))))
+
 (defn max-imap-uid
   "Return the highest stored IMAP UID, or 0."
   [conn]

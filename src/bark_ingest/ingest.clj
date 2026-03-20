@@ -124,6 +124,11 @@
       (db/message-id-exists? conn message-id)
       (do (log/debug "Skipping already stored Message-ID:" message-id) false)
 
+      (db/imap-uid-exists? conn imap-uid)
+      (do (log/warn "Skipping UID collision:" imap-uid
+                    "— different Message-ID but UID already stored")
+          false)
+
       :else
       (let [txdata (email->txdata msg)]
         (try
