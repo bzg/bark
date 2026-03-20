@@ -441,16 +441,47 @@
     (:global-labels source-cfg) (merge (:global-labels source-cfg))
     (:labels source-cfg)        (merge (:labels source-cfg))))
 
+(defn- normalize-command-entry
+  "Normalize a :commands config value: a vector is shorthand for {:words [...]}.
+  A map is passed through. Returns a map with at least :words (when present)."
+  [v]
+  (if (vector? v) {:words v} v))
+
 (defn resolve-commands-map
   "Resolve trigger words for a source-map entry: defaults -> global -> per-source.
   Supports both :commands and legacy :triggers config keys.
-  Returns a (non-compiled) word-list map."
+  Values can be vectors (word lists, backward compat) or maps with optional
+  :words, :scope, and :report-types overrides.
+  Returns a map of action -> word-list (trigger words only, for compilation)."
   [source-cfg]
   (let [global (or (:global-commands source-cfg) (:global-triggers source-cfg))
-        local  (or (:commands source-cfg) (:triggers source-cfg))]
+        local  (or (:commands source-cfg) (:triggers source-cfg))
+        extract-words (fn [m]
+                        (update-vals m (fn [v]
+                                         (:words (normalize-command-entry v)))))]
     (cond-> default-commands
-      global (merge global)
-      local  (merge local))))
+      global (merge (extract-words global))
+      local  (merge (extract-words local)))))
+
+(defn resolve-command-overrides
+  "Collect :scope and :report-types overrides from :commands config.
+  Returns a map of command-id -> {:scope ... :report-types ...} (only
+  keys explicitly set in config). Used by bark-commands to override
+  the hardcoded registry at detection and application time."
+  [source-cfg]
+  (let [global (or (:global-commands source-cfg) (:global-triggers source-cfg))
+        local  (or (:commands source-cfg) (:triggers source-cfg))
+        extract (fn [m]
+                  (reduce-kv (fn [acc k v]
+                               (let [entry (normalize-command-entry v)
+                                     overrides (select-keys entry [:scope :report-types])]
+                                 (if (seq overrides)
+                                   (assoc acc k overrides)
+                                   acc)))
+                             {} m))]
+    ;; Per-source overrides take precedence over global
+    (merge (when global (extract global))
+           (when local (extract local)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Shared schema (used by bark-export, bark-notify, bark-stats, bark-digest)

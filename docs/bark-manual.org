@@ -1,5 +1,6 @@
 #+title: BARK! Another Report Keeper
 #+subtitle: User and admin manual
+#+options: toc:1
 
 * BARK! Another Report Keeper
 
@@ -286,10 +287,38 @@ You can use multiple keywords in the same email, one per line.
    :CUSTOM_ID: customising-command-keywords
    :END:
 
-You can customize command keywords globally or per source:
+You can customize command keywords globally or per source.
+
+*** Overriding trigger words
+
+The simple form overrides which words trigger a command:
 
  : :commands {:closed ["Canceled" "Fixed" "Resolved" "Wontfix"]
  :            :acked  ["Approved" "Reviewed" "LGTM"]}
+
+*** Overriding permissions and report types
+
+The extended form lets you also override =:scope= (who can use the
+command) and =:report-types= (which report types it applies to):
+
+#+begin_src edn
+:commands {:acked    {:words        ["Approved" "LGTM"]
+                      :scope        :maintainer}        ;; restrict to maintainers
+           :deadline {:report-types #{:bug :patch :request :change}} ;; widen to changes
+           :closed   ["Canceled" "Fixed" "Wontfix"]}    ;; simple form still works
+#+end_src
+
+- =:scope= can be =:user= (anyone) or =:maintainer= (maintainer only).
+  It overrides the default permission for that command.
+- =:report-types= replaces the default set of report types the command
+  applies to. When absent, the registry default is used.
+- Both simple (vector) and extended (map) forms can be mixed.
+- Any command ID from the table below can be overridden, both triggers
+  and directives.
+- Controls (role and notify) cannot be overridden.
+
+Per-source settings take precedence over the global =:commands=, which
+in turn take precedence over the built-in defaults.
 
 ** All commands
 

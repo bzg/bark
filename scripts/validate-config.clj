@@ -108,11 +108,47 @@
 (s/def :bark/notifications (s/keys :req-un [:notif/enabled]
                                    :opt-un [:notif/smtp]))
 
-;; Per-source triggers (optional)
+;; Valid report type keywords (shared by commands, export, and report-types specs)
+(def valid-report-types #{:bug :patch :request :announcement :release :change})
+
+;; Command IDs (for extended :commands format)
+(def valid-command-ids
+  #{:acked :owned :closed :urgent :important
+    :acked-by :owned-by :closed-by :urgent-by :important-by
+    :unacked :unowned :unclosed :unurgent :unimportant
+    :deadline :undeadline :topic})
+
+;; Per-source commands (optional)
+;; Values can be vectors (word lists, backward compat) or maps with
+;; :words, :scope, :report-types overrides.
 (s/def ::trigger-words (s/coll-of ::non-blank-string :kind vector? :min-count 1))
+(s/def ::command-scope #{:user :maintainer})
+(s/def ::command-report-types (s/coll-of valid-report-types :kind set? :min-count 1))
+(s/def ::command-entry
+  (s/or :words-only ::trigger-words
+        :extended   (s/keys :opt-un [::trigger-words ::command-scope ::command-report-types])))
+;; Normalize keys: the extended map uses :words, :scope, :report-types
+(s/def ::command-entry-map
+  (s/and map?
+         (s/keys :opt-un [:cmd/words :cmd/scope :cmd/report-types])))
+
+(defn valid-command-value? [v]
+  (or (and (vector? v) (s/valid? ::trigger-words v))
+      (and (map? v)
+           (every? #{:words :scope :report-types} (keys v))
+           (if (:words v) (s/valid? ::trigger-words (:words v)) true)
+           (if (:scope v) (contains? #{:user :maintainer} (:scope v)) true)
+           (if (:report-types v) (s/valid? ::command-report-types (:report-types v)) true))))
+
+(s/def ::commands-map
+  (s/and (s/map-of valid-command-ids any?)
+         #(every? valid-command-value? (vals %))))
+
+(s/def :source/commands ::commands-map)
 (s/def :source/triggers (s/map-of #{:acked :owned :closed} ::trigger-words))
 
-;; Global triggers (optional) — same shape as per-source triggers
+;; Global commands/triggers (optional) — same shape as per-source
+(s/def :bark/commands ::commands-map)
 (s/def :bark/triggers (s/map-of #{:acked :owned :closed} ::trigger-words))
 
 ;; Subject triggers: map of report-type keyword -> vector of tag strings
@@ -125,7 +161,6 @@
 (s/def :bark/labels ::labels)
 
 ;; Export reports: set of report type keywords to include in export
-(def valid-report-types #{:bug :patch :request :announcement :release :change})
 (s/def ::export-reports
   (s/coll-of valid-report-types :kind set? :min-count 1))
 (s/def :source/export-reports ::export-reports)
@@ -157,7 +192,7 @@
 (s/def ::config
   (s/keys :req-un [:bark/admin :bark/imap :bark/sources :bark/db]
           :opt-un [:bark/ingest :bark/notifications :bark/labels :bark/triggers
-                   :bark/export-reports :bark/report-types :bark/logging]))
+                   :bark/commands :bark/export-reports :bark/report-types :bark/logging]))
 
 ;; ---------------------------------------------------------------------------
 ;; Validation

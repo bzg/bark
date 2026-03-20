@@ -86,11 +86,26 @@
  ;; Merged on top of defaults; specify only the actions you want to change.
  ;; When set per source, it overrides the global value.
  ;;
- ;; Example:
+ ;; Simple form (backward compatible) — just override trigger words:
  ;; :commands {:closed ["Canceled" "Fixed" "Resolved" "Wontfix"]
  ;;            :acked  ["Approved" "Reviewed" "LGTM"]}
  ;;
- ;; Defaults:
+ ;; Extended form — override :words, :scope, and/or :report-types:
+ ;; :commands {:acked    {:words ["Approved" "LGTM"]
+ ;;                       :scope :maintainer}          ;; restrict to maintainers
+ ;;            :deadline {:report-types #{:bug :patch :request :change}}  ;; widen types
+ ;;            :closed   ["Canceled" "Fixed" "Wontfix"]}  ;; simple form still works
+ ;;
+ ;; :scope can be :user (anyone) or :maintainer (maintainer only).
+ ;; :report-types replaces the default set for that command.
+ ;; Both simple and extended forms can be mixed in the same map.
+ ;; These overrides apply to any command ID (triggers and directives):
+ ;;   :acked :owned :closed :urgent :important
+ ;;   :acked-by :owned-by :closed-by :urgent-by :important-by
+ ;;   :unacked :unowned :unclosed :unurgent :unimportant
+ ;;   :deadline :undeadline :topic
+ ;;
+ ;; Default trigger words:
  ;;   :acked     ["Acked" "Confirmed" "Reviewed" "Approved"]
  ;;   :owned     ["Owned" "Handled" "Assigned"]
  ;;   :closed    ["Canceled" "Cancelled" "Resolved" "Applied"

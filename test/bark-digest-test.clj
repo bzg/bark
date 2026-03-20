@@ -604,37 +604,37 @@
         ;; --- Unit tests: detect-directives ---
         (println "\n--- detect-directives unit tests ---")
         (assert= "Acked-by parsed"
-                 [{:action :set :attr :report/acked :email-address "a@b.com"}]
+                 [{:action :set :attr :report/acked :email-address "a@b.com" :scope :maintainer}]
                  (detect-directives :bug "Acked-by: a@b.com\n"))
         (assert= "Multiple directives parsed in order"
-                 [{:action :set :attr :report/owned :email-address "x@y.com"}
-                  {:action :set :attr :report/urgent :email-address "x@y.com"}]
+                 [{:action :set :attr :report/owned :email-address "x@y.com" :scope :maintainer}
+                  {:action :set :attr :report/urgent :email-address "x@y.com" :scope :maintainer}]
                  (detect-directives :bug "Owned-by: x@y.com\nUrgent-by: x@y.com\n"))
         (assert= "Unacked parsed"
-                 [{:action :unset :attr :report/acked}]
+                 [{:action :unset :attr :report/acked :scope :maintainer}]
                  (detect-directives :bug "Unacked\n"))
         (assert= "Unurgent parsed"
-                 [{:action :unset :attr :report/urgent}]
+                 [{:action :unset :attr :report/urgent :scope :maintainer}]
                  (detect-directives :bug "Unurgent\n"))
         (assert= "Unimportant parsed"
-                 [{:action :unset :attr :report/important}]
+                 [{:action :unset :attr :report/important :scope :maintainer}]
                  (detect-directives :bug "Unimportant\n"))
         (assert= "Deadline parsed"
-                 [{:action :set-deadline :date (parse-date-iso "2026-06-15")}]
+                 [{:action :set-deadline :date (parse-date-iso "2026-06-15") :scope :maintainer}]
                  (detect-directives :bug "Deadline: 2026-06-15\n"))
         (assert= "Undeadline parsed"
-                 [{:action :unset-deadline}]
+                 [{:action :unset-deadline :scope :maintainer}]
                  (detect-directives :bug "Undeadline\n"))
         (assert= "Topic parsed"
-                 [{:action :set-topic :topic "my-topic"}]
+                 [{:action :set-topic :topic "my-topic" :scope :maintainer}]
                  (detect-directives :bug "Topic: my-topic\n"))
         (assert= "Mixed directives + deadline + topic in order"
-                 [{:action :set :attr :report/acked :email-address "a@b.com"}
-                  {:action :set-deadline :date (parse-date-iso "2026-07-01")}
-                  {:action :set-topic :topic "urgent-fix"}]
+                 [{:action :set :attr :report/acked :email-address "a@b.com" :scope :maintainer}
+                  {:action :set-deadline :date (parse-date-iso "2026-07-01") :scope :maintainer}
+                  {:action :set-topic :topic "urgent-fix" :scope :maintainer}]
                  (detect-directives :bug "Acked-by: a@b.com\nDeadline: 2026-07-01\nTopic: urgent-fix\n"))
         (assert= "Directive lines mixed with plain text"
-                 [{:action :set :attr :report/owned :email-address "x@y.com"}]
+                 [{:action :set :attr :report/owned :email-address "x@y.com" :scope :maintainer}]
                  (detect-directives :bug "Thanks for the report.\nOwned-by: x@y.com\nWill look into it.\n"))
         (assert= "No directives in plain text"
                  [] (detect-directives :bug "Just a normal reply.\n"))

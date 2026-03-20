@@ -14,7 +14,7 @@
 
 ;; Defined in bark-common.clj / bark-roles.clj; forward-declared for clj-kondo.
 (declare default-commands close-reasons
-         resolve-commands-map
+         resolve-commands-map resolve-command-overrides
          email-body-text report-priority maintainer?
          bump-report-updated!
          get-header extract-list-id)
@@ -237,13 +237,15 @@
 
 (defn build-source-commands
   "Merge trigger words for a source: defaults -> global -> per-source.
-  Returns {:compiled action->pattern, :words action->word-list}."
+  Returns {:compiled action->pattern, :words action->word-list,
+           :overrides {command-id -> {:scope ... :report-types ...}}}."
   [source-cfg]
   (let [merged (resolve-commands-map source-cfg)]
-    {:compiled (if (= merged default-commands)
-                 default-compiled-commands
-                 (compile-trigger-words merged))
-     :words    merged}))
+    {:compiled  (if (= merged default-commands)
+                  default-compiled-commands
+                  (compile-trigger-words merged))
+     :words     merged
+     :overrides (resolve-command-overrides source-cfg)}))
 
 ;; ---------------------------------------------------------------------------
 ;; Compiled directive patterns (built once from the registry)
@@ -293,18 +295,22 @@
 
 (defn detect-triggers
   "Detect trigger commands in body text.
-  `source-commands` is {:compiled action->pattern, :words action->word-list}.
+  `source-commands` is {:compiled action->pattern, :words action->word-list,
+                        :overrides {cmd-id -> {:scope ... :report-types ...}}}.
   Returns a map of {attr true ...} or nil.
-  Filters by report-type restrictions from the command registry."
+  Filters by report-type restrictions, consulting per-source overrides first,
+  then falling back to the command registry defaults."
   [report-type body-text source-commands]
   (when body-text
-    (let [compiled (:compiled source-commands)
-          all-sets (match-triggers compiled body-text)
+    (let [compiled  (:compiled source-commands)
+          overrides (:overrides source-commands)
+          all-sets  (match-triggers compiled body-text)
           ;; Filter out triggers not applicable to this report type
           filtered (into {}
                          (keep (fn [[attr :as entry]]
                                  (let [cmd (attr->trigger-cmd attr)
-                                       rt  (:report-types cmd)]
+                                       rt  (or (:report-types (get overrides (:id cmd)))
+                                               (:report-types cmd))]
                                    (when (or (nil? rt) (contains? rt report-type))
                                      entry))))
                          all-sets)
@@ -316,25 +322,31 @@
 
 (defn detect-directives
   "Parse directive commands from body text, filtered by report-type.
-  Returns a seq of actions in order, each {:action ... :attr ... :email-address/:date/:topic ...}."
-  [report-type body-text]
+  `overrides` is a map of command-id -> {:scope ... :report-types ...}
+  from the per-source config, or nil.
+  Returns a seq of actions in order, each {:action ... :attr ... :scope ...
+  :email-address/:date/:topic ...}."
+  ([report-type body-text] (detect-directives report-type body-text nil))
+  ([report-type body-text overrides]
   (when body-text
     (let [lines (str/split-lines body-text)]
       (->> lines
            (keep (fn [line]
-                   (some (fn [[{:keys [action attr param report-types]} pattern]]
-                           (when (or (nil? report-types)
-                                     (contains? report-types report-type))
-                             (when-let [m (re-matches pattern line)]
-                               (case action
-                                 :set            {:action :set   :attr attr :email-address (nth m 1)}
-                                 :unset          {:action :unset :attr attr}
-                                 :set-deadline   (when-let [d (parse-date-iso (nth m 1))]
-                                                   {:action :set-deadline :date d})
-                                 :unset-deadline {:action :unset-deadline}
-                                 :set-topic      {:action :set-topic :topic (nth m 1)}))))
+                   (some (fn [[{:keys [id action attr param scope report-types]} pattern]]
+                           (let [rt (or (:report-types (get overrides id)) report-types)
+                                 sc (or (:scope (get overrides id)) scope)]
+                             (when (or (nil? rt) (contains? rt report-type))
+                               (when-let [m (re-matches pattern line)]
+                                 (let [base (case action
+                                              :set            {:action :set   :attr attr :email-address (nth m 1)}
+                                              :unset          {:action :unset :attr attr}
+                                              :set-deadline   (when-let [d (parse-date-iso (nth m 1))]
+                                                                {:action :set-deadline :date d})
+                                              :unset-deadline {:action :unset-deadline}
+                                              :set-topic      {:action :set-topic :topic (nth m 1)})]
+                                   (when base (assoc base :scope sc)))))))
                          compiled-directives)))
-           vec))))
+           vec)))))
 
 (defn resolve-commands
   "Given a seq of directive actions, apply last-one-wins per attribute.
@@ -463,106 +475,138 @@
                   "(by" email-mid ")")))))
 
 (defn apply-directives!
-  "Apply directive commands (maintainer-only)."
+  "Apply directive commands. Each directive carries its own :scope
+  (from per-source overrides or the registry default). A directive
+  with :scope :maintainer requires maintainer permission; :scope :user
+  allows anyone."
   [conn report-eid directives email-eid from-addr is-maintainer?]
-  (when (and (seq directives) is-maintainer?)
-    (let [{:keys [set unset deadline undeadline? topic]} (resolve-commands directives)
-          report-mid (d/q '[:find ?mid . :in $ ?r
-                            :where [?r :report/message-id ?mid]]
-                          (d/db conn) report-eid)
-          current    (d/pull (d/db conn)
-                             (into state-attrs [:report/deadline :report/close-reason
-                                                :report/closed-proxy :report/acked-proxy
-                                                :report/owned-proxy :report/urgent-proxy
-                                                :report/important-proxy])
-                             report-eid)
-          set-tx (mapcat (fn [[attr addr]]
-                           (let [target-eid (find-or-create-synthetic-email!
-                                             conn addr report-mid attr)]
-                             [[:db/add report-eid attr target-eid]
-                              [:db/add report-eid (proxy-attrs attr) email-eid]]))
-                         set)
-          close-reason-tx (when (contains? set :report/closed)
-                            [[:db/add report-eid :report/close-reason :resolved]])
-          unset-tx (mapcat (fn [attr]
-                             (when-let [cur (get current attr)]
-                               (let [retract    [[:db/retract report-eid attr (ref-eid cur)]]
-                                     proxy-attr (proxy-attrs attr)
-                                     proxy-cur  (get current proxy-attr)]
-                                 (if proxy-cur
-                                   (conj retract [:db/retract report-eid proxy-attr (ref-eid proxy-cur)])
-                                   retract))))
-                           unset)
-          unclose-reason-tx (when (and (contains? unset :report/closed)
-                                       (:report/close-reason current))
-                              [[:db/retract report-eid :report/close-reason
-                                (:report/close-reason current)]])
-          deadline-tx (cond
-                        deadline    [[:db/add report-eid :report/deadline deadline]]
-                        undeadline? (when (:report/deadline current)
-                                      [[:db/retract report-eid :report/deadline
-                                        (:report/deadline current)]])
-                        :else       nil)
-          topic-tx (when topic [[:db/add report-eid :report/topic topic]])
-          all-tx (vec (concat set-tx close-reason-tx unset-tx unclose-reason-tx
-                              deadline-tx topic-tx))
-          desc (concat (map (fn [[attr addr]] (str (name attr) " -> " addr)) set)
-                       (map #(str "un-" (name %)) unset)
-                       (when deadline [(str "deadline " deadline)])
-                       (when undeadline? ["undeadline"])
-                       (when topic [(str "topic:" topic)]))]
-      (when (seq all-tx)
-        (d/transact! conn all-tx)
-        (bump-report-updated! conn report-eid)
-        (log/info "Commands:" (str/join ", " desc)
-                  "(proxy by" from-addr ")")))))
+  (let [permitted (filter (fn [{:keys [scope]}]
+                            (or (= :user scope) (and (= :maintainer scope) is-maintainer?)))
+                          directives)]
+    (when (seq permitted)
+      (let [{:keys [set unset deadline undeadline? topic]} (resolve-commands permitted)
+            report-mid (d/q '[:find ?mid . :in $ ?r
+                              :where [?r :report/message-id ?mid]]
+                            (d/db conn) report-eid)
+            current    (d/pull (d/db conn)
+                               (into state-attrs [:report/deadline :report/close-reason
+                                                  :report/closed-proxy :report/acked-proxy
+                                                  :report/owned-proxy :report/urgent-proxy
+                                                  :report/important-proxy])
+                               report-eid)
+            set-tx (mapcat (fn [[attr addr]]
+                             (let [target-eid (find-or-create-synthetic-email!
+                                               conn addr report-mid attr)]
+                               [[:db/add report-eid attr target-eid]
+                                [:db/add report-eid (proxy-attrs attr) email-eid]]))
+                           set)
+            close-reason-tx (when (contains? set :report/closed)
+                              [[:db/add report-eid :report/close-reason :resolved]])
+            unset-tx (mapcat (fn [attr]
+                               (when-let [cur (get current attr)]
+                                 (let [retract    [[:db/retract report-eid attr (ref-eid cur)]]
+                                       proxy-attr (proxy-attrs attr)
+                                       proxy-cur  (get current proxy-attr)]
+                                   (if proxy-cur
+                                     (conj retract [:db/retract report-eid proxy-attr (ref-eid proxy-cur)])
+                                     retract))))
+                             unset)
+            unclose-reason-tx (when (and (contains? unset :report/closed)
+                                         (:report/close-reason current))
+                                [[:db/retract report-eid :report/close-reason
+                                  (:report/close-reason current)]])
+            deadline-tx (cond
+                          deadline    [[:db/add report-eid :report/deadline deadline]]
+                          undeadline? (when (:report/deadline current)
+                                        [[:db/retract report-eid :report/deadline
+                                          (:report/deadline current)]])
+                          :else       nil)
+            topic-tx (when topic [[:db/add report-eid :report/topic topic]])
+            all-tx (vec (concat set-tx close-reason-tx unset-tx unclose-reason-tx
+                                deadline-tx topic-tx))
+            desc (concat (map (fn [[attr addr]] (str (name attr) " -> " addr)) set)
+                         (map #(str "un-" (name %)) unset)
+                         (when deadline [(str "deadline " deadline)])
+                         (when undeadline? ["undeadline"])
+                         (when topic [(str "topic:" topic)]))]
+        (when (seq all-tx)
+          (d/transact! conn all-tx)
+          (bump-report-updated! conn report-eid)
+          (log/info "Commands:" (str/join ", " desc)
+                    "(proxy by" from-addr ")"))))))
+
+(defn- filter-triggers-by-scope
+    "Remove trigger results whose :scope override is :maintainer when
+  the sender is not a maintainer. Without overrides, all triggers
+  default to :user scope and pass through."
+    [trig-result overrides is-maintainer?]
+    (when trig-result
+      (let [filtered (into {}
+                           (keep (fn [[attr :as entry]]
+                                   (let [cmd   (attr->trigger-cmd attr)
+                                         scope (or (:scope (get overrides (:id cmd)))
+                                                   (:scope cmd))]
+                                     (when (or (= :user scope) is-maintainer?)
+                                       entry))))
+                           (dissoc trig-result :report/close-reason))]
+        (when (seq filtered)
+          (cond-> filtered
+            (:report/close-reason trig-result) (assoc :report/close-reason
+                                                      (:report/close-reason trig-result)))))))
 
 (defn apply-commands!
   "Detect all commands and votes from an email's body text,
   then apply them: triggers first, then directives.
   On closed reports, only the Unclosed directive (maintainer) is allowed.
   `roles` is the roles map for the report's source."
-  [conn report-eid report-type email source-map roles]
-  (let [body-text (email-body-text email)
-        from-addr (:email/from-address email)
-        eid       (:db/id email)]
-    (when body-text
-      (let [src-name    (d/q '[:find ?src . :in $ ?rid :where
-                               [?rid :report/email ?e] [?e :email/source ?src]]
-                             (d/db conn) report-eid)
-            source-cfg  (get source-map src-name)
-            src-cmds    (build-source-commands source-cfg)
-            trig-result (detect-triggers report-type body-text src-cmds)
-            directives  (detect-directives report-type body-text)
-            is-maintainer? (maintainer? roles from-addr (:email/date-sent email))
-            closed?     (some? (:report/closed
-                                (d/pull (d/db conn) [:report/closed] report-eid)))]
+    [conn report-eid report-type email source-map roles]
+    (let [body-text (email-body-text email)
+          from-addr (:email/from-address email)
+          eid       (:db/id email)]
+      (when body-text
+        (let [src-name    (d/q '[:find ?src . :in $ ?rid :where
+                                 [?rid :report/email ?e] [?e :email/source ?src]]
+                               (d/db conn) report-eid)
+              source-cfg  (get source-map src-name)
+              src-cmds    (build-source-commands source-cfg)
+              overrides   (:overrides src-cmds)
+              trig-result (detect-triggers report-type body-text src-cmds)
+              directives  (detect-directives report-type body-text overrides)
+              is-maintainer? (maintainer? roles from-addr (:email/date-sent email))
+              trig-result (filter-triggers-by-scope trig-result overrides is-maintainer?)
+              closed?     (some? (:report/closed
+                                  (d/pull (d/db conn) [:report/closed] report-eid)))]
 
-        ;; Votes (requests only, not on closed reports)
-        (when (and (= :request report-type) from-addr (not closed?))
-          (apply-vote! conn report-eid from-addr body-text email source-cfg))
+          ;; Votes (requests only, not on closed reports)
+          (when (and (= :request report-type) from-addr (not closed?))
+            (apply-vote! conn report-eid from-addr body-text email source-cfg))
 
-        (if closed?
-          ;; Closed report: only Unclosed directive allowed (maintainer)
-          (when (and (seq directives) is-maintainer?)
-            (let [{:keys [unset]} (resolve-commands directives)]
-              (when (contains? unset :report/closed)
-                (let [current (d/pull (d/db conn) [:report/closed :report/closed-proxy
-                                                   :report/close-reason] report-eid)
-                      retract-tx (when-let [cur (:report/closed current)]
-                                   [[:db/retract report-eid :report/closed (ref-eid cur)]])
-                      proxy-tx   (when-let [cur (:report/closed-proxy current)]
-                                   [[:db/retract report-eid :report/closed-proxy (ref-eid cur)]])
-                      reason-tx  (when (:report/close-reason current)
-                                   [[:db/retract report-eid :report/close-reason
-                                     (:report/close-reason current)]])
-                      all-tx     (vec (concat retract-tx proxy-tx reason-tx))]
-                  (when (seq all-tx)
-                    (d/transact! conn all-tx)
-                    (bump-report-updated! conn report-eid)
-                    (log/info "Commands: un-closed (proxy by" from-addr ")"))))))
+          (if closed?
+            ;; Closed report: only Unclosed directive allowed, respecting its scope
+            (let [unclosed-dirs (filter (fn [{:keys [action scope]}]
+                                          (and (= :unset action)
+                                               (or (= :user scope)
+                                                   (and (= :maintainer scope) is-maintainer?))))
+                                        directives)]
+              (when (seq unclosed-dirs)
+                (let [{:keys [unset]} (resolve-commands unclosed-dirs)]
+                  (when (contains? unset :report/closed)
+                    (let [current (d/pull (d/db conn) [:report/closed :report/closed-proxy
+                                                       :report/close-reason] report-eid)
+                          retract-tx (when-let [cur (:report/closed current)]
+                                       [[:db/retract report-eid :report/closed (ref-eid cur)]])
+                          proxy-tx   (when-let [cur (:report/closed-proxy current)]
+                                       [[:db/retract report-eid :report/closed-proxy (ref-eid cur)]])
+                          reason-tx  (when (:report/close-reason current)
+                                       [[:db/retract report-eid :report/close-reason
+                                         (:report/close-reason current)]])
+                          all-tx     (vec (concat retract-tx proxy-tx reason-tx))]
+                      (when (seq all-tx)
+                        (d/transact! conn all-tx)
+                        (bump-report-updated! conn report-eid)
+                        (log/info "Commands: un-closed (proxy by" from-addr ")")))))))
 
-          ;; Open report: triggers then directives
-          (do
-            (apply-triggers! conn report-eid trig-result eid (:email/message-id email))
-            (apply-directives! conn report-eid directives eid from-addr is-maintainer?)))))))
+            ;; Open report: triggers then directives
+            (do
+              (apply-triggers! conn report-eid trig-result eid (:email/message-id email))
+              (apply-directives! conn report-eid directives eid from-addr is-maintainer?)))))))
