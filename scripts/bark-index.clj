@@ -30,7 +30,7 @@
 ;; Config
 ;; ---------------------------------------------------------------------------
 
-(def default-json "public/reports/all.json")
+(def default-json "public/reports/all-open.json")
 (def default-output "public/web/index.html")
 
 (def type-labels {"bug" "bug" "announcement" "ann" "request" "req"
@@ -250,8 +250,13 @@
 
 (def ^:private index-js (slurp "resources/bark-index.js"))
 
-(defn page-js [types-json]
-  (wrap-js (str "var barkConfig = {types:" types-json "};\n"
+(defn page-js [types-json total open-count closed-count]
+  (wrap-js (str "var barkConfig = {types:" types-json
+                ",total:" total
+                ",openCount:" open-count
+                ",closedCount:" closed-count
+                ",closedJsonUrl:'reports/all-closed.json'"
+                "};\n"
                 index-js "\n"
                 theme-toggle-js)))
 
@@ -259,20 +264,23 @@
 ;; Page assembly
 ;; ---------------------------------------------------------------------------
 
-(defn index-page [reports reports-dir]
-  (let [types      (vec (distinct (map #(get % "type") reports)))
-        types-json (json/generate-string types)
-        has-rss?   (.exists (clojure.java.io/file reports-dir "all.xml"))
+(defn index-page [reports reports-dir envelope]
+  (let [types        (vec (distinct (map #(get % "type") reports)))
+        types-json   (json/generate-string types)
+        total        (get envelope "total" (count reports))
+        open-count   (get envelope "open-count" (count reports))
+        closed-count (get envelope "closed-count" 0)
+        has-rss?     (.exists (clojure.java.io/file reports-dir "all.xml"))
         generated-at (str (java.util.Date.))
-        rss-href   "reports/all.xml"
-        cols       [[:th {:data-sort "type"     :onclick "sortTable(0,'type')"}     "Type"]
-                    [:th {:data-sort "priority" :onclick "sortTable(1,'priority')"} "Priority"]
-                    [:th {:data-sort "due"      :onclick "sortTable(2,'due')"}      "Due"]
-                    [:th {:data-sort "flags"    :onclick "sortTable(3,'flags')"}    "Flags"]
-                    [:th {:data-sort "subject"  :onclick "sortTable(4,'subject')"}  "Subject"]
-                    [:th {:data-sort "from"     :onclick "sortTable(5,'from')"}     "Author"]
-                    [:th {:data-sort "date"     :onclick "sortTable(6,'date')"}     "Date"]
-                    [:th {:data-sort "replies"  :onclick "sortTable(7,'replies')"}  "↩"]]]
+        rss-href     "reports/all.xml"
+        cols         [[:th {:data-sort "type"     :onclick "sortTable(0,'type')"}     "Type"]
+                      [:th {:data-sort "priority" :onclick "sortTable(1,'priority')"} "Priority"]
+                      [:th {:data-sort "due"      :onclick "sortTable(2,'due')"}      "Due"]
+                      [:th {:data-sort "flags"    :onclick "sortTable(3,'flags')"}    "Flags"]
+                      [:th {:data-sort "subject"  :onclick "sortTable(4,'subject')"}  "Subject"]
+                      [:th {:data-sort "from"     :onclick "sortTable(5,'from')"}     "Author"]
+                      [:th {:data-sort "date"     :onclick "sortTable(6,'date')"}     "Date"]
+                      [:th {:data-sort "replies"  :onclick "sortTable(7,'replies')"}  "↩"]]]
     (str
      "<!DOCTYPE html>\n"
      (h/html
@@ -322,7 +330,7 @@
            [:tbody
             (for [r reports]
               (report-row r))]]]
-         [:script (h/raw (page-js types-json))]]
+         [:script (h/raw (page-js types-json total open-count closed-count))]]
         (bark-footer)]]))))
 
 ;; ---------------------------------------------------------------------------
@@ -339,7 +347,7 @@
   (.mkdirs (clojure.java.io/file (.getParent (clojure.java.io/file out-file))))
   (let [envelope (json/parse-string (slurp json-file))
         reports  (get envelope "reports" envelope)
-        html     (index-page reports reports-dir)]
+        html     (index-page reports reports-dir envelope)]
     (spit out-file html)
     (binding [*out* *err*]
       (log/info "Wrote" (count reports) "reports to" out-file))))

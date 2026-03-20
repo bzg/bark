@@ -264,14 +264,17 @@
 (defn dump-json!
   "Dump reports as JSON for a single source."
   ([reports out-dir source-name source-map maintainers-map]
-   (dump-json! reports out-dir source-name source-map maintainers-map "all.json"))
+   (dump-json! reports out-dir source-name source-map maintainers-map "all.json" nil))
   ([reports out-dir source-name source-map maintainers-map basename]
+   (dump-json! reports out-dir source-name source-map maintainers-map basename nil))
+  ([reports out-dir source-name source-map maintainers-map basename extra-meta]
    (let [data     (mapv #(report->map % source-map maintainers-map) reports)
          meta     (source-metadata source-name source-map)
          envelope (cond-> {:bark-format bark-format
                            :source      source-name
                            :reports     data}
-                    (seq meta) (merge meta))
+                    (seq meta)       (merge meta)
+                    (seq extra-meta) (merge extra-meta))
          filename (str out-dir "/" basename)]
      (spit filename (json/generate-string envelope {:pretty true}))
      (log/info "Wrote" (count data) "reports to" filename))))
@@ -520,15 +523,23 @@
       (dump-rss! typed reports-dir source-name source-map maintainers-map
                  (str plural ".xml") plural))))
 
-(defn- dump-open!
-  "Export open-only reports as -open suffixed files (JSON and Org only, no RSS).
-  Produces all-open.json, all-open.org, bugs-open.json, etc."
+(defn- dump-open-closed!
+  "Export all-open.json and all-closed.json with summary counts.
+  all-open.json is loaded by index.html on first paint (fast).
+  all-closed.json is lazy-loaded when user deactivates the Open filter.
+  Both include :total, :open-count, :closed-count in the envelope.
+  Also produces per-type -open files when fmts allows."
   [reports reports-dir source-name source-map maintainers-map fmts]
-  (let [open (open-reports reports)]
+  (let [open       (vec (open-reports reports))
+        closed     (vec (filter :report/closed reports))
+        counts     {:total        (count reports)
+                    :open-count   (count open)
+                    :closed-count (count closed)}]
+    (dump-json! open reports-dir source-name source-map maintainers-map
+                "all-open.json" counts)
+    (dump-json! closed reports-dir source-name source-map maintainers-map
+                "all-closed.json" counts)
     (when (seq open)
-      (when (fmts "json")
-        (dump-json! open reports-dir source-name source-map maintainers-map
-                    "all-open.json"))
       (when (fmts "org")
         (dump-org! open reports-dir source-name source-map maintainers-map
                    "all-open.org" "open reports"))
@@ -542,13 +553,11 @@
         (when (fmts "org")
           (dump-org! typed reports-dir source-name source-map maintainers-map
                      (str plural "-open.org") (str plural " (open)")))))))
-
 (defn export-source!
   "Export a single source in the given format(s).
-  When format is \"all\", per-type feeds respect :export-formats from config.
-  When only-open? is true, also export -open files with only open reports."
-  [format reports base-dir source-name source-map maintainers-map cli-extra
-   only-open?]
+  Always produces all-open.json and all-closed.json (used by index.html).
+  When format is \"all\", per-type feeds respect :export-formats from config."
+  [format reports base-dir source-name source-map maintainers-map cli-extra]
   (let [reports-dir (str base-dir "/reports")
         patches-dir (str base-dir "/patches")
         _           (doseq [d [reports-dir patches-dir]]
@@ -558,19 +567,16 @@
                       (case fmt
                         "json"    (do (dump-json! reports reports-dir source-name source-map maintainers-map)
                                       (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"json"})
-                                      (when only-open?
-                                        (dump-open! reports reports-dir source-name source-map maintainers-map #{"json"})))
+                                      (dump-open-closed! reports reports-dir source-name source-map maintainers-map #{"json"}))
                         "rss"     (do (dump-rss!  reports reports-dir source-name source-map maintainers-map)
                                       (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"rss"}))
                         "org"     (do (dump-org!  reports reports-dir source-name source-map maintainers-map)
                                       (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"org"})
-                                      (when only-open?
-                                        (dump-open! reports reports-dir source-name source-map maintainers-map #{"org"})))
+                                      (dump-open-closed! reports reports-dir source-name source-map maintainers-map #{"org"}))
                         "patches" (dump-patches! reports patches-dir)
                         "html"    (do (dump-json! reports reports-dir source-name source-map maintainers-map)
                                       (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"json"})
-                                      (when only-open?
-                                        (dump-open! reports reports-dir source-name source-map maintainers-map #{"json"}))
+                                      (dump-open-closed! reports reports-dir source-name source-map maintainers-map #{"json"})
                                       (dump-docs! base-dir source-name)
                                       (dump-html! base-dir reports-dir cli-extra))
                         "stats"   (dump-stats! base-dir reports-dir source-name "json" cli-extra)))]
@@ -579,8 +585,7 @@
           (when (ef "rss")  (dump-rss!  reports reports-dir source-name source-map maintainers-map))
           (when (ef "org")  (dump-org!  reports reports-dir source-name source-map maintainers-map))
           (dump-per-type! reports reports-dir source-name source-map maintainers-map ef)
-          (when only-open?
-            (dump-open! reports reports-dir source-name source-map maintainers-map ef))
+          (dump-open-closed! reports reports-dir source-name source-map maintainers-map ef)
           (dump-patches! reports patches-dir)
           (dump-docs! base-dir source-name)
           (dump-html! base-dir reports-dir cli-extra)
@@ -594,7 +599,7 @@
 
 (def formats #{"json" "rss" "org" "html" "all" "stats" "patches"})
 
-(let [{:keys [format source-name min-priority min-status force-all? only-open?]
+(let [{:keys [format source-name min-priority min-status force-all?]
        :or {format "all"}}
       (parse-cli-args *command-line-args*)
       db-path (or (System/getenv "BARK_DB") "data/bark-db")
@@ -613,8 +618,6 @@
     (let [db              (d/db conn)
           last-modified   (get-last-modified db)
           last-export     (get-last-export db)
-          ;; Incremental: skip entirely when nothing changed since last export.
-          ;; --force bypasses this; so does requesting a specific format.
           incremental?    (and (not force-all?)
                                (= format "all")
                                last-export last-modified)
@@ -637,7 +640,7 @@
                                                  (str/join ", " (keys source-map)))
                                       (System/exit 1)))
                                 (mapv :name (:sources config)))
-              cli-extra       (remove #{format "-n" source-name "--force" "--only-open"}
+              cli-extra       (remove #{format "-n" source-name "--force"}
                                       (rest *command-line-args*))]
           (when (and incremental? (seq changed-types))
             (log/info "Incremental: changed types:" (str/join ", " (map name changed-types))))
@@ -647,7 +650,6 @@
                                                      :min-status   min-status})
                   er       (resolve-export-reports src-name source-map)
                   reports  (if er (filter #(contains? er (:report/type %)) reports) reports)
-                  ;; When incremental, check if any changed type is present in this source
                   src-types (when incremental? (set (map :report/type reports)))
                   skip-src? (and incremental? (seq changed-types)
                                  (empty? (clojure.set/intersection changed-types src-types)))
@@ -661,13 +663,10 @@
 
                 :else
                 (do (log/info (str "[" src-name "] " (count reports) " report(s)"
-                                   (if only-open?
-                                     (str " (" (count (open-reports reports)) " open)")
-                                     "")
+                                   " (" (count (open-reports reports)) " open)"
                                    (if incremental? " (incremental)" "")))
                     (export-source! format reports base-dir src-name
-                                    source-map maintainers-map cli-extra
-                                    only-open?)))))
+                                    source-map maintainers-map cli-extra)))))
           (save-last-export! conn (java.util.Date.)))))
     (finally
       (d/close conn))))

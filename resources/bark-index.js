@@ -1,9 +1,13 @@
-// bark-index.js — Client-side filtering, sorting, URL state, theme toggle.
+// bark-index.js — Client-side filtering, sorting, URL state, lazy-load closed.
 // Copyright (c) 2026 Bastien Guerry <bzg@gnu.org>
 // SPDX-License-Identifier: MPL-2.0
 //
 // Expects a global `barkConfig` object with:
-//   .types    — array of report type strings
+//   .types          — array of report type strings
+//   .total          — total report count (open + closed)
+//   .openCount      — open report count
+//   .closedCount    — closed report count
+//   .closedJsonUrl  — URL of all-closed.json (lazy-loaded)
 
 var allTypes = barkConfig.types;
 var activeTypes = {};
@@ -11,6 +15,9 @@ allTypes.forEach(function(t) { activeTypes[t] = true; });
 var onlyOpen    = true;
 var onlyAcked   = false;
 var onlyOwned   = false;
+
+var closedLoaded = false;
+var closedLoading = false;
 
 function getSearchInput() { return document.getElementById('si'); }
 
@@ -57,27 +64,19 @@ function resolveDate(s) {
   return '';
 }
 
-/* Wildcard-aware field match: '*' matches any non-empty value */
 function matchField(fieldVal, terms) {
   if (terms.length === 1 && terms[0] === '*') return fieldVal !== '';
   return terms.some(function(t) { return fieldVal.indexOf(t) !== -1; });
 }
 
-/* Extract the value after the first ':' in a search token */
 function extractValue(part, lowered) {
   return part.substring(lowered.indexOf(':') + 1);
 }
 
-/* Check whether lowered starts with any of the given prefixes */
 function startsWithAny(lowered, prefixes) {
   return prefixes.some(function(pfx) { return lowered.indexOf(pfx) === 0; });
 }
 
-/*
- * Field map: each entry maps search prefixes to a result key.
- * parseClause uses this to turn "from:alice" into result.froms = ["alice"].
- * matchClause uses the dataAttr to look up the corresponding data-* attribute.
- */
 var fieldMap = [
   {prefixes: ['message-id:', 'mid:', 'm:'], key: 'mids',      dataAttr: 'mid'},
   {prefixes: ['from:', 'f:'],               key: 'froms',     dataAttr: 'from'},
@@ -90,7 +89,6 @@ var fieldMap = [
   {prefixes: ['important:', 'i:'],          key: 'important', dataAttr: 'important'}
 ];
 
-/* Parse a single AND-clause (no | in it) */
 function parseClause(q) {
   var result = { text: '', mids: [], froms: [], subjects: [],
                  acked: [], owned: [], closed: [], topics: [],
@@ -100,7 +98,6 @@ function parseClause(q) {
   for (var i = 0; i < parts.length; i++) {
     var p  = parts[i];
     var lp = p.toLowerCase();
-    // Try each field mapping
     var matched = false;
     for (var j = 0; j < fieldMap.length; j++) {
       if (startsWithAny(lp, fieldMap[j].prefixes)) {
@@ -110,7 +107,6 @@ function parseClause(q) {
       }
     }
     if (matched) continue;
-    // Special cases: priority and date (not simple field lookups)
     if (lp.indexOf('priority:') === 0 || lp.indexOf('p:') === 0) {
       var n = parseInt(extractValue(p, lp), 10);
       if (!isNaN(n)) result.minPriority = n;
@@ -128,13 +124,10 @@ function parseClause(q) {
 
 function matchClause(tr, q) {
   var d = tr.dataset;
-
   if (!activeTypes[d.type]) return false;
   if (onlyOpen && d.closed === 'true') return false;
-  if (onlyAcked  && d.acked  === '')     return false;
-  if (onlyOwned  && d.owned  === '')     return false;
-
-  // Check all field-mapped filters
+  if (onlyAcked  && d.acked  === '') return false;
+  if (onlyOwned  && d.owned  === '') return false;
   for (var j = 0; j < fieldMap.length; j++) {
     var f = fieldMap[j];
     if (q[f.key].length > 0) {
@@ -142,24 +135,21 @@ function matchClause(tr, q) {
       if (!matchField(val, q[f.key])) return false;
     }
   }
-
   if (q.minPriority !== null) {
     if (parseInt(d.priority || '0', 10) < q.minPriority) return false;
   }
   if (q.dateFrom && d.date < q.dateFrom) return false;
   if (q.dateTo   && d.date > q.dateTo)   return false;
   if (q.text && d.search.indexOf(q.text.toLowerCase()) === -1) return false;
-
   return true;
 }
 
-/* Split on ' | ' (pipe with surrounding spaces), evaluate OR of clauses */
 function matchRow(tr, raw) {
   var clauses = raw.split(/\s*\|\s*/);
   return clauses.some(function(c) { return matchClause(tr, parseClause(c)); });
 }
 
-/* ── Pure display: no side effects ─────────────────────────── */
+/* ── Display ───────────────────────────────────────────────── */
 
 function restripe() {
   var i = 0;
@@ -172,20 +162,156 @@ function restripe() {
   });
 }
 
-function filterRows() {
-  var raw  = getSearchInput().value;
+function updateStatus() {
   var rows = document.querySelectorAll('tbody tr');
   var visible = 0;
   rows.forEach(function(tr) {
-    var show = matchRow(tr, raw);
-    tr.classList.toggle('hidden', !show);
-    if (show) visible++;
+    if (!tr.classList.contains('hidden')) visible++;
   });
-  document.getElementById('status').textContent = visible + '/' + rows.length + ' reports';
+  document.getElementById('status').textContent = visible + '/' + barkConfig.total + ' reports';
+}
+
+function filterRows() {
+  var raw  = getSearchInput().value;
+  document.querySelectorAll('tbody tr').forEach(function(tr) {
+    tr.classList.toggle('hidden', !matchRow(tr, raw));
+  });
+  updateStatus();
   restripe();
 }
 
-/* ── URL ↔ state (no history decision here) ───────────────── */
+/* ── Lazy-load closed reports ──────────────────────────────── */
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function escAttr(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function parseIsoDate(dateRaw) {
+  var ds = String(dateRaw || '').trim();
+  if (ds.length >= 10 && /^\d{4}-\d{2}-\d{2}/.test(ds)) return ds.substring(0, 10);
+  var monthMap = {Jan:'01',Feb:'02',Mar:'03',Apr:'04',May:'05',Jun:'06',
+                  Jul:'07',Aug:'08',Sep:'09',Oct:'10',Nov:'11',Dec:'12'};
+  var dm = ds.match(/^\w+ (\w+) (\d+) .* (\d{4})$/);
+  if (dm && monthMap[dm[1]]) return dm[3] + '-' + monthMap[dm[1]] + '-' + String(dm[2]).padStart(2, '0');
+  return '';
+}
+
+var _typeLabels = {bug:'bug',announcement:'ann',request:'req',patch:'patch',release:'rel',change:'chg'};
+
+function buildRowElement(r) {
+  var type = r.type || '', subject = r.subject || '', from = r.from || '';
+  var fromName = r['from-name'] || '', dateRaw = r['date-raw'] || r.date || '';
+  var flags = r.flags || '---', priority = r.priority || 0, replies = r.replies || 0;
+  var archivedAt = r['archived-at'] || '', messageId = r['message-id'] || '';
+  var acked = r.acked || '', owned = r.owned || '', closed = r.closed || '';
+  var urgent = r.urgent || '', important = r.important || '';
+  var deadline = r.deadline || '', topic = r.topic || '';
+  var closeReason = r['close-reason'] || '', role = r.role || '';
+
+  var isoDate = parseIsoDate(dateRaw);
+  var closed_b = flags.length >= 3 && flags[2] === 'C';
+  var author = fromName || from;
+  var flagA = acked ? 'A' : '-', flagO = owned ? 'O' : '-';
+  var flagC = closeReason === 'canceled' ? 'C' : closeReason === 'expired' ? 'E' : closed_b ? 'R' : '-';
+  var flagsStr = flagA + flagO + flagC;
+  var flagsScore = (acked ? 1 : 0) + (owned ? 2 : 0) + (closed_b ? 0 : 4);
+  var label = _typeLabels[type] || type;
+
+  var subjectHtml = closeReason === 'canceled' ? '<em><s>' + escHtml(subject) + '</s></em>'
+                  : closed_b ? '<em>' + escHtml(subject) + '</em>' : escHtml(subject);
+  if (archivedAt) subjectHtml = '<a href="' + escAttr(archivedAt) + '">' + subjectHtml + '</a>';
+
+  var priLabel = priority === 3 ? 'A' : priority === 2 ? 'B' : priority === 1 ? 'C' : ' ';
+  var isMaint = role === 'maintainer' || role === 'admin';
+  var authorHtml = isMaint ? '<strong>' + escHtml(author) + '</strong>' : escHtml(author);
+
+  var tr = document.createElement('tr');
+  tr.dataset.type = type;
+  tr.dataset.closed = String(closed_b);
+  tr.dataset.mid = messageId;
+  tr.dataset.from = from.toLowerCase();
+  tr.dataset.subject = subject.toLowerCase();
+  tr.dataset.date = isoDate;
+  tr.dataset.source = r.source || '';
+  tr.dataset.acked = acked.toLowerCase();
+  tr.dataset.owned = owned.toLowerCase();
+  tr.dataset.closedby = closed.toLowerCase();
+  tr.dataset.urgent = urgent.toLowerCase();
+  tr.dataset.important = important.toLowerCase();
+  tr.dataset.priority = String(priority);
+  tr.dataset.deadline = deadline;
+  tr.dataset.topic = (topic || '').toLowerCase();
+  tr.dataset.search = (subject + ' ' + from + ' ' + author + ' ' + isoDate + ' ' + topic).toLowerCase();
+
+  tr.innerHTML =
+    '<td><mark data-type="' + escAttr(type) + '" style="cursor:pointer" onclick="isolateType(\'' + escAttr(type) + '\')">' + escHtml(label) + '</mark></td>' +
+    '<td data-value="' + priority + '" style="text-align:center">' + priLabel + '</td>' +
+    '<td data-value="' + escAttr(deadline) + '" class="due-cell"></td>' +
+    '<td data-value="' + flagsScore + '" title="' + escAttr(flagsStr) + '" style="text-align:center;font-family:monospace;font-size:0.8rem;letter-spacing:0.1em">' + flagsStr + '</td>' +
+    '<td>' + subjectHtml + '</td>' +
+    '<td class="secondary" title="' + escAttr(from) + '">' + authorHtml + '</td>' +
+    '<td data-value="' + escAttr(isoDate) + '"><small>' + escHtml(isoDate || '') + '</small></td>' +
+    '<td style="text-align:center">' + replies + '</td>';
+
+  return tr;
+}
+
+function computeDueCells(container) {
+  var today = new Date();
+  today.setHours(0,0,0,0);
+  var todayMs = today.getTime();
+  var msPerDay = 86400000;
+  container.querySelectorAll('.due-cell').forEach(function(td) {
+    var dl = td.getAttribute('data-value');
+    if (!dl) return;
+    var parts = dl.split('-');
+    if (parts.length !== 3) return;
+    var deadlineMs = new Date(+parts[0], +parts[1]-1, +parts[2]).getTime();
+    var days = Math.round((deadlineMs - todayMs) / msPerDay);
+    td.setAttribute('data-value', String(days));
+    td.textContent = days < 0 ? Math.abs(days) + 'd. ago' : 'In ' + days + ' d.';
+    td.title = dl;
+    td.style.textAlign = 'center';
+    if (days < 0) td.style.color = 'var(--pico-del-color, #c0392b)';
+    else if (days <= 3) td.style.color = 'var(--pico-ins-color, #b8860b)';
+  });
+}
+
+function loadClosedReports(callback) {
+  if (closedLoaded) { if (callback) callback(); return; }
+  if (closedLoading) return;
+  closedLoading = true;
+  document.getElementById('status').textContent = 'Loading closed reports…';
+  fetch(barkConfig.closedJsonUrl)
+    .then(function(resp) { return resp.json(); })
+    .then(function(data) {
+      var reports = data.reports || [];
+      var tbody = document.querySelector('tbody');
+      var fragment = document.createDocumentFragment();
+      reports.forEach(function(r) { fragment.appendChild(buildRowElement(r)); });
+      tbody.appendChild(fragment);
+      computeDueCells(tbody);
+      reports.forEach(function(r) {
+        if (r.type && allTypes.indexOf(r.type) === -1) {
+          allTypes.push(r.type);
+          activeTypes[r.type] = true;
+        }
+      });
+      closedLoaded = true;
+      closedLoading = false;
+      if (callback) callback();
+    })
+    .catch(function(err) {
+      closedLoading = false;
+      console.error('Failed to load closed reports:', err);
+      document.getElementById('status').textContent = 'Failed to load closed reports.';
+    });
+}
+
+/* ── URL ↔ state ───────────────────────────────────────────── */
 
 function buildURL() {
   var params = new URLSearchParams();
@@ -208,7 +334,7 @@ function buildURL() {
 function pushURL()    { history.pushState(null, '', buildURL()); }
 function replaceURL() { history.replaceState(null, '', buildURL()); }
 
-/* ── Button handlers: mutate → display → one pushState ────── */
+/* ── Button handlers ───────────────────────────────────────── */
 
 function toggleType(type, btn) {
   activeTypes[type] = !activeTypes[type];
@@ -252,18 +378,20 @@ function toggleOwned(btn) {
 function toggleOpen(btn) {
   onlyOpen = !onlyOpen;
   btn.classList.toggle('outline');
-  filterRows();
-  pushURL();
+  if (!onlyOpen && !closedLoaded) {
+    loadClosedReports(function() { filterRows(); pushURL(); });
+  } else {
+    filterRows();
+    pushURL();
+  }
 }
-
-/* ── Search input: no history push, just replaceState ─────── */
 
 function onSearchInput() {
   filterRows();
   replaceURL();
 }
 
-/* ── Sort: pure DOM reorder + one pushState when user-initiated */
+/* ── Sort ──────────────────────────────────────────────────── */
 
 var sortState = {};
 
@@ -283,9 +411,7 @@ function doSort(colIdx, key, dir) {
       return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
     var an = parseFloat(av), bn = parseFloat(bv);
     var aNaN = isNaN(an) || av === '', bNaN = isNaN(bn) || bv === '';
-    if (aNaN !== bNaN)
-      // Push empty/NaN values to the end regardless of sort direction
-      return aNaN ? 1 : -1;
+    if (aNaN !== bNaN) return aNaN ? 1 : -1;
     if (!aNaN && !bNaN) return dir === 'asc' ? an - bn : bn - an;
     return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
   });
@@ -293,7 +419,6 @@ function doSort(colIdx, key, dir) {
   restripe();
 }
 
-/* Called from onclick on <th> — user-initiated, pushes history */
 function sortTable(colIdx, key) {
   var dir = sortState[key] === 'asc' ? 'desc' : 'asc';
   sortState = {};
@@ -302,12 +427,10 @@ function sortTable(colIdx, key) {
   pushURL();
 }
 
-/* ── Restore from URL: reads URL → sets state → displays.     */
-/*    Touches NO history (the URL is already correct).          */
+/* ── Restore from URL ──────────────────────────────────────── */
 
 function restoreFromURL() {
   var params = new URLSearchParams(location.search);
-
   getSearchInput().value = params.get('q') || '';
 
   if (params.has('types')) {
@@ -343,32 +466,16 @@ function restoreFromURL() {
     }
   }
 
-  filterRows();
+  if (!onlyOpen && !closedLoaded) {
+    loadClosedReports(function() { filterRows(); });
+  } else {
+    filterRows();
+  }
 }
 
 restoreFromURL();
-
 window.addEventListener('popstate', function() { restoreFromURL(); });
 
-/* Compute "Due" column: convert deadline dates to days-until-deadline */
-(function() {
-  var today = new Date();
-  today.setHours(0,0,0,0);
-  var todayMs = today.getTime();
-  var msPerDay = 86400000;
-  document.querySelectorAll('.due-cell').forEach(function(td) {
-    var dl = td.getAttribute('data-value');
-    if (!dl) return;
-    var parts = dl.split('-');
-    if (parts.length !== 3) return;
-    var deadlineMs = new Date(+parts[0], +parts[1]-1, +parts[2]).getTime();
-    var days = Math.round((deadlineMs - todayMs) / msPerDay);
-    td.setAttribute('data-value', String(days));
-    td.textContent = days < 0 ? Math.abs(days) + 'd. ago' : 'In ' + days + ' d.';
-    td.title = dl;
-    td.style.textAlign = 'center';
-    if (days < 0) td.style.color = 'var(--pico-del-color, #c0392b)';
-    else if (days <= 3) td.style.color = 'var(--pico-ins-color, #b8860b)';
-  });
-})();
+/* Compute "Due" column for server-rendered rows */
+computeDueCells(document);
 
