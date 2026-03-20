@@ -1,3 +1,6 @@
+#+title: BARK! Another Report Keeper
+#+subtitle: User and admin manual
+
 * BARK! Another Report Keeper
 
 BARK monitors a mailbox and converts incoming emails into reports.
@@ -6,8 +9,35 @@ report using predefined commands. Admins and maintainers can also
 update reports by writing directly to the monitored inbox, manage
 roles, and receive periodic digest emails.
 
-* As a user
+** Rationale and design choices
 
+- *Email-native* :: BARK is a tool for email-based workflows.
+
+- *One place* :: The [[https://orgmode.org][Org Mode]] was born out of the idea that to-do items
+  come from notes, and that both should live in the same space.
+  Similarly, bug reports, patches, and feature requests should be
+  discussed in general discussion areas: it should be the tracker's
+  job to filter out the noise and help contributors focus on how to
+  help.
+
+- *KISS* :: BARK provides a simple framework for acting on reports, with
+  a fixed vocabulary: =acked=, =owned=, or =closed= for status; =urgency= and
+  =importance= for priority. You cannot invent a custom =WONTFIX-MAYBE=
+  status or manually set a report to P0.
+
+- *Immutable* :: No web form, no API endpoint, no account. Users report
+  bugs and request features by sending an email to a list. Maintainers
+  act by replying to that same thread: an =Acked.= line marks the bug as
+  acked. Because every state change is encoded in an email, the entire
+  tracker state can be reconstructed at any time by replaying the
+  mailbox from scratch.
+
+- *Local-first* :: BARK exports to JSON, RSS, Org. Companion tools like
+  =bone= (TUI browser), =gnus-bone.el= (Emacs/Gnus) and =notmuch-bone.el=
+  (Emacs/notmuch) let users consume the data in whatever environment
+  they already live in, rather than forcing a new interface on them.
+
+* As a user
 ** Bug, Patch, Request
 
 As a user, you can report bugs, propose patches and make other
@@ -53,8 +83,7 @@ Requests (=[POLL]=, =[FR]=, =[TODO]=, etc.) support voting:
 - =-1= or =1-= means "I don't support"
 - =+0=, =0+=, =-0= or =0-= means "I abstain"
 
-* As a maintainer or admin
-
+* As a maintainer
 ** Announcements, releases, changes
 
 In addition to bugs, patches, and requests, maintainers can make
@@ -261,6 +290,36 @@ You can customize command keywords globally or per source:
  : :commands {:closed ["Canceled" "Fixed" "Resolved" "Wontfix"]
  :            :acked  ["Approved" "Reviewed" "LGTM"]}
 
+** Summary
+
+| ID            | Syntax / Words                       | Permission      | Report types        |
+|---------------+--------------------------------------+-----------------+---------------------|
+| =:acked=        | Acked, Confirmed, Reviewed, Approved | any user        | bug, patch, request |
+| =:owned=        | Owned, Handled, Assigned             | any user        | bug, patch, request |
+| =:closed=       | Canceled, Applied, Fixed, Closed...  | any user        | all                 |
+| =:urgent=       | Urgent                               | any user        | all                 |
+| =:important=    | Important                            | any user        | all                 |
+|---------------+--------------------------------------+-----------------+---------------------|
+| =:unacked=      | =Unacked=                              | maintainer      | bug, patch, request |
+| =:unowned=      | =Unowned=                              | maintainer      | bug, patch, request |
+| =:unclosed=     | =Unclosed=                             | maintainer      | all                 |
+| =:unurgent=     | =Unurgent=                             | maintainer      | all                 |
+| =:unimportant=  | =Unimportant=                          | maintainer      | all                 |
+| =:topic=        | Topic: word                          | maintainer      | all                 |
+|---------------+--------------------------------------+-----------------+---------------------|
+| =:acked-by=     | =Acked-by: addr@host=                  | maintainer      | bug, patch, request |
+| =:owned-by=     | =Owned-by: addr@host=                  | maintainer      | bug, patch, request |
+| =:urgent-by=    | =Urgent-by: addr@host=                 | maintainer      | all                 |
+| =:important-by= | =Important-by: addr@host=              | maintainer      | all                 |
+| =:closed-by=    | =Closed-by: addr@host=                 | maintainer      | all                 |
+|---------------+--------------------------------------+-----------------+---------------------|
+| =:deadline=     | =Deadline: 2025-03-19=                 | maintainer      | bug, patch, request |
+| =:undeadline=   | =Undeadline=                           | maintainer      | bug, patch, request |
+|---------------+--------------------------------------+-----------------+---------------------|
+| vote up       | =+1= or =1+=                             | any user (once) | request             |
+| vote down     | =-1= or =1-=                             | any user (once) | request             |
+| vote null     | =+0= / =0+= / =-0= / =0-=                    | any user (once) | request             |
+
 * Exploring reports
 
 The BARK instance can expose reports as HTML, JSON, Org and RSS.
@@ -317,7 +376,8 @@ The search field has a minimal syntax:
 
 ** The =bone= CLI tool, =gnus-bone.el= and =notmuch-bone.el=
 
-- [[https://codeberg.org/bzg/bone][bone]] lets you browse and filter BARK reports interactively from the terminal.
+- [[https://codeberg.org/bzg/bone][bone]] lets you browse and filter BARK reports interactively from the
+  terminal.
 - [[https://codeberg.org/bzg/gnus-bone][gnus-bone.el]] lets you explore BARK reports from within [[https://gnus.org/][Emacs Gnus]].
 - [[https://codeberg.org/bzg/notmuch-bone][notmuch-bone.el]] provides the same integration for [[https://notmuchmail.org/][notmuch]].
 
@@ -418,23 +478,23 @@ email lacks the usual =List-Id= or =Delivered-To= headers.
 
 ** Source options
 
-| Key                     | Description                                                      |
-|-------------------------+------------------------------------------------------------------|
-| =:name=                   | Source identifier (required)                                     |
-| =:match=                  | ={:list-id "…"}= or ={:delivered-to "…"}= (required)               |
-| =:admin=                  | Admin email for this source (required)                           |
-| =:list-post=              | Mailing list posting address (for on-list/off-list distinction)  |
-| =:list-archive=           | URL of the list archive (shown in HTML reports)                  |
-| =:archive-format-string=  | URL template for message-ids (=%s= is replaced), used when the    |
-|                         | =Archived-At= header is absent                                    |
-| =:bark-path=              | Base URL where this source's public directory is served           |
-| =:labels=                 | Per-source label overrides (see [[#customising-subject-labels]])      |
-| =:commands=               | Per-source command overrides (see [[#customising-command-keywords]])  |
-| =:maintainers=            | Initial maintainers, e.g. =[{:email "dev@example.org" :since "2025-01-01"}]= |
-| =:report-types=           | Restrict detected types, e.g. =#{:bug :patch}=                    |
-| =:export-formats=         | Output formats, e.g. =["json" "rss"]=  (default: =["json" "org" "rss"]=) |
-| =:export-reports=         | Restrict exported types, e.g. =#{:bug :patch :request}=           |
-| =:expiry=                 | Auto-close delays in days (see below)                            |
+| Key                    | Description                                                                |
+|------------------------+----------------------------------------------------------------------------|
+| =:name=                  | Source identifier (required)                                               |
+| =:match=                 | ={:list-id "…"}= or ={:delivered-to "…"}= (required)                           |
+| =:admin=                 | Admin email for this source (required)                                     |
+| =:list-post=             | Mailing list posting address (for on-list/off-list distinction)            |
+| =:list-archive=          | URL of the list archive (shown in HTML reports)                            |
+| =:archive-format-string= | URL template for message-ids (=%s= is replaced), used when the               |
+|                        | =Archived-At= header is absent                                               |
+| =:bark-path=             | Base URL where this source's public directory is served                    |
+| =:labels=                | Per-source label overrides (see [[#customising-subject-labels]])               |
+| =:commands=              | Per-source command overrides (see [[#customising-command-keywords]])           |
+| =:maintainers=           | Initial maintainers, e.g. =[{:email "dev@example.org" :since "2025-01-01"}]= |
+| =:report-types=          | Restrict detected types, e.g. =#{:bug :patch}=                               |
+| =:export-formats=        | Output formats, e.g. =["json" "rss"]=  (default: =["json" "org" "rss"]=)       |
+| =:export-reports=        | Restrict exported types, e.g. =#{:bug :patch :request}=                      |
+| =:expiry=                | Auto-close delays in days (see below)                                      |
 
 The =:since= date on a maintainer entry restricts their privileges to
 emails dated on or after that date.  Omit =:since= for immediate
@@ -503,31 +563,3 @@ All commands are run via [[https://babashka.org/][Babashka]]:
 
 Export accepts flags: =-n <source>= (restrict to one source), =-p <N>=
 (minimum priority), =-s <N>= (minimum status).
-
-* Rationale
-  :PROPERTIES:
-  :CUSTOM_ID: rationale
-  :END:
-
-- *Email-native and immutable* :: BARK has no web form, no API endpoint,
-  users don't have to create an account. Users report bugs and request
-  features by sending an email to a list. Maintainers act by replying
-  to that same thread: an =Acked.= line marks the bug as acked. Because
-  every state change is encoded in an email, the entire tracker state
-  can be reconstructed at any time by replaying the mailbox from scratch.
-
-- *Statuses and priorities are derived, not asserted* :: BARK provides a
-  short fixed vocabulary: =acked=, =owned=, =closed= for status; =urgency= and
-  =importance= for priority. You cannot invent a custom =WONTFIX-MAYBE=
-  status or manually set a report to P0.
-
-- *No catch-all inbox* :: Most trackers (GitHub Issues being the
-  canonical example) accept anything and leave triage as an exercise
-  for the maintainer. BARK only ingests messages that match explicit
-  subject- or body-command rules defined in =config.edn=. Most noise
-  stays out of the tracker by design, not by discipline.
-
-- *Local-first, workflow-agnostic* :: BARK exports to JSON, RSS, Org.
-  Companion tools — =bone= (a TUI browser), =gnus-bark.el= (Emacs/Gnus
-  integration) let each user consume the data in whatever environment
-  they already live in, rather than forcing a new interface on them.
