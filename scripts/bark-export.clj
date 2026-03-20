@@ -42,7 +42,7 @@
 (declare load-datalevin-pod! get-header slugify mid-hash email-body-text
          format-date format-date-iso report-priority report-status
          report-descendant-count all-reports report-pull-pattern
-         parse-cli-args load-config build-source-map bark-schema
+         parse-cli-args load-config build-source-map bark-schema bark-format
          get-last-modified get-last-export save-last-export!
          changed-report-types-since)
 
@@ -161,7 +161,7 @@
          :replies  (report-descendant-count report)}
         (assoc-from-addresses report)
         (cond->
-          (:email/from-name email)        (assoc :from-name (:email/from-name email))
+         (:email/from-name email)        (assoc :from-name (:email/from-name email))
           role                            (assoc :role role)
           (:report/message-id report)     (assoc :message-id (:report/message-id report))
           (:report/version report)        (assoc :version (:report/version report))
@@ -271,9 +271,9 @@
   ([reports out-dir source-name source-map maintainers-map basename]
    (let [data     (mapv #(report->map % source-map maintainers-map) reports)
          meta     (source-metadata source-name source-map)
-         envelope (cond-> {:format-version "0.2.2"
-                           :source         source-name
-                           :reports        data}
+         envelope (cond-> {:bark-format bark-format
+                           :source      source-name
+                           :reports     data}
                     (seq meta) (merge meta))
          filename (str out-dir "/" basename)]
      (spit filename (json/generate-string envelope {:pretty true}))
@@ -637,7 +637,7 @@
                                   [source-name]
                                   (do (log/error "No source named" (str "'" source-name "'"))
                                       (log/error "Available:"
-                                                    (str/join ", " (keys source-map)))
+                                                 (str/join ", " (keys source-map)))
                                       (System/exit 1)))
                                 (mapv :name (:sources config)))
               cli-extra       (remove #{format "-n" source-name "--force" "--only-open"}
@@ -646,14 +646,14 @@
             (log/info "Incremental: changed types:" (str/join ", " (map name changed-types))))
           (doseq [src-name source-names]
             (let [reports  (filter-reports all-reps {:source       src-name
-                                                    :min-priority min-priority
-                                                    :min-status   min-status})
+                                                     :min-priority min-priority
+                                                     :min-status   min-status})
                   er       (resolve-export-reports src-name source-map)
                   reports  (if er (filter #(contains? er (:report/type %)) reports) reports)
                   ;; When incremental, check if any changed type is present in this source
                   src-types (when incremental? (set (map :report/type reports)))
                   skip-src? (and incremental? (seq changed-types)
-                                  (empty? (clojure.set/intersection changed-types src-types)))
+                                 (empty? (clojure.set/intersection changed-types src-types)))
                   base-dir (str "public/" (slugify src-name))]
               (cond
                 skip-src?

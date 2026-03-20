@@ -26,7 +26,7 @@
 
 ;; Forward-declared for clj-kondo (provided at runtime by load-file calls below).
 (declare ;; bark-common.clj
-         load-datalevin-pod! classify-source email-body-text
+ load-datalevin-pod! classify-source email-body-text
          load-config build-source-map get-header bark-schema
          days-between
          bump-report-updated! bump-global-modified!
@@ -132,8 +132,8 @@
   (when (and source-name from-addr)
     (let [k (str source-name ":" (str/lower-case from-addr))]
       (when-not (d/q '[:find ?e .
-                        :in $ ?k
-                        :where [?e :contributor/key ?k]]
+                       :in $ ?k
+                       :where [?e :contributor/key ?k]]
                      (d/db conn) k)
         (d/transact! conn [{:contributor/key    k
                             :contributor/source source-name
@@ -207,12 +207,12 @@
                          db version)]
       (when (seq open-chgs)
         (d/transact! conn (mapv (fn [r] {:db/id r
-                                          :report/closed release-email-eid
-                                          :report/close-reason :resolved})
+                                         :report/closed release-email-eid
+                                         :report/close-reason :resolved})
                                 open-chgs))
         (bump-report-updated! conn open-chgs)
         (log/info "Auto-closed" (count open-chgs)
-                      "[CHG" version "] (superseded by release)")))))
+                  "[CHG" version "] (superseded by release)")))))
 
 (defn- parse-version-number
   "Parse \"v3\" -> 3, or nil."
@@ -298,12 +298,12 @@
       (do (log/debug "Ignored" from-addr "—" (:email/subject email))
           (assoc acc :skipped (inc skipped)))
       (do ;; Role and notify commands — blocked when the email came through
-       ;; a mailing list (has both List-Id and List-Post), regardless of
-       ;; sender, to prevent replay attacks.
+          ;; a mailing list (has both List-Id and List-Post), regardless of
+          ;; sender, to prevent replay attacks.
        (when (and from-addr body-text source-name
                   (not (from-mailing-list? email)))
          (apply-role-commands! conn roles source-name from-addr body-text
-                              (:email/date-sent email))
+                               (:email/date-sent email))
          (apply-notify-commands! conn roles source-name from-addr body-text))
           ;; Detect and create report
           (let [report-info (detect-report email subj-patterns allowed-types)
@@ -466,7 +466,7 @@
                   sorted)]
       (save-last-run! conn (java.util.Date.))
       (log/info "Created" created "report(s), threaded" threaded
-                    "email(s), skipped" skipped "ignored.")
+                "email(s), skipped" skipped "ignored.")
       ;; --- Expiry pass ---
       (expire-reports! conn source-map))))
 

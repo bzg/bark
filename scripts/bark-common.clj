@@ -142,12 +142,23 @@
 
 (def datalevin-version "0.10.7")
 
+(def bark-format
+  "BARK export format version. Bump when the JSON/Org export shape changes."
+  "0.2.2")
+
 (defn load-datalevin-pod!
   "Load the datalevin pod and require its namespace as `d`."
   []
   (require '[babashka.pods :as pods])
   ((resolve 'pods/load-pod) 'huahaiy/datalevin datalevin-version)
   (require '[pod.huahaiy.datalevin :as d]))
+
+;; Lazy-resolved pod functions — resolved once on first call, cached thereafter.
+;; Must be called after load-datalevin-pod!.
+(def ^:private d-transact! (delay (resolve 'pod.huahaiy.datalevin/transact!)))
+(def ^:private d-q         (delay (resolve 'pod.huahaiy.datalevin/q)))
+(defn dt! "Resolved d/transact!" [& args] (apply @d-transact! args))
+(defn dq  "Resolved d/q"         [& args] (apply @d-q args))
 
 ;; ---------------------------------------------------------------------------
 ;; Canonical report pull pattern (shared by export, notify, stats)
@@ -184,11 +195,10 @@
   "Fetch all reports from the database. Returns unsorted.
   Must be called after load-datalevin-pod!."
   [db]
-  (let [dq (resolve 'pod.huahaiy.datalevin/q)]
-    (->> (dq (list :find (list 'pull '?r report-pull-pattern)
-                   :where ['?r :report/type '_])
-             db)
-         (map first))))
+  (->> (dq (list :find (list 'pull '?r report-pull-pattern)
+                 :where ['?r :report/type '_])
+           db)
+       (map first)))
 
 (defn load-config
   "Load config.edn if it exists, or nil.
@@ -381,13 +391,16 @@
   (let [s (str (or date ""))]
     (subs s 0 (min 16 (count s)))))
 
+(def ^:private iso-date-fmt
+  "Shared yyyy-MM-dd formatter (safe in single-threaded bb)."
+  (doto (java.text.SimpleDateFormat. "yyyy-MM-dd")
+    (.setTimeZone (java.util.TimeZone/getTimeZone "UTC"))))
+
 (defn format-date-iso
   "Format a java.util.Date as yyyy-MM-dd (ISO 8601 date only)."
   [date]
   (when date
-    (let [fmt (java.text.SimpleDateFormat. "yyyy-MM-dd")]
-      (.setTimeZone fmt (java.util.TimeZone/getTimeZone "UTC"))
-      (.format fmt date))))
+    (.format iso-date-fmt date)))
 
 ;; ---------------------------------------------------------------------------
 ;; Shared label/command defaults and merge logic
@@ -457,8 +470,7 @@
   "Set :report/updated-at and :meta/last-modified to now.
   `report-eid` can be a single eid or a collection of eids."
   [conn report-eid]
-  (let [dt!  (resolve 'pod.huahaiy.datalevin/transact!)
-        now  (java.util.Date.)
+  (let [now  (java.util.Date.)
         eids (if (coll? report-eid) report-eid [report-eid])
         tx   (into [{:meta/ident "global" :meta/last-modified now}]
                    (map (fn [eid] {:db/id eid :report/updated-at now}))
@@ -470,42 +482,37 @@
   Use when a mutation (e.g. expiry) already transacted report changes
   and you just need the global flag."
   [conn]
-  (let [dt! (resolve 'pod.huahaiy.datalevin/transact!)]
-    (dt! conn [{:meta/ident "global" :meta/last-modified (java.util.Date.)}])))
+  (dt! conn [{:meta/ident "global" :meta/last-modified (java.util.Date.)}]))
 
 (defn get-last-modified
   "Return the global :meta/last-modified instant, or nil."
   [db]
-  (let [dq (resolve 'pod.huahaiy.datalevin/q)]
-    (dq '[:find ?t .
-           :where [?e :meta/ident "global"] [?e :meta/last-modified ?t]]
-        db)))
+  (dq '[:find ?t .
+        :where [?e :meta/ident "global"] [?e :meta/last-modified ?t]]
+      db))
 
 (defn get-last-export
   "Return the :meta/last-export instant, or nil."
   [db]
-  (let [dq (resolve 'pod.huahaiy.datalevin/q)]
-    (dq '[:find ?t .
-           :where [?e :meta/ident "global"] [?e :meta/last-export ?t]]
-        db)))
+  (dq '[:find ?t .
+        :where [?e :meta/ident "global"] [?e :meta/last-export ?t]]
+      db))
 
 (defn save-last-export!
   "Record the export timestamp."
   [conn ts]
-  (let [dt! (resolve 'pod.huahaiy.datalevin/transact!)]
-    (dt! conn [{:meta/ident "global" :meta/last-export ts}])))
+  (dt! conn [{:meta/ident "global" :meta/last-export ts}]))
 
 (defn changed-report-types-since
   "Return the set of :report/type keywords that have been updated since `since-ts`."
   [db since-ts]
-  (let [dq (resolve 'pod.huahaiy.datalevin/q)]
-    (set (dq '[:find [?t ...]
-               :in $ ?since
-               :where
-               [?r :report/updated-at ?u]
-               [(> ?u ?since)]
-               [?r :report/type ?t]]
-             db since-ts))))
+  (set (dq '[:find [?t ...]
+             :in $ ?since
+             :where
+             [?r :report/updated-at ?u]
+             [(> ?u ?since)]
+             [?r :report/type ?t]]
+           db since-ts)))
 
 ;; ---------------------------------------------------------------------------
 ;; Shared date arithmetic (used by bark-digest, bark-stats)
