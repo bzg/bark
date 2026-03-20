@@ -9,3 +9,9 @@ config.edn
 todo.org
 public/
 logs/
+*aux
+*log
+*pdf
+*texi
+*toc
+*html
