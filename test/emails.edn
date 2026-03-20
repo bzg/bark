@@ -1378,4 +1378,36 @@
   :email/in-reply-to "<100@test.org>"
   :email/references "<100@test.org>"
   :email/body-text  "Confirmed.\n"}
+
+ ;; =========================================================================
+ ;; 102 — CHG 10.0 (first change announcement for version 10.0)
+ ;; 103 — CHG 10.0 (second change announcement, same version, different thread)
+ ;; 104 — REL 10.0 (release closes both CHGs and links them as related)
+ ;; =========================================================================
+ {:email/imap-uid    102
+  :email/source      "direct"
+  :email/message-id  "<102@test.org>"
+  :email/subject     "[CHG 10.0] New export format"
+  :email/from-address "admin@test.org"
+  :email/date-sent  #inst "2026-02-10T10:00:00"
+  :email/ingested-at #inst "2026-02-10T10:00:00"
+  :email/body-text  "Export format changing to JSON.\n"}
+
+ {:email/imap-uid    103
+  :email/source      "direct"
+  :email/message-id  "<103@test.org>"
+  :email/subject     "[CHG 10.0] Config syntax update"
+  :email/from-address "admin@test.org"
+  :email/date-sent  #inst "2026-02-11T10:00:00"
+  :email/ingested-at #inst "2026-02-11T10:00:00"
+  :email/body-text  "Config files now use EDN.\n"}
+
+ {:email/imap-uid    104
+  :email/source      "direct"
+  :email/message-id  "<104@test.org>"
+  :email/subject     "[REL 10.0] Version 10.0 released"
+  :email/from-address "admin@test.org"
+  :email/date-sent  #inst "2026-02-15T10:00:00"
+  :email/ingested-at #inst "2026-02-15T10:00:00"
+  :email/body-text  "10.0 is out with new export and config.\n"}
 ]

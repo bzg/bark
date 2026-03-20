@@ -194,8 +194,13 @@
       (d/transact! conn txdata))))
 
 (defn close-changes-for-release!
-  "When a [REL x] report is created, close any open [CHG x] with the same version."
-  [conn version release-email-eid]
+  "When a [REL x] report is created, close any open [CHG x] with the same version
+  and mark them as related to the release report.
+  This is a particular case of relation: unlike the normal thread-based
+  `link-related-reports!`, the [REL] and [CHG] emails may not be in the
+  same thread — they are linked because the release logically closes the
+  change announcements it ships."
+  [conn version release-email-eid release-report-eid]
   (when (and version (not (str/blank? version)))
     (let [db      (d/db conn)
           open-chgs (d/q '[:find [?r ...]
@@ -210,6 +215,15 @@
                                          :report/closed release-email-eid
                                          :report/close-reason :resolved})
                                 open-chgs))
+        ;; Link the release report and the closed change reports as related.
+        ;; This is a cross-thread relation: the emails may not share a thread,
+        ;; but the release semantically encompasses these changes.
+        (let [rel-tx (into []
+                           (mapcat (fn [chg-rid]
+                                     [[:db/add release-report-eid :report/related chg-rid]
+                                      [:db/add chg-rid :report/related release-report-eid]]))
+                           open-chgs)]
+          (d/transact! conn rel-tx))
         (bump-report-updated! conn open-chgs)
         (log/info "Auto-closed" (count open-chgs)
                   "[CHG" version "] (superseded by release)")))))
@@ -317,8 +331,6 @@
                       (create-report! conn eid message-id report-info)
                       (ensure-contributor! conn source-name from-addr
                                            (:email/from-name email) (:email/date-sent email))
-                      (when (and (= :release (:type report-info)) (:version report-info))
-                        (close-changes-for-release! conn (:version report-info) eid))
                       (let [rid (d/q '[:find ?r . :in $ ?mid :where [?r :report/message-id ?mid]]
                                      (d/db conn) message-id)]
                         (bump-report-updated! conn rid)
@@ -361,6 +373,11 @@
             ;; Post-creation: link related reports + manage series + store patches
             (when (and report-eid (seq parent-report-eids))
               (link-related-reports! conn report-eid parent-report-eids))
+            ;; Auto-close [CHG x] when [REL x] is created (+ cross-thread relation)
+            (when (and report-eid
+                       (= :release (:type report-info))
+                       (:version report-info))
+              (close-changes-for-release! conn (:version report-info) eid report-eid))
             ;; Auto-close previous patch version (v<n> supersedes v<n-1>)
             (when (and report-eid
                        (= :patch (:type report-info))

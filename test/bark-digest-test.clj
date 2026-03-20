@@ -281,7 +281,15 @@
           (assert-test "CHG auto-closed" (some? (:report/closed chg)))
           (assert= "CHG close-reason is :resolved" :resolved (:report/close-reason chg))
           (assert= "REL type" :release (:report/type rel))
-          (assert= "REL version" "9.8" (:report/version rel)))
+          (assert= "REL version" "9.8" (:report/version rel))
+          ;; Cross-thread relation: [REL] and [CHG] are not in the same
+          ;; email thread, but closing a CHG via REL links them as related.
+          (assert-test "REL is related to CHG"
+                       (some #(= "<19@test.org>" (:report/message-id %))
+                             (:report/related rel)))
+          (assert-test "CHG is related to REL"
+                       (some #(= "<20@test.org>" (:report/message-id %))
+                             (:report/related chg))))
 
         ;; --- Email 21: ignored ---
         (println "\n--- Email 21: ignored user ---")
@@ -764,6 +772,29 @@
                    :bug (:report/type r))
           (assert= "Classified under public-list via bark prefix"
                    "public-list" src))
+
+        ;; --- CHG 102, CHG 103, REL 104: release closes multiple changes ---
+        (println "\n--- CHG 102+103 / REL 104: release closes and relates multiple changes ---")
+        (let [chg1 (get-report db "<102@test.org>")
+              chg2 (get-report db "<103@test.org>")
+              rel  (get-report db "<104@test.org>")
+              rel-related-mids (set (map :report/message-id (:report/related rel)))]
+          (assert-test "CHG 102 auto-closed" (some? (:report/closed chg1)))
+          (assert-test "CHG 103 auto-closed" (some? (:report/closed chg2)))
+          (assert= "CHG 102 close-reason" :resolved (:report/close-reason chg1))
+          (assert= "CHG 103 close-reason" :resolved (:report/close-reason chg2))
+          ;; REL is related to both CHGs
+          (assert-test "REL related to CHG 102"
+                       (contains? rel-related-mids "<102@test.org>"))
+          (assert-test "REL related to CHG 103"
+                       (contains? rel-related-mids "<103@test.org>"))
+          ;; Each CHG is related back to REL
+          (assert-test "CHG 102 related to REL"
+                       (some #(= "<104@test.org>" (:report/message-id %))
+                             (:report/related chg1)))
+          (assert-test "CHG 103 related to REL"
+                       (some #(= "<104@test.org>" (:report/message-id %))
+                             (:report/related chg2))))
 
         ;; --- Summary ---
         (println "\n=== Summary ===")
