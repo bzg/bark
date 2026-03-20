@@ -326,8 +326,8 @@
           (assert= "Topic" "refactor" (:report/topic r))
           (assert= "Seq" "2/3" (:report/patch-seq r)))
 
-        ;; --- Email 29: role command via mailing list (List-Id blocks it) ---
-        (println "\n--- Email 29: role command via mailing list ---")
+        ;; --- Email 29: role control via mailing list (List-Id blocks it) ---
+        (println "\n--- Email 29: role control via mailing list ---")
         (let [roles (d/pull db '[:roles/maintainers]
                             [:roles/source "direct"])]
           (assert-test "evil@hacker.org NOT added as maintainer"

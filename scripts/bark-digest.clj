@@ -6,7 +6,7 @@
 ;;
 ;; Orchestrates the digest pipeline:
 ;;   1. Classify email source
-;;   2. Apply role/notify commands
+;;   2. Apply role/notify controls
 ;;   3. Detect report type
 ;;   4. Create report or thread as descendant
 ;;   5. Apply commands to nearest ancestor
@@ -33,7 +33,7 @@
          ;; bark-roles.clj
          get-roles ignored? admin?
          ensure-source-roles! ensure-notify-defaults!
-         apply-role-commands! apply-notify-commands!
+         apply-role-controls! apply-notify-controls!
          from-mailing-list? can-create-report?
          ;; bark-detect.clj
          detect-report resolve-labels build-patch-entities
@@ -311,14 +311,14 @@
     (if (and from-addr (ignored? roles from-addr))
       (do (log/debug "Ignored" from-addr "—" (:email/subject email))
           (assoc acc :skipped (inc skipped)))
-      (do ;; Role and notify commands — blocked when the email came through
+      (do ;; Role and notify controls — blocked when the email came through
           ;; a mailing list (has both List-Id and List-Post), regardless of
           ;; sender, to prevent replay attacks.
        (when (and from-addr body-text source-name
                   (not (from-mailing-list? email)))
-         (apply-role-commands! conn roles source-name from-addr body-text
+         (apply-role-controls! conn roles source-name from-addr body-text
                                (:email/date-sent email))
-         (apply-notify-commands! conn roles source-name from-addr body-text))
+         (apply-notify-controls! conn roles source-name from-addr body-text))
           ;; Detect and create report
           (let [report-info (detect-report email subj-patterns allowed-types)
                 permitted?  (and report-info from-addr

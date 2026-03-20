@@ -1,9 +1,9 @@
-;; bark-roles.clj — Role management and permission checks.
+;; bark-roles.clj — Role management, controls, and permission checks.
 ;;
 ;; Pure functions: admin?, maintainer?, ignored?, can-create-report?,
-;;                 parse-role-commands
-;; Effectful:      apply-role-commands!, ensure-source-roles!,
-;;                 get-roles, ensure-notify-defaults!, apply-notify-commands!
+;;                 parse-role-controls
+;; Effectful:      apply-role-controls!, ensure-source-roles!,
+;;                 get-roles, ensure-notify-defaults!, apply-notify-controls!
 ;;
 ;; Usage: (load-file "scripts/bark-roles.clj")
 
@@ -126,21 +126,21 @@
       (d/transact! conn [[:db/retract eid attr addr]]))))
 
 ;; ---------------------------------------------------------------------------
-;; Role command parsing (pure) and application (effectful)
+;; Role control parsing (pure) and application (effectful)
 ;; ---------------------------------------------------------------------------
 
-(def role-command-pattern
+(def role-control-pattern
   #"(?m)^(Add maintainer|Remove maintainer|Ignore|Unignore):\s+(.+)$")
 
 (defn- parse-addresses [s]
   (when s (remove str/blank? (str/split (str/trim s) #"\s+"))))
 
-(defn parse-role-commands
-  "Parse role commands from body text. Returns a vector of
+(defn parse-role-controls
+  "Parse role controls from body text. Returns a vector of
   {:command \"...\" :addresses [\"...\"]} maps."
   [body-text]
   (when body-text
-    (->> (re-seq role-command-pattern body-text)
+    (->> (re-seq role-control-pattern body-text)
          (mapv (fn [[_ cmd addrs]]
                  {:command cmd :addresses (parse-addresses addrs)})))))
 
@@ -154,7 +154,7 @@
   "Set :roles/maintainer-since for the given addresses to the specified date.
   Removes any existing entry first, then adds the new one.
   Re-reads roles from DB to get current entries — acceptable since this
-  runs at most once per role-command email, not in a hot loop."
+  runs at most once per role control email, not in a hot loop."
   [conn source-name addresses date]
   (when-let [eid (roles-eid conn source-name)]
     (let [roles   (get-roles (d/db conn) source-name)
@@ -175,17 +175,17 @@
               (d/transact! conn [[:db/add eid :roles/maintainer-since
                                   (str (str/lower-case addr) ":" date-str)]]))))))))
 
-(defn apply-role-commands! [conn roles source-name from-addr body-text email-date]
+(defn apply-role-controls! [conn roles source-name from-addr body-text email-date]
   ;; Permission check uses the non-temporal admin-or-maintainer? deliberately:
   ;; role management is an administrative operation, so config-seeded
-  ;; maintainers can issue role commands regardless of their :since date.
-  ;; Note: `roles` is read once before the doseq — if one command changes
-  ;; who is a maintainer, subsequent commands still use the original snapshot.
+  ;; maintainers can issue role controls regardless of their :since date.
+  ;; Note: `roles` is read once before the doseq — if one control changes
+  ;; who is a maintainer, subsequent controls still use the original snapshot.
   ;; This is safe because the sender's own permission doesn't change mid-email.
-  (let [commands  (parse-role-commands body-text)
+  (let [controls (parse-role-controls body-text)
         is-admin  (admin? roles from-addr)
         is-maint  (admin-or-maintainer? roles from-addr)]
-    (doseq [{:keys [command addresses]} commands]
+    (doseq [{:keys [command addresses]} controls]
       (when-let [{:keys [requires action attr]} (role-dispatch command)]
         (if (case requires :admin is-admin :maint is-maint)
           (do ((case action :add add-role! :remove remove-role!)
@@ -201,7 +201,7 @@
           (log/warn "Denied:" from-addr "lacks permission for:" command))))))
 
 ;; ---------------------------------------------------------------------------
-;; Notify command parsing and application
+;; Notify control parsing and application
 ;; ---------------------------------------------------------------------------
 
 (def ^:private notify-pattern
@@ -259,8 +259,8 @@
                               :notify/min-priority 1
                               :notify/min-status   1}]))))))
 
-(defn apply-notify-commands!
-  "Parse and apply Notify: commands from email body.
+(defn apply-notify-controls!
+  "Parse and apply Notify: controls from email body.
   Only admin/maintainers can set their own notification prefs."
   [conn roles source-name from-addr body-text]
   (when-let [[_ params-str] (re-find notify-pattern (or body-text ""))]

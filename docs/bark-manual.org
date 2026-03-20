@@ -427,7 +427,7 @@ Notify: on
 
 ** Setting preferences
 
-Notification preferences are set via the same =Notify:= command.
+Notification preferences are set via the same =Notify:= conrol.
 Parameters can be combined on a single line:
 
 | Parameter   | Description                        | Default |
@@ -447,7 +447,7 @@ Notify: p:1                 — only important reports
 Notify: d:3 s:4 p:2         — every 3 days, only open reports with priority >= 2
 #+end_example
 
-Like role commands, =Notify:= commands are only processed from direct
+Like role controls, =Notify:= controls are only processed from direct
 emails, not from the mailing list.
 
 * Config
@@ -559,23 +559,23 @@ configured.
 
 * CLI reference
 
-All commands are run via [[https://babashka.org/][Babashka]]:
+All tasks are run via [[https://babashka.org/][Babashka]]:
 
-| Command              | Description                                              |
-|----------------------+----------------------------------------------------------|
-| =bb digest=            | Ingest new emails and create/update reports              |
-| =bb digest --all=      | Re-process all emails from scratch                       |
-| =bb export all=        | Export all formats for all sources                       |
-| =bb export html=       | Export HTML pages only                                   |
-| =bb export json=       | Export JSON feeds only                                   |
-| =bb export rss=        | Export RSS feeds only                                    |
-| =bb export org=        | Export Org feeds only                                    |
-| =bb export stats=      | Export stats pages only                                  |
-| =bb notify=            | Send notification emails                                 |
-| =bb notify --dry-run=  | Preview notifications without sending                    |
-| =bb clean=             | Remove all generated files (=public/=, =classes/=, =target/=) |
-| =bb test-config=       | Validate =config.edn=                                     |
-| =bb test-smtp=         | Test SMTP configuration (=--to addr=, =--dry-run=)          |
+| Task                | Description                                             |
+|---------------------+---------------------------------------------------------|
+| =bb digest=           | Ingest new emails and create/update reports             |
+| =bb digest --all=     | Re-process all emails from scratch                      |
+| =bb export all=       | Export all formats for all sources                      |
+| =bb export html=      | Export HTML pages only                                  |
+| =bb export json=      | Export JSON feeds only                                  |
+| =bb export rss=       | Export RSS feeds only                                   |
+| =bb export org=       | Export Org feeds only                                   |
+| =bb export stats=     | Export stats pages only                                 |
+| =bb notify=           | Send notification emails                                |
+| =bb notify --dry-run= | Preview notifications without sending                   |
+| =bb clean=            | Remove all generated files (=public/=, =classes/=, =target/=) |
+| =bb test-config=      | Validate =config.edn=                                     |
+| =bb test-smtp=        | Test SMTP configuration (=--to addr=, =--dry-run=)          |
 
 Export accepts flags: =-n <source>= (restrict to one source), =-p <N>=
 (minimum priority), =-s <N>= (minimum status).

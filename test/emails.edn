@@ -5,7 +5,7 @@
 ;;
 ;; Actors:
 ;;   admin@test.org     — admin
-;;   maint@test.org     — maintainer (added by role command in email 01)
+;;   maint@test.org     — maintainer (added by role control in email 01)
 ;;   user@test.org      — regular user
 ;;   voter1@test.org    — voter
 ;;   voter2@test.org    — voter
@@ -16,7 +16,7 @@
 
 [
  ;; =========================================================================
- ;; 01 — Admin adds a maintainer via role command
+ ;; 01 — Admin adds a maintainer via role control
  ;; =========================================================================
  {
   :email/imap-uid   1
