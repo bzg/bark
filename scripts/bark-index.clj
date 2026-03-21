@@ -274,7 +274,7 @@
         generated-at (str (java.util.Date.))
         rss-href     "reports/all.xml"
         cols         [[:th {:data-sort "type"     :onclick "sortTable(0,'type')"}     "Type"]
-                      [:th {:data-sort "priority" :onclick "sortTable(1,'priority')"} "Priority"]
+                      [:th {:data-sort "priority" :onclick "sortTable(1,'priority')"} "Prio"]
                       [:th {:data-sort "due"      :onclick "sortTable(2,'due')"}      "Due"]
                       [:th {:data-sort "flags"    :onclick "sortTable(3,'flags')"}    "Flags"]
                       [:th {:data-sort "subject"  :onclick "sortTable(4,'subject')"}  "Subject"]

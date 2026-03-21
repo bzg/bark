@@ -172,8 +172,7 @@ function updateStatus() {
   rows.forEach(function(tr) {
     if (!tr.classList.contains('hidden')) visible++;
   });
-  var base = onlyOpen ? barkConfig.openCount : barkConfig.total;
-  document.getElementById('status').textContent = visible + '/' + base + ' reports';
+  document.getElementById('status').textContent = visible + '/' + barkConfig.total + ' reports';
 }
 
 function filterRows() {
