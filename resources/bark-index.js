@@ -144,44 +144,55 @@ function matchClause(tr, q) {
   return true;
 }
 
-function matchRow(tr, raw) {
-  var clauses = raw.split(/\s*\|\s*/);
-  return clauses.some(function(c) { return matchClause(tr, parseClause(c)); });
+function matchRow(tr, clauses) {
+  return clauses.some(function(c) { return matchClause(tr, c); });
 }
 
 /* ── Display ───────────────────────────────────────────────── */
 
 /* Post-restripe hooks — called after stripe classes change */
 var _restripeHooks = [];
+var _cachedRows = null;
+
+function getCachedRows() {
+  if (!_cachedRows) _cachedRows = Array.from(document.querySelectorAll('tbody tr'));
+  return _cachedRows;
+}
+
+function invalidateRowCache() { _cachedRows = null; }
 
 function restripe() {
+  var rows = getCachedRows();
   var i = 0;
-  document.querySelectorAll('tbody tr').forEach(function(tr) {
+  for (var k = 0; k < rows.length; k++) {
+    var tr = rows[k];
     if (!tr.classList.contains('hidden')) {
       tr.classList.toggle('stripe', i++ % 2 === 1);
     } else {
       tr.classList.remove('stripe');
     }
-  });
+  }
   _restripeHooks.forEach(function(fn) { fn(); });
 }
 
-function updateStatus() {
-  var rows = document.querySelectorAll('tbody tr');
-  var visible = 0;
-  rows.forEach(function(tr) {
-    if (!tr.classList.contains('hidden')) visible++;
-  });
-  document.getElementById('status').textContent = visible + '/' + barkConfig.total + ' reports';
-}
-
 function filterRows() {
-  var raw  = getSearchInput().value;
-  document.querySelectorAll('tbody tr').forEach(function(tr) {
-    tr.classList.toggle('hidden', !matchRow(tr, raw));
-  });
-  updateStatus();
-  restripe();
+  var raw = getSearchInput().value;
+  var clauses = raw.split(/\s*\|\s*/).map(parseClause);
+  var rows = getCachedRows();
+  var visible = 0, i = 0;
+  for (var k = 0; k < rows.length; k++) {
+    var tr = rows[k];
+    var show = matchRow(tr, clauses);
+    tr.classList.toggle('hidden', !show);
+    if (show) {
+      tr.classList.toggle('stripe', i++ % 2 === 1);
+      visible++;
+    } else {
+      tr.classList.remove('stripe');
+    }
+  }
+  document.getElementById('status').textContent = visible + '/' + barkConfig.total + ' reports';
+  _restripeHooks.forEach(function(fn) { fn(); });
 }
 
 /* ── Lazy-load closed reports ──────────────────────────────── */
@@ -307,6 +318,7 @@ function loadClosedReports(callback) {
       });
       closedLoaded = true;
       closedLoading = false;
+      invalidateRowCache();
       if (callback) callback();
     })
     .catch(function(err) {
@@ -391,9 +403,10 @@ function toggleOpen(btn) {
   }
 }
 
+var _filterTimer;
 function onSearchInput() {
-  filterRows();
-  replaceURL();
+  clearTimeout(_filterTimer);
+  _filterTimer = setTimeout(function() { filterRows(); replaceURL(); }, 120);
 }
 
 /* ── Sort ──────────────────────────────────────────────────── */
@@ -402,6 +415,7 @@ var sortState = {};
 
 function doSort(colIdx, key, dir) {
   var tbody = document.querySelector('tbody');
+  var parent = tbody.parentNode;
   var rows  = Array.from(tbody.querySelectorAll('tr'));
   document.querySelectorAll('th[data-sort]').forEach(function(th) {
     th.classList.remove('asc', 'desc');
@@ -420,7 +434,10 @@ function doSort(colIdx, key, dir) {
     if (!aNaN && !bNaN) return dir === 'asc' ? an - bn : bn - an;
     return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
   });
-  rows.forEach(function(r) { tbody.appendChild(r); });
+  parent.removeChild(tbody);
+  for (var k = 0; k < rows.length; k++) tbody.appendChild(rows[k]);
+  parent.appendChild(tbody);
+  invalidateRowCache();
   restripe();
 }
 
@@ -492,12 +509,9 @@ computeDueCells(document);
     'td:nth-child(5).expanded { white-space: normal; overflow: visible; }' +
     '.unfold { position: absolute; right: 0; top: 50%; transform: translateY(-50%);' +
     '  cursor: pointer; color: var(--pico-primary); font-weight: 700; font-size: 1em;' +
-    '  padding: 0.1em 0.4em 0.1em 0.6em; user-select: none; z-index: 1; }';
+    '  padding: 0.1em 0.4em 0.1em 0.6em; user-select: none; z-index: 1;' +
+    '  background-color: inherit; }';
   document.head.appendChild(style);
-
-  function isTruncated(td) {
-    return td.scrollWidth > td.clientWidth + 1;
-  }
 
   function setupToggles(container) {
     container.querySelectorAll('td:nth-child(5)').forEach(function(td) {
@@ -521,22 +535,41 @@ computeDueCells(document);
   }
 
   function showTogglesIfNeeded() {
-    document.querySelectorAll('td:nth-child(5) .unfold').forEach(function(toggle) {
+    var toggles = document.querySelectorAll('td:nth-child(5) .unfold');
+    // Pass 1: collect visible candidates, hide hidden rows immediately
+    var items = [];
+    for (var i = 0; i < toggles.length; i++) {
+      var toggle = toggles[i];
       var td = toggle.parentElement;
-      if (isTruncated(td)) {
-        toggle.style.display = '';
-        toggle.style.backgroundColor = getComputedStyle(td).backgroundColor;
-      } else {
+      if (td.closest('tr').classList.contains('hidden')) {
         toggle.style.display = 'none';
+      } else if (td.textContent.length < 75) {
+        // Short subjects never overflow 740px — skip geometry check
+        toggle.style.display = 'none';
+      } else {
+        items.push({toggle: toggle, td: td});
       }
-    });
+    }
+    // Pass 2: batch geometry reads (single reflow)
+    var truncated = new Array(items.length);
+    for (var i = 0; i < items.length; i++) {
+      truncated[i] = items[i].td.scrollWidth > items[i].td.clientWidth + 1;
+    }
+    // Pass 3: batch writes
+    for (var i = 0; i < items.length; i++) {
+      items[i].toggle.style.display = truncated[i] ? '' : 'none';
+    }
   }
 
   setupToggles(document);
   requestAnimationFrame(showTogglesIfNeeded);
   window.addEventListener('resize', showTogglesIfNeeded);
   _restripeHooks.push(function() {
-    requestAnimationFrame(showTogglesIfNeeded);
+    // Double-rAF: let the browser paint visibility changes first,
+    // then measure geometry on already-laid-out rows
+    requestAnimationFrame(function() {
+      requestAnimationFrame(showTogglesIfNeeded);
+    });
   });
 
   var tbody = document.querySelector('tbody');

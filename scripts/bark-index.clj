@@ -205,7 +205,10 @@
   th[data-sort].asc::after  { content: ' ↑'; opacity: 0.7; }
   th[data-sort].desc::after { content: ' ↓'; opacity: 0.7; }
   tr.hidden { display: none; }
-  tr.stripe td { background: #fafafa; }
+  [data-theme=light] { --bark-stripe-bg: #f5f5f5; --bark-row-bg: #fff; }
+  [data-theme=dark]  { --bark-stripe-bg: #1a1f2b; --bark-row-bg: #13171f; }
+  tr.stripe td       { background-color: var(--bark-stripe-bg); }
+  tr:not(.stripe) td { background-color: var(--bark-row-bg); }
   td:nth-child(3) { white-space: nowrap; }
   td:nth-child(5) { min-width: 740px; }
   td:nth-child(6) { max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
