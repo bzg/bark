@@ -3,17 +3,13 @@
 ;; License-Filename: LICENSES/EPL-2.0.txt
 
 (ns bark.logging
-  "Shared logging utilities: size parsing, log rotation, file/email appenders.
-  Used by bark.main (JVM); bark-common.clj (bb) mirrors this logic."
+  "Shared logging utilities: size parsing, log rotation, file appender."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [taoensso.timbre :as log]))
 
 ;; ---------------------------------------------------------------------------
 ;; Size parsing
-;; SYNC: parse-size, rotate-log!, configure-file-logging! are mirrored in
-;; scripts/bark-common.clj (bb version, no locking — single-threaded).
-;; Keep both in sync when changing the log format or rotation logic.
 ;; ---------------------------------------------------------------------------
 
 (defn parse-size

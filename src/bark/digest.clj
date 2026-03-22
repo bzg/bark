@@ -6,11 +6,12 @@
   "Single-email digest orchestration.
   Processes one email at a time: source classification, report detection,
   threading, command application, and series management.
-  Called by bark.pipeline/store-and-process! after each email is stored."
+  Called by bark.main/store-and-process! after each email is stored."
   (:require [clojure.string :as str]
             [datalevin.core :as d]
             [taoensso.timbre :as log]
             [bark.common :as common]
+            [bark.tracking :as tracking]
             [bark.detect :as detect]
             [bark.commands :as commands]
             [bark.roles :as roles]
@@ -130,7 +131,7 @@
                                       [:db/add chg-rid :report/related release-report-eid]]))
                            open-chgs)]
           (d/transact! conn rel-tx))
-        (common/bump-report-updated! conn open-chgs)
+        (tracking/bump-report-updated! conn open-chgs)
         (log/info "Auto-closed" (count open-chgs)
                   "[CHG" version "] (superseded by release)")))))
 
@@ -157,11 +158,11 @@
               (d/transact! conn [{:db/id rid
                                   :report/closed email-eid
                                   :report/close-reason :canceled}])
-              (common/bump-report-updated! conn rid)
+              (tracking/bump-report-updated! conn rid)
               (log/info "Auto-closed [PATCH" prev-version
                         (or (:report/topic r) "") "]"
                         (str "(" (:report/message-id r) ")")
-                        "(superseded by" new-version ")"))))))))
+                        (str "(superseded by " new-version ")")))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Source resolution
@@ -187,7 +188,7 @@
                       (when (and hdr-src (not= irt-src hdr-src))
                         (log/warn "Source mismatch for" mid
                                   "— In-Reply-To says" irt-src
-                                  "but headers say" hdr-src "(using" irt-src ")"))))
+                                  "but headers say" hdr-src (str "(using " irt-src ")")))))
         src-name  (or existing irt-src
                       (common/classify-source (:email/headers-edn email)
                                               (:email/subject email) sources))
@@ -240,7 +241,7 @@
                                                    (:email/from-name email) (:email/date-sent email))
                               (let [rid (d/q '[:find ?r . :in $ ?mid :where [?r :report/message-id ?mid]]
                                              (d/db conn) message-id)]
-                                (common/bump-report-updated! conn rid)
+                                (tracking/bump-report-updated! conn rid)
                                 rid))]
 
           (when (and report-info (not permitted?) (not new-report?))
@@ -263,7 +264,7 @@
                                     (d/db conn) rid)
                         rroles (if rsrc (roles/get-roles (d/db conn) rsrc) rroles)]
                     (commands/apply-commands! conn rid rtype email source-map rroles))))
-              (common/bump-report-updated! conn parent-eids))
+              (tracking/bump-report-updated! conn parent-eids))
 
             ;; Post-creation hooks
             (when report-eid

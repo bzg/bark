@@ -6,12 +6,11 @@
   "Entry point for BARK. Connects to a single IMAP mailbox,
   watches for new emails, and stores+processes them atomically.
   Each email is ingested and digested in one step."
-  (:require [bark.db :as db]
-            [bark.ingest :as ingest]
+  (:require [bark.ingest :as ingest]
             [bark.logging :as blog]
             [bark.common :as common]
+            [bark.digest :as digest]
             [bark.expire :as expire]
-            [bark.pipeline :as pipeline]
             [bark.roles :as roles]
             [datalevin.core :as d]
             [fetch-imap.core :as imap]
@@ -118,7 +117,34 @@
       (when (not= new-wm (some->> all-uids last))
         (log/warn "Watermark stopped at UID" new-wm
                   "(some messages failed — will retry on next reconnect)"))
-      (db/save-imap-uid! db-conn new-wm))))
+      (ingest/save-imap-uid! db-conn new-wm))))
+
+;; ---------------------------------------------------------------------------
+;; Atomic store+process (was bark.pipeline)
+;; ---------------------------------------------------------------------------
+
+(defn- store-and-process!
+  "Store an email and immediately digest it.
+  Skips if already stored or exceeds max-size."
+  [db-conn source-map sources msg {:keys [max-size]}]
+  (let [size (:size msg -1)]
+    (if (and max-size (pos? size) (> size max-size))
+      (do (log/warn "Skipping oversized email UID:" (:uid msg)
+                    "size:" size (str "bytes (max: " max-size ")"))
+          false)
+      (when (ingest/store-email! db-conn msg)
+        (let [db    (d/db db-conn)
+              mid   (:message-id msg)
+              eid   (d/q '[:find ?e . :in $ ?mid :where [?e :email/message-id ?mid]]
+                         db mid)
+              email (d/pull db digest/email-pull-pattern eid)]
+          (try
+            (digest/process-email! db-conn source-map sources email)
+            true
+            (catch Exception e
+              (log/error e "Failed to digest email" mid
+                         (or (.getMessage e) (str (class e))))
+              false)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Catch-up fetch (store+process per email)
@@ -129,7 +155,7 @@
   Each message is stored and processed atomically."
   [imap-conn db-conn folder fetch-opts source-map sources ingest-opts]
   (when-not (shutting-down?)
-    (let [watermark (db/max-imap-uid db-conn)
+    (let [watermark (ingest/max-imap-uid db-conn)
           msgs (if (zero? watermark)
                  (let [{:keys [limit since]} fetch-opts]
                    (if since
@@ -144,7 +170,7 @@
       (when (and (seq msgs) (not (shutting-down?)))
         (let [safe-uids (reduce (fn [acc msg]
                                   (try
-                                    (pipeline/store-and-process! db-conn source-map sources msg ingest-opts)
+                                    (store-and-process! db-conn source-map sources msg ingest-opts)
                                     (if-let [uid (:uid msg)]
                                       (conj acc uid)
                                       acc)
@@ -204,7 +230,7 @@
                      (log/info "New message via IDLE — UID:" (:uid msg)
                                "Subject:" (:subject msg))
                      (try
-                       (pipeline/store-and-process! db-conn source-map sources msg ingest-opts)
+                       (store-and-process! db-conn source-map sources msg ingest-opts)
                        (catch Exception e
                          (log/error e "Error processing IDLE message UID:" (:uid msg)
                                     (str "(" (.getName (class e)) ": "
@@ -268,7 +294,7 @@
         (log/error "No :imap key in config.edn.")
         (System/exit 1))
       (let [db-cfg  (:db config)
-            db-conn (db/connect (:path db-cfg))
+            db-conn (ingest/connect (:path db-cfg))
             _       (log/info "Datalevin connected.")]
         ;; Initialize roles from config
         (roles/ensure-source-roles! db-conn config)
@@ -282,6 +308,6 @@
             (log/info "Shutting down...")
             (reset! shutdown? true)
             (Thread/sleep 1000)
-            (try (db/close db-conn) (catch Exception _))
+            (try (ingest/close db-conn) (catch Exception _))
             (log/info "Goodbye."))))
         (idle-loop! imap-cfg db-conn ingest-cfg config)))))

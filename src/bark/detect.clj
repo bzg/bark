@@ -43,7 +43,7 @@
           (when-not (str/blank? topic) topic))))))
 
 ;; ---------------------------------------------------------------------------
-;; Report detection (pure)
+;; Report detection (pure, table-driven)
 ;; ---------------------------------------------------------------------------
 
 (def patch-seq-pattern #"(\d+/\d+)\s*$")
@@ -54,11 +54,36 @@
     (let [t (str/trim s)]
       (when-not (str/blank? t) t))))
 
-(defn detect-bug [subject patterns]
-  (when-let [m (re-find (:bug patterns) subject)]
-    (let [inner (extract-inner m)
-          topic (or inner (extract-colon-topic subject))]
-      (cond-> {:type :bug} topic (assoc :topic topic)))))
+;; Detection table: each entry describes how to parse a subject tag.
+;; :key       — lookup in compiled patterns map
+;; :type      — report type keyword
+;; :versioned — extract last token as :version
+;; :special   — :patch triggers special patch-subject parsing
+(def ^:private detection-table
+  [{:key :bug     :type :bug}
+   {:key :patch   :type :patch   :special :patch}
+   {:key :request :type :request}
+   {:key :announcement :type :announcement}
+   {:key :release :type :release :versioned true}
+   {:key :change  :type :change  :versioned true}])
+
+(defn- detect-simple-tag
+  "Detect a report type from a subject tag. Handles topic extraction
+  and optional version parsing for :versioned types."
+  [rtype subject pattern versioned?]
+  (when-let [m (re-find pattern subject)]
+    (let [inner (extract-inner m)]
+      (if versioned?
+        (let [tokens (when inner (str/split inner #"\s+"))
+              version (when (seq tokens) (last tokens))
+              topic-tokens (when (> (count tokens) 1) (butlast tokens))
+              topic (or (when (seq topic-tokens) (str/join " " topic-tokens))
+                        (extract-colon-topic subject))]
+          (cond-> {:type rtype}
+            version (assoc :version version)
+            topic   (assoc :topic topic)))
+        (let [topic (or inner (extract-colon-topic subject))]
+          (cond-> {:type rtype} topic (assoc :topic topic)))))))
 
 (defn detect-patch-subject [subject patterns]
   (when-let [m (re-find (:patch patterns) subject)]
@@ -79,34 +104,6 @@
         seq-str (assoc :patch-seq seq-str)
         version (assoc :version version)
         topic   (assoc :topic topic)))))
-
-(defn detect-request [subject patterns]
-  (when-let [m (re-find (:request patterns) subject)]
-    (let [topic (or (extract-inner m) (extract-colon-topic subject))]
-      (cond-> {:type :request} topic (assoc :topic topic)))))
-
-(defn detect-announcement [subject patterns]
-  (when-let [m (re-find (:announcement patterns) subject)]
-    (let [topic (or (extract-inner m) (extract-colon-topic subject))]
-      (cond-> {:type :announcement} topic (assoc :topic topic)))))
-
-(defn- detect-versioned-tag [rtype pattern subject]
-  (when-let [m (re-find pattern subject)]
-    (let [inner  (extract-inner m)
-          tokens (when inner (str/split inner #"\s+"))
-          version (when (seq tokens) (last tokens))
-          topic-tokens (when (> (count tokens) 1) (butlast tokens))
-          topic   (or (when (seq topic-tokens) (str/join " " topic-tokens))
-                      (extract-colon-topic subject))]
-      (cond-> {:type rtype}
-        version (assoc :version version)
-        topic   (assoc :topic topic)))))
-
-(defn detect-release [subject patterns]
-  (detect-versioned-tag :release (:release patterns) subject))
-
-(defn detect-change [subject patterns]
-  (detect-versioned-tag :change (:change patterns) subject))
 
 ;; Attachment & inline patch detection
 
@@ -135,9 +132,8 @@
         (:topic from-subject)     (assoc :topic (:topic from-subject))))))
 
 (defn detect-report
-  "Detect report type from an email. Patches are detected from a [PATCH]
-  subject tag, or from patch attachments and inline diffs even when the
-  subject has no tag."
+  "Detect report type from an email. Walks detection-table in order;
+  patches also detected from attachments/inline diffs without a subject tag."
   ([email] (detect-report email default-compiled-labels nil))
   ([email patterns] (detect-report email patterns nil))
   ([email patterns allowed-types]
@@ -150,21 +146,19 @@
          attachments (:email/attachments email)
          body-text   (common/email-body-text email)]
      (or (when subject
-           (or (allowed? (detect-bug subject patterns))
-               (allowed? (detect-patch subject attachments body-text patterns))
-               (allowed? (detect-request subject patterns))
-               (allowed? (detect-announcement subject patterns))
-               (allowed? (detect-release subject patterns))
-               (allowed? (detect-change subject patterns))))
-         ;; Fallback: no subject tag matched, but email has patch content
+           (some (fn [{:keys [key type versioned special]}]
+                   (when-let [pattern (get patterns key)]
+                     (allowed?
+                      (if (= special :patch)
+                        (detect-patch subject attachments body-text patterns)
+                        (detect-simple-tag type subject pattern versioned)))))
+                 detection-table))
+         ;; Fallback: no subject tag, but email has patch content
          (allowed?
-          (let [from-att (when (has-patch-attachment? attachments) :attachment)
-                from-inl (when (has-inline-patch? body-text) :inline)
-                sources  (cond-> #{}
-                           from-att (conj :attachment)
-                           from-inl (conj :inline))]
-            (when (seq sources)
-              {:type :patch :patch-source sources})))))))
+          (let [sources (cond-> #{}
+                          (has-patch-attachment? attachments) (conj :attachment)
+                          (has-inline-patch? body-text)       (conj :inline))]
+            (when (seq sources) {:type :patch :patch-source sources})))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Patch content extraction (pure)

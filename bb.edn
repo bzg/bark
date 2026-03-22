@@ -1,4 +1,5 @@
-{:tasks
+{:paths ["src" "resources"]
+ :tasks
  {;; The JVM daemon handles ingest, digest and expire:
  ;;   clojure -M:run                   (daemon)
  ;;   clojure -M:run -- --initial-fetch 4d  (recovery)

@@ -7,7 +7,8 @@
   the configured :expiry delay. Runs inside the daemon."
   (:require [datalevin.core :as d]
             [taoensso.timbre :as log]
-            [bark.common :as common])
+            [bark.common :as common]
+            [bark.tracking :as tracking])
   (:import [java.util Date]))
 
 (def ^:private expirable-types #{:announcement :release :change})
@@ -55,7 +56,7 @@
                                               (get (:tempids tx) tempid)))]
                          (d/transact! conn [[:db/add rid :report/closed synth-eid]
                                             [:db/add rid :report/close-reason :expired]])
-                         (common/bump-report-updated! conn rid)
+                         (tracking/bump-report-updated! conn rid)
                          (log/info "Expired" (name rtype) "report:" report-mid)
                          (inc n))
                        n)))

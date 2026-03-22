@@ -3,14 +3,41 @@
 ;; License-Filename: LICENSES/EPL-2.0.txt
 
 (ns bark.ingest
-  "Transform parsed email maps into Datalevin transactions and store them.
-  Source classification is deferred to bark-digest."
-  (:require [bark.db :as db]
+  "Email ingestion: Datalevin connection, storage, and email→txdata transform."
+  (:require [bark.common :as common]
             [datalevin.core :as d]
             [clojure.string :as str]
             [taoensso.timbre :as log])
   (:import [java.util Date]
            [org.jsoup Jsoup]))
+
+;; ---------------------------------------------------------------------------
+;; Database connection (was bark.db)
+;; ---------------------------------------------------------------------------
+
+(defn connect [db-path]
+  (log/info "Opening Datalevin database at" db-path)
+  (d/get-conn db-path common/bark-schema {:wal? false}))
+
+(defn close [conn] (d/close conn))
+
+(defn- message-id-exists? [conn message-id]
+  (when message-id
+    (some? (d/q '[:find ?e . :in $ ?mid :where [?e :email/message-id ?mid]]
+                (d/db conn) message-id))))
+
+(defn- imap-uid-exists? [conn imap-uid]
+  (when imap-uid
+    (some? (d/q '[:find ?e . :in $ ?uid :where [?e :email/imap-uid ?uid]]
+                (d/db conn) imap-uid))))
+
+(defn max-imap-uid [conn]
+  (or (d/q '[:find ?uid . :where [?e :watermark/id "default"] [?e :watermark/imap-uid ?uid]]
+           (d/db conn))
+      0))
+
+(defn save-imap-uid! [conn imap-uid]
+  (d/transact! conn [{:watermark/id "default" :watermark/imap-uid imap-uid}]))
 
 ;; ---------------------------------------------------------------------------
 ;; Helpers
@@ -121,10 +148,10 @@
       (nil? message-id)
       (do (log/warn "Skipping email with nil Message-ID, UID:" imap-uid) false)
 
-      (db/message-id-exists? conn message-id)
+      (message-id-exists? conn message-id)
       (do (log/debug "Skipping already stored Message-ID:" message-id) false)
 
-      (db/imap-uid-exists? conn imap-uid)
+      (imap-uid-exists? conn imap-uid)
       (do (log/warn "Skipping UID collision:" imap-uid
                     "— different Message-ID but UID already stored")
           false)
@@ -139,31 +166,9 @@
           (catch Exception e
             ;; If the message-id now exists, another process (e.g. bb digest)
             ;; inserted it between our exists? check and the transact — harmless race.
-            (let [now-exists? (try (db/message-id-exists? conn message-id)
+            (let [now-exists? (try (message-id-exists? conn message-id)
                                   (catch Exception _ false))]
               (if now-exists?
                 (do (log/debug "Duplicate Message-ID (race):" message-id) false)
                 (throw e)))))))))
 
-(defn store-emails!
-  "Store a batch of parsed emails.
-  Returns {:stored <count>, :safe-uids <set of UIDs safe to advance past>}.
-  Safe UIDs include both successfully stored and intentionally skipped messages.
-  Messages that throw during storage are excluded from safe-uids."
-  [conn msgs]
-  (let [result (reduce (fn [acc msg]
-                         (let [uid (:uid msg)]
-                           (try
-                             (if (store-email! conn msg)
-                               (cond-> (update acc :stored inc)
-                                 uid (update :safe-uids conj uid))
-                               ;; Skipped (nil mid or duplicate) — safe to advance past
-                               (cond-> acc
-                                 uid (update :safe-uids conj uid)))
-                             (catch Exception e
-                               (log/warn e "Failed to store email UID:" uid
-                                        (or (.getMessage e) (str (class e))))
-                               acc))))
-                       {:stored 0 :safe-uids #{}} msgs)]
-    (log/info "Batch complete. Stored" (:stored result) "of" (count msgs) "emails.")
-    result))

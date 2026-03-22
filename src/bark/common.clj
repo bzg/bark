@@ -3,12 +3,11 @@
 ;; License-Filename: LICENSES/EPL-2.0.txt
 
 (ns bark.common
-  "Shared utilities for BARK JVM code.
-  Pure functions plus Datalevin helpers for change tracking."
+  "Shared pure utilities for BARK. No datalevin dependency — loadable by both
+  JVM and Babashka."
   (:require [clojure.string :as str]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [datalevin.core :as d]
             [taoensso.timbre :as log])
   (:import [java.text Normalizer Normalizer$Form SimpleDateFormat]
            [java.security MessageDigest]
@@ -23,13 +22,7 @@
   "0.2.2")
 
 (def bark-schema
-  (let [f (io/file "resources/bark-schema.edn")]
-    (if (.exists f)
-      (edn/read-string (slurp f))
-      (throw (ex-info "resources/bark-schema.edn not found"
-                      {:path (.getAbsolutePath f)})))))
-
-(def ^:const meta-ident "global")
+  (edn/read-string (slurp (io/resource "bark-schema.edn"))))
 
 ;; ---------------------------------------------------------------------------
 ;; Pure utilities
@@ -80,9 +73,13 @@
 ;; Date formatting
 ;; ---------------------------------------------------------------------------
 
-(defn format-date [date]
-  (let [s (str (or date ""))]
-    (subs s 0 (min 16 (count s)))))
+(defn format-date
+  "Format a date as 'yyyy-MM-dd HH:mm' in UTC."
+  [date]
+  (when date
+    (.format (doto (SimpleDateFormat. "yyyy-MM-dd HH:mm")
+               (.setTimeZone (TimeZone/getTimeZone "UTC")))
+             date)))
 
 (defn- iso-date-formatter
   "Create a yyyy-MM-dd formatter in UTC."
@@ -239,6 +236,48 @@
           entries)))
 
 ;; ---------------------------------------------------------------------------
+;; Role checks (pure — operate on a roles map, no DB access)
+;; ---------------------------------------------------------------------------
+
+(defn- roles-set [roles attr]
+  (ensure-set (get roles attr)))
+
+(defn- has-role? [roles attr addr]
+  (boolean (some #(= (str/lower-case %) (str/lower-case addr))
+                 (roles-set roles attr))))
+
+(defn admin? [roles addr]
+  (and addr (:roles/admin roles)
+       (= (str/lower-case (:roles/admin roles))
+          (str/lower-case addr))))
+
+(defn- parse-maintainer-since [roles]
+  (let [fmt     (doto (SimpleDateFormat. "yyyy-MM-dd")
+                  (.setTimeZone (TimeZone/getTimeZone "UTC")))]
+    (into {}
+          (keep (fn [[email date-str]]
+                  (try [email (.parse fmt date-str)]
+                       (catch Exception _ nil))))
+          (parse-maintainer-since-entries roles))))
+
+(defn maintainer?
+  ([roles addr]
+   (and addr (has-role? roles :roles/maintainers addr)))
+  ([roles addr as-of]
+   (and addr
+        (has-role? roles :roles/maintainers addr)
+        (if as-of
+          (let [since (get (parse-maintainer-since roles) (str/lower-case addr))]
+            (or (nil? since) (not (.before ^Date as-of since))))
+          true))))
+
+(defn admin-or-maintainer? [roles addr]
+  (or (admin? roles addr) (maintainer? roles addr)))
+
+(defn ignored? [roles addr]
+  (and addr (has-role? roles :roles/ignored addr)))
+
+;; ---------------------------------------------------------------------------
 ;; Config and source-map
 ;; ---------------------------------------------------------------------------
 
@@ -328,40 +367,6 @@
     {:report/email [:email/subject :email/from-address :email/from-name
                     :email/date-sent :email/source :email/imap-uid
                     :email/headers-edn]}])
-
-(defn all-reports [db]
-  (->> (d/q '[:find [(pull ?r report-pull-pattern) ...]
-              :in $ report-pull-pattern
-              :where [?r :report/type _]]
-            db report-pull-pattern)))
-
-;; ---------------------------------------------------------------------------
-;; Change tracking (for incremental export)
-;; ---------------------------------------------------------------------------
-
-(defn bump-report-updated!
-  "Set :report/updated-at and :meta/last-modified to now.
-  `report-eid` can be a single eid or a collection of eids."
-  [conn report-eid]
-  (let [now  (Date.)
-        eids (if (coll? report-eid) report-eid [report-eid])
-        tx   (into [{:meta/ident meta-ident :meta/last-modified now}]
-                   (map (fn [eid] {:db/id eid :report/updated-at now}))
-                   eids)]
-    (d/transact! conn tx)))
-
-(defn bump-global-modified! [conn]
-  (d/transact! conn [{:meta/ident meta-ident :meta/last-modified (Date.)}]))
-
-(defn get-last-modified [db]
-  (d/q '[:find ?t .
-         :where [?e :meta/ident "global"] [?e :meta/last-modified ?t]] db))
-
-(defn changed-report-types-since [db since-ts]
-  (set (d/q '[:find [?t ...]
-              :in $ ?since
-              :where [?r :report/updated-at ?u] [(> ?u ?since)] [?r :report/type ?t]]
-            db since-ts)))
 
 ;; ---------------------------------------------------------------------------
 ;; CLI arg parsing

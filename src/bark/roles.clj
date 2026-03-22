@@ -7,7 +7,8 @@
   (:require [clojure.string :as str]
             [datalevin.core :as d]
             [taoensso.timbre :as log]
-            [bark.common :as common])
+            [bark.common :as common]
+            [bark.tracking :as tracking])
   (:import [java.text SimpleDateFormat]
            [java.util Date TimeZone]))
 
@@ -15,46 +16,12 @@
 ;; Role queries and checks (pure, given a roles map)
 ;; ---------------------------------------------------------------------------
 
-(defn- roles-set [roles attr]
-  (common/ensure-set (get roles attr)))
-
-(defn- has-role? [roles attr addr]
-  (let [addrs (roles-set roles attr)]
-    (boolean (some #(= (str/lower-case %) (str/lower-case addr)) addrs))))
-
-(defn admin? [roles addr]
-  (and addr (:roles/admin roles)
-       (= (str/lower-case (:roles/admin roles))
-          (str/lower-case addr))))
-
-(defn- parse-maintainer-since [roles]
-  (let [fmt     (doto (SimpleDateFormat. "yyyy-MM-dd")
-                  (.setTimeZone (TimeZone/getTimeZone "UTC")))
-        entries (common/parse-maintainer-since-entries roles)]
-    (into {}
-          (keep (fn [[email date-str]]
-                  (try [email (.parse fmt date-str)]
-                       (catch Exception _ nil))))
-          entries)))
-
-(defn maintainer?
-  ([roles addr]
-   (and addr (has-role? roles :roles/maintainers addr)))
-  ([roles addr as-of]
-   (and addr
-        (has-role? roles :roles/maintainers addr)
-        (if as-of
-          (let [since-map (parse-maintainer-since roles)
-                since     (get since-map (str/lower-case addr))]
-            (or (nil? since)
-                (not (.before ^Date as-of since))))
-          true))))
-
-(defn admin-or-maintainer? [roles addr]
-  (or (admin? roles addr) (maintainer? roles addr)))
-
-(defn ignored? [roles addr]
-  (and addr (has-role? roles :roles/ignored addr)))
+;; Pure checks are defined in bark.common. Re-export for callers
+;; that already use the roles/ prefix.
+(def admin?              common/admin?)
+(def maintainer?         common/maintainer?)
+(def admin-or-maintainer? common/admin-or-maintainer?)
+(def ignored?            common/ignored?)
 
 ;; ---------------------------------------------------------------------------
 ;; Role DB operations
@@ -81,7 +48,7 @@
                           (d/db conn) name)]
         (d/transact! conn [{:roles/source name :roles/admin admin}])
         (when-not existing
-          (log/info "Initialized roles for source" name "(admin:" admin ")"))
+          (log/info "Initialized roles for source" name (str "(admin: " admin ")")))
         (when (seq maintainers)
           (let [eid     (roles-eid conn name)
                 current (common/ensure-set (:roles/maintainers (get-roles (d/db conn) name)))]
@@ -102,14 +69,14 @@
                     (doseq [{:keys [email since]} new-maints]
                       (log/info "Config maintainer:" (str/lower-case email)
                                 (if since (str "(since " since ")") "")
-                                "(for" name ")"))))))))))))
+                                (str "(for " name ")")))))))))))))
 
 ;; Phase 0 fix: idempotent add-role! / remove-role!
 (defn- add-role!
   "Add addresses to a role attr. Returns true if any change was made."
   [conn source-name attr addresses]
   (when-let [eid (roles-eid conn source-name)]
-    (let [current   (roles-set (get-roles (d/db conn) source-name) attr)
+    (let [current   (common/ensure-set (get (get-roles (d/db conn) source-name) attr))
           new-addrs (remove #(contains? current (str/lower-case %)) addresses)]
       (when (seq new-addrs)
         (d/transact! conn (mapv (fn [addr] [:db/add eid attr addr]) new-addrs))
@@ -119,7 +86,7 @@
   "Remove addresses from a role attr. Returns true if any change was made."
   [conn source-name attr addresses]
   (when-let [eid (roles-eid conn source-name)]
-    (let [current   (roles-set (get-roles (d/db conn) source-name) attr)
+    (let [current   (common/ensure-set (get (get-roles (d/db conn) source-name) attr))
           to-remove (filter #(contains? current (str/lower-case %)) addresses)]
       (when (seq to-remove)
         (d/transact! conn (mapv (fn [addr] [:db/retract eid attr addr]) to-remove))
@@ -141,23 +108,15 @@
          (mapv (fn [[_ cmd addrs]]
                  {:command cmd :addresses (parse-addresses addrs)})))))
 
-(def ^:private role-dispatch
-  {"Remove maintainer" {:requires :admin  :attr :roles/maintainers :action :remove}
-   "Unignore"          {:requires :admin  :attr :roles/ignored     :action :remove}
-   "Add maintainer"    {:requires :maint  :attr :roles/maintainers :action :add}
-   "Ignore"            {:requires :maint  :attr :roles/ignored     :action :add}})
-
-;; Phase 0 fix: idempotent set-maintainer-since!
 (defn- set-maintainer-since! [conn source-name addresses date]
   (when-let [eid (roles-eid conn source-name)]
     (let [roles    (get-roles (d/db conn) source-name)
-          entries  (roles-set roles :roles/maintainer-since)
+          entries  (common/ensure-set (:roles/maintainer-since roles))
           date-str (when date
-                     (if (string? date)
-                       date
-                       (let [fmt (SimpleDateFormat. "yyyy-MM-dd")]
-                         (.setTimeZone fmt (TimeZone/getTimeZone "UTC"))
-                         (.format fmt date))))]
+                     (if (string? date) date
+                         (.format (doto (SimpleDateFormat. "yyyy-MM-dd")
+                                   (.setTimeZone (TimeZone/getTimeZone "UTC")))
+                                  date)))]
       (doseq [addr addresses]
         (let [target   (when date-str (str (str/lower-case addr) ":" date-str))
               prefix   (str (str/lower-case addr) ":")
@@ -168,21 +127,28 @@
             (when target
               (d/transact! conn [[:db/add eid :roles/maintainer-since target]]))))))))
 
+(def ^:private role-dispatch
+  {"Remove maintainer" {:requires :admin :attr :roles/maintainers :action :remove
+                        :post-fn (fn [conn src addrs _date]
+                                   (set-maintainer-since! conn src addrs nil))}
+   "Unignore"          {:requires :admin :attr :roles/ignored     :action :remove}
+   "Add maintainer"    {:requires :maint :attr :roles/maintainers :action :add
+                        :post-fn (fn [conn src addrs date]
+                                   (set-maintainer-since! conn src addrs date))}
+   "Ignore"            {:requires :maint :attr :roles/ignored     :action :add}})
+
 (defn apply-role-controls! [conn roles source-name from-addr body-text email-date]
   (let [controls (parse-role-controls body-text)
-        is-admin  (admin? roles from-addr)
-        is-maint  (admin-or-maintainer? roles from-addr)]
+        perms    {:admin (admin? roles from-addr) :maint (admin-or-maintainer? roles from-addr)}]
     (doseq [{:keys [command addresses]} controls]
-      (when-let [{:keys [requires action attr]} (role-dispatch command)]
-        (if (case requires :admin is-admin :maint is-maint)
+      (when-let [{:keys [requires action attr post-fn]} (role-dispatch command)]
+        (if (perms requires)
           (when ((case action :add add-role! :remove remove-role!)
                  conn source-name attr addresses)
-            (when (= attr :roles/maintainers)
-              (set-maintainer-since! conn source-name addresses
-                                     (when (= action :add) email-date)))
-            (common/bump-global-modified! conn)
+            (when post-fn (post-fn conn source-name addresses email-date))
+            (tracking/bump-global-modified! conn)
             (log/info (str/lower-case command) ":"
-                      (str/join " " addresses) "(for" source-name ")"))
+                      (str/join " " addresses) (str "(for " source-name ")")))
           (log/warn "Denied:" from-addr "lacks permission for:" command))))))
 
 ;; ---------------------------------------------------------------------------
@@ -245,7 +211,7 @@
                      (contains? params :subject-match)  (assoc :notify/subject-match (:subject-match params))
                      (contains? params :topic)          (assoc :notify/topic (:topic params)))]
         (d/transact! conn [txn])
-        (log/info "Notify:" params-str "(for" from-addr "on" source-name ")")))))
+        (log/info "Notify:" params-str (str "(for " from-addr " on " source-name ")"))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Permission check for report creation (pure)
@@ -263,18 +229,13 @@
     (second (re-find #"<mailto:([^>]+)>" lp))))
 
 (defn can-create-report? [roles from-addr report-info email source-cfg]
-  (let [as-of (:email/date-sent email)]
+  (let [as-of  (:email/date-sent email)
+        maint? (maintainer? roles from-addr as-of)]
     (cond
-      (announcement-types (:type report-info))
-      (maintainer? roles from-addr as-of)
-
-      (maintainer? roles from-addr as-of) true
-
-      :else
-      (let [ml-email (:list-post source-cfg)]
-        (if (nil? ml-email)
-          true
-          (let [lp (list-post-address email)]
-            (when (and lp (not= lp ml-email))
-              (log/warn "List-post mismatch: expected" ml-email "got" lp))
-            (boolean (= lp ml-email))))))))
+      (announcement-types (:type report-info)) maint?
+      maint?                                   true
+      (nil? (:list-post source-cfg))           true
+      :else (let [lp (list-post-address email)]
+              (when (and lp (not= lp (:list-post source-cfg)))
+                (log/warn "List-post mismatch: expected" (:list-post source-cfg) "got" lp))
+              (boolean (= lp (:list-post source-cfg)))))))
