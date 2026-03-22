@@ -180,8 +180,8 @@
 (defn detect-report
   "Detect report type from an email. Returns a map with :type and optional
   :version, :topic, :patch-seq, :patch-source — or nil if no report detected.
-  Emails with no subject can still be detected as patches if they carry
-  patch attachments or inline diffs.
+  Patches are detected from a [PATCH] subject tag, or from patch attachments
+  and inline diffs even when the subject has no tag.
   When `allowed-types` is provided (a set of keywords), only those types
   are detected; nil means all types are allowed."
   ([email] (detect-report email default-compiled-labels nil))
@@ -203,15 +203,14 @@
                (allowed? (detect-release subject patterns))
                (allowed? (detect-change subject patterns))))
          ;; Fallback: no subject tag matched, but email has patch content
-         (when-not subject
-           (allowed?
-            (let [from-att (when (has-patch-attachment? attachments) :attachment)
-                  from-inl (when (has-inline-patch? body-text) :inline)
-                  sources  (cond-> #{}
-                             from-att (conj :attachment)
-                             from-inl (conj :inline))]
-              (when (seq sources)
-                {:type :patch :patch-source sources}))))))))
+         (allowed?
+          (let [from-att (when (has-patch-attachment? attachments) :attachment)
+                from-inl (when (has-inline-patch? body-text) :inline)
+                sources  (cond-> #{}
+                           from-att (conj :attachment)
+                           from-inl (conj :inline))]
+            (when (seq sources)
+              {:type :patch :patch-source sources})))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Patch content extraction (pure)

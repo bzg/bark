@@ -598,6 +598,7 @@
         (when (fmts "org")
           (dump-org! t-closed reports-dir source-name source-map maintainers-map
                      (str plural "-closed.org") (str plural " (closed)")))))))
+
 (defn export-source!
   "Export a single source in the given format(s).
   Always produces all-open.json and all-closed.json (used by index.html).

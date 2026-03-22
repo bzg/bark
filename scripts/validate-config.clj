@@ -91,7 +91,10 @@
 (s/def :bark/db (s/keys :req-un [:db/path]))
 
 ;; Ingest
-(s/def :ingest/initial-fetch ::pos-int)
+(s/def :ingest/initial-fetch
+  (s/or :count pos-int?
+        :date  (s/and string? #(re-matches #"\d{4}-\d{2}-\d{2}" %))
+        :duration (s/and string? #(re-seq #"\d+\s*[ydwm]" %))))
 (s/def :bark/ingest (s/keys :opt-un [:ingest/initial-fetch]))
 
 ;; SMTP
@@ -244,7 +247,10 @@
                           (str "notify: " (get-in src [:notifications :enable])))))
             (log/info "  DB path:" (get-in config [:db :path]))
             (when-let [ingest (:ingest config)]
-              (log/info "  Initial:" (or (:initial-fetch ingest) 50) "msgs"))
+              (let [v (or (:initial-fetch ingest) 50)]
+                (log/info "  Initial fetch:" (cond
+                                               (int? v) (str v " msgs")
+                                               (string? v) v))))
             (when-let [notif (:notifications config)]
               (log/info "  Notifications:" (if (:enabled notif) "enabled" "disabled"))
               (when-let [smtp (:smtp notif)]

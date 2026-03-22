@@ -17,6 +17,9 @@
             [clojure.string :as str]
             [postal.core :as postal]
             [taoensso.timbre :as log])
+  (:import [java.time Instant LocalDate ZoneId]
+           [java.time.temporal ChronoUnit]
+           [java.util Date])
   (:gen-class))
 
 ;; ---------------------------------------------------------------------------
@@ -115,26 +118,67 @@
                   "(some messages failed — will retry on next reconnect)"))
       (db/save-imap-uid! db-conn new-wm))))
 
+(defn- parse-duration-str
+  "Parse a duration string like \"2y 3m 10d 2w\" into a total number of days.
+  Units: y=365d, m=30d, w=7d, d=1d.  Returns nil if no valid units found.
+  Throws on unrecognized tokens (e.g. \"50x\")."
+  [s]
+  (let [valid-parts   (re-seq #"(\d+)\s*(y|m|w|d)" s)
+        invalid-parts (re-seq #"(\d+)\s*([a-zA-Z]+)" s)
+        bad-units     (remove (fn [[_ _ u]] (#{"y" "m" "w" "d"} u)) invalid-parts)]
+    (when (seq bad-units)
+      (throw (ex-info (str "Unknown duration unit(s): "
+                           (str/join ", " (map #(nth % 2) bad-units))
+                           " (expected y, m, w, d)")
+                      {:value s :bad-units (mapv #(nth % 2) bad-units)})))
+    (when (seq valid-parts)
+      (reduce (fn [acc [_ n unit]]
+                (+ acc (* (parse-long n)
+                          (case unit "y" 365 "m" 30 "w" 7 "d" 1))))
+              0 valid-parts))))
+
+(defn- parse-initial-fetch
+  "Parse the :initial-fetch config value into a fetch-imap options map.
+
+  Accepted forms:
+    50           → {:limit 50}           (last 50 messages)
+    \"50d\"        → {:since <Date>}       (last 50 days)
+    \"2y 3m\"      → {:since <Date>}       (last 2 years + 3 months)
+    \"2024-01-01\" → {:since \"2024-01-01\"} (since ISO date, parsed by fetch-imap)"
+  [v]
+  (cond
+    (integer? v) {:limit v}
+    (string? v)
+    (or (when (re-matches #"\d{4}-\d{2}-\d{2}" v)
+          {:since v})
+        (when-let [days (parse-duration-str v)]
+          {:since (Date/from (.minus (Instant/now) days ChronoUnit/DAYS))})
+        (throw (ex-info (str "Invalid :initial-fetch value: " (pr-str v)
+                            " (expected integer, \"Nd/w/m/y\" duration, or \"yyyy-MM-dd\" date)")
+                       {:value v})))
+    :else {:limit 50}))
+
 (defn catch-up-fetch!
   "Fetch messages missed while the process was down.
-  - First run (no watermark): fetch the last `initial-limit` messages.
+  - First run (no watermark): fetch according to `fetch-opts` (:limit or :since).
   - Restart (watermark exists): fetch all messages with UID > watermark.
   This is the ONLY place the watermark is advanced.  IDLE does not touch
   it, so any messages that fail during IDLE will be retried here on the
   next reconnect."
-  [imap-conn db-conn folder initial-limit]
+  [imap-conn db-conn folder fetch-opts]
   (when-not (shutting-down?)
     (let [watermark (db/max-imap-uid db-conn)]
       (if (zero? watermark)
-        (do (log/info "First run — fetching last" initial-limit "messages")
-            (log/warn ":initial-fetch says to fetch only the" initial-limit "most recent messages.")
-            (let [msgs (fetch/messages imap-conn folder
-                                       {:limit        initial-limit
-                                        :attachments? true})]
-              (log/info "Fetched" (count msgs) "messages from IMAP")
-              (when-not (shutting-down?)
-                (let [{:keys [safe-uids]} (ingest/store-emails! db-conn msgs)]
-                  (advance-watermark! db-conn msgs safe-uids)))))
+        (let [{:keys [limit since]} fetch-opts]
+          (if since
+            (log/info "First run — fetching messages since" since)
+            (log/info "First run — fetching last" limit "messages"))
+          (let [msgs (fetch/messages imap-conn folder
+                                     (merge {:attachments? true} fetch-opts))]
+            (log/info "Fetched" (count msgs) "messages from IMAP")
+            (when-not (shutting-down?)
+              (let [{:keys [safe-uids]} (ingest/store-emails! db-conn msgs)]
+                (advance-watermark! db-conn msgs safe-uids)))))
         (do (log/info "Resuming — fetching UIDs >" watermark)
             (let [msgs (fetch/by-uid-range imap-conn folder
                                            (inc watermark) Long/MAX_VALUE)]
@@ -212,7 +256,8 @@
               (try
                 (log/info "IMAP connected, folder:" folder)
                 (catch-up-fetch! conn db-conn folder
-                                 (or (:initial-fetch ingest-cfg) 50))
+                                 (parse-initial-fetch
+                                  (or (:initial-fetch ingest-cfg) 50)))
                 (when-not (shutting-down?)
                   (start-idle! conn db-conn folder))
                 (catch Exception e

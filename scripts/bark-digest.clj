@@ -297,14 +297,16 @@
         existing  (:email/source email)
         irt-src   (when-not existing
                     (source-from-in-reply-to (d/db conn) (:email/in-reply-to email)))
-        hdr-src   (when (and irt-src (not existing))
-                    (classify-source (:email/headers-edn email)
-                                     (:email/subject email) sources))
-        _         (when (and irt-src hdr-src (not= irt-src hdr-src))
-                    (log/warn "Source mismatch for" mid
-                              "— In-Reply-To says" irt-src
-                              "but headers say" hdr-src "(using" irt-src ")"))
-        src-name  (or existing irt-src hdr-src
+        ;; Cross-check: when In-Reply-To resolved a source, also check
+        ;; headers to warn on mismatches. irt-src always wins.
+        _         (when irt-src
+                    (let [hdr-src (classify-source (:email/headers-edn email)
+                                                    (:email/subject email) sources)]
+                      (when (and hdr-src (not= irt-src hdr-src))
+                        (log/warn "Source mismatch for" mid
+                                  "— In-Reply-To says" irt-src
+                                  "but headers say" hdr-src "(using" irt-src ")"))))
+        src-name  (or existing irt-src
                       (classify-source (:email/headers-edn email)
                                        (:email/subject email) sources))
         _         (when (and src-name (not existing))

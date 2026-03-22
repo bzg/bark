@@ -116,6 +116,7 @@
                       (log/info "Config maintainer:" (str/lower-case email)
                                 (if since (str "(since " since ")") "")
                                 "(for" name ")"))))))))))))
+
 (defn- add-role! [conn source-name attr addresses]
   (when-let [eid (roles-eid conn source-name)]
     (doseq [addr addresses]
