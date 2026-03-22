@@ -4,9 +4,9 @@
 ;;
 ;; BARK: Bug And Report Keeper
 ;;
-;; Queries notification preferences from the database, builds a plain-text
-;; summary of open reports, and sends emails via SMTP to subscribers whose
-;; interval has elapsed.
+;; Queries notification preferences from the database (read-only),
+;; builds plain-text summaries, and sends emails via SMTP.
+;; Last-sent timestamps are stored in public/.last-notify.edn (not the DB).
 ;;
 ;; Usage:
 ;;   bb notify           — send due notifications
@@ -17,13 +17,13 @@
 
 (require '[babashka.pods :as pods]
          '[clojure.string :as str]
-         '[clojure.edn :as edn])
+         '[clojure.edn :as edn]
+         '[clojure.java.io :as io])
 
 ;; Forward-declared for clj-kondo (provided at runtime by load-file below).
 (declare load-datalevin-pod! get-header format-date format-date-iso
          report-priority report-status report-descendant-count
          all-reports report-pull-pattern load-config build-source-map bark-schema
-         ;; bark-roles.clj
          get-roles admin-or-maintainer?)
 
 (load-file "scripts/bark-common.clj")
@@ -33,7 +33,25 @@
 
 (require '[pod.tzzh.mail :as mail])
 
-(load-file "scripts/bark-roles.clj")
+;; ---------------------------------------------------------------------------
+;; File-based last-sent timestamps (replaces DB :notify/last-sent)
+;; ---------------------------------------------------------------------------
+
+(def ^:private last-notify-file "public/.last-notify.edn")
+
+(defn- load-last-sent
+  "Read {notify-key -> epoch-millis} from .last-notify.edn, or {}."
+  []
+  (let [f (io/file last-notify-file)]
+    (if (.exists f)
+      (try (edn/read-string (slurp f)) (catch Exception _ {}))
+      {})))
+
+(defn- save-last-sent!
+  "Write the last-sent map to .last-notify.edn."
+  [m]
+  (io/make-parents last-notify-file)
+  (spit last-notify-file (pr-str m)))
 
 ;; ---------------------------------------------------------------------------
 ;; Report queries (all-reports and report-pull-pattern loaded from bark-common.clj)
@@ -56,12 +74,13 @@
        (map first)))
 
 (defn- due?
-  "True if enough days have elapsed since last-sent (or never sent)."
-  [notify now]
+  "True if enough days have elapsed since last-sent (or never sent).
+  Reads last-sent from the file-based map, not the DB."
+  [notify now last-sent-map]
   (let [interval-ms (* (:notify/interval-days notify 30) 86400000)
-        last-sent   (:notify/last-sent notify)]
-    (or (nil? last-sent)
-        (>= (- (.getTime now) (.getTime last-sent)) interval-ms))))
+        last-ms     (get last-sent-map (:notify/key notify))]
+    (or (nil? last-ms)
+        (>= (- (.getTime now) last-ms) interval-ms))))
 
 (defn- still-privileged?
   "Confirm the subscriber is still admin or maintainer for the source.
@@ -244,11 +263,12 @@
               src-map  (build-source-map config)
               reports  (all-reports db)
               prefs    (all-notify-prefs db)
+              last-sent-map (load-last-sent)
               _        (do (log/debug (count prefs) "notify pref(s) found")
                            (doseq [p prefs]
                              (log/debug " " (:notify/key p)
                                         "enabled=" (:notify/enabled p)
-                                        "last-sent=" (:notify/last-sent p)
+                                        "last-sent=" (get last-sent-map (:notify/key p))
                                         "interval=" (:notify/interval-days p))))
               enabled  (filter :notify/enabled prefs)
               _        (log/debug (count enabled) "enabled")
@@ -260,7 +280,7 @@
                                           "— notifications disabled for source"
                                           (:notify/source p))))
                            (log/debug (count src-ok) "after per-source filter"))
-              on-time  (if force? src-ok (filter #(due? % now) src-ok))
+              on-time  (if force? src-ok (filter #(due? % now last-sent-map) src-ok))
               _        (log/debug (count on-time) "due"
                                   (when force? "(--force, skipped interval check)"))
               due      (filter #(still-privileged? db %) on-time)
@@ -271,7 +291,8 @@
                                (log/debug "DROPPED" (:notify/email p)
                                           "— not admin/maintainer for"
                                           (:notify/source p)))))
-              sent     (atom 0)]
+              sent     (atom 0)
+              updated-map (atom last-sent-map)]
           (if (empty? due)
             (log/info "No notifications due.")
             (doseq [notify due]
@@ -282,8 +303,7 @@
                                 "Notifying" addr (str "(source: " (:notify/source notify) ")"))
                       (when-not dry-run?
                         (send-notification! smtp addr body)
-                        (d/transact! conn [{:notify/key       (:notify/key notify)
-                                            :notify/last-sent now}])
+                        (swap! updated-map assoc (:notify/key notify) (.getTime now))
                         (swap! sent inc))
                       (when dry-run?
                         (println "---")
@@ -291,6 +311,8 @@
                         (println "---")))
                   (log/info "No open items for" addr
                             (str "(source: " (:notify/source notify) "),") "skipping.")))))
+          (when-not dry-run?
+            (save-last-sent! @updated-map))
           (log/info "Done." (if dry-run? "Dry run, no emails sent." (str @sent " email(s) sent."))))
         (finally
           (d/close conn))))))

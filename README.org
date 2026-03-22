@@ -8,8 +8,8 @@ applies commands from email body, and manages roles per source.
 
 BARK reports can be read with other tools:
 
-- As a CLI based on fzf: [[https://codeberg.org/bzg/bone][bone]]
-- Via GNU Emacs [[https://gnus.org/][Gnus]]: [[https://codeberg.org/bzg/gnus-bone][gnus-bone]]
+- As a CLI based on [[https://junegunn.github.io/fzf/][fzf]]: [[https://codeberg.org/bzg/bone][bone]]
+- Via GNU Emacs [[https://gnus.org][Gnus]]: [[https://codeberg.org/bzg/gnus-bone][gnus-bone]]
 - Via GNU Emacs [[https://notmuchmail.org/notmuch-emacs/][notmuch]]: [[https://codeberg.org/bzg/notmuch-bone][notmuch-bone]]
 
 ** BARK manual
@@ -18,17 +18,19 @@ For a more extensive documentation, please read the [[docs/bark-manual.org][BARK
 
 ** How it works
 
-- *bark-ingest* --- Connects to IMAP via IDLE, stores emails in the db.
-- *bark-digest* --- Scans new emails and creates/updates reports/roles in the db.
-- *bark-export* --- Exports all reports as JSON, RSS, or Org.
-- *bark-html* --- Generates a static HTML page embedding report data (via =bb export html=).
-- *bark-notify* --- Sends notification emails to admin/maintainers.
+- *JVM daemon* (=clojure -M:run=) --- Connects to IMAP, stores emails,
+  digests them into reports, applies commands and roles, periodically
+  expires stale reports. All database writes happen here.
+- *bb export* --- Exports reports as JSON, RSS, Org, and generates HTML
+  and stats pages. Read-only (no database writes).
+- *bb notify* --- Sends notification emails to admin/maintainers.
+  Read-only (no database writes).
 
 ** Dependencies
 
-- [[https://babashka.org/][Babashka]] (bb)
-- Java 17+ (for bark-ingest)
-- Datalevin (pod for bb, library for JVM)
+- [[https://babashka.org/][Babashka]] (bb) for export, notify, and utility scripts
+- [[https://github.com/datalevin/datalevin][Datalevin]] (pod for bb scripts, library for JVM)
+- Java 17+ (for the daemon)
 
 ** Quick start
 
@@ -36,52 +38,83 @@ For a more extensive documentation, please read the [[docs/bark-manual.org][BARK
 # 1. Copy and edit config
 cp config.edn.example config.edn
 
-# 2a. Start ingesting emails (dev)
+# 2a. Start the daemon (dev)
 clj -M:run
 
 # 2b. Or build an uberjar and run it (production)
 mkdir -p classes
-clj -M -e "(compile 'bark-ingest.main)"
-clj -M:uberdeps --main-class bark_ingest.main
+clj -M -e "(compile 'bark.main)"
+clj -M:uberdeps --main-class bark.main
 java --add-opens=java.base/java.nio=ALL-UNNAMED \
      --add-opens=java.base/sun.nio.ch=ALL-UNNAMED \
      -jar target/bark.jar
 
-# 3. Digest new emails into reports
-bb digest          # incremental
-bb digest --all    # rescan everything
+# 3. Export reports
+bb export          # incremental (skips if nothing changed)
+bb export all      # all formats
+bb export json     # JSON only
+bb export rss      # RSS only
+bb export org      # Org only
+bb export html     # HTML + JSON
+bb export stats    # stats.json
+bb export all --force  # ignore timestamps, full export
 
-# 4. Export reports
-bb export          # -> public/reports.json
-bb export rss      # -> public/reports.xml
-bb export org      # -> public/reports.org
-bb export html     # -> public/index.html
-bb export stats    # -> public/stats.json
-bb export all      # -> all of the above
+# 4. Send notification emails
+bb notify              # send due notifications
+bb notify --dry-run    # preview without sending
+bb notify --force      # ignore intervals
+bb notify --debug      # verbose filtering diagnostics
 
 # 5. Test SMTP configuration
 bb test-smtp --dry-run
 
-# 6. Send notification emails
-bb notify          # send due notifications
-bb notify --dry-run --debug  # preview without sending
+# 6. Run tests
+clj -M:test
 #+end_src
+
+** Architecture
+
+All source code lives under =src/bark/=:
+
+| Namespace     | Role                                                |
+|---------------+-----------------------------------------------------|
+| =bark.main=     | Daemon entry point (IMAP IDLE loop)                 |
+| =bark.db=       | Datalevin connection, schema, queries               |
+| =bark.ingest=   | Email parsing and storage                           |
+| =bark.pipeline= | Atomic store-then-digest per email                  |
+| =bark.digest=   | Single-email processing (classify, detect, thread)  |
+| =bark.detect=   | Report type detection from subject/body/attachments |
+| =bark.commands= | Triggers, directives, votes                         |
+| =bark.roles=    | Permission checks and role management               |
+| =bark.series=   | Patch series tracking                               |
+| =bark.expire=   | Periodic report expiry (runs inside daemon)         |
+| =bark.common=   | Shared utilities (JVM)                              |
+| =bark.logging=  | File and email log appenders                        |
+
+Read-only bb scripts live under =scripts/=:
+
+| Script              | Role                                    |
+|---------------------+-----------------------------------------|
+| =bark-common.clj=     | Shared utilities (bb)                   |
+| =bark-export.clj=     | Report export (JSON, RSS, Org, patches) |
+| =bark-notify.clj=     | Notification emails                     |
+| =bark-index.clj=      | HTML index page generation              |
+| =bark-stats.clj=      | Statistics and data page generation     |
+| =bark-docs.clj=       | Documentation page generation           |
+| =bark-html.clj=       | HTML template helpers                   |
+| =validate-config.clj= | Config validation                       |
 
 ** bb tasks
 
 #+begin_example
-bb digest [--all]                         Digest emails into reports
-bb export [json|rss|org|html|stats|all]   Export all reports (default: json)
+bb export [json|rss|org|html|stats|all]   Export reports (default: all)
        [-n source] [-p 1|2|3] [-s 1-7]   Filter by source, priority, status
+       [--force]                          Ignore timestamps, full export
 bb notify [--dry-run] [--force] [--debug] Send notification emails
 bb test-config [path]                     Validate config.edn
-bb test-digest                            Run bark-digest integration tests
 bb test-smtp [--to addr] [--dry-run]      Test SMTP configuration
 bb clean                                  Remove all files in public/
 #+end_example
-
-The =notify= command also accepts =--force= (ignore interval, send now)
-and =--debug= (print filtering diagnostics).
 
 ** Config
 
@@ -98,6 +131,13 @@ Single IMAP connection shared by all sources.
 | =:password=     | ​*        | IMAP password (* or =:oauth2-token=) |
 | =:oauth2-token= | ​*        | OAuth2 token (* or =:password=)      |
 | =:folder=       | yes      | IMAP folder (usually ="INBOX"=)      |
+
+*** Ingest settings (=:ingest=)
+
+| Field          | Default | Description                                           |
+|----------------+---------+-------------------------------------------------------|
+| =:initial-fetch= | =50=      | First-run fetch: count, duration (="30d"=), or ISO date |
+| =:max-size=      | none    | Skip emails larger than N bytes (e.g. =1048576=)        |
 
 *** Sources (=:sources=)
 
@@ -137,7 +177,8 @@ Match rules (all optional, all must match if present):
             :match {:delivered-to "private@example.com"}}
            {:name "direct"}]
  :db {:path "data/bark-db"}
- :ingest {:initial-fetch 50}
+ :ingest {:initial-fetch 50
+          :max-size 1048576}
  :notifications {:enabled true
                  :smtp {:host "smtp.example.com" :port 587 :tls true
                         :user "notify@example.com" :password "secret"
@@ -146,13 +187,13 @@ Match rules (all optional, all must match if present):
 
 *** Report labels (=:labels=)
 
-Controls which subject tags are recognised per report type. Can be set
-globally at the top level or per source (per-source takes precedence).
-Only the types you specify are overridden; others keep their defaults.
+Controls which subject labels are recognised per report type. 
 
-Default tags:
+Can be set globally at the top level or per source (per-source takes
+precedence). Only the types you specify are overridden; others keep
+their defaults. Here are the default labels:
 
-| Type          | Default tags     |
+| Type          | Default labels   |
 |---------------+------------------|
 | =:bug=          | =BUG=              |
 | =:patch=        | =PATCH=            |

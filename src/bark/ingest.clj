@@ -2,10 +2,10 @@
 ;; SPDX-License-Identifier: EPL-2.0
 ;; License-Filename: LICENSES/EPL-2.0.txt
 
-(ns bark-ingest.ingest
+(ns bark.ingest
   "Transform parsed email maps into Datalevin transactions and store them.
   Source classification is deferred to bark-digest."
-  (:require [bark-ingest.db :as db]
+  (:require [bark.db :as db]
             [datalevin.core :as d]
             [clojure.string :as str]
             [taoensso.timbre :as log])

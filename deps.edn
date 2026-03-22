@@ -10,11 +10,22 @@
   com.draines/postal             {:mvn/version "2.0.5"}}
 
  :aliases
- {:run
-  {:main-opts ["-m" "bark-ingest.main"]
+ {;; Main daemon: ingest + digest + periodic expire
+  :run
+  {:main-opts ["-m" "bark.main"]
    :jvm-opts ["--add-opens=java.base/java.nio=ALL-UNNAMED"
               "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"]}
 
+  ;; Tests
+  :test
+  {:extra-paths ["test"]
+   :extra-deps  {io.github.cognitect-labs/test-runner {:git/tag "v0.5.1"
+                                                        :git/sha "dfb30dd"}}
+   :main-opts   ["-m" "cognitect.test-runner"]
+   :jvm-opts    ["--add-opens=java.base/java.nio=ALL-UNNAMED"
+                 "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"]}
+
+  ;; Build uberjar
   :uberdeps
   {:extra-deps {uberdeps/uberdeps {:mvn/version "1.4.0"}}
    :replace-paths []

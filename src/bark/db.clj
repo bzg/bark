@@ -2,7 +2,7 @@
 ;; SPDX-License-Identifier: EPL-2.0
 ;; License-Filename: LICENSES/EPL-2.0.txt
 
-(ns bark-ingest.db
+(ns bark.db
   "Datalevin database setup, schema, and operations."
   (:require [datalevin.core :as d]
             [clojure.edn :as edn]

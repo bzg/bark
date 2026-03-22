@@ -1,4 +1,8 @@
-;; bark-common.clj — Shared utilities for bark bb scripts.
+;; bark-common.clj — Shared utilities for bark bb scripts (read-only).
+;;
+;; Write operations (digest, export, notify) are handled by JVM namespaces
+;; under src/bark/. This file provides read-side utilities for bb scripts
+;; that generate HTML, stats, docs, and index pages.
 ;;
 ;; Usage: (load-file "scripts/bark-common.clj")
 
@@ -6,100 +10,7 @@
          '[clojure.edn :as edn]
          '[taoensso.timbre :as log])
 
-;; ---------------------------------------------------------------------------
-;; Logging config
-;; SYNC: parse-size, rotate-log!, configure-file-logging! are mirrored in
-;; src/bark_ingest/logging.clj (JVM version adds locking for thread-safety).
-;; Keep both in sync when changing the log format or rotation logic.
-;; ---------------------------------------------------------------------------
-
 (log/merge-config! {:min-level :info})
-
-(defn- parse-size
-  "Parse a size string like \"10MB\" into bytes.
-  Returns nil if the numeric part is not a valid integer."
-  [s]
-  (let [s (str/upper-case (str/trim (str s)))]
-    (cond
-      (str/ends-with? s "GB") (some-> (parse-long (str/replace s #"GB$" "")) (* 1024 1024 1024))
-      (str/ends-with? s "MB") (some-> (parse-long (str/replace s #"MB$" "")) (* 1024 1024))
-      (str/ends-with? s "KB") (some-> (parse-long (str/replace s #"KB$" "")) (* 1024))
-      :else                   (parse-long s))))
-
-(defn- rotate-log!
-  "Rotate log-file if it exceeds max-bytes, keeping up to backlog files."
-  [log-file max-bytes backlog]
-  (let [f (clojure.java.io/file log-file)]
-    (when (and (.exists f) (> (.length f) max-bytes))
-      (doseq [i (range (dec backlog) 0 -1)]
-        (let [src (clojure.java.io/file (str log-file "." i))
-              dst (clojure.java.io/file (str log-file "." (inc i)))]
-          (when (.exists src) (.renameTo src dst))))
-      (.renameTo f (clojure.java.io/file (str log-file ".1"))))))
-
-(defn configure-file-logging!
-  "If logging-cfg contains :file, add a Timbre file appender
-  that persists logs at or above the specified :level."
-  [{:keys [file level max-size backlog]
-    :or   {level :warn max-size "10MB" backlog 5}}]
-  (when file
-    (clojure.java.io/make-parents file)
-    (let [max-bytes (parse-size max-size)]
-      (log/merge-config!
-       {:appenders
-        {:file
-         {:enabled?  true
-          :min-level level
-          :fn        (fn [data]
-                       (rotate-log! file max-bytes backlog)
-                       (spit file
-                             (str (force (:timestamp_ data)) " "
-                                  (str/upper-case (name (:level data))) " "
-                                  (:?ns-str data) " - "
-                                  (force (:msg_ data)) "\n")
-                             :append true))}}}))))
-
-(defn- ensure-mail-pod!
-  "Load the tzzh/mail pod once (idempotent)."
-  []
-  (when-not (try (requiring-resolve 'pod.tzzh.mail/send-mail) (catch Exception _ nil))
-    (require '[babashka.pods :as pods])
-    ((resolve 'pods/load-pod) 'tzzh/mail "0.0.3")
-    (require '[pod.tzzh.mail :as mail])))
-
-;; SYNC: mirrored in src/bark_ingest/main.clj (JVM version uses postal).
-(defn configure-email-logging!
-  "Add a Timbre email appender using the SMTP config from :notifications.
-  Loads the tzzh/mail pod on first use."
-  [smtp-cfg {:keys [to level] :or {level :error}}]
-  (when (and smtp-cfg to)
-    (ensure-mail-pod!)
-    (let [{:keys [host port tls user password from]} smtp-cfg
-          send! (resolve 'pod.tzzh.mail/send-mail)]
-      (log/merge-config!
-       {:appenders
-        {:email
-         {:enabled?   true
-          :min-level  level
-          :rate-limit [[5 (* 5 60 1000)]]
-          :fn         (fn [data]
-                        (try
-                          (let [level-str (str/upper-case (name (:level data)))
-                                msg       (force (:msg_ data))]
-                            (send! {:host     host
-                                    :port     (or port 587)
-                                    :tls      (boolean tls)
-                                    :username user
-                                    :password password
-                                    :from     from
-                                    :to       [to]
-                                    :subject  (str "[BARK] " level-str " — " (:?ns-str data))
-                                    :text     (str (force (:timestamp_ data)) " "
-                                                   level-str " " (:?ns-str data)
-                                                   " — " msg)}))
-                          (catch Exception e
-                            (binding [*out* *err*]
-                              (println "Failed to send log email:" (.getMessage e))))))}}}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Utilities
@@ -165,12 +76,12 @@
   ((resolve 'pods/load-pod) 'huahaiy/datalevin datalevin-version)
   (require '[pod.huahaiy.datalevin :as d]))
 
-;; Lazy-resolved pod functions — resolved once on first call, cached thereafter.
+;; Lazy-resolved pod functions — resolved once on first call.
 ;; Must be called after load-datalevin-pod!.
-(def ^:private d-transact! (delay (resolve 'pod.huahaiy.datalevin/transact!)))
-(def ^:private d-q         (delay (resolve 'pod.huahaiy.datalevin/q)))
-(defn dt! "Resolved d/transact!" [& args] (apply @d-transact! args))
-(defn dq  "Resolved d/q"         [& args] (apply @d-q args))
+(def ^:private d-q    (delay (resolve 'pod.huahaiy.datalevin/q)))
+(def ^:private d-pull (delay (resolve 'pod.huahaiy.datalevin/pull)))
+(defn dq "Resolved d/q" [& args] (apply @d-q args))
+(defn dpull "Resolved d/pull" [& args] (apply @d-pull args))
 
 ;; ---------------------------------------------------------------------------
 ;; Canonical report pull pattern (shared by export, notify, stats)
@@ -213,19 +124,11 @@
        (map first)))
 
 (defn load-config
-  "Load config.edn if it exists, or nil.
-  Configures file and email logging when :logging is present."
+  "Load config.edn if it exists, or nil."
   []
   (let [f (clojure.java.io/file "config.edn")]
     (when (.exists f)
-      (let [cfg (edn/read-string (slurp f))]
-        (when-let [logging (:logging cfg)]
-          (configure-file-logging! logging)
-          (when-let [email-cfg (:email logging)]
-            (if-let [smtp (get-in cfg [:notifications :smtp])]
-              (configure-email-logging! smtp email-cfg)
-              (log/warn "Logging :email configured but no :notifications :smtp found."))))
-        cfg))))
+      (edn/read-string (slurp f)))))
 
 (defn get-header
   "Case-insensitive header lookup. headers-edn can be an EDN string or
@@ -250,55 +153,8 @@
       id
       (str raw))))
 
-(defn- match-source?
-  "Check if headers match a source's :match spec (substring, case-insensitive).
-  For :list-id, extracts the identifier from angle brackets before comparing."
-  [headers-edn match-spec]
-  (every? (fn [[k v]]
-            (let [header-name (case k
-                                :list-id      "List-Id"
-                                :delivered-to "Delivered-To"
-                                :to           "To"
-                                (name k))
-                  header-val  (get-header headers-edn header-name)
-                  header-val  (if (= k :list-id)
-                                (extract-list-id header-val)
-                                header-val)]
-              (and header-val
-                   (str/includes? (str/lower-case (str header-val))
-                                  (str/lower-case v)))))
-          match-spec))
-
-(def ^:private bark-prefix-pattern
-  "Matches [bark:<list-id>] at the start of a subject line (case-insensitive)."
-  #"(?i)^\[bark:([^\]]+)\]")
-
-(defn- extract-bark-list-id
-  "Extract list-id from a [bark:<list-id>] subject prefix, or nil."
-  [subject]
-  (when subject
-    (second (re-find bark-prefix-pattern subject))))
-
-(defn classify-source
-  "Return the :name of the first matching source, or nil.
-  Matches by header (List-Id, Delivered-To, etc.) first, then falls back
-  to a [bark:<list-id>] subject prefix for maintainers who cannot set
-  mail headers.  A source with no :match acts as a catch-all."
-  [headers-edn subject sources]
-  (let [bark-lid (extract-bark-list-id subject)]
-    (some (fn [{:keys [name match]}]
-            (when (or (empty? match)
-                      (match-source? headers-edn match)
-                      ;; Fallback: [bark:<list-id>] in subject matches :list-id
-                      (and bark-lid
-                           (:list-id match)
-                           (str/includes? (str/lower-case bark-lid)
-                                          (str/lower-case (:list-id match)))))
-              name))
-          sources)))
-
 ;; ---------------------------------------------------------------------------
-;; Maintainer-since parsing (shared by bark-roles, bark-docs)
+;; Maintainer-since parsing (shared by bark-docs)
 ;; ---------------------------------------------------------------------------
 
 (defn parse-maintainer-since-entries
@@ -315,6 +171,58 @@
                     (when (and idx (pos? idx))
                       [(subs entry 0 idx) (subs entry (inc idx))]))))
           entries)))
+
+;; ---------------------------------------------------------------------------
+;; Role queries (read-only — used by bark-notify, bark-export)
+;; ---------------------------------------------------------------------------
+
+(defn get-roles
+  "Fetch roles for a source. Returns a map or {}."
+  [db source-name]
+  (or (dpull db '[:roles/admin :roles/maintainers :roles/maintainer-since :roles/ignored]
+             [:roles/source source-name])
+      {}))
+
+(defn- roles-set [roles attr]
+  (ensure-set (get roles attr)))
+
+(defn- has-role? [roles attr addr]
+  (let [addrs (roles-set roles attr)]
+    (boolean (some #(= (str/lower-case %) (str/lower-case addr)) addrs))))
+
+(defn admin? [roles addr]
+  (and addr (:roles/admin roles)
+       (= (str/lower-case (:roles/admin roles))
+          (str/lower-case addr))))
+
+(defn- parse-maintainer-since [roles]
+  (let [fmt     (doto (java.text.SimpleDateFormat. "yyyy-MM-dd")
+                  (.setTimeZone (java.util.TimeZone/getTimeZone "UTC")))
+        entries (parse-maintainer-since-entries roles)]
+    (into {}
+          (keep (fn [[email date-str]]
+                  (try [email (.parse fmt date-str)]
+                       (catch Exception _ nil))))
+          entries)))
+
+(defn maintainer?
+  ([roles addr]
+   (and addr (has-role? roles :roles/maintainers addr)))
+  ([roles addr as-of]
+   (and addr
+        (has-role? roles :roles/maintainers addr)
+        (if as-of
+          (let [since-map (parse-maintainer-since roles)
+                since     (get since-map (str/lower-case addr))]
+            (or (nil? since)
+                (not (.before ^java.util.Date as-of since))))
+          true))))
+
+(defn admin-or-maintainer? [roles addr]
+  (or (admin? roles addr) (maintainer? roles addr)))
+
+(defn ignored? [roles addr]
+  (and addr (has-role? roles :roles/ignored addr)))
 
 (defn build-source-map
   "Build source-name -> {:admin :list-post :list-id :list-archive :bark-path ...} from config."
@@ -439,13 +347,6 @@
    :urgent    ["Urgent"]
    :important ["Important"]})
 
-(def close-reasons
-  "Map closed trigger words to close reasons.
-  Words not listed here default to :resolved."
-  {"Canceled"  :canceled
-   "Cancelled" :canceled
-   "Expired"   :expired})
-
 (defn resolve-labels-map
   "Resolve labels for a source-map entry: defaults -> global -> per-source.
   Returns a (non-compiled) labels map."
@@ -476,28 +377,8 @@
       global (merge (extract-words global))
       local  (merge (extract-words local)))))
 
-(defn resolve-command-overrides
-  "Collect :scope and :report-types overrides from :commands config.
-  Returns a map of command-id -> {:scope ... :report-types ...} (only
-  keys explicitly set in config). Used by bark-commands to override
-  the hardcoded registry at detection and application time."
-  [source-cfg]
-  (let [global (or (:global-commands source-cfg) (:global-triggers source-cfg))
-        local  (or (:commands source-cfg) (:triggers source-cfg))
-        extract (fn [m]
-                  (reduce-kv (fn [acc k v]
-                               (let [entry (normalize-command-entry v)
-                                     overrides (select-keys entry [:scope :report-types])]
-                                 (if (seq overrides)
-                                   (assoc acc k overrides)
-                                   acc)))
-                             {} m))]
-    ;; Per-source overrides take precedence over global
-    (merge (when global (extract global))
-           (when local (extract local)))))
-
 ;; ---------------------------------------------------------------------------
-;; Shared schema (used by bark-export, bark-notify, bark-stats, bark-digest)
+;; Shared schema
 ;; ---------------------------------------------------------------------------
 
 (def bark-schema
@@ -507,29 +388,8 @@
       (throw (ex-info "resources/bark-schema.edn not found" {:path (.getAbsolutePath f)})))))
 
 ;; ---------------------------------------------------------------------------
-;; Export change tracking
+;; Read-only change tracking (used by bark-export)
 ;; ---------------------------------------------------------------------------
-
-(def ^:const meta-ident "global")
-(def ^:const digest-watermark-id "watermark")
-
-(defn bump-report-updated!
-  "Set :report/updated-at and :meta/last-modified to now.
-  `report-eid` can be a single eid or a collection of eids."
-  [conn report-eid]
-  (let [now  (java.util.Date.)
-        eids (if (coll? report-eid) report-eid [report-eid])
-        tx   (into [{:meta/ident meta-ident :meta/last-modified now}]
-                   (map (fn [eid] {:db/id eid :report/updated-at now}))
-                   eids)]
-    (dt! conn tx)))
-
-(defn bump-global-modified!
-  "Bump :meta/last-modified without targeting a specific report.
-  Use when a mutation (e.g. expiry) already transacted report changes
-  and you just need the global flag."
-  [conn]
-  (dt! conn [{:meta/ident meta-ident :meta/last-modified (java.util.Date.)}]))
 
 (defn get-last-modified
   "Return the global :meta/last-modified instant, or nil."
@@ -537,18 +397,6 @@
   (dq '[:find ?t .
         :where [?e :meta/ident "global"] [?e :meta/last-modified ?t]]
       db))
-
-(defn get-last-export
-  "Return the :meta/last-export instant, or nil."
-  [db]
-  (dq '[:find ?t .
-        :where [?e :meta/ident "global"] [?e :meta/last-export ?t]]
-      db))
-
-(defn save-last-export!
-  "Record the export timestamp."
-  [conn ts]
-  (dt! conn [{:meta/ident meta-ident :meta/last-export ts}]))
 
 (defn changed-report-types-since
   "Return the set of :report/type keywords that have been updated since `since-ts`."

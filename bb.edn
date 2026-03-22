@@ -1,10 +1,16 @@
 {:tasks
- {digest     {:doc  "Digest emails into reports (use --all to rescan everything)"
-              :task (apply shell "bb scripts/bark-digest.clj" *command-line-args*)}
-  export     {:doc  "Export reports: bb export [json|rss|org|html|stats|all] [-n source] [-p 1|2|3] [-s 1-7]"
+ {;; The JVM daemon handles ingest, digest and expire:
+ ;;   clojure -M:run                   (daemon)
+ ;;   clojure -M:run -- --initial-fetch 4d  (recovery)
+ ;;
+ ;; Export and notify are read-only bb scripts:
+
+  export     {:doc  "Export reports: bb export [json|rss|org|html|stats|all] [-n source] [-p 1|2|3] [-s 1-7] [--force]"
               :task (apply shell "bb scripts/bark-export.clj" *command-line-args*)}
-  notify     {:doc  "Send notification emails: bb notify [--dry-run]"
+
+  notify     {:doc  "Send notification emails: bb notify [--dry-run] [--force] [--debug]"
               :task (apply shell "bb scripts/bark-notify.clj" *command-line-args*)}
+
   clean      {:doc  "Remove all files in classes/, public/ and docs/"
               :task (doseq [d ["public" "classes" "target" "docs"]]
                       (let [dir (clojure.java.io/file d)]
@@ -14,9 +20,11 @@
                                           (.endsWith (.getPath f) ".org"))
                               (.delete f)
                               (println "Deleted" (.getPath f)))))))}
+
   test-config {:doc  "Validate config.edn (pass path as arg, default: ./config.edn)"
                :task (apply shell "bb scripts/validate-config.clj" *command-line-args*)}
-  test-digest {:doc  "Run bark-digest integration tests"
-               :task (shell "bb test/bark-digest-test.clj")}
+
+  ;; Integration tests: clojure -M:test
+
   test-smtp  {:doc  "Test SMTP config: bb test-smtp [--to addr] [--dry-run]"
-              :task (apply shell "bb test/bark-email-test.clj" *command-line-args*)}}}
+              :task (apply shell "bb scripts/bark-email-test.clj" *command-line-args*)}}}

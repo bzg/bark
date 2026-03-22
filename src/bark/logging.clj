@@ -2,9 +2,9 @@
 ;; SPDX-License-Identifier: EPL-2.0
 ;; License-Filename: LICENSES/EPL-2.0.txt
 
-(ns bark-ingest.logging
+(ns bark.logging
   "Shared logging utilities: size parsing, log rotation, file/email appenders.
-  Used by bark-ingest.main (JVM); bark-common.clj (bb) mirrors this logic."
+  Used by bark.main (JVM); bark-common.clj (bb) mirrors this logic."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [taoensso.timbre :as log]))

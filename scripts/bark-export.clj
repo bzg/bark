@@ -43,12 +43,32 @@
          ensure-set format-date format-date-iso report-priority report-status
          report-descendant-count all-reports report-pull-pattern
          parse-cli-args load-config build-source-map bark-schema bark-format
-         get-last-modified get-last-export save-last-export!
-         changed-report-types-since)
+         get-last-modified changed-report-types-since)
 
 (load-file "scripts/bark-common.clj")
 
 (load-datalevin-pod!)
+
+;; ---------------------------------------------------------------------------
+;; File-based export timestamp (replaces DB-based save-last-export!)
+;; The export is fully read-only w.r.t. the database.
+;; ---------------------------------------------------------------------------
+
+(def ^:private last-export-file "public/.last-export")
+
+(defn- get-last-export
+  "Read the last export timestamp from public/.last-export, or nil."
+  []
+  (let [f (io/file last-export-file)]
+    (when (.exists f)
+      (try (java.util.Date. ^long (parse-long (str/trim (slurp f))))
+           (catch Exception _ nil)))))
+
+(defn- save-last-export!
+  "Write the export timestamp to public/.last-export."
+  [^java.util.Date ts]
+  (io/make-parents last-export-file)
+  (spit last-export-file (str (.getTime ts))))
 
 ;; ---------------------------------------------------------------------------
 ;; DB queries (all-reports and report-pull-pattern loaded from bark-common.clj)
@@ -663,7 +683,7 @@
       (System/exit 1))
     (let [db              (d/db conn)
           last-modified   (get-last-modified db)
-          last-export     (get-last-export db)
+          last-export     (get-last-export)
           incremental?    (and (not force-all?)
                                (= format "all")
                                last-export last-modified)
@@ -713,6 +733,6 @@
                                    (if incremental? " (incremental)" "")))
                     (export-source! format reports base-dir src-name
                                     source-map maintainers-map cli-extra)))))
-          (save-last-export! conn (java.util.Date.)))))
+          (save-last-export! (java.util.Date.)))))
     (finally
       (d/close conn))))
