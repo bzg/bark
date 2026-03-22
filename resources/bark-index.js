@@ -239,6 +239,27 @@ function buildRowElement(r) {
                   : closed_b ? '<em>' + escHtml(subject) + '</em>' : escHtml(subject);
   if (archivedAt) subjectHtml = '<a href="' + escAttr(archivedAt) + '">' + subjectHtml + '</a>';
 
+  var patchHtml = '';
+  if (r.patches && r.patches.length > 0) {
+    var n = r.patches.length;
+    var href = n === 1
+      ? 'patches/' + r.patches[0].file
+      : 'patches/' + r.patches[0].file.replace(/\/[^/]+$/, '/');
+    var plabel = n === 1 ? '1 patch file' : n + ' patch files';
+    patchHtml = '<a href="' + escAttr(href) + '" title="' + escAttr(plabel) +
+      '" aria-label="' + escAttr(plabel) + '" style="font-size:0.75rem">\uD83D\uDCCE </a>';
+  }
+
+  var relatedHtml = '';
+  if (r.related && r.related.length > 0) {
+    var mids = r.related.map(function(x) { return x['message-id']; }).filter(Boolean).join(',');
+    if (mids) {
+      relatedHtml = '<a class="secondary" href="#" onclick="showRelated(\'m:' + escAttr(mids) +
+        '\'); return false;" title="Filter related reports" style="font-size:0.75rem">\u21B3' +
+        r.related.length + ' </a>';
+    }
+  }
+
   var priLabel = priority === 3 ? 'A' : priority === 2 ? 'B' : priority === 1 ? 'C' : ' ';
   var isMaint = role === 'maintainer' || role === 'admin';
   var authorHtml = isMaint ? '<strong>' + escHtml(author) + '</strong>' : escHtml(author);
@@ -266,7 +287,7 @@ function buildRowElement(r) {
     '<td data-value="' + priority + '" style="text-align:center">' + priLabel + '</td>' +
     '<td data-value="' + escAttr(deadline) + '" class="due-cell"></td>' +
     '<td data-value="' + flagsScore + '" title="' + escAttr(flagsStr) + '" style="text-align:center;font-family:monospace;font-size:0.8rem;letter-spacing:0.1em">' + flagsStr + '</td>' +
-    '<td>' + subjectHtml + '</td>' +
+    '<td>' + patchHtml + relatedHtml + subjectHtml + '</td>' +
     '<td class="secondary" title="' + escAttr(from) + '">' + authorHtml + '</td>' +
     '<td data-value="' + escAttr(isoDate) + '"><small>' + escHtml(isoDate || '') + '</small></td>' +
     '<td style="text-align:center">' + replies + '</td>';
