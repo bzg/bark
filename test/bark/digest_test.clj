@@ -587,8 +587,8 @@
         (testing "Bug 98 standalone deadline"
           (is (some? (:report/deadline (get-report db "<98@test.org>")))))
 
-        ;; --- Email 100 [bark:source-name] prefix ---
-        (testing "Email 100 [bark:source-name] subject prefix"
+        ;; --- Email 100 [source-name] prefix ---
+        (testing "Email 100 [source-name] subject prefix"
           (let [r   (get-report db "<100@test.org>")
                 eid (d/q '[:find ?e . :in $ ?mid :where [?e :email/message-id ?mid]]
                          db "<100@test.org>")

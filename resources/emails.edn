@@ -1351,12 +1351,12 @@
   :email/body-text  "Deadline: 2026-08-15\n"}
 
  ;; =========================================================================
- ;; 100 — Bug report using [bark:public-list] prefix instead of List-Id header.
+ ;; 100 — Bug report using [public-list] prefix instead of List-Id header.
  ;; Should be classified under "public-list" source, with prefix stripped.
  ;; =========================================================================
  {:email/imap-uid    100
   :email/message-id  "<100@test.org>"
-  :email/subject     "[bark:public-list] [BUG] BARK prefix source test"
+  :email/subject     "[public-list] [BUG] BARK prefix source test"
   :email/content-type "text/plain"
   :email/from-address "admin@test.org"
   :email/date-sent  #inst "2026-02-01T10:00:00"
@@ -1364,7 +1364,7 @@
   :email/body-text  "Testing bark prefix classification.\n"}
 
  ;; =========================================================================
- ;; 101 — Maintainer replies off-list: no :email/source, no List-Id, no [bark:*]
+ ;; 101 — Maintainer replies off-list: no :email/source, no List-Id, no [source]
  ;;       Source should be resolved from In-Reply-To -> email 100 -> "direct"
  ;; =========================================================================
  {:email/imap-uid    101

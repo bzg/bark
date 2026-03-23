@@ -177,16 +177,24 @@
 (defn- gate-direct-email
   "Apply the direct-email gate to a candidate source.
   Direct emails targeting :mailing-list or :alias sources require
-  a maintainer with a bark-source signal (X-Bark-Source or [bark:...]).
+  a maintainer with a source signal (X-Bark-Source or [<source-name>]).
+  The [<source-name>] must match a known source to avoid confusion
+  with type labels like [BUG] or [PATCH].
   Returns source-name or nil."
   [candidate-src delivery from-addr headers subject source-map db]
   (when candidate-src
     (let [src-cfg (get source-map candidate-src)]
       (if (and (= :direct delivery)
                (not= :mailbox (:source-type src-cfg)))
-        (let [rroles (roles/get-roles db candidate-src)]
+        (let [rroles    (roles/get-roles db candidate-src)
+              bark-src  (common/extract-bark-source headers subject)
+              known-src (when bark-src
+                          (let [lc (str/lower-case bark-src)]
+                            (some (fn [[k _]] (when (= (str/lower-case k) lc) k))
+                                  source-map)))]
           (when (and (common/maintainer? rroles from-addr)
-                     (common/extract-bark-source headers subject))
+                     (or (common/get-header headers "X-Bark-Source")
+                         known-src))
             candidate-src))
         candidate-src))))
 
@@ -198,7 +206,7 @@
         ;; 1. In-Reply-To inheritance (also gated)
         irt-src  (source-from-in-reply-to db in-reply-to)
         irt-src  (gate-direct-email irt-src delivery from-addr headers subject source-map db)
-        ;; 2. Normal header + bark-source match
+        ;; 2. Normal header + source-prefix match
         hdr-src  (when-not irt-src
                    (common/classify-source headers subject sources))
         hdr-src  (gate-direct-email hdr-src delivery from-addr headers subject source-map db)]
@@ -216,15 +224,20 @@
                               db source-map sources headers subject from-addr irt)]
     src-name))
 
-(defn- strip-bark-prefix
-  "Remove [bark:...] prefix from email subject, if present."
-  [email]
-  (if-let [bark-pfx (re-find #"(?i)^\[bark:[^\]]+\]\s*" (:email/subject email))]
-    (update email :email/subject #(str/replace-first % bark-pfx ""))
+(defn- strip-source-prefix
+  "Remove [<source-name>] prefix from email subject, if present."
+  [email source-name]
+  (if (and source-name (:email/subject email))
+    (let [pat (re-pattern (str "(?i)^\\["
+                               (java.util.regex.Pattern/quote source-name)
+                               "\\]\\s*"))]
+      (if (re-find pat (:email/subject email))
+        (update email :email/subject #(str/replace-first % pat ""))
+        email))
     email))
 
 (defn- resolve-email-source!
-  "Classify the email's source, persist to DB, strip [bark:] prefix in-memory.
+  "Classify the email's source, persist to DB, strip [<source-name>] prefix in-memory.
   For live emails (pre-classified by store-and-process!) the source is already
   set; for test emails this runs the full classification."
   [conn email sources source-map]
@@ -235,7 +248,7 @@
     (if existing
       ;; Already classified (live path via store-and-process!)
       (let [delivery (common/classify-delivery hdrs)]
-        [existing (strip-bark-prefix email) delivery])
+        [existing (strip-source-prefix email existing) delivery])
       ;; Not yet classified (test path / legacy)
       (let [from-addr (:email/from-address email)
             irt       (:email/in-reply-to email)
@@ -248,7 +261,7 @@
                     "but headers say" hdr-src (str "(using " irt-src ")")))
         (when src-name
           (d/transact! conn [{:db/id eid :email/source src-name}]))
-        [src-name (strip-bark-prefix email) delivery]))))
+        [src-name (strip-source-prefix email src-name) delivery]))))
 
 ;; ---------------------------------------------------------------------------
 ;; Single-email processing

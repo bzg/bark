@@ -122,7 +122,7 @@ To remove a deadline:
 Maintainers can write directly to the watched inbox to update a
 report without notifying the list.  To route the email to the correct
 source, add either a =X-Bark-Source: source-name= header or a
-=[bark:source-name]= prefix to the subject.
+=[source-name]= prefix to the subject.
 
 For example, the maintainer can clean up old issues by marking them as
 =Canceled= in the body of a reply sent to the monitored inbox (with the
@@ -531,7 +531,7 @@ When a maintainer sends directly to the BARK inbox (bypassing the
 list or alias), they must signal the target source via one of:
 
 - A =X-Bark-Source: source-name= header.
-- A =[bark:source-name]= prefix in the subject (the prefix is stripped
+- A =[source-name]= prefix in the subject (the prefix is stripped
   before processing).
 
 The source name must match a source's =:name= exactly

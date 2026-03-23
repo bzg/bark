@@ -261,19 +261,19 @@
                                 (:to source))
     false))
 
-(def ^:private bark-prefix-pattern
-  #"(?i)^\[bark:([^\]]+)\]")
+(def ^:private source-prefix-pattern
+  #"(?i)^\[([^\]]+)\]")
 
 (defn extract-bark-source
-  "Extract source name from [bark:...] subject prefix or X-Bark-Source header."
+  "Extract source name from [<source-name>] subject prefix or X-Bark-Source header."
   [headers-edn subject]
   (or (get-header headers-edn "X-Bark-Source")
-      (when subject (second (re-find bark-prefix-pattern subject)))))
+      (when subject (second (re-find source-prefix-pattern subject)))))
 
 (defn classify-source
   "Return the :name of the first matching source, or nil.
   Uses classify-delivery + match-source? for normal matching, then falls back
-  to [bark:...] / X-Bark-Source for maintainer direct emails."
+  to [<source-name>] / X-Bark-Source for maintainer direct emails."
   [headers-edn subject sources]
   (or
    ;; 1. Normal header-based match
