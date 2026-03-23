@@ -5,9 +5,17 @@
 ;;
 ;; Usage: (load-file "scripts/bark-common.clj")
 
-;; Import all pure functions from bark.common
+;; Import pure functions from bark.common — explicit list for clj-kondo
 (require 'bark.common)
-(refer 'bark.common)
+(refer 'bark.common :only '[bark-format bark-schema slugify mid-hash
+                            email-body-text ensure-set format-date format-date-iso
+                            days-between parse-delay get-header source-type
+                            default-labels default-commands
+                            resolve-labels-map resolve-commands-map
+                            parse-maintainer-since-entries admin-or-maintainer?
+                            load-config build-source-map
+                            report-priority report-status report-descendant-count
+                            report-pull-pattern parse-cli-args])
 
 (require '[taoensso.timbre :as log])
 

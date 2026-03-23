@@ -92,14 +92,14 @@
       (is (not (report-closed? conn "<young@test>")))
       (teardown! ctx))))
 
-(deftest delay-legacy-integer-test
-  (testing "Legacy integer format (days) still works"
+(deftest delay-integer-in-map-test
+  (testing "Integer :delay value inside a rule map"
     (let [{:keys [conn] :as ctx} (setup-db!)
-          source-map {"test-src" {:expiry {:announcement 10}}}
-          eid (insert-email! conn {:mid "<legacy@test>" :date-sent (days-ago 15)})
-          _   (insert-report! conn {:mid "<legacy@test>" :type :announcement :email-eid eid})]
+          source-map {"test-src" {:expiry {:announcement {:delay 10}}}}
+          eid (insert-email! conn {:mid "<intdelay@test>" :date-sent (days-ago 15)})
+          _   (insert-report! conn {:mid "<intdelay@test>" :type :announcement :email-eid eid})]
       (expire/expire-reports! conn source-map)
-      (is (report-closed? conn "<legacy@test>"))
+      (is (report-closed? conn "<intdelay@test>"))
       (teardown! ctx))))
 
 (deftest delay-duration-formats-test

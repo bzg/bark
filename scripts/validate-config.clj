@@ -126,7 +126,7 @@
     :deadline :undeadline :topic})
 
 ;; Per-source commands (optional)
-;; Values can be vectors (word lists, backward compat) or maps with
+;; Values can be vectors (word lists) or maps with
 ;; :words, :scope, :report-types overrides.
 (s/def ::trigger-words (s/coll-of ::non-blank-string :kind vector? :min-count 1))
 (s/def ::command-scope #{:user :maintainer})
@@ -152,11 +152,9 @@
          #(every? valid-command-value? (vals %))))
 
 (s/def :source/commands ::commands-map)
-(s/def :source/triggers (s/map-of #{:acked :owned :closed} ::trigger-words))
 
-;; Global commands/triggers (optional) — same shape as per-source
+;; Global commands (optional) — same shape as per-source
 (s/def :bark/commands ::commands-map)
-(s/def :bark/triggers (s/map-of #{:acked :owned :closed} ::trigger-words))
 
 ;; Subject triggers: map of report-type keyword -> vector of tag strings
 ;; e.g. {:bug ["BUG" "DEFECT"] :request ["POLL" "FR" "TODO"]}
@@ -181,7 +179,7 @@
 (s/def :bark/report-types ::report-types)
 
 ;; Expiry rules (optional)
-;; Each report type maps to either a legacy integer (days) or a rule map.
+;; Each report type maps to a rule map with :delay and optional conditions.
 (s/def :expiry/delay (s/or :string (s/and ::non-blank-string #(re-seq #"\d+\s*[ydwm]" %))
                            :int pos-int?))
 (s/def :expiry/max-status (s/and int? #(<= 0 % 3)))
@@ -189,9 +187,8 @@
 (s/def :expiry/op-answered boolean?)
 
 (s/def ::expiry-rule
-  (s/or :legacy pos-int?
-        :rule-map (s/keys :req-un [:expiry/delay]
-                          :opt-un [:expiry/max-status :expiry/max-priority :expiry/op-answered])))
+  (s/keys :req-un [:expiry/delay]
+          :opt-un [:expiry/max-status :expiry/max-priority :expiry/op-answered]))
 
 (s/def ::expiry
   (s/map-of valid-report-types ::expiry-rule))
@@ -220,7 +217,7 @@
 ;; Top-level config
 (s/def ::config
   (s/keys :req-un [:bark/admin :bark/imap :bark/sources :bark/db]
-          :opt-un [:bark/ingest :bark/notifications :bark/labels :bark/triggers
+          :opt-un [:bark/ingest :bark/notifications :bark/labels
                    :bark/commands :bark/export-reports :bark/report-types
                    :bark/expiry :bark/logging :bark/maintenance]))
 

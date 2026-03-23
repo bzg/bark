@@ -408,7 +408,7 @@
   (when s (str/replace s #"^<|>$" "")))
 
 (defn- report->org-entry [m]
-  (let [todo    (if (= (get (:flags m "---") 2 \-) \C) "DONE" "TODO")
+  (let [todo    (if (= (nth (:flags m "---") 2 \-) \C) "DONE" "TODO")
         prio    (case (:priority m 0)
                   3 "[#A] " 2 "[#B] " 1 "[#C] " "")
         subject (:subject m "")
@@ -655,9 +655,9 @@
         row-html
         (fn [{:keys [name slug total open closed list-archive]}]
           (str "<tr>"
-               "<td><a href=\"" slug "/index.html\">" name "</a>"
+               "<td><a href=\"" slug "/index.html\">" (xml-escape name) "</a>"
                (when list-archive
-                 (str " <a class=\"archive\" href=\"" list-archive
+                 (str " <a class=\"archive\" href=\"" (xml-escape list-archive)
                       "\" title=\"List archive\">↗</a>"))
                "</td>"
                "<td class=\"num\">" open "</td>"

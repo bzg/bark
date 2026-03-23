@@ -17,14 +17,12 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- parse-expiry-rule
-  "Normalize an expiry rule value into a map with :delay-days.
-  Accepts a map (new format) or an integer (legacy, days)."
+  "Normalize an expiry rule map into a map with :delay-days.
+  Expects a map with at least :delay (integer or duration string)."
   [v]
-  (cond
-    (map? v)     (when-let [d (common/parse-delay (:delay v))]
-                   (assoc v :delay-days d))
-    (integer? v) {:delay-days v}
-    :else        nil))
+  (when (map? v)
+    (when-let [d (common/parse-delay (:delay v))]
+      (assoc v :delay-days d))))
 
 (defn- report-activity-score
   "Compute activity score from a pulled report: acked (1) + owned (2).
@@ -105,22 +103,24 @@
                           [?e :email/date-sent ?date]
                           (not [?r :report/closed _])]
                         (d/db conn))
+        ;; Single snapshot for all read-only checks (report state, OP-answered, etc.)
+        ;; Synthetic email existence uses a fresh db for idempotency on re-runs.
+        db-snap (d/db conn)
         expired (reduce
                  (fn [n [rid rtype src date-sent]]
                    (let [expiry-cfg (:expiry (get source-map src))
                          rule-raw   (get expiry-cfg (keyword rtype))]
                      (if-let [rule (parse-expiry-rule rule-raw)]
-                       (let [db (d/db conn)
-                             report-data (d/pull db [:report/acked :report/owned
-                                                     :report/urgent :report/important] rid)]
-                         (if (rule-matches? db rid rule report-data now date-sent)
+                       (let [report-data (d/pull db-snap [:report/acked :report/owned
+                                                          :report/urgent :report/important] rid)]
+                         (if (rule-matches? db-snap rid rule report-data now date-sent)
                            (let [report-mid (d/q '[:find ?mid . :in $ ?r
                                                    :where [?r :report/message-id ?mid]]
-                                                 db rid)
+                                                 db-snap rid)
                                  synth-mid  (str "<bark-expired-" report-mid ">")
                                  synth-eid  (or (d/q '[:find ?e . :in $ ?mid
                                                        :where [?e :email/message-id ?mid]]
-                                                     db synth-mid)
+                                                     (d/db conn) synth-mid)
                                                 (let [tempid -1
                                                       tx (d/transact!
                                                           conn [{:db/id          tempid

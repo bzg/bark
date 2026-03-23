@@ -249,7 +249,7 @@
       ;; Already classified (live path via store-and-process!)
       (let [delivery (common/classify-delivery hdrs)]
         [existing (strip-source-prefix email existing) delivery])
-      ;; Not yet classified (test path / legacy)
+      ;; Not yet classified (test path — process-email! called directly)
       (let [from-addr (:email/from-address email)
             irt       (:email/in-reply-to email)
             [delivery src-name irt-src hdr-src] (classify-email-source

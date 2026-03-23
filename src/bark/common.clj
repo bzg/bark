@@ -11,6 +11,7 @@
             [taoensso.timbre :as log])
   (:import [java.text Normalizer Normalizer$Form SimpleDateFormat]
            [java.security MessageDigest]
+           [java.time LocalDate ZoneOffset]
            [java.util Date TimeZone]))
 
 ;; ---------------------------------------------------------------------------
@@ -219,13 +220,13 @@
       :list
 
       ;; 2a. Original recipient not in To/Cc → alias
+      ;; (the let-when form is the cond test; :alias below is the result)
       (let [orig (some-> (original-recipient hdrs) str/lower-case)
             to   (some-> (get-header hdrs "To") str/lower-case)
             cc   (some-> (get-header hdrs "Cc") str/lower-case)]
-        (when (and orig
-                   (not (some-> to (str/includes? orig)))
-                   (not (some-> cc (str/includes? orig))))
-          true))
+        (boolean (and orig
+                      (not (some-> to (str/includes? orig)))
+                      (not (some-> cc (str/includes? orig))))))
       :alias
 
       ;; 2b. Multiple distinct Delivered-To → alias
@@ -322,8 +323,8 @@
   (if (vector? v) {:words v} v))
 
 (defn resolve-commands-map [source-cfg]
-  (let [global (or (:global-commands source-cfg) (:global-triggers source-cfg))
-        local  (or (:commands source-cfg) (:triggers source-cfg))
+  (let [global (:global-commands source-cfg)
+        local  (:commands source-cfg)
         extract-words (fn [m]
                         (update-vals m (fn [v] (:words (normalize-command-entry v)))))]
     (cond-> default-commands
@@ -331,8 +332,8 @@
       local  (merge (extract-words local)))))
 
 (defn resolve-command-overrides [source-cfg]
-  (let [global (or (:global-commands source-cfg) (:global-triggers source-cfg))
-        local  (or (:commands source-cfg) (:triggers source-cfg))
+  (let [global (:global-commands source-cfg)
+        local  (:commands source-cfg)
         extract (fn [m]
                   (reduce-kv (fn [acc k v]
                                (let [entry (normalize-command-entry v)
@@ -376,13 +377,12 @@
           (str/lower-case addr))))
 
 (defn- parse-maintainer-since [roles]
-  (let [fmt     (doto (SimpleDateFormat. "yyyy-MM-dd")
-                  (.setTimeZone (TimeZone/getTimeZone "UTC")))]
-    (into {}
-          (keep (fn [[email date-str]]
-                  (try [email (.parse fmt date-str)]
-                       (catch Exception _ nil))))
-          (parse-maintainer-since-entries roles))))
+  (into {}
+        (keep (fn [[email date-str]]
+                (try [email (Date/from (.toInstant (.atStartOfDay (LocalDate/parse date-str)
+                                                                  ZoneOffset/UTC)))]
+                     (catch Exception _ nil))))
+        (parse-maintainer-since-entries roles)))
 
 (defn maintainer?
   ([roles addr]
@@ -424,24 +424,25 @@
         global-expiry (:expiry config)
         global-rt     (:report-types config)]
     (into {}
-          (map (fn [src]
+          (keep (fn [src]
                  (let [stype (source-type src)]
                    (when-not stype
-                     (log/warn "Source has no :list, :alias, or :to key:" (:name src)))
-                   [(:name src)
-                    (merge {:admin (or (:admin src) default-admin)
-                            :source-type stype}
-                         (select-keys src [:list :alias :to :commands :labels :notifications
-                                           :archive-format-string :list-archive :bark-path
-                                           :maintainers])
-                         (when global-st {:global-labels global-st})
-                         (when global-cmd {:global-commands global-cmd})
-                         {:export-formats (set (or (:export-formats src) global-ef ["json" "org" "rss"]))
-                          :export-reports (when-let [er (or (:export-reports src) global-er)]
-                                            (set (map keyword er)))
-                          :report-types (when-let [rt (or (:report-types src) global-rt)]
-                                          (set (map keyword rt)))
-                          :expiry (or (:expiry src) global-expiry)})])))
+                     (log/warn "Source has no :list, :alias, or :to key — skipping:" (:name src)))
+                   (when stype
+                     [(:name src)
+                      (merge {:admin (or (:admin src) default-admin)
+                              :source-type stype}
+                           (select-keys src [:list :alias :to :commands :labels :notifications
+                                             :archive-format-string :list-archive :bark-path
+                                             :maintainers])
+                           (when global-st {:global-labels global-st})
+                           (when global-cmd {:global-commands global-cmd})
+                           {:export-formats (set (or (:export-formats src) global-ef ["json" "org" "rss"]))
+                            :export-reports (when-let [er (or (:export-reports src) global-er)]
+                                              (set (map keyword er)))
+                            :report-types (when-let [rt (or (:report-types src) global-rt)]
+                                            (set (map keyword rt)))
+                            :expiry (or (:expiry src) global-expiry)})]))))
           (:sources config))))
 
 ;; ---------------------------------------------------------------------------
@@ -516,4 +517,6 @@
       (#{"-p" "--min-priority"} a)    (if v (recur (assoc opts :min-priority (parse-long v)) r) opts)
       (#{"-s" "--min-status"} a)      (if v (recur (assoc opts :min-status (parse-long v)) r) opts)
       (not (:format opts))            (recur (assoc opts :format a) more)
-      :else                           (recur opts more))))
+      :else                           (do (when (str/starts-with? a "-")
+                                                (log/debug "Ignoring unrecognized flag:" a))
+                                          (recur opts more)))))

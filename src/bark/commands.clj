@@ -164,12 +164,14 @@
                               (when (or (nil? rt) (contains? rt report-type))
                                 (when-let [m (re-matches pattern line)]
                                   (let [base (case action
-                                               :set            {:action :set :attr attr :email-address (nth m 1)}
+                                               :set            (when-let [addr (nth m 1 nil)]
+                                                                 {:action :set :attr attr :email-address addr})
                                                :unset          {:action :unset :attr attr}
                                                :set-deadline   (when-let [d (parse-date-iso (nth m 1))]
                                                                  {:action :set-deadline :date d})
                                                :unset-deadline {:action :unset-deadline}
-                                               :set-topic      {:action :set-topic :topic (nth m 1)})]
+                                               :set-topic      (when-let [t (nth m 1 nil)]
+                                                                 {:action :set-topic :topic t}))]
                                     (when base (assoc base :scope sc)))))))
                           compiled-directives)))
             vec)))))

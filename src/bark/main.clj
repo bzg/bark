@@ -102,7 +102,7 @@
       (ingest/save-imap-uid! db-conn new-wm))))
 
 ;; ---------------------------------------------------------------------------
-;; Atomic store+process (was bark.pipeline)
+;; Atomic store+process
 ;; ---------------------------------------------------------------------------
 
 (defn- store-and-process!
@@ -116,13 +116,11 @@
           false)
       (if-let [src-name (digest/pre-classify-source (d/db db-conn) source-map sources msg)]
         (if (ingest/store-email! db-conn msg)
-          (let [db    (d/db db-conn)
-                mid   (:message-id msg)
-                eid   (d/q '[:find ?e . :in $ ?mid :where [?e :email/message-id ?mid]]
-                           db mid)]
-            ;; Stamp the pre-classified source
-            (d/transact! db-conn [{:db/id eid :email/source src-name}])
-            (let [email (d/pull (d/db db-conn) digest/email-pull-pattern eid)]
+          (let [mid      (:message-id msg)
+                lookup   [:email/message-id mid]]
+            ;; Stamp the pre-classified source (lookup ref avoids re-query)
+            (d/transact! db-conn [{:db/id lookup :email/source src-name}])
+            (let [email (d/pull (d/db db-conn) digest/email-pull-pattern lookup)]
               (try
                 (digest/process-email! db-conn source-map sources email)
                 true
@@ -158,10 +156,10 @@
       (when (and (seq msgs) (not (shutting-down?)))
         (let [safe-uids (reduce (fn [acc msg]
                                   (try
-                                    (store-and-process! db-conn source-map sources msg ingest-opts)
-                                    (if-let [uid (:uid msg)]
-                                      (conj acc uid)
-                                      acc)
+                                    (let [ok? (store-and-process! db-conn source-map sources msg ingest-opts)]
+                                      (if (and ok? (:uid msg))
+                                        (conj acc (:uid msg))
+                                        acc))
                                     (catch Exception e
                                       (log/error e "Failed to process UID:" (:uid msg))
                                       acc)))

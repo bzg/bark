@@ -98,7 +98,7 @@
  ;; Merged on top of defaults; specify only the actions you want to change.
  ;; When set per source, it overrides the global value.
  ;;
- ;; Simple form (backward compatible) — just override trigger words:
+ ;; Simple form — just override trigger words:
  ;; :commands {:closed ["Canceled" "Fixed" "Resolved" "Wontfix"]
  ;;            :acked  ["Approved" "Reviewed" "LGTM"]}
  ;;
@@ -137,7 +137,6 @@
  ;;   :op-answered   — false: don't expire if the OP posted the last reply [optional]
  ;;
  ;; All conditions are conjunctive (all must be true to expire).
- ;; For backward compat, an integer is accepted as days: :announcement 30
  ;;
  ;; Example:
  ;; :expiry {:announcement {:delay "30d"}
