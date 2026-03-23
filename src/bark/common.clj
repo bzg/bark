@@ -502,7 +502,7 @@
 (defn parse-cli-args
   "Parse common CLI flags into a map.
   Recognises: -o/--output, -n/--source, -p/--min-priority, -s/--min-status,
-  --json, --dir, --force, --only-open.
+  --json, --dir, --force, --only-open, --theme.
   Any leading non-flag token is captured as :format."
   [args]
   (loop [opts {} [a & [v & r :as more]] args]
@@ -514,6 +514,7 @@
       (#{"-n" "--source"} a)          (if v (recur (assoc opts :source-name v) r) opts)
       (#{"--json"} a)                 (if v (recur (assoc opts :json-file v) r) opts)
       (#{"--dir"} a)                  (if v (recur (assoc opts :out-dir v) r) opts)
+      (#{"--theme"} a)                (if v (recur (assoc opts :theme v) r) opts)
       (#{"-p" "--min-priority"} a)    (if v (recur (assoc opts :min-priority (parse-long v)) r) opts)
       (#{"-s" "--min-status"} a)      (if v (recur (assoc opts :min-status (parse-long v)) r) opts)
       (not (:format opts))            (recur (assoc opts :format a) more)

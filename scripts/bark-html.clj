@@ -12,6 +12,44 @@
 (def pico-cdn "https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css")
 
 ;; ---------------------------------------------------------------------------
+;; Theme CDN — set via config.edn :theme or --theme CLI flag
+;; ---------------------------------------------------------------------------
+
+(def ^:private pico-themes-cdn
+  "Base URL for bzg/pico-themes on jsDelivr."
+  "https://cdn.jsdelivr.net/gh/bzg/pico-themes@main/")
+
+(def ^:private theme-shortnames
+  "Recognised short names for --theme / :theme."
+  #{"org" "dsfr" "swh" "doric"})
+
+(defn resolve-theme-url
+  "Resolve a theme value to a full URL, or nil.
+  Accepts: nil, a short name (\"org\", \"dsfr\", \"swh\", \"doric\"),
+  or an arbitrary URL (starts with \"http\")."
+  [theme]
+  (when (and theme (not= theme "none"))
+    (cond
+      (theme-shortnames theme) (str pico-themes-cdn theme ".css")
+      (str/starts-with? theme "http") theme
+      :else (do (binding [*out* *err*]
+                  (println (str "Warning: unknown theme '" theme
+                                "', expected: org, dsfr, swh, doric or a URL")))
+                nil))))
+
+(def ^:private theme-cdn-atom (atom nil))
+
+(defn set-theme!
+  "Set the theme URL from a short name or URL. Called by each script at startup."
+  [theme]
+  (reset! theme-cdn-atom (resolve-theme-url theme)))
+
+(defn theme-cdn
+  "Current theme CDN URL, or nil."
+  []
+  @theme-cdn-atom)
+
+;; ---------------------------------------------------------------------------
 ;; Shared metadata
 ;; ---------------------------------------------------------------------------
 
@@ -59,6 +97,8 @@
        "<meta property=\"og:description\" content=\"" bark-description "\">\n"
        "<meta property=\"og:type\" content=\"website\">\n"
        "<link rel=\"stylesheet\" href=\"" pico-cdn "\">\n"
+       (when-let [tc (theme-cdn)]
+         (str "<link rel=\"stylesheet\" href=\"" tc "\">\n"))
        (when rss-href
          (str "<link rel=\"alternate\" type=\"application/rss+xml\" "
               "title=\"BARK Reports RSS\" href=\"" rss-href "\">\n"))

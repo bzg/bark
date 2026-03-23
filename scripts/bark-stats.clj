@@ -20,7 +20,7 @@
 (declare load-datalevin-pod! all-reports report-pull-pattern
          report-priority report-status report-descendant-count
          format-date format-date-iso parse-cli-args load-config
-         pico-cdn bark-description bark-repo-url footer-css
+         pico-cdn theme-cdn set-theme! bark-description bark-repo-url footer-css
          bark-footer wrap-js theme-toggle-js bark-schema
          nav-bar theme-toggle-btn html-head org-inline-links)
 
@@ -597,6 +597,7 @@
 
 (defn -main [& args]
   (let [opts        (parse-cli-args args)
+        _           (when-let [t (:theme opts)] (set-theme! t))
         html?       (= (:format opts) "html")
         source-name (:source-name opts)
         out-file    (or (:out-file opts)

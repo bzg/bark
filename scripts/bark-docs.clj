@@ -19,7 +19,7 @@
          resolve-labels-map resolve-commands-map
          parse-cli-args load-config build-source-map
          load-datalevin-pod! bark-schema parse-maintainer-since-entries
-         pico-cdn bark-description footer-css bark-footer wrap-js
+         pico-cdn theme-cdn set-theme! bark-description footer-css bark-footer wrap-js
          theme-toggle-btn theme-toggle-js nav-bar org-inline-links)
 
 (load-file "scripts/bark-common.clj")
@@ -459,7 +459,8 @@
 ;; Main
 ;; ---------------------------------------------------------------------------
 
-(let [{:keys [out-file out-dir source-name]} (parse-cli-args *command-line-args*)
+(let [{:keys [out-file out-dir source-name theme]} (parse-cli-args *command-line-args*)
+      _           (when theme (set-theme! theme))
       config      (load-config)
       source-map  (when config (build-source-map config))
       source-cfg  (get source-map source-name)

@@ -19,7 +19,7 @@
 
 ;; Forward-declared for clj-kondo (provided at runtime by load-file calls below).
 (declare parse-cli-args load-config
-         pico-cdn bark-description bark-repo-url
+         pico-cdn theme-cdn set-theme! bark-description bark-repo-url
          footer-css bark-footer wrap-js
          theme-toggle-btn theme-toggle-js nav-bar)
 
@@ -181,24 +181,24 @@
 
 (def page-css (str "
   main.container { max-width: 1800px; padding-left: max(1rem, env(safe-area-inset-left)); padding-right: max(1rem, env(safe-area-inset-right)); }
-  mark[data-type=bug]          { --pico-mark-background-color: #c0392b22; --pico-mark-color: #c0392b; }
-  mark[data-type=announcement] { --pico-mark-background-color: #1a7a8a22; --pico-mark-color: #1a7a8a; }
-  mark[data-type=request]      { --pico-mark-background-color: #b8860b22; --pico-mark-color: #b8860b; }
-  mark[data-type=patch]        { --pico-mark-background-color: #27ae6022; --pico-mark-color: #27ae60; }
-  mark[data-type=release]      { --pico-mark-background-color: #8e44ad22; --pico-mark-color: #8e44ad; }
-  mark[data-type=change]       { --pico-mark-background-color: #2c3e5022; --pico-mark-color: #2c3e50; }
+  mark[data-type=bug]          { --pico-mark-background-color: var(--bark-mark-bug-bg, #c0392b1a); --pico-mark-color: var(--bark-mark-bug, #c0392b); }
+  mark[data-type=announcement] { --pico-mark-background-color: var(--bark-mark-ann-bg, #1a7a8a1a); --pico-mark-color: var(--bark-mark-ann, #1a7a8a); }
+  mark[data-type=request]      { --pico-mark-background-color: var(--bark-mark-req-bg, #b8860b1a); --pico-mark-color: var(--bark-mark-req, #b8860b); }
+  mark[data-type=patch]        { --pico-mark-background-color: var(--bark-mark-patch-bg, #27ae601a); --pico-mark-color: var(--bark-mark-patch, #27ae60); }
+  mark[data-type=release]      { --pico-mark-background-color: var(--bark-mark-rel-bg, #8e44ad1a); --pico-mark-color: var(--bark-mark-rel, #8e44ad); }
+  mark[data-type=change]       { --pico-mark-background-color: var(--bark-mark-chg-bg, #2c3e501a); --pico-mark-color: var(--bark-mark-chg, #2c3e50); }
   mark { font-size: 0.75rem; font-weight: 600; text-transform: uppercase;
          letter-spacing: 0.05em; padding: 0.15rem 0.4rem; border-radius: 2px; }
   .toolbar { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; margin-bottom: 1rem; }
   .filters { display: flex; gap: 0.4rem; flex-wrap: wrap; }
   .filters button { padding: 0.3rem 0.7rem; font-size: 0.8rem; }
   .filters button.outline { opacity: 0.5; }
-  .filters.status-filters button.open-btn          { background: #27ae60; border-color: #27ae60; color: #fff; }
-  .filters.status-filters button.open-btn.outline   { background: none; color: #27ae60; opacity: 0.5; }
-  .filters.status-filters button.acked-btn         { background: #b8860b; border-color: #b8860b; color: #fff; }
-  .filters.status-filters button.acked-btn.outline  { background: none; color: #b8860b; opacity: 0.5; }
-  .filters.status-filters button.owned-btn         { background: #1a5a8a; border-color: #1a5a8a; color: #fff; }
-  .filters.status-filters button.owned-btn.outline  { background: none; color: #1a5a8a; opacity: 0.5; }
+  .filters.status-filters button.open-btn          { background: var(--bark-btn-open, #27ae60); border-color: var(--bark-btn-open, #27ae60); color: var(--bark-btn-open-text, #fff); }
+  .filters.status-filters button.open-btn.outline   { background: none; color: var(--bark-btn-open, #27ae60); opacity: 0.5; }
+  .filters.status-filters button.acked-btn         { background: var(--bark-btn-acked, #b8860b); border-color: var(--bark-btn-acked, #b8860b); color: var(--bark-btn-acked-text, #fff); }
+  .filters.status-filters button.acked-btn.outline  { background: none; color: var(--bark-btn-acked, #b8860b); opacity: 0.5; }
+  .filters.status-filters button.owned-btn         { background: var(--bark-btn-owned, #1a5a8a); border-color: var(--bark-btn-owned, #1a5a8a); color: var(--bark-btn-owned-text, #fff); }
+  .filters.status-filters button.owned-btn.outline  { background: none; color: var(--bark-btn-owned, #1a5a8a); opacity: 0.5; }
   input[type=search] { max-width: 25vw; min-width: 200px; margin-bottom: 0; }
   th[data-sort] { cursor: pointer; user-select: none; white-space: nowrap; }
   th[data-sort]:hover { text-decoration: underline; }
@@ -216,9 +216,9 @@
   #status { font-size: 0.8rem; margin-bottom: 0.5rem; }
   .vote-badge { display: inline-block; padding: 0.1rem 0.4rem; border-radius: 3px; font-size: 0.7rem;
                 font-weight: 600; margin-left: 0.4em; margin-right: 0.4em; vertical-align: middle; }
-  .vote-pos { background: #27ae6033; color: #27ae60; }
-  .vote-neg { background: #c0392b33; color: #c0392b; }
-  .vote-zero { background: #95a5a622; color: #7f8c8d; }
+  .vote-pos { background: var(--bark-vote-pos-bg, #27ae6033); color: var(--bark-vote-pos, #27ae60); }
+  .vote-neg { background: var(--bark-vote-neg-bg, #c0392b33); color: var(--bark-vote-neg, #c0392b); }
+  .vote-zero { background: var(--bark-vote-zero-bg, #95a5a622); color: var(--bark-vote-zero, #7f8c8d); }
   .theme-toggle { cursor: pointer; background: none; border: none; font-size: 1.2rem; padding: 0.3rem; }
 
   /* Responsive: progressively hide columns — only Subject remains */
@@ -298,6 +298,8 @@
         [:meta {:property "og:description" :content bark-description}]
         [:meta {:property "og:type" :content "website"}]
         [:link {:rel "stylesheet" :href pico-cdn}]
+        (when-let [tc (theme-cdn)]
+          [:link {:rel "stylesheet" :href tc}])
         (when has-rss?
           [:link {:rel "alternate" :type "application/rss+xml"
                   :title "BARK Reports RSS" :href rss-href}])
@@ -341,8 +343,9 @@
 ;; Main
 ;; ---------------------------------------------------------------------------
 
-(let [{:keys [out-file json-file out-dir]}
+(let [{:keys [out-file json-file out-dir theme]}
       (parse-cli-args *command-line-args*)
+      _           (when theme (set-theme! theme))
       json-file   (or json-file default-json)
       out-file    (or out-file default-output)
       reports-dir (or out-dir

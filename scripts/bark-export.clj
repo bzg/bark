@@ -44,7 +44,9 @@
          ensure-set format-date format-date-iso report-priority report-status
          report-descendant-count all-reports report-pull-pattern
          parse-cli-args load-config build-source-map bark-schema bark-format
-         get-last-modified changed-report-types-since)
+         get-last-modified changed-report-types-since
+         set-theme! resolve-theme-url
+         html-head footer-css bark-footer wrap-js theme-toggle-js bark-repo-url)
 
 (load-file "scripts/bark-common.clj")
 (load-file "scripts/bark-html.clj")
@@ -509,11 +511,12 @@
 
 (defn dump-docs!
   "Generate docs.html for a single source."
-  [base-dir source-name]
+  [base-dir source-name cli-args]
   (apply process/shell (cond-> ["bb" "scripts/bark-docs.clj"
                                 "-o" (str base-dir "/docs.html")
                                 "--dir" base-dir]
-                         source-name (into ["-n" source-name]))))
+                         source-name (into ["-n" source-name])
+                         true (into cli-args))))
 
 ;; ---------------------------------------------------------------------------
 ;; Per-type export
@@ -726,7 +729,7 @@
                         "html"    (do (dump-json! reports reports-dir source-name source-map maintainers-map)
                                       (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"json"})
                                       (dump-open-closed! reports reports-dir source-name source-map maintainers-map #{"json"})
-                                      (dump-docs! base-dir source-name)
+                                      (dump-docs! base-dir source-name cli-extra)
                                       (dump-html! base-dir reports-dir cli-extra))
                         "stats"   (dump-stats! base-dir reports-dir source-name "json" cli-extra)))]
     (if (= format "all")
@@ -736,7 +739,7 @@
           (dump-per-type! reports reports-dir source-name source-map maintainers-map ef)
           (dump-open-closed! reports reports-dir source-name source-map maintainers-map ef)
           (dump-patches! reports patches-dir)
-          (dump-docs! base-dir source-name)
+          (dump-docs! base-dir source-name cli-extra)
           (dump-html! base-dir reports-dir cli-extra)
           (dump-stats! base-dir reports-dir source-name "json" cli-extra)
           (dump-stats! base-dir reports-dir source-name "html" cli-extra))
@@ -748,7 +751,7 @@
 
 (def formats #{"json" "rss" "org" "html" "all" "stats" "patches" "root"})
 
-(let [{:keys [format source-name min-priority min-status force-all?]
+(let [{:keys [format source-name min-priority min-status force-all? theme]
        :or {format "all"}}
       (parse-cli-args *command-line-args*)
       db-path (or (System/getenv "BARK_DB") "data/bark-db")
@@ -778,6 +781,8 @@
         (let [changed-types   (when (and incremental? last-export)
                                 (changed-report-types-since db last-export))
               config          (load-config)
+              effective-theme (or theme (:theme config))
+              _               (when effective-theme (set-theme! effective-theme))
               source-map      (if config (build-source-map config) {})
               maintainers-map (if config (build-maintainers db source-map) {})
               all-reps        (all-reports-by-date db)
@@ -789,8 +794,10 @@
                                                  (str/join ", " (keys source-map)))
                                       (System/exit 1)))
                                 (mapv :name (:sources config)))
-              cli-extra       (remove #{format "-n" source-name "--force"}
-                                      (rest *command-line-args*))]
+              cli-extra       (let [drop (disj (hash-set format "-n" source-name
+                                                          "--force" "--theme" theme) nil)]
+                                (cond-> (vec (remove drop (rest *command-line-args*)))
+                                effective-theme (into ["--theme" effective-theme])))]
           (when (and incremental? (seq changed-types))
             (log/info "Incremental: changed types:" (str/join ", " (map name changed-types))))
           (when-not (= format "root")
