@@ -79,7 +79,7 @@
     (let [current   (common/ensure-set (get (get-roles (d/db conn) source-name) attr))
           new-addrs (remove #(contains? current (str/lower-case %)) addresses)]
       (when (seq new-addrs)
-        (d/transact! conn (mapv (fn [addr] [:db/add eid attr addr]) new-addrs))
+        (d/transact! conn (mapv (fn [addr] [:db/add eid attr (str/lower-case addr)]) new-addrs))
         true))))
 
 (defn- remove-role!
@@ -89,7 +89,7 @@
     (let [current   (common/ensure-set (get (get-roles (d/db conn) source-name) attr))
           to-remove (filter #(contains? current (str/lower-case %)) addresses)]
       (when (seq to-remove)
-        (d/transact! conn (mapv (fn [addr] [:db/retract eid attr addr]) to-remove))
+        (d/transact! conn (mapv (fn [addr] [:db/retract eid attr (str/lower-case addr)]) to-remove))
         true))))
 
 ;; ---------------------------------------------------------------------------

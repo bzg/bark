@@ -76,7 +76,8 @@
   (cond
     (integer? v) {:limit v}
     (string? v)
-    (or (when (re-matches #"\d{4}-\d{2}-\d{2}" v) {:since v})
+    (or (when (re-matches #"\d{4}-\d{2}-\d{2}" v)
+          {:since (Date/from (Instant/parse (str v "T00:00:00Z")))})
         (when-let [days (common/parse-duration-str v)]
           {:since (Date/from (.minus (Instant/now) days ChronoUnit/DAYS))})
         (throw (ex-info (str "Invalid :initial-fetch value: " (pr-str v)
