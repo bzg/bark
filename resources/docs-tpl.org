@@ -75,5 +75,15 @@ Important.
 | mid:<...>                   | =m:=        | Report open with message-id <...>                     |
 | date:3d..                   | =d:=        | Reports from 3 days ago                               |
 | date:2023-01-01..2023-12-31 | =d:=        | Reports from 2023-01-01 to 2023-12-31                 |
+| deadline:2026-09-01          | =D:=        | Reports with due date 2026-09-01                      |
+| deadline:2026-01-01..2026-06-30 | =D:=     | Reports with due date in that range                   |
+| deadline:2m                  | =D:=        | Reports due between now and 2 months from now         |
+| expired:10d                  | =e:=        | Reports expired between now and 10 days from now      |
+| expired:2026-01-01..2026-03-31 | =e:=      | Reports expired in that date range                    |
 | match1 \vert match2             |           | Reports matching "match1" or "match2"                 |
 | from:* acked:* …            | =f:*= =a:*= … | Wildcard for from/acked/owned/closed/urgent/important |
+
+Durations: =Nd= (days), =Nw= (weeks), =Nm= (months).  For =date:= they
+look backward from today; for =deadline:= and =expired:= they look
+forward.  Combine filters freely: =D:2m e:10d= finds reports due
+within 2 months that also expire within 10 days.

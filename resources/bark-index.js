@@ -54,14 +54,49 @@ function localDate(d) {
 
 function resolveDate(s) {
   if (!s) return '';
-  var m = s.match(/^(\d+)d$/);
-  if (m) {
-    var d = new Date();
-    d.setDate(d.getDate() - parseInt(m[1]));
-    return localDate(d);
-  }
+  var m;
+  m = s.match(/^(\d+)d$/);
+  if (m) { var d = new Date(); d.setDate(d.getDate() - parseInt(m[1])); return localDate(d); }
+  m = s.match(/^(\d+)w$/);
+  if (m) { var d = new Date(); d.setDate(d.getDate() - parseInt(m[1]) * 7); return localDate(d); }
+  m = s.match(/^(\d+)m$/);
+  if (m) { var d = new Date(); d.setMonth(d.getMonth() - parseInt(m[1])); return localDate(d); }
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
   return '';
+}
+
+function resolveFutureDate(s) {
+  if (!s) return '';
+  var m;
+  m = s.match(/^(\d+)d$/);
+  if (m) { var d = new Date(); d.setDate(d.getDate() + parseInt(m[1])); return localDate(d); }
+  m = s.match(/^(\d+)w$/);
+  if (m) { var d = new Date(); d.setDate(d.getDate() + parseInt(m[1]) * 7); return localDate(d); }
+  m = s.match(/^(\d+)m$/);
+  if (m) { var d = new Date(); d.setMonth(d.getMonth() + parseInt(m[1])); return localDate(d); }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  return '';
+}
+
+function isDuration(s) { return /^\d+[dwm]$/.test(s); }
+
+function parseFutureDateRange(val) {
+  var hasDots = val.indexOf('..') !== -1;
+  var parts = val.split('..');
+  if (!hasDots && isDuration(parts[0])) {
+    // D:2m → from today to today + duration
+    return { from: localDate(new Date()), to: resolveFutureDate(parts[0]) };
+  }
+  if (!hasDots) {
+    // D:2026-09-01 → exact date match
+    var exact = resolveFutureDate(parts[0]);
+    return { from: exact, to: exact };
+  }
+  // D:2026-01-01..2026-06-30 or D:2026-01-01..
+  return {
+    from: resolveFutureDate(parts[0] || ''),
+    to:   resolveFutureDate(parts[1] || '') || localDate(new Date())
+  };
 }
 
 function matchField(fieldVal, terms) {
@@ -93,10 +128,20 @@ function parseClause(q) {
   var result = { text: '', mids: [], froms: [], subjects: [],
                  acked: [], owned: [], closed: [], topics: [],
                  urgent: [], important: [],
-                 dateFrom: '', dateTo: '', minPriority: null };
+                 dateFrom: '', dateTo: '',
+                 deadlineFrom: '', deadlineTo: '',
+                 expiredFrom: '', expiredTo: '',
+                 minPriority: null };
   var parts = q.trim().split(/\s+/).filter(Boolean);
   for (var i = 0; i < parts.length; i++) {
     var p  = parts[i];
+    // D: (uppercase) is deadline shortcut — check before lowercasing
+    if (p.indexOf('D:') === 0) {
+      var dr = parseFutureDateRange(p.substring(2));
+      result.deadlineFrom = dr.from;
+      result.deadlineTo   = dr.to;
+      continue;
+    }
     var lp = p.toLowerCase();
     var matched = false;
     for (var j = 0; j < fieldMap.length; j++) {
@@ -110,6 +155,15 @@ function parseClause(q) {
     if (lp.indexOf('priority:') === 0 || lp.indexOf('p:') === 0) {
       var n = parseInt(extractValue(p, lp), 10);
       if (!isNaN(n)) result.minPriority = n;
+    } else if (lp.indexOf('deadline:') === 0) {
+      var dr = parseFutureDateRange(p.substring(9));
+      result.deadlineFrom = dr.from;
+      result.deadlineTo   = dr.to;
+    } else if (lp.indexOf('expired:') === 0 || lp.indexOf('e:') === 0) {
+      var pfxLen = lp.indexOf('expired:') === 0 ? 8 : 2;
+      var er = parseFutureDateRange(p.substring(pfxLen));
+      result.expiredFrom = er.from;
+      result.expiredTo   = er.to;
     } else if (lp.indexOf('date:') === 0 || lp.indexOf('d:') === 0) {
       var pfxLen = lp.indexOf('date:') === 0 ? 5 : 2;
       var range = p.substring(pfxLen).split('..');
@@ -140,6 +194,16 @@ function matchClause(tr, q) {
   }
   if (q.dateFrom && d.date < q.dateFrom) return false;
   if (q.dateTo   && d.date > q.dateTo)   return false;
+  if (q.deadlineFrom || q.deadlineTo) {
+    if (!d.deadline) return false;
+    if (q.deadlineFrom && d.deadline < q.deadlineFrom) return false;
+    if (q.deadlineTo   && d.deadline > q.deadlineTo)   return false;
+  }
+  if (q.expiredFrom || q.expiredTo) {
+    if (!d.expired) return false;
+    if (q.expiredFrom && d.expired < q.expiredFrom) return false;
+    if (q.expiredTo   && d.expired > q.expiredTo)   return false;
+  }
   if (q.text && d.search.indexOf(q.text.toLowerCase()) === -1) return false;
   return true;
 }
@@ -225,6 +289,7 @@ function buildRowElement(r) {
   var urgent = r.urgent || '', important = r.important || '';
   var deadline = r.deadline || '', topic = r.topic || '';
   var closeReason = r['close-reason'] || '', role = r.role || '';
+  var expiredDate = r['expired-date'] || '';
 
   var isoDate = parseIsoDate(dateRaw);
   var closed_b = flags.length >= 3 && flags[2] === 'C';
@@ -279,6 +344,7 @@ function buildRowElement(r) {
   tr.dataset.important = important.toLowerCase();
   tr.dataset.priority = String(priority);
   tr.dataset.deadline = deadline;
+  tr.dataset.expired = expiredDate;
   tr.dataset.topic = (topic || '').toLowerCase();
   tr.dataset.search = (subject + ' ' + from + ' ' + author + ' ' + isoDate + ' ' + topic).toLowerCase();
 
