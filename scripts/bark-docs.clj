@@ -314,6 +314,8 @@
         [:meta {:property "og:description" :content bark-description}]
         [:meta {:property "og:type" :content "website"}]
         [:link {:rel "stylesheet" :href pico-cdn}]
+        (when-let [tc (theme-cdn)]
+          [:link {:rel "stylesheet" :href tc}])
         [:title title]
         [:style (h/raw docs-css)]]
        [:body
