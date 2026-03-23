@@ -595,7 +595,7 @@ computeDueCells(document);
     'td:nth-child(5) { position: relative; white-space: nowrap; overflow: hidden; max-width: 740px; }' +
     'td:nth-child(5).expanded { white-space: normal; overflow: visible; }' +
     '.unfold { position: absolute; right: 0; top: 50%; transform: translateY(-50%);' +
-    '  cursor: pointer; color: var(--pico-primary); font-weight: 700; font-size: 1em;' +
+    '  cursor: pointer; font-weight: 700; font-size: 1em;' +
     '  padding: 0.1em 0.4em 0.1em 0.6em; user-select: none; z-index: 1;' +
     '  background-color: inherit; }';
   document.head.appendChild(style);
