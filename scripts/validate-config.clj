@@ -213,12 +213,16 @@
 (s/def :bark/logging (s/keys :opt-un [:logging/file :logging/level :logging/max-size
                                       :logging/backlog :logging/email]))
 
+;; Maintenance
+(s/def :maintenance/orphan-delay (s/or :str ::non-blank-string :int pos-int?))
+(s/def :bark/maintenance (s/keys :opt-un [:maintenance/orphan-delay]))
+
 ;; Top-level config
 (s/def ::config
   (s/keys :req-un [:bark/admin :bark/imap :bark/sources :bark/db]
           :opt-un [:bark/ingest :bark/notifications :bark/labels :bark/triggers
                    :bark/commands :bark/export-reports :bark/report-types
-                   :bark/expiry :bark/logging]))
+                   :bark/expiry :bark/logging :bark/maintenance]))
 
 ;; ---------------------------------------------------------------------------
 ;; Validation

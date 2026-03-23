@@ -25,6 +25,9 @@
   test-config {:doc  "Validate config.edn (pass path as arg, default: ./config.edn)"
                :task (apply shell "bb scripts/validate-config.clj" *command-line-args*)}
 
+  maintenance {:doc  "Purge orphan emails: bb maintenance [--delete] [--verbose] [-n source]"
+               :task (apply shell "bb scripts/bark-maintenance.clj" *command-line-args*)}
+
   ;; Integration tests: clojure -M:test
 
   test-smtp  {:doc  "Test SMTP config: bb test-smtp [--to addr] [--dry-run]"

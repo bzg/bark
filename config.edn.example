@@ -184,4 +184,13 @@
  ;;           :email    {:to    "admin@example.com"  ;; recipient address
  ;;                      :level :error}}             ;; minimum level to email (default: :error)
 
+ ;; Maintenance (optional) — settings for `bb maintenance`.
+ ;; Run only when the JVM daemon is stopped.
+ ;;   :orphan-delay — delete orphan emails older than this duration.
+ ;;                   An orphan is an email not referenced by any report
+ ;;                   and not sent by a maintainer or admin.
+ ;;                   Accepts a duration string ("30d", "6w", "3m", "1y")
+ ;;                   or an integer (days). Default: 90 days.
+ ;; :maintenance {:orphan-delay "90d"}
+
  }
