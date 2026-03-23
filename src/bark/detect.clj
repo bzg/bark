@@ -86,7 +86,8 @@
           (cond-> {:type rtype} topic (assoc :topic topic)))))))
 
 (defn detect-patch-subject [subject patterns]
-  (when-let [m (re-find (:patch patterns) subject)]
+  (when subject
+    (when-let [m (re-find (:patch patterns) subject)]
     (let [inner   (extract-inner m)
           seq-m   (when inner (re-find patch-seq-pattern inner))
           seq-str (when seq-m (first seq-m))
@@ -103,7 +104,7 @@
       (cond-> {:type :patch :patch-source #{:subject}}
         seq-str (assoc :patch-seq seq-str)
         version (assoc :version version)
-        topic   (assoc :topic topic)))))
+        topic   (assoc :topic topic))))))
 
 ;; Attachment & inline patch detection
 
@@ -132,8 +133,9 @@
         (:topic from-subject)     (assoc :topic (:topic from-subject))))))
 
 (defn detect-report
-  "Detect report type from an email. Walks detection-table in order;
-  patches also detected from attachments/inline diffs without a subject tag."
+  "Detect report type from an email.  Attachment or inline patches always
+  win over subject tags (e.g. [BUG] [PATCH] with an attached .patch → patch).
+  Otherwise walks detection-table in order; first matching subject tag wins."
   ([email] (detect-report email default-compiled-labels nil))
   ([email patterns] (detect-report email patterns nil))
   ([email patterns allowed-types]
@@ -144,21 +146,23 @@
                          result))
          subject     (:email/subject email)
          attachments (:email/attachments email)
-         body-text   (common/email-body-text email)]
-     (or (when subject
-           (some (fn [{:keys [key type versioned special]}]
-                   (when-let [pattern (get patterns key)]
-                     (allowed?
-                      (if (= special :patch)
-                        (detect-patch subject attachments body-text patterns)
-                        (detect-simple-tag type subject pattern versioned)))))
-                 detection-table))
-         ;; Fallback: no subject tag, but email has patch content
-         (allowed?
-          (let [sources (cond-> #{}
-                          (has-patch-attachment? attachments) (conj :attachment)
-                          (has-inline-patch? body-text)       (conj :inline))]
-            (when (seq sources) {:type :patch :patch-source sources})))))))
+         body-text   (common/email-body-text email)
+         has-patch?  (or (has-patch-attachment? attachments)
+                         (has-inline-patch? body-text))]
+     (or
+      ;; 1. Attachment or inline patch content → always a patch
+      (when has-patch?
+        (allowed? (detect-patch subject attachments body-text patterns)))
+      ;; 2. Subject tag walk (no patch content present)
+      (when subject
+        (some (fn [{:keys [key type versioned special]}]
+                (when-let [pattern (get patterns key)]
+                  (allowed?
+                   (if (= special :patch)
+                     ;; [PATCH] in subject but no attachment/inline — subject-only patch
+                     (detect-patch-subject subject patterns)
+                     (detect-simple-tag type subject pattern versioned)))))
+              detection-table))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Patch content extraction (pure)
