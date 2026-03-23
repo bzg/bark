@@ -3,62 +3,139 @@
 ;; License-Filename: LICENSES/EPL-2.0.txt
 
 (ns bark.expire
-  "Close open reports of expirable types when their age exceeds
-  the configured :expiry delay. Runs inside the daemon."
-  (:require [datalevin.core :as d]
+  "Close open reports when their age and state match the configured
+  :expiry rules. Runs inside the daemon."
+  (:require [clojure.string :as str]
+            [datalevin.core :as d]
             [taoensso.timbre :as log]
             [bark.common :as common]
             [bark.tracking :as tracking])
   (:import [java.util Date]))
 
-(def ^:private expirable-types #{:announcement :release :change})
+;; ---------------------------------------------------------------------------
+;; Rule evaluation
+;; ---------------------------------------------------------------------------
+
+(defn- parse-expiry-rule
+  "Normalize an expiry rule value into a map with :delay-days.
+  Accepts a map (new format) or an integer (legacy, days)."
+  [v]
+  (cond
+    (map? v)     (when-let [d (common/parse-delay (:delay v))]
+                   (assoc v :delay-days d))
+    (integer? v) {:delay-days v}
+    :else        nil))
+
+(defn- report-activity-score
+  "Compute activity score from a pulled report: acked (1) + owned (2).
+  Range 0–3. The open/closed bit is excluded because expiry candidates
+  are already filtered to open reports only."
+  [report]
+  (+ (if (:report/owned report) 2 0)
+     (if (:report/acked report) 1 0)))
+
+(defn- report-priority-value
+  "Compute priority from a pulled report."
+  [report]
+  (+ (if (:report/urgent report) 2 0)
+     (if (:report/important report) 1 0)))
+
+(defn- last-descendant-from
+  "Return the :email/from-address of the most recent descendant email (by date)."
+  [db report-eid]
+  (let [descendants (d/q '[:find ?addr ?date
+                           :in $ ?r
+                           :where
+                           [?r :report/descendants ?e]
+                           [?e :email/from-address ?addr]
+                           [?e :email/date-sent ?date]]
+                         db report-eid)]
+    (when (seq descendants)
+      (first (last (sort-by second descendants))))))
+
+(defn- op-address
+  "Return the from-address of the report's founding email."
+  [db report-eid]
+  (d/q '[:find ?addr .
+         :in $ ?r
+         :where [?r :report/email ?e] [?e :email/from-address ?addr]]
+       db report-eid))
+
+(defn- rule-matches?
+  "Check whether a report matches all expiry rule conditions.
+  Returns true if the report should be expired."
+  [db report-eid rule report-data now date-sent]
+  (let [{:keys [delay-days max-status max-priority op-answered]} rule]
+    (and
+     ;; Age check
+     delay-days date-sent
+     (> (common/days-between date-sent now) delay-days)
+     ;; Status ceiling (activity score: acked=1 + owned=2, range 0–3)
+     (or (nil? max-status)
+         (<= (report-activity-score report-data) max-status))
+     ;; Priority ceiling
+     (or (nil? max-priority)
+         (<= (report-priority-value report-data) max-priority))
+     ;; OP-answered check
+     (or (nil? op-answered)
+         (let [op   (op-address db report-eid)
+               last (last-descendant-from db report-eid)]
+           (if (false? op-answered)
+             ;; Expire when the last reply is NOT from the OP
+             (or (nil? last) (not= (some-> op str/lower-case)
+                                   (some-> last str/lower-case)))
+             ;; op-answered true: expire only when last IS from OP
+             (and last (= (some-> op str/lower-case)
+                          (some-> last str/lower-case)))))))))
+
+;; ---------------------------------------------------------------------------
+;; Expiry engine
+;; ---------------------------------------------------------------------------
 
 (defn expire-reports!
-  "Close open reports of expirable types (announcement, release, change)
-  when their age exceeds the configured :expiry delay for their source.
-  Sets :report/close-reason to :expired."
+  "Close open reports whose age and state match the :expiry rules for
+  their source. Sets :report/close-reason to :expired."
   [conn source-map]
   (let [now (Date.)
-        ;; Candidate query uses a snapshot taken before any writes.
         candidates (d/q '[:find ?r ?type ?src ?date
-                          :in $ ?types
                           :where
                           [?r :report/type ?type]
-                          [(contains? ?types ?type)]
                           [?r :report/email ?e]
                           [?e :email/source ?src]
                           [?e :email/date-sent ?date]
                           (not [?r :report/closed _])]
-                        (d/db conn) expirable-types)
+                        (d/db conn))
         expired (reduce
                  (fn [n [rid rtype src date-sent]]
                    (let [expiry-cfg (:expiry (get source-map src))
-                         delay-days (get expiry-cfg (keyword rtype))]
-                     (if (and delay-days date-sent
-                              (> (common/days-between date-sent now) delay-days))
-                       ;; Fresh db snapshot for each iteration — safe across writes.
-                       (let [db         (d/db conn)
-                             report-mid (d/q '[:find ?mid . :in $ ?r
-                                               :where [?r :report/message-id ?mid]]
-                                             db rid)
-                             synth-mid  (str "<bark-expired-" report-mid ">")
-                             synth-eid  (or (d/q '[:find ?e . :in $ ?mid
-                                                   :where [?e :email/message-id ?mid]]
-                                                 db synth-mid)
-                                            (let [tempid -1
-                                                  tx (d/transact!
-                                                      conn [{:db/id          tempid
-                                                             :email/message-id   synth-mid
-                                                             :email/from-address "bark-system"
-                                                             :email/source       src
-                                                             :email/date-sent    now
-                                                             :email/subject      (str "Auto-expired: " report-mid)}])]
-                                              (get (:tempids tx) tempid)))]
-                         (d/transact! conn [[:db/add rid :report/closed synth-eid]
-                                            [:db/add rid :report/close-reason :expired]])
-                         (tracking/bump-report-updated! conn rid)
-                         (log/info "Expired" (name rtype) "report:" report-mid)
-                         (inc n))
+                         rule-raw   (get expiry-cfg (keyword rtype))]
+                     (if-let [rule (parse-expiry-rule rule-raw)]
+                       (let [db (d/db conn)
+                             report-data (d/pull db [:report/acked :report/owned
+                                                     :report/urgent :report/important] rid)]
+                         (if (rule-matches? db rid rule report-data now date-sent)
+                           (let [report-mid (d/q '[:find ?mid . :in $ ?r
+                                                   :where [?r :report/message-id ?mid]]
+                                                 db rid)
+                                 synth-mid  (str "<bark-expired-" report-mid ">")
+                                 synth-eid  (or (d/q '[:find ?e . :in $ ?mid
+                                                       :where [?e :email/message-id ?mid]]
+                                                     db synth-mid)
+                                                (let [tempid -1
+                                                      tx (d/transact!
+                                                          conn [{:db/id          tempid
+                                                                 :email/message-id   synth-mid
+                                                                 :email/from-address "bark-system"
+                                                                 :email/source       src
+                                                                 :email/date-sent    now
+                                                                 :email/subject      (str "Auto-expired: " report-mid)}])]
+                                                  (get (:tempids tx) tempid)))]
+                             (d/transact! conn [[:db/add rid :report/closed synth-eid]
+                                                [:db/add rid :report/close-reason :expired]])
+                             (tracking/bump-report-updated! conn rid)
+                             (log/info "Expired" (name rtype) "report:" report-mid)
+                             (inc n))
+                           n))
                        n)))
                  0 candidates)]
     (when (pos? expired)

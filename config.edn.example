@@ -125,14 +125,30 @@
  ;;   :urgent    ["Urgent"]
  ;;   :important ["Important"]
 
- ;; Expiry delay (optional) — auto-close open reports after N days.
- ;; Only applies to announcements, releases, and changes.
+ ;; Expiry rules (optional) — auto-close open reports when age and state
+ ;; match configured conditions. Applies to any report type.
  ;; When set per source, it overrides the global value.
  ;;
+ ;; Each entry maps a report type to a rule map:
+ ;;   :delay         — duration string ("30d", "6w", "3m", "1y") [required]
+ ;;   :max-status    — don't expire if activity score > this (0=none, 1=acked,
+ ;;                    2=owned, 3=acked+owned) [optional]
+ ;;   :max-priority  — don't expire if priority > this (0-3) [optional]
+ ;;   :op-answered   — false: don't expire if the OP posted the last reply [optional]
+ ;;
+ ;; All conditions are conjunctive (all must be true to expire).
+ ;; For backward compat, an integer is accepted as days: :announcement 30
+ ;;
  ;; Example:
- ;; :expiry {:announcement 30   ;; close announcements after 30 days
- ;;          :release      60   ;; close releases after 60 days
- ;;          :change       14}  ;; close changes after 14 days
+ ;; :expiry {:announcement {:delay "30d"}
+ ;;          :release      {:delay "6w"}
+ ;;          :change       {:delay "3m"}
+ ;;          :bug          {:delay "1000d"
+ ;;                         :max-status 0       ;; only open, unacked, unowned
+ ;;                         :max-priority 0     ;; only non-urgent, non-important
+ ;;                         :op-answered false}  ;; only when OP is NOT the last to reply
+ ;;          :request      {:delay "1000d"
+ ;;                         :max-status 0}}
 
  ;; Global export formats (optional) — controls which per-type feed files
  ;; are generated (e.g. bugs.json, patches.xml, announcements.org).

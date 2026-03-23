@@ -99,6 +99,38 @@
     (quot (Math/abs (- (.getTime b) (.getTime a))) 86400000)))
 
 ;; ---------------------------------------------------------------------------
+;; Duration parsing
+;; ---------------------------------------------------------------------------
+
+(defn parse-duration-str
+  "Parse \"2y 3m 10d 2w\" into a total number of days.
+  Returns nil if no valid tokens. Throws on unrecognized units."
+  [s]
+  (let [valid-parts   (re-seq #"(\d+)\s*(y|m|w|d)" s)
+        invalid-parts (re-seq #"(\d+)\s*([a-zA-Z]+)" s)
+        bad-units     (remove (fn [[_ _ u]] (#{"y" "m" "w" "d"} u)) invalid-parts)]
+    (when (seq bad-units)
+      (throw (ex-info (str "Unknown duration unit(s): "
+                           (str/join ", " (map #(nth % 2) bad-units))
+                           " (expected y, m, w, d)")
+                      {:value s :bad-units (mapv #(nth % 2) bad-units)})))
+    (when (seq valid-parts)
+      (reduce (fn [acc [_ n unit]]
+                (+ acc (* (parse-long n)
+                          (case unit "y" 365 "m" 30 "w" 7 "d" 1))))
+              0 valid-parts))))
+
+(defn parse-delay
+  "Parse a :delay value into a number of days.
+  Accepts an integer (days) or a duration string (\"30d\", \"6w\", \"3m\").
+  Note: \"0d\" returns 0, meaning 'expire immediately'."
+  [v]
+  (cond
+    (integer? v) v
+    (string? v)  (parse-duration-str v)
+    :else        nil))
+
+;; ---------------------------------------------------------------------------
 ;; Header utilities
 ;; ---------------------------------------------------------------------------
 
@@ -144,8 +176,7 @@
   "Extract In-Reply-To message-id from a headers map (raw or parsed).
   Handles both string and vector values."
   [headers]
-  (when-let [v (or (get-header headers "In-Reply-To")
-                   (get headers "In-Reply-To"))]
+  (when-let [v (get-header headers "In-Reply-To")]
     (let [s (str/trim (if (vector? v) (first v) (str v)))]
       (when-not (str/blank? s) s))))
 
@@ -154,15 +185,12 @@
 ;; ---------------------------------------------------------------------------
 
 (defn source-type
-  "Infer the source type from its config keys.
-  Returns nil (with warning) if no type key is present."
+  "Infer the source type from its config keys. Returns nil if none present."
   [source]
-  (or (cond
-        (:list source)  :mailing-list
-        (:alias source) :alias
-        (:to source)    :mailbox)
-      (do (log/warn "Source has no :list, :alias, or :to key:" (:name source))
-          nil)))
+  (cond
+    (:list source)  :mailing-list
+    (:alias source) :alias
+    (:to source)    :mailbox))
 
 (defn original-recipient
   "Extract the original recipient address from MTA headers.
@@ -397,9 +425,12 @@
         global-rt     (:report-types config)]
     (into {}
           (map (fn [src]
-                 [(:name src)
-                  (merge {:admin (or (:admin src) default-admin)
-                          :source-type (source-type src)}
+                 (let [stype (source-type src)]
+                   (when-not stype
+                     (log/warn "Source has no :list, :alias, or :to key:" (:name src)))
+                   [(:name src)
+                    (merge {:admin (or (:admin src) default-admin)
+                            :source-type stype}
                          (select-keys src [:list :alias :to :commands :labels :notifications
                                            :archive-format-string :list-archive :bark-path
                                            :maintainers])
@@ -410,7 +441,7 @@
                                             (set (map keyword er)))
                           :report-types (when-let [rt (or (:report-types src) global-rt)]
                                           (set (map keyword rt)))
-                          :expiry (or (:expiry src) global-expiry)})]))
+                          :expiry (or (:expiry src) global-expiry)})])))
           (:sources config))))
 
 ;; ---------------------------------------------------------------------------

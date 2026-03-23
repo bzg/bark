@@ -83,7 +83,7 @@
                           :source/list-archive :source/commands :source/labels
                           :source/bark-path :source/export-reports
                           :source/report-types :source/maintainers
-                          :source/notifications])
+                          :source/notifications :source/expiry])
          exactly-one-source-type?))
 
 (s/def :bark/sources
@@ -180,6 +180,24 @@
 (s/def :source/report-types ::report-types)
 (s/def :bark/report-types ::report-types)
 
+;; Expiry rules (optional)
+;; Each report type maps to either a legacy integer (days) or a rule map.
+(s/def :expiry/delay (s/or :string (s/and ::non-blank-string #(re-seq #"\d+\s*[ydwm]" %))
+                           :int pos-int?))
+(s/def :expiry/max-status (s/and int? #(<= 0 % 3)))
+(s/def :expiry/max-priority (s/and int? #(<= 0 % 3)))
+(s/def :expiry/op-answered boolean?)
+
+(s/def ::expiry-rule
+  (s/or :legacy pos-int?
+        :rule-map (s/keys :req-un [:expiry/delay]
+                          :opt-un [:expiry/max-status :expiry/max-priority :expiry/op-answered])))
+
+(s/def ::expiry
+  (s/map-of valid-report-types ::expiry-rule))
+(s/def :source/expiry ::expiry)
+(s/def :bark/expiry ::expiry)
+
 ;; Logging (optional)
 (s/def :logging/file ::non-blank-string)
 (s/def :logging/level #{:debug :info :warn :error})
@@ -199,7 +217,8 @@
 (s/def ::config
   (s/keys :req-un [:bark/admin :bark/imap :bark/sources :bark/db]
           :opt-un [:bark/ingest :bark/notifications :bark/labels :bark/triggers
-                   :bark/commands :bark/export-reports :bark/report-types :bark/logging]))
+                   :bark/commands :bark/export-reports :bark/report-types
+                   :bark/expiry :bark/logging]))
 
 ;; ---------------------------------------------------------------------------
 ;; Validation

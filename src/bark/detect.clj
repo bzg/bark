@@ -88,23 +88,23 @@
 (defn detect-patch-subject [subject patterns]
   (when subject
     (when-let [m (re-find (:patch patterns) subject)]
-    (let [inner   (extract-inner m)
-          seq-m   (when inner (re-find patch-seq-pattern inner))
-          seq-str (when seq-m (first seq-m))
-          rest    (when inner
-                    (str/trim (if seq-str
-                                (subs inner 0 (- (count inner) (count seq-str)))
-                                inner)))
-          tokens  (when (and rest (not (str/blank? rest))) (str/split rest #"\s+"))
-          version (when (and tokens (re-matches patch-version-pattern (last tokens)))
-                    (last tokens))
-          topic-tokens (if version (butlast tokens) tokens)
-          topic   (or (when (seq topic-tokens) (str/join " " topic-tokens))
-                      (extract-colon-topic subject))]
-      (cond-> {:type :patch :patch-source #{:subject}}
-        seq-str (assoc :patch-seq seq-str)
-        version (assoc :version version)
-        topic   (assoc :topic topic))))))
+      (let [inner   (extract-inner m)
+            seq-m   (when inner (re-find patch-seq-pattern inner))
+            seq-str (when seq-m (first seq-m))
+            rest    (when inner
+                      (str/trim (if seq-str
+                                  (subs inner 0 (- (count inner) (count seq-str)))
+                                  inner)))
+            tokens  (when (and rest (not (str/blank? rest))) (str/split rest #"\s+"))
+            version (when (and tokens (re-matches patch-version-pattern (last tokens)))
+                      (last tokens))
+            topic-tokens (if version (butlast tokens) tokens)
+            topic   (or (when (seq topic-tokens) (str/join " " topic-tokens))
+                        (extract-colon-topic subject))]
+        (cond-> {:type :patch :patch-source #{:subject}}
+          seq-str (assoc :patch-seq seq-str)
+          version (assoc :version version)
+          topic   (assoc :topic topic))))))
 
 ;; Attachment & inline patch detection
 

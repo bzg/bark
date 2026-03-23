@@ -359,13 +359,13 @@ in turn take precedence over the built-in defaults.
 /Controls/ are always sent privately to the monitored inbox by
 maintainers or the admin.
 
-| ID        | Syntax / Words                     | Permission      | Report types |
-|-----------+------------------------------------+-----------------+--------------|
-| notify    | =Notify: on= / =off= / =d:7 p:2 s:4 ...= | maintainer      | n/a          |
-| role      | =Add maintainer: addr@host=          | maintainer      | n/a          |
-| role      | =Ignore: addr@host=                  | maintainer      | n/a          |
-| role      | =Remove maintainer: addr@host=       | admin           | n/a          |
-| role      | =Unignore: addr@host=                | admin           | n/a          |
+| ID     | Syntax / Words                     | Permission | Report types |
+|--------+------------------------------------+------------+--------------|
+| notify | =Notify: on= / =off= / =d:7 p:2 s:4 ...= | maintainer | n/a          |
+| role   | =Add maintainer: addr@host=          | maintainer | n/a          |
+| role   | =Ignore: addr@host=                  | maintainer | n/a          |
+| role   | =Remove maintainer: addr@host=       | admin      | n/a          |
+| role   | =Unignore: addr@host=                | admin      | n/a          |
 
 * Exploring reports
 
@@ -555,7 +555,7 @@ The source name must match a source's =:name= exactly
 | =:report-types=          | Restrict detected types, e.g. =#{:bug :patch}=                               |
 | =:export-formats=        | Output formats, e.g. =["json" "rss"]=  (default: =["json" "org" "rss"]=)       |
 | =:export-reports=        | Restrict exported types, e.g. =#{:bug :patch :request}=                      |
-| =:expiry=                | Auto-close delays in days (see below)                                      |
+| =:expiry=                | Auto-close rules per report type (see below)                               |
 
 The =:since= date on a maintainer entry restricts their privileges to
 emails dated on or after that date.  Omit =:since= for immediate
@@ -564,17 +564,49 @@ maintainer.
 
 ** Report expiry
 
-Announcements, releases, and changes can be automatically closed
-after a configurable number of days.  The close reason is set to
-"expired".
+Any report type can be automatically closed when its age and state
+match configured rules.  The close reason is set to "expired".
+
+Each entry under =:expiry= maps a report type keyword to a rule map:
+
+| Rule key      | Type    | Description                                           |
+|---------------+---------+-------------------------------------------------------|
+| =:delay=        | string  | Duration before expiry (e.g. ="30d"=, ="6w"=, ="3m"=, ="1y"=) |
+| =:max-status=   | integer | Don't expire if activity score > this value (0--3)    |
+| =:max-priority= | integer | Don't expire if priority > this value (0--3)          |
+| =:op-answered=  | boolean | =false=: don't expire if the OP posted the last reply   |
+
+All rules are conjunctive: a report is only expired when *all*
+conditions are met.  Only =:delay= is required; the others are
+optional filters.
+
+The =:max-status= value uses an activity score that only counts acked
+and owned (since expiry candidates are always open reports):
+
+| Score | Meaning          |
+|-------+------------------|
+|     0 | unacked, unowned |
+|     1 | acked            |
+|     2 | owned            |
+|     3 | acked + owned    |
 
 #+begin_src edn
-:expiry {:announcement 30
-         :release      60
-         :change       14}
+:expiry {:announcement {:delay "30d"}
+         :release      {:delay "6w"}
+         :change       {:delay "3m"}
+         :bug          {:delay "1000d"
+                        :max-status 0      ;; only open, unacked, unowned
+                        :max-priority 0    ;; only non-urgent, non-important
+                        :op-answered false} ;; only when OP is NOT the last to reply
+         :request      {:delay "1000d"
+                        :max-status 0}}
 #+end_src
 
-This can be set globally or per source.
+For backward compatibility, an integer value is still accepted and
+interpreted as a number of days: =:announcement 30= is equivalent to
+=:announcement {:delay "30d"}=.
+
+This can be set globally or per source (per-source takes precedence).
 
 ** Notifications (SMTP)
 

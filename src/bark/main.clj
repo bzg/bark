@@ -72,30 +72,12 @@
 ;; Initial-fetch parsing
 ;; ---------------------------------------------------------------------------
 
-(defn- parse-duration-str
-  "Parse \"2y 3m 10d 2w\" into a total number of days.
-  Throws on unrecognized tokens."
-  [s]
-  (let [valid-parts   (re-seq #"(\d+)\s*(y|m|w|d)" s)
-        invalid-parts (re-seq #"(\d+)\s*([a-zA-Z]+)" s)
-        bad-units     (remove (fn [[_ _ u]] (#{"y" "m" "w" "d"} u)) invalid-parts)]
-    (when (seq bad-units)
-      (throw (ex-info (str "Unknown duration unit(s): "
-                           (str/join ", " (map #(nth % 2) bad-units))
-                           " (expected y, m, w, d)")
-                      {:value s :bad-units (mapv #(nth % 2) bad-units)})))
-    (when (seq valid-parts)
-      (reduce (fn [acc [_ n unit]]
-                (+ acc (* (parse-long n)
-                          (case unit "y" 365 "m" 30 "w" 7 "d" 1))))
-              0 valid-parts))))
-
 (defn- parse-initial-fetch [v]
   (cond
     (integer? v) {:limit v}
     (string? v)
     (or (when (re-matches #"\d{4}-\d{2}-\d{2}" v) {:since v})
-        (when-let [days (parse-duration-str v)]
+        (when-let [days (common/parse-duration-str v)]
           {:since (Date/from (.minus (Instant/now) days ChronoUnit/DAYS))})
         (throw (ex-info (str "Invalid :initial-fetch value: " (pr-str v)
                             " (expected integer, \"Nd/w/m/y\" duration, or \"yyyy-MM-dd\" date)")
@@ -125,7 +107,7 @@
 
 (defn- store-and-process!
   "Classify, store, and digest an email.
-  Skips if no matching source, already stored, or exceeds max-size."
+  Returns true on success, false on skip or failure."
   [db-conn source-map sources msg {:keys [max-size]}]
   (let [size (:size msg -1)]
     (if (and max-size (pos? size) (> size max-size))
@@ -133,7 +115,7 @@
                     "size:" size (str "bytes (max: " max-size ")"))
           false)
       (if-let [src-name (digest/pre-classify-source (d/db db-conn) source-map sources msg)]
-        (when (ingest/store-email! db-conn msg)
+        (if (ingest/store-email! db-conn msg)
           (let [db    (d/db db-conn)
                 mid   (:message-id msg)
                 eid   (d/q '[:find ?e . :in $ ?mid :where [?e :email/message-id ?mid]]
@@ -147,7 +129,8 @@
                 (catch Exception e
                   (log/error e "Failed to digest email" mid
                              (or (.getMessage e) (str (class e))))
-                  false)))))
+                  false))))
+          false)
         (do (log/debug "No matching source for UID:" (:uid msg) "— not stored")
             false)))))
 
@@ -244,14 +227,16 @@
               :heartbeat-ms (* 20 60 1000)}))
 
 (defn idle-loop!
-  "Run IDLE with automatic reconnection and exponential backoff."
-  [imap-cfg db-conn ingest-cfg config]
+  "Run IDLE with automatic reconnection and exponential backoff.
+  Reloads config.edn on each reconnect so changes take effect."
+  [imap-cfg db-conn ingest-cfg config-path]
   (let [folder      (or (:folder imap-cfg) "INBOX")
         fetch-opts  (parse-initial-fetch (or (:initial-fetch ingest-cfg) 50))
         ingest-opts (select-keys ingest-cfg [:max-size])]
     (loop [backoff-ms 1000]
       (when-not (shutting-down?)
-        (let [source-map (if config (common/build-source-map config) {})
+        (let [config     (or (common/load-config config-path) {})
+              source-map (common/build-source-map config)
               sources    (or (:sources config) [])
               conn       (connect-imap imap-cfg)]
           (if-not conn
@@ -315,4 +300,4 @@
             (Thread/sleep 1000)
             (try (ingest/close db-conn) (catch Exception _))
             (log/info "Goodbye."))))
-        (idle-loop! imap-cfg db-conn ingest-cfg config)))))
+        (idle-loop! imap-cfg db-conn ingest-cfg config-path)))))

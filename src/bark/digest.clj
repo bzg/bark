@@ -192,7 +192,7 @@
 
 (defn- classify-email-source
   "Shared source classification logic. Works on any headers (raw map or edn string).
-  Returns source-name or nil."
+  Returns [delivery src-name irt-src hdr-src]."
   [db source-map sources headers subject from-addr in-reply-to]
   (let [delivery (common/classify-delivery headers)
         ;; 1. In-Reply-To inheritance (also gated)
@@ -202,7 +202,7 @@
         hdr-src  (when-not irt-src
                    (common/classify-source headers subject sources))
         hdr-src  (gate-direct-email hdr-src delivery from-addr headers subject source-map db)]
-    [delivery (or irt-src hdr-src) irt-src]))
+    [delivery (or irt-src hdr-src) irt-src hdr-src]))
 
 (defn pre-classify-source
   "Pre-storage source classification on a raw fetch-imap msg.
@@ -216,6 +216,13 @@
                               db source-map sources headers subject from-addr irt)]
     src-name))
 
+(defn- strip-bark-prefix
+  "Remove [bark:...] prefix from email subject, if present."
+  [email]
+  (if-let [bark-pfx (re-find #"(?i)^\[bark:[^\]]+\]\s*" (:email/subject email))]
+    (update email :email/subject #(str/replace-first % bark-pfx ""))
+    email))
+
 (defn- resolve-email-source!
   "Classify the email's source, persist to DB, strip [bark:] prefix in-memory.
   For live emails (pre-classified by store-and-process!) the source is already
@@ -227,29 +234,21 @@
         existing (:email/source email)]
     (if existing
       ;; Already classified (live path via store-and-process!)
-      (let [delivery (common/classify-delivery hdrs)
-            email    (if-let [bark-pfx (re-find #"(?i)^\[bark:[^\]]+\]\s*" (:email/subject email))]
-                       (update email :email/subject #(str/replace-first % bark-pfx ""))
-                       email)]
-        [existing email delivery])
+      (let [delivery (common/classify-delivery hdrs)]
+        [existing (strip-bark-prefix email) delivery])
       ;; Not yet classified (test path / legacy)
       (let [from-addr (:email/from-address email)
             irt       (:email/in-reply-to email)
-            [delivery src-name irt-src] (classify-email-source
-                                         (d/db conn) source-map sources
-                                         hdrs (:email/subject email) from-addr irt)]
-        (when (and irt-src src-name (not= irt-src src-name))
-          (let [hdr-src (common/classify-source hdrs (:email/subject email) sources)]
-            (when (and hdr-src (not= irt-src hdr-src))
-              (log/warn "Source mismatch for" mid
-                        "— In-Reply-To says" irt-src
-                        "but headers say" hdr-src (str "(using " irt-src ")")))))
+            [delivery src-name irt-src hdr-src] (classify-email-source
+                                                  (d/db conn) source-map sources
+                                                  hdrs (:email/subject email) from-addr irt)]
+        (when (and irt-src hdr-src (not= irt-src hdr-src))
+          (log/warn "Source mismatch for" mid
+                    "— In-Reply-To says" irt-src
+                    "but headers say" hdr-src (str "(using " irt-src ")")))
         (when src-name
           (d/transact! conn [{:db/id eid :email/source src-name}]))
-        (let [email (if-let [bark-pfx (re-find #"(?i)^\[bark:[^\]]+\]\s*" (:email/subject email))]
-                      (update email :email/subject #(str/replace-first % bark-pfx ""))
-                      email)]
-          [src-name email delivery])))))
+        [src-name (strip-bark-prefix email) delivery]))))
 
 ;; ---------------------------------------------------------------------------
 ;; Single-email processing
