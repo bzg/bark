@@ -21,6 +21,7 @@
 ;;   bb export html          — generate index.html for each source
 ;;   bb export stats         — generate stats.json for each source
 ;;   bb export patches       — export patch files for each source
+;;   bb export root          — regenerate public/index.html (source listing)
 ;;   bb export all           — all formats (still incremental)
 ;;   bb export --force       — force full export, ignore timestamps
 ;;   bb export --only-open   — also export -open files (all-open.json, etc.)
@@ -46,6 +47,7 @@
          get-last-modified changed-report-types-since)
 
 (load-file "scripts/bark-common.clj")
+(load-file "scripts/bark-html.clj")
 
 (load-datalevin-pod!)
 
@@ -620,6 +622,83 @@
           (dump-org! t-closed reports-dir source-name source-map maintainers-map
                      (str plural "-closed.org") (str plural " (closed)")))))))
 
+;; ---------------------------------------------------------------------------
+;; Root index — public/index.html listing all sources
+;; ---------------------------------------------------------------------------
+
+(defn- load-source-meta
+  "Read reports/meta.json for a source dir, or nil on failure."
+  [base-dir]
+  (let [f (io/file base-dir "reports" "meta.json")]
+    (when (.exists f)
+      (try (json/parse-string (slurp f) true)
+           (catch Exception _ nil)))))
+
+(defn dump-root-index!
+  "Generate public/index.html listing all exported sources.
+  Reads each source's reports/meta.json for summary counts."
+  [source-names source-map]
+  (let [rows (for [src-name source-names
+                   :let [slug     (slugify src-name)
+                         base-dir (str "public/" slug)
+                         meta     (load-source-meta base-dir)]
+                   :when meta]
+               {:name         src-name
+                :slug         slug
+                :total        (or (:total meta) 0)
+                :open         (or (:open-count meta) 0)
+                :closed       (or (:closed-count meta) 0)
+                :list-archive (:list-archive meta)})
+        row-html
+        (fn [{:keys [name slug total open closed list-archive]}]
+          (str "<tr>"
+               "<td><a href=\"" slug "/index.html\">" name "</a>"
+               (when list-archive
+                 (str " <a class=\"archive\" href=\"" list-archive
+                      "\" title=\"List archive\">↗</a>"))
+               "</td>"
+               "<td class=\"num\">" open "</td>"
+               "<td class=\"num\">" closed "</td>"
+               "<td class=\"num\">" total "</td>"
+               "<td class=\"num feeds\">"
+               "<a href=\"" slug "/reports/all.xml\">RSS</a> · "
+               "<a href=\"" slug "/reports/all.json\">JSON</a>"
+               "</td>"
+               "</tr>\n"))
+        page
+        (str
+         "<!DOCTYPE html>\n<html lang=\"en\">\n"
+         (html-head {:title "BARK — Sources"
+                     :css (str "table{margin-top:1.5rem}"
+                               "td.num,th.num{text-align:right}"
+                               "a.archive{font-size:0.82rem;margin-left:0.4rem;opacity:0.7}"
+                               ".feeds{font-size:0.82rem;white-space:nowrap}"
+                               ".theme-toggle{cursor:pointer;background:none;border:none;font-size:1.2rem;padding:0.3rem}"
+                               footer-css)})
+         "<body>\n<main class=\"container\">\n"
+         "<nav><ul><li><strong>BARK</strong></li></ul>"
+         "<ul><li><button class=\"theme-toggle\" onclick=\"toggleTheme()\" "
+         "aria-label=\"Toggle theme\"><span id=\"theme-icon\">🌙</span>"
+         "</button></li></ul></nav>\n"
+         "<table role=\"grid\">\n"
+         "<thead><tr>"
+         "<th>Source</th>"
+         "<th class=\"num\">Open</th>"
+         "<th class=\"num\">Closed</th>"
+         "<th class=\"num\">Total</th>"
+         "<th class=\"num\">Feeds</th>"
+         "</tr></thead>\n<tbody>\n"
+         (apply str (map row-html rows))
+         "</tbody></table>\n"
+         "<footer class=\"bark-footer\">"
+         "<a href=\"" bark-repo-url "\">BARK</a> is "
+         "<a href=\"https://www.gnu.org/philosophy/free-sw.html\">Free Software</a>"
+         "</footer>\n"
+         "<script>\n" (wrap-js theme-toggle-js) "\n</script>\n"
+         "</main>\n</body>\n</html>\n")]
+    (spit "public/index.html" page)
+    (log/info "Wrote public/index.html with" (count rows) "source(s)")))
+
 (defn export-source!
   "Export a single source in the given format(s).
   Always produces all-open.json and all-closed.json (used by index.html).
@@ -664,7 +743,7 @@
 ;; Main
 ;; ---------------------------------------------------------------------------
 
-(def formats #{"json" "rss" "org" "html" "all" "stats" "patches"})
+(def formats #{"json" "rss" "org" "html" "all" "stats" "patches" "root"})
 
 (let [{:keys [format source-name min-priority min-status force-all?]
        :or {format "all"}}
@@ -674,7 +753,7 @@
   (try
     (when-not (formats format)
       (log/error "Unknown format:" format)
-      (log/error "Formats: json rss org html stats patches all")
+      (log/error "Formats: json rss org html stats patches root all")
       (System/exit 1))
     (when (and min-priority (not (#{1 2 3} min-priority)))
       (log/error "Invalid --min-priority:" min-priority "(must be 1, 2, or 3)")
@@ -711,29 +790,32 @@
                                       (rest *command-line-args*))]
           (when (and incremental? (seq changed-types))
             (log/info "Incremental: changed types:" (str/join ", " (map name changed-types))))
-          (doseq [src-name source-names]
-            (let [reports  (filter-reports all-reps {:source       src-name
-                                                     :min-priority min-priority
-                                                     :min-status   min-status})
-                  er       (resolve-export-reports src-name source-map)
-                  reports  (if er (filter #(contains? er (:report/type %)) reports) reports)
-                  src-types (when incremental? (set (map :report/type reports)))
-                  skip-src? (and incremental? (seq changed-types)
-                                 (empty? (clojure.set/intersection changed-types src-types)))
-                  base-dir (str "public/" (slugify src-name))]
-              (cond
-                skip-src?
-                (log/info (str "[" src-name "]") "no changed types, skipping.")
+          (when-not (= format "root")
+            (doseq [src-name source-names]
+              (let [reports  (filter-reports all-reps {:source       src-name
+                                                       :min-priority min-priority
+                                                       :min-status   min-status})
+                    er       (resolve-export-reports src-name source-map)
+                    reports  (if er (filter #(contains? er (:report/type %)) reports) reports)
+                    src-types (when incremental? (set (map :report/type reports)))
+                    skip-src? (and incremental? (seq changed-types)
+                                   (empty? (clojure.set/intersection changed-types src-types)))
+                    base-dir (str "public/" (slugify src-name))]
+                (cond
+                  skip-src?
+                  (log/info (str "[" src-name "]") "no changed types, skipping.")
 
-                (empty? reports)
-                (log/info "No reports for source" (str "'" src-name "'") ", skipping.")
+                  (empty? reports)
+                  (log/info "No reports for source" (str "'" src-name "'") ", skipping.")
 
-                :else
-                (do (log/info (str "[" src-name "] " (count reports) " report(s)"
-                                   " (" (count (open-reports reports)) " open)"
-                                   (if incremental? " (incremental)" "")))
-                    (export-source! format reports base-dir src-name
-                                    source-map maintainers-map cli-extra)))))
+                  :else
+                  (do (log/info (str "[" src-name "] " (count reports) " report(s)"
+                                     " (" (count (open-reports reports)) " open)"
+                                     (if incremental? " (incremental)" "")))
+                      (export-source! format reports base-dir src-name
+                                      source-map maintainers-map cli-extra))))))
+          (when (#{"all" "root"} format)
+            (dump-root-index! source-names source-map))
           (save-last-export! (java.util.Date.)))))
     (finally
       (d/close conn))))
