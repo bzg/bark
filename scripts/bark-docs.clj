@@ -460,8 +460,8 @@
 ;; ---------------------------------------------------------------------------
 
 (let [{:keys [out-file out-dir source-name theme]} (parse-cli-args *command-line-args*)
-      _           (when theme (set-theme! theme))
       config      (load-config)
+      _           (set-theme! (or theme (:theme config)))
       source-map  (when config (build-source-map config))
       source-cfg  (get source-map source-name)
       labels      (if source-cfg (docs-labels source-cfg) default-labels)
