@@ -223,17 +223,12 @@
 
 (defn- vote-allowed? [email source-cfg]
   (let [hdrs (:email/headers-edn email)]
-    (cond
-      (:list-id source-cfg)
-      (and (some? (common/get-header hdrs "List-Id"))
-           (some? (common/get-header hdrs "List-Post")))
-
-      (:delivered-to source-cfg)
-      (if-let [dt (common/get-header hdrs "Delivered-To")]
-        (= (str/lower-case dt) (str/lower-case (:delivered-to source-cfg)))
-        false)
-
-      :else true)))
+    (case (:source-type source-cfg)
+      :mailing-list (some? (common/get-header hdrs "List-Id"))
+      :alias        (some? (common/original-recipient hdrs))
+      :mailbox      true
+      ;; unknown source type — allow
+      true)))
 
 (defn- apply-vote! [conn report-eid from-addr body-text email source-cfg]
   (when-let [vote (detect-vote body-text)]

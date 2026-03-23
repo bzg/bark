@@ -69,14 +69,17 @@
 ;; Fixture data
 ;; ---------------------------------------------------------------------------
 
-(def source-map {"direct"      {:admin "admin@test.org"}
-                 "public-list" {:admin     "admin@test.org"
-                                :list-post "list@test.org"}})
+(def source-map {"direct"      {:admin "admin@test.org"
+                                :source-type :mailbox
+                                :to "direct@test.org"}
+                 "public-list" {:admin "admin@test.org"
+                                :source-type :mailing-list
+                                :list "list.test.org"}})
 
 (def sources [{:name "public-list"
-               :match {:list-id "list.test.org"}
-               :list-post "list@test.org"}
-              {:name "direct"}])
+               :list "list.test.org"}
+              {:name "direct"
+               :to "direct@test.org"}])
 
 ;; ---------------------------------------------------------------------------
 ;; DB setup / teardown
@@ -584,8 +587,8 @@
         (testing "Bug 98 standalone deadline"
           (is (some? (:report/deadline (get-report db "<98@test.org>")))))
 
-        ;; --- Email 100 [bark:list-id] prefix ---
-        (testing "Email 100 [bark:list-id] subject prefix"
+        ;; --- Email 100 [bark:source-name] prefix ---
+        (testing "Email 100 [bark:source-name] subject prefix"
           (let [r   (get-report db "<100@test.org>")
                 eid (d/q '[:find ?e . :in $ ?mid :where [?e :email/message-id ?mid]]
                          db "<100@test.org>")

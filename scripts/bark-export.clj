@@ -228,9 +228,10 @@
   "Build metadata map for a single source."
   [source-name source-map]
   (let [cfg (get source-map source-name)]
-    (cond-> {}
-      (:list-id cfg)       (assoc :list-id       (:list-id cfg))
-      (:list-post cfg)     (assoc :list-post     (:list-post cfg))
+    (cond-> {:source-type (or (:source-type cfg) :mailbox)}
+      (:list cfg)          (assoc :list          (:list cfg))
+      (:alias cfg)         (assoc :alias         (:alias cfg))
+      (:to cfg)            (assoc :to            (:to cfg))
       (:list-archive cfg)  (assoc :list-archive  (:list-archive cfg))
       (:bark-path cfg)     (assoc :bark-path     (:bark-path cfg)))))
 

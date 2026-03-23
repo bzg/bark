@@ -67,9 +67,9 @@
                                  new-maints)]
                     (d/transact! conn tx)
                     (doseq [{:keys [email since]} new-maints]
-                      (log/info "Config maintainer:" (str/lower-case email)
-                                (if since (str "(since " since ")") "")
-                                (str "(for " name ")")))))))))))))
+                      (log/info (str "Config maintainer: " (str/lower-case email)
+                                     (when since (str " (since " since ")"))
+                                     " (for " name ")")))))))))))))
 
 ;; Phase 0 fix: idempotent add-role! / remove-role!
 (defn- add-role!
@@ -219,23 +219,11 @@
 
 (def announcement-types #{:announcement :release :change})
 
-(defn from-mailing-list? [email]
-  (let [hdrs (:email/headers-edn email)]
-    (and (some? (common/get-header hdrs "List-Id"))
-         (some? (common/get-header hdrs "List-Post")))))
-
-(defn- list-post-address [email]
-  (when-let [lp (common/get-header (:email/headers-edn email) "List-Post")]
-    (second (re-find #"<mailto:([^>]+)>" lp))))
-
-(defn can-create-report? [roles from-addr report-info email source-cfg]
-  (let [as-of  (:email/date-sent email)
-        maint? (maintainer? roles from-addr as-of)]
-    (cond
-      (announcement-types (:type report-info)) maint?
-      maint?                                   true
-      (nil? (:list-post source-cfg))           true
-      :else (let [lp (list-post-address email)]
-              (when (and lp (not= lp (:list-post source-cfg)))
-                (log/warn "List-post mismatch: expected" (:list-post source-cfg) "got" lp))
-              (boolean (= lp (:list-post source-cfg)))))))
+(defn can-create-report?
+  "Check whether from-addr is permitted to create a report on this source.
+  Announcements/releases/changes require maintainer status.
+  All other report types are allowed (source-match gate already filtered)."
+  [roles from-addr report-info email _source-cfg]
+  (if (announcement-types (:type report-info))
+    (maintainer? roles from-addr (:email/date-sent email))
+    true))

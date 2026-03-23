@@ -17,12 +17,11 @@
 
  :sources [
            ;; --- Use-case 1: mailing list ---
+           ;; Use :list with the List-Id identifier (inside angle brackets),
+           ;; e.g. for a header "List-Id: Org Mode <emacs-orgmode.gnu.org>",
+           ;; use "emacs-orgmode.gnu.org" (not the full header value).
            {:name               "public-list"
-            ;;
-            ;; :list-id expects the identifier inside angle brackets,
-            ;; e.g. for a header "List-Id: Org Mode <emacs-orgmode.gnu.org>",
-            ;; use "emacs-orgmode.gnu.org" (not the full header value).
-            :match              {:list-id "bugs.example.org"}
+            :list               "bugs.example.org"
             ;;
 	    ;; The Bark admin of this monitored mailbox
             :admin              "lead@example.org"
@@ -41,9 +40,6 @@
             ;; Base URL where this source's public/ directory is served (optional)
             :bark-path "https://bark.example.org/public/public-list/"
             ;;
-            ;; The mailing list address for permission check
-            :list-post          "bugs@example.org"
-            ;;
             ;; URL of the list archive (informational, used in HTML reports)
             :list-archive "https://list.example.org"
             ;;
@@ -53,10 +49,26 @@
             :archive-format-string "https://list.example.org/%s"
             }
 
-           ;; --- Use-case 2: email address (alias or mailbox) ---
-           {:name               "my-alias"
-            :match              {:delivered-to "security@example.com"}}
+           ;; --- Use-case 2: email alias ---
+           ;; Use :alias when the BARK mailbox receives mail via an alias.
+           ;; Matches X-Original-To, Envelope-To, X-Envelope-To, or Delivered-To.
+           {:name               "team-alias"
+            :alias              "security@example.com"}
+
+           ;; --- Use-case 3: dedicated mailbox ---
+           ;; Use :to when the BARK mailbox is the final destination.
+           ;; Matches Delivered-To.
+           {:name               "direct-inbox"
+            :to                 "inbox@example.com"}
            ]
+
+ ;; Direct emails from maintainers:
+ ;; When a maintainer sends directly to the BARK inbox (bypassing the
+ ;; list or alias), they must signal the target source with either:
+ ;;   - An X-Bark-Source: source-name header, or
+ ;;   - A [bark:source-name] prefix in the subject.
+ ;; The source-name must match a source's :name exactly (case-insensitive).
+ ;; Non-maintainer direct emails to :list or :alias sources are ignored.
 
  ;; Notification settings (optional — notifications disabled if absent)
  :notifications {:enabled true
@@ -144,7 +156,7 @@
  ;;
  ;; Example — a source that only tracks bugs and patches:
  ;; {:name "kernel-patches"
- ;;  :match {:list-id "lkml.org"}
+ ;;  :list "lkml.org"
  ;;  :report-types #{:bug :patch}}
 
  ;; Logging (optional — logs go to stdout only when absent)

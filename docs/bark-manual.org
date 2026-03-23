@@ -119,12 +119,14 @@ To remove a deadline:
 
 ** Updating offlist
 
-Also, maintainers can write directly to the watched inbox to update a
-report without notifying the list.
+Maintainers can write directly to the watched inbox to update a
+report without notifying the list.  To route the email to the correct
+source, add either a =X-Bark-Source: source-name= header or a
+=[bark:source-name]= prefix to the subject.
 
 For example, the maintainer can clean up old issues by marking them as
-=Canceled= in the body of a reply sent to the monitored inbox, rather
-than to the entire list.
+=Canceled= in the body of a reply sent to the monitored inbox (with the
+appropriate source signal), rather than to the entire list.
 
 ** Acting as an update proxy
 
@@ -502,33 +504,47 @@ validate it.
  :db {:path "data/bark-db"}
 
  :sources [{:name       "my-list"
-            :match      {:list-id "my-list.example.org"}
-            :admin      "lead@example.org"
-            :list-post  "my-list@example.org"}]}
+            :list       "my-list.example.org"
+            :admin      "lead@example.org"}]}
 #+end_src
 
-** Source matching
+** Source types and matching
 
-Each source has a =:match= key that determines which emails belong to
-it.  Two strategies are supported:
+Each source has exactly one type key that determines how emails are
+matched:
 
-- =:list-id= --- matches the =List-Id= header (the identifier inside
-  angle brackets, e.g. ="my-list.example.org"=).
-- =:delivered-to= --- matches the =Delivered-To= header (useful for
-  aliases or dedicated mailboxes).
+- =:list= --- matches the =List-Id= header (bare identifier, e.g.
+  ="my-list.example.org"=).  Emails are detected as list mail when
+  =List-Id= or =X-BeenThere= is present.
+- =:alias= --- matches =X-Original-To=, =Envelope-To=, =X-Envelope-To=, or
+  =Delivered-To=.  Emails are detected as alias mail when the original
+  recipient (from these headers) differs from =To=/=Cc=, or when multiple
+  distinct =Delivered-To= values are present.
+- =:to= --- matches =Delivered-To=.  This is for a dedicated mailbox
+  where all emails are delivered directly.
 
-As a fallback, a maintainer can add =[bark:<list-id>]= to the subject
-of an email sent directly to the BARK inbox.  This is useful when the
-email lacks the usual =List-Id= or =Delivered-To= headers.
+Emails that don't match any source are not stored.
+
+*** Direct emails from maintainers
+
+When a maintainer sends directly to the BARK inbox (bypassing the
+list or alias), they must signal the target source via one of:
+
+- A =X-Bark-Source: source-name= header.
+- A =[bark:source-name]= prefix in the subject (the prefix is stripped
+  before processing).
+
+The source name must match a source's =:name= exactly
+(case-insensitive).  Non-maintainer direct emails to =:list= or
+=:alias= sources are silently ignored.
 
 ** Source options
 
 | Key                    | Description                                                                |
 |------------------------+----------------------------------------------------------------------------|
 | =:name=                  | Source identifier (required)                                               |
-| =:match=                 | ={:list-id "…"}= or ={:delivered-to "…"}= (required)                           |
+| =:list= / =:alias= / =:to=   | Exactly one (determines source type and header to match)                   |
 | =:admin=                 | Admin email for this source (required)                                     |
-| =:list-post=             | Mailing list posting address (for on-list/off-list distinction)            |
 | =:list-archive=          | URL of the list archive (shown in HTML reports)                            |
 | =:archive-format-string= | URL template for message-ids (=%s= is replaced), used when the               |
 |                        | =Archived-At= header is absent                                               |

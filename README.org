@@ -78,16 +78,15 @@ All source code lives under =src/bark/=:
 
 | Namespace     | Role                                                |
 |---------------+-----------------------------------------------------|
-| =bark.main=     | Daemon entry point (IMAP IDLE loop)                 |
-| =bark.db=       | Datalevin connection, schema, queries               |
-| =bark.ingest=   | Email parsing and storage                           |
-| =bark.pipeline= | Atomic store-then-digest per email                  |
+| =bark.main=     | Daemon entry point (IMAP IDLE loop, store+digest)   |
+| =bark.ingest=   | Datalevin connection, email parsing and storage     |
 | =bark.digest=   | Single-email processing (classify, detect, thread)  |
 | =bark.detect=   | Report type detection from subject/body/attachments |
 | =bark.commands= | Triggers, directives, votes                         |
 | =bark.roles=    | Permission checks and role management               |
 | =bark.series=   | Patch series tracking                               |
 | =bark.expire=   | Periodic report expiry (runs inside daemon)         |
+| =bark.tracking= | Change-tracking for incremental export              |
 | =bark.common=   | Shared utilities (JVM)                              |
 | =bark.logging=  | File and email log appenders                        |
 
@@ -141,26 +140,37 @@ Single IMAP connection shared by all sources.
 
 *** Sources (=:sources=)
 
-Each source classifies incoming emails by header matching. Sources are
-checked in order; the first match wins. A source without =:match= acts
-as a catch-all.
+Each source classifies incoming emails by delivery type.  Sources are
+checked in order; the first match wins.  Each source must have exactly
+one of the three type keys:
 
-| Field      | Required | Description                              |
-|------------+----------+------------------------------------------|
-| =:name=      | yes      | Unique source identifier                 |
-| =:match=     | no       | Header matching rules (see below)        |
-| =:list-post= | no       | Associated mailing list address          |
-| =:admin=     | no       | Admin for this source (fallback: global) |
-| =:commands=  | no       | Command keyword overrides (per action)   |
-| =:labels=    | no       | Report label overrides (per report type) |
+| Key    | Source type  | Matches against                                            |
+|--------+--------------+------------------------------------------------------------|
+| =:list=  | Mailing list | =List-Id= header (bare identifier, e.g. ="bugs.example.org"=)  |
+| =:alias= | Email alias  | =X-Original-To=, =Envelope-To=, =X-Envelope-To=, or =Delivered-To= |
+| =:to=    | Mailbox      | =Delivered-To= header                                        |
 
-Match rules (all optional, all must match if present):
+| Field                  | Required | Description                                                          |
+|------------------------+----------+----------------------------------------------------------------------|
+| =:name=                  | yes      | Unique source identifier                                             |
+| =:list= / =:alias= / =:to=   | yes      | Exactly one (determines source type and header to match)             |
+| =:admin=                 | no       | Admin for this source (fallback: global)                             |
+| =:commands=              | no       | Command keyword overrides (per action)                               |
+| =:labels=                | no       | Report label overrides (per report type)                             |
+| =:maintainers=           | no       | Initial maintainers, e.g. =[{:email "dev@x.org" :since "2025-01-01"}]= |
+| =:list-archive=          | no       | URL of the list archive (shown in HTML reports)                      |
+| =:archive-format-string= | no       | URL template for message-ids (=%s= is replaced)                        |
+| =:bark-path=             | no       | Base URL where this source's public directory is served              |
+| =:report-types=          | no       | Restrict detected types, e.g. =#{:bug :patch}=                         |
+| =:export-formats=        | no       | Output formats (default: =["json" "org" "rss"]=)                       |
+| =:export-reports=        | no       | Restrict exported types, e.g. =#{:bug :patch :request}=                |
+| =:expiry=                | no       | Auto-close delays in days per type                                   |
 
-| Key           | Matches against | Example             |
-|---------------+-----------------+---------------------|
-| =:list-id=      | =List-Id= header  | ="bugs.example.org"=  |
-| =:delivered-to= | =Delivered-To=    | ="bugs@example.com"=  |
-| =:to=           | =To= header       | ="inbox@example.com"= |
+*Direct emails from maintainers:* when a maintainer sends directly to
+the BARK inbox (bypassing the list or alias), they must signal the
+target source with either a =X-Bark-Source: source-name= header or a
+=[bark:source-name]= prefix in the subject.  Non-maintainer direct
+emails to =:list= or =:alias= sources are ignored.
 
 *** Example config
 
@@ -170,12 +180,13 @@ Match rules (all optional, all must match if present):
          :user "imap-login@example.com" :password "secret"
          :folder "INBOX"}
  :sources [{:name "public-list"
-            :match {:list-id "bugs.example.org"}
-            :list-post "bugs@example.org"
-            :admin "lead@example.org"}
-           {:name "private"
-            :match {:delivered-to "private@example.com"}}
-           {:name "direct"}]
+            :list "bugs.example.org"
+            :admin "lead@example.org"
+            :list-archive "https://lists.example.org/bugs/"}
+           {:name "team-alias"
+            :alias "team@example.com"}
+           {:name "direct-inbox"
+            :to "inbox@example.com"}]
  :db {:path "data/bark-db"}
  :ingest {:initial-fetch 50
           :max-size 1048576}

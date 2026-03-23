@@ -46,19 +46,21 @@
   (s/and ::non-blank-string
          ;; Must be the bare identifier, not the full header with angle brackets
          (complement #(re-find #"[<>]" %))))
-(s/def :match/delivered-to ::non-blank-string)
+(s/def :match/alias ::non-blank-string)
 (s/def :match/to ::non-blank-string)
 
-(s/def ::match
-  (s/keys :opt-un [:match/list-id :match/delivered-to :match/to]))
+;; Source — exactly one of :list, :alias, :to
+(defn- exactly-one-source-type? [src]
+  (= 1 (count (filter some? (map src [:list :alias :to])))))
 
 ;; Source
 (s/def :source/name
   (s/and ::non-blank-string
          #(re-matches #"[a-zA-Z0-9][a-zA-Z0-9 ._-]*" %)))
-(s/def :source/match ::match)
+(s/def :source/list :match/list-id)
+(s/def :source/alias :match/alias)
+(s/def :source/to :match/to)
 (s/def :source/admin ::email)
-(s/def :source/list-post ::email)
 (s/def :source/list-archive (s/and ::non-blank-string #(re-find #"^https?://" %)))
 (s/def :source/bark-path ::non-blank-string)
 
@@ -75,12 +77,14 @@
 (s/def :source/maintainers (s/coll-of ::maintainer-entry :kind vector? :min-count 1))
 
 (s/def ::source
-  (s/keys :req-un [:source/name]
-          :opt-un [:source/match :source/admin :source/list-post
-                   :source/list-archive :source/commands :source/labels
-                   :source/bark-path :source/export-reports
-                   :source/report-types :source/maintainers
-                   :source/notifications]))
+  (s/and (s/keys :req-un [:source/name]
+                 :opt-un [:source/list :source/alias :source/to
+                          :source/admin
+                          :source/list-archive :source/commands :source/labels
+                          :source/bark-path :source/export-reports
+                          :source/report-types :source/maintainers
+                          :source/notifications])
+         exactly-one-source-type?))
 
 (s/def :bark/sources
   (s/and (s/coll-of ::source :kind vector? :min-count 1)
@@ -233,8 +237,10 @@
             (log/info "  Sources:" (count (:sources config)))
             (doseq [src (:sources config)]
               (log/info "    -" (:name src)
-                        (when-let [m (:match src)] (str "(match: " (pr-str m) ")"))
-                        (when-let [ml (:list-post src)] (str "list: " ml))
+                        (cond
+                          (:list src)  (str "(list: " (:list src) ")")
+                          (:alias src) (str "(alias: " (:alias src) ")")
+                          (:to src)    (str "(mailbox: " (:to src) ")"))
                         (when-let [la (:list-archive src)] (str "archive: " la))
                         (when-let [a (:admin src)] (str "admin: " a))
                         (when-let [rt (:report-types src)] (str "report-types: " (pr-str rt)))

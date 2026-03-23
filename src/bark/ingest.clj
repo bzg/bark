@@ -86,9 +86,7 @@
         from        (first (:from msg))
         headers     (:headers msg)
         headers-edn (when (seq headers) (pr-str headers))
-        in-reply-to (when-let [v (get headers "In-Reply-To")]
-                      (let [s (str/trim (if (vector? v) (first v) v))]
-                        (when-not (str/blank? s) s)))
+        in-reply-to (common/extract-in-reply-to headers)
         references  (when-let [v (get headers "References")]
                       (parse-message-ids (if (vector? v) (str/join " " v) v)))
         attachments (mapv (fn [att]

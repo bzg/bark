@@ -124,27 +124,32 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- store-and-process!
-  "Store an email and immediately digest it.
-  Skips if already stored or exceeds max-size."
+  "Classify, store, and digest an email.
+  Skips if no matching source, already stored, or exceeds max-size."
   [db-conn source-map sources msg {:keys [max-size]}]
   (let [size (:size msg -1)]
     (if (and max-size (pos? size) (> size max-size))
       (do (log/warn "Skipping oversized email UID:" (:uid msg)
                     "size:" size (str "bytes (max: " max-size ")"))
           false)
-      (when (ingest/store-email! db-conn msg)
-        (let [db    (d/db db-conn)
-              mid   (:message-id msg)
-              eid   (d/q '[:find ?e . :in $ ?mid :where [?e :email/message-id ?mid]]
-                         db mid)
-              email (d/pull db digest/email-pull-pattern eid)]
-          (try
-            (digest/process-email! db-conn source-map sources email)
-            true
-            (catch Exception e
-              (log/error e "Failed to digest email" mid
-                         (or (.getMessage e) (str (class e))))
-              false)))))))
+      (if-let [src-name (digest/pre-classify-source (d/db db-conn) source-map sources msg)]
+        (when (ingest/store-email! db-conn msg)
+          (let [db    (d/db db-conn)
+                mid   (:message-id msg)
+                eid   (d/q '[:find ?e . :in $ ?mid :where [?e :email/message-id ?mid]]
+                           db mid)]
+            ;; Stamp the pre-classified source
+            (d/transact! db-conn [{:db/id eid :email/source src-name}])
+            (let [email (d/pull (d/db db-conn) digest/email-pull-pattern eid)]
+              (try
+                (digest/process-email! db-conn source-map sources email)
+                true
+                (catch Exception e
+                  (log/error e "Failed to digest email" mid
+                             (or (.getMessage e) (str (class e))))
+                  false)))))
+        (do (log/debug "No matching source for UID:" (:uid msg) "— not stored")
+            false)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Catch-up fetch (store+process per email)

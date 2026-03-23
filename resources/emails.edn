@@ -428,11 +428,11 @@
   :email/headers-edn "{\"List-Post\" \"<mailto:list@test.org>\", \"List-Id\" \"<list.test.org>\"}"}
 
  ;; =========================================================================
- ;; 31 — Bug on list-backed source, no List-Post (denied)
+ ;; 31 — Bug on list-backed source, sent directly (denied: no list headers,
+ ;;      non-maintainer user cannot route direct email to a :mailing-list source)
  ;; =========================================================================
  {
   :email/imap-uid   31
-  :email/source     "public-list"
   :email/message-id "<31@test.org>"
   :email/subject    "[BUG] Direct bug bypassing list"
   :email/from-address "user@test.org"
@@ -441,11 +441,10 @@
   :email/body-text  "Bug sent directly, no List-Post.\n"}
 
  ;; =========================================================================
- ;; 32 — Bug on list-backed source, wrong List-Post (denied)
+ ;; 32 — Bug via wrong mailing list (denied: List-Id doesn't match any source)
  ;; =========================================================================
  {
   :email/imap-uid   32
-  :email/source     "public-list"
   :email/message-id "<32@test.org>"
   :email/subject    "[BUG] Bug via wrong list"
   :email/from-address "user@test.org"
@@ -1352,12 +1351,12 @@
   :email/body-text  "Deadline: 2026-08-15\n"}
 
  ;; =========================================================================
- ;; 100 — Bug report using [bark:list.test.org] prefix instead of List-Id header.
+ ;; 100 — Bug report using [bark:public-list] prefix instead of List-Id header.
  ;; Should be classified under "public-list" source, with prefix stripped.
  ;; =========================================================================
  {:email/imap-uid    100
   :email/message-id  "<100@test.org>"
-  :email/subject     "[bark:list.test.org] [BUG] BARK prefix source test"
+  :email/subject     "[bark:public-list] [BUG] BARK prefix source test"
   :email/content-type "text/plain"
   :email/from-address "admin@test.org"
   :email/date-sent  #inst "2026-02-01T10:00:00"

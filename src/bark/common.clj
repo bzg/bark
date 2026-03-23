@@ -102,17 +102,34 @@
 ;; Header utilities
 ;; ---------------------------------------------------------------------------
 
-(defn get-header
-  "Case-insensitive header lookup from headers-edn (string or map)."
-  [headers-edn header-name]
+(defn parse-headers
+  "Parse headers-edn into a seq of [key value] pairs.
+  Accepts a string (EDN) or an already-parsed collection. Returns nil on failure."
+  [headers-edn]
   (when headers-edn
     (try
-      (let [headers (if (string? headers-edn) (edn/read-string headers-edn) headers-edn)
-            lname   (str/lower-case header-name)]
-        (some (fn [[k v]] (when (= (str/lower-case k) lname) v)) headers))
+      (if (string? headers-edn) (edn/read-string headers-edn) headers-edn)
       (catch Exception e
         (log/warn "Failed to parse headers-edn:" (.getMessage e))
         nil))))
+
+(defn get-header
+  "Case-insensitive header lookup from headers (string, map, or parsed seq).
+  Returns the first value (string) or a vector if the header appears multiple times."
+  [headers-edn header-name]
+  (when-let [headers (parse-headers headers-edn)]
+    (let [lname (str/lower-case header-name)]
+      (some (fn [[k v]] (when (= (str/lower-case k) lname) v)) headers))))
+
+(defn get-header-values
+  "Like get-header but always returns a vector of strings (empty if missing).
+  Handles headers stored as a single string or as a vector of strings."
+  [headers-edn header-name]
+  (let [v (get-header headers-edn header-name)]
+    (cond
+      (nil? v)    []
+      (vector? v) v
+      :else       [v])))
 
 (defn extract-list-id
   "Extract the identifier from a List-Id header value.
@@ -123,46 +140,125 @@
       id
       (str raw))))
 
+(defn extract-in-reply-to
+  "Extract In-Reply-To message-id from a headers map (raw or parsed).
+  Handles both string and vector values."
+  [headers]
+  (when-let [v (or (get-header headers "In-Reply-To")
+                   (get headers "In-Reply-To"))]
+    (let [s (str/trim (if (vector? v) (first v) (str v)))]
+      (when-not (str/blank? s) s))))
+
 ;; ---------------------------------------------------------------------------
 ;; Source classification
 ;; ---------------------------------------------------------------------------
 
+(defn source-type
+  "Infer the source type from its config keys.
+  Returns nil (with warning) if no type key is present."
+  [source]
+  (or (cond
+        (:list source)  :mailing-list
+        (:alias source) :alias
+        (:to source)    :mailbox)
+      (do (log/warn "Source has no :list, :alias, or :to key:" (:name source))
+          nil)))
+
+(defn original-recipient
+  "Extract the original recipient address from MTA headers.
+  Checks X-Original-To, Envelope-To, X-Envelope-To in order."
+  [headers-edn]
+  (or (get-header headers-edn "X-Original-To")
+      (get-header headers-edn "Envelope-To")
+      (get-header headers-edn "X-Envelope-To")))
+
+(defn- multiple-delivered-to?
+  "True when Delivered-To contains 2+ distinct addresses (alias signal)."
+  [headers-edn]
+  (let [vals (->> (get-header-values headers-edn "Delivered-To")
+                  (map str/lower-case)
+                  distinct)]
+    (> (count vals) 1)))
+
+(defn classify-delivery
+  "Heuristic: returns :list, :alias, or :direct based on email headers."
+  [headers-edn]
+  (let [hdrs (parse-headers headers-edn)]
+    (cond
+      ;; 1. Any List-Id or X-BeenThere → mailing list
+      (or (get-header hdrs "List-Id")
+          (get-header hdrs "X-BeenThere"))
+      :list
+
+      ;; 2a. Original recipient not in To/Cc → alias
+      (let [orig (some-> (original-recipient hdrs) str/lower-case)
+            to   (some-> (get-header hdrs "To") str/lower-case)
+            cc   (some-> (get-header hdrs "Cc") str/lower-case)]
+        (when (and orig
+                   (not (some-> to (str/includes? orig)))
+                   (not (some-> cc (str/includes? orig))))
+          true))
+      :alias
+
+      ;; 2b. Multiple distinct Delivered-To → alias
+      (multiple-delivered-to? hdrs)
+      :alias
+
+      ;; 3. Otherwise → direct
+      :else :direct)))
+
+(defn- matches?
+  "Case-insensitive substring match."
+  [haystack needle]
+  (and haystack needle
+       (str/includes? (str/lower-case (str haystack))
+                      (str/lower-case needle))))
+
+(defn- any-matches?
+  "True if any value in coll matches needle (case-insensitive substring)."
+  [coll needle]
+  (boolean (some #(matches? % needle) coll)))
+
 (defn- match-source?
-  "Check if headers match a source's :match spec (substring, case-insensitive)."
-  [headers-edn match-spec]
-  (every? (fn [[k v]]
-            (let [header-name (case k
-                                :list-id      "List-Id"
-                                :delivered-to "Delivered-To"
-                                :to           "To"
-                                (name k))
-                  header-val  (get-header headers-edn header-name)
-                  header-val  (if (= k :list-id)
-                                (extract-list-id header-val)
-                                header-val)]
-              (and header-val
-                   (str/includes? (str/lower-case (str header-val))
-                                  (str/lower-case v)))))
-          match-spec))
+  "Check if headers match a source based on its inferred type."
+  [headers-edn source]
+  (case (source-type source)
+    :mailing-list (matches? (extract-list-id (get-header headers-edn "List-Id"))
+                            (:list source))
+    :alias        (or (matches? (original-recipient headers-edn)
+                                (:alias source))
+                      (any-matches? (get-header-values headers-edn "Delivered-To")
+                                    (:alias source)))
+    :mailbox      (any-matches? (get-header-values headers-edn "Delivered-To")
+                                (:to source))
+    false))
 
 (def ^:private bark-prefix-pattern
   #"(?i)^\[bark:([^\]]+)\]")
 
-(defn- extract-bark-list-id [subject]
-  (when subject (second (re-find bark-prefix-pattern subject))))
+(defn extract-bark-source
+  "Extract source name from [bark:...] subject prefix or X-Bark-Source header."
+  [headers-edn subject]
+  (or (get-header headers-edn "X-Bark-Source")
+      (when subject (second (re-find bark-prefix-pattern subject)))))
 
 (defn classify-source
-  "Return the :name of the first matching source, or nil."
+  "Return the :name of the first matching source, or nil.
+  Uses classify-delivery + match-source? for normal matching, then falls back
+  to [bark:...] / X-Bark-Source for maintainer direct emails."
   [headers-edn subject sources]
-  (let [bark-lid (extract-bark-list-id subject)]
-    (some (fn [{:keys [name match]}]
-            (when (or (empty? match)
-                      (match-source? headers-edn match)
-                      (and bark-lid (:list-id match)
-                           (str/includes? (str/lower-case bark-lid)
-                                          (str/lower-case (:list-id match)))))
-              name))
-          sources)))
+  (or
+   ;; 1. Normal header-based match
+   (some (fn [source]
+           (when (match-source? headers-edn source) (:name source)))
+         sources)
+   ;; 2. Bark-source fallback (validated by caller for maintainer status)
+   (let [bark-src (extract-bark-source headers-edn subject)]
+     (when bark-src
+       (let [lc (str/lower-case bark-src)]
+         (some (fn [source]
+                 (when (= (str/lower-case (:name source)) lc) (:name source)))
+               sources))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Label / command defaults and merge logic
@@ -302,12 +398,11 @@
     (into {}
           (map (fn [src]
                  [(:name src)
-                  (merge {:admin (or (:admin src) default-admin)}
-                         (select-keys src [:list-post :commands :labels :notifications
+                  (merge {:admin (or (:admin src) default-admin)
+                          :source-type (source-type src)}
+                         (select-keys src [:list :alias :to :commands :labels :notifications
                                            :archive-format-string :list-archive :bark-path
                                            :maintainers])
-                         (when-let [lid (get-in src [:match :list-id])] {:list-id lid})
-                         (when-let [dt (get-in src [:match :delivered-to])] {:delivered-to dt})
                          (when global-st {:global-labels global-st})
                          (when global-cmd {:global-commands global-cmd})
                          {:export-formats (set (or (:export-formats src) global-ef ["json" "org" "rss"]))
