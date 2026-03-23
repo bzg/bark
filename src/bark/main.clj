@@ -263,7 +263,7 @@
 
 (defn -main [& args]
   (let [;; Parse CLI args: --initial-fetch, -c config-path
-        pairs     (partition 2 1 args)
+        pairs     (partition 2 args)
         cli-fetch (some (fn [[a b]] (when (= "--initial-fetch" a) b)) pairs)
         config-path (or (some (fn [[a b]] (when (= "-c" a) b)) pairs) "config.edn")
         config      (common/load-config config-path)]
