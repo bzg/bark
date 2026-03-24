@@ -20,7 +20,7 @@
          parse-cli-args load-config build-source-map
          load-datalevin-pod! bark-schema parse-maintainer-since-entries
          pico-cdn theme-cdns set-theme! bark-description footer-css bark-footer wrap-js
-         theme-toggle-btn theme-toggle-js nav-bar org-inline-links)
+         spit-html theme-toggle-btn theme-toggle-js nav-bar org-inline-links)
 
 (load-file "scripts/bark-common.clj")
 (load-file "scripts/bark-html.clj")
@@ -489,6 +489,6 @@
       html        (docs-page body-html)]
   ((resolve 'pod.huahaiy.datalevin/close) conn)
   (.mkdirs (.getParentFile (clojure.java.io/file out-file)))
-  (spit out-file html)
+  (spit-html out-file html)
   (binding [*out* *err*]
     (log/info "Wrote" out-file)))

@@ -20,7 +20,7 @@
 ;; Forward-declared for clj-kondo (provided at runtime by load-file calls below).
 (declare parse-cli-args load-config
          pico-cdn theme-cdns set-theme! bark-description bark-repo-url
-         footer-css bark-footer wrap-js
+         footer-css bark-footer wrap-js spit-html
          theme-toggle-btn theme-toggle-js nav-bar)
 
 (load-file "scripts/bark-common.clj")
@@ -361,6 +361,6 @@
   (let [envelope (json/parse-string (slurp json-file))
         reports  (get envelope "reports" envelope)
         html     (index-page reports reports-dir envelope)]
-    (spit out-file html)
+    (spit-html out-file html)
     (binding [*out* *err*]
       (log/info "Wrote" (count reports) "reports to" out-file))))

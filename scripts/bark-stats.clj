@@ -21,7 +21,7 @@
          report-priority report-status report-descendant-count
          format-date format-date-iso parse-cli-args load-config
          pico-cdn theme-cdns set-theme! bark-description bark-repo-url footer-css
-         bark-footer wrap-js theme-toggle-js bark-schema
+         bark-footer wrap-js spit-html theme-toggle-js bark-schema
          nav-bar theme-toggle-btn html-head org-inline-links)
 
 (load-file "scripts/bark-common.clj")
@@ -600,7 +600,7 @@
             stats    (compute-stats reports db)]
         (io/make-parents out-file)
         (if html?
-          (do (spit out-file (render-html stats out-dir))
+          (do (spit-html out-file (render-html stats out-dir))
               (log/info "Wrote" out-file "(HTML," (count reports) "reports)"))
           (do (spit out-file (json/generate-string stats {:pretty true}))
               (log/info "Wrote" out-file "(JSON," (count reports) "reports)"))))

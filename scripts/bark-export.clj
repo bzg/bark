@@ -46,7 +46,7 @@
          parse-cli-args load-config build-source-map bark-schema bark-format
          get-last-modified changed-report-types-since
          set-theme! resolve-theme-urls
-         html-head footer-css bark-footer wrap-js theme-toggle-js bark-repo-url)
+         html-head footer-css bark-footer wrap-js spit-html theme-toggle-js bark-repo-url)
 
 (load-file "scripts/bark-common.clj")
 (load-file "scripts/bark-html.clj")
@@ -707,7 +707,7 @@
          "</footer>\n"
          "<script>\n" (wrap-js theme-toggle-js) "\n</script>\n"
          "</main>\n</body>\n</html>\n")]
-    (spit "public/index.html" page)
+    (spit-html "public/index.html" page)
     (log/info "Wrote public/index.html with" (count rows) "source(s)")))
 
 (defn export-source!

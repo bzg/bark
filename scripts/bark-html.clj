@@ -17,7 +17,7 @@
 
 (def ^:private themes-cdn
   "Base URL for bzg/themes on jsDelivr."
-  "https://cdn.jsdelivr.net/gh/bzg/themes@latest/")
+  "https://cdn.jsdelivr.net/gh/bzg/pico-themes@latest/")
 
 (def ^:private theme-shortnames
   "Recognised short names for --theme / :theme."
@@ -174,3 +174,37 @@
   (-> s
       (str/replace #"\[\[([^\]]+)\]\[([^\]]+)\]\]" "<a href=\"$1\">$2</a>")
       (str/replace #"\[\[([^\]]+)\]\]" "<a href=\"$1\">$1</a>")))
+
+;; ---------------------------------------------------------------------------
+;; HTML tidy (optional — graceful no-op when tidy is not installed)
+;; ---------------------------------------------------------------------------
+
+(def ^:private tidy-available?
+  "True when the `tidy` binary is on PATH."
+  (delay
+    (try
+      (-> (babashka.process/process ["tidy" "--version"]
+                                    {:out :string :err :string})
+          deref :exit (= 0))
+      (catch Exception _ false))))
+
+(defn tidy-html
+  "Pretty-print an HTML string via tidy.  Returns the input unchanged if
+  tidy is not installed or if it fails on the input."
+  [html]
+  (if-not @tidy-available?
+    html
+    (try
+      (let [result @(babashka.process/process
+                     ["tidy" "-qi" "--wrap" "0" "--tidy-mark" "no"]
+                     {:in html :out :string :err :string})]
+        ;; tidy exits 0 = ok, 1 = warnings (normal), 2 = errors
+        (if (<= (:exit result) 1)
+          (:out result)
+          html))
+      (catch Exception _ html))))
+
+(defn spit-html
+  "Write `html` to `file`, running it through tidy when available."
+  [file html]
+  (spit file (tidy-html html)))
