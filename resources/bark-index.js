@@ -290,20 +290,25 @@ function buildRowElement(r) {
   var deadline = r.deadline || '', topic = r.topic || '';
   var closeReason = r['close-reason'] || '', role = r.role || '';
   var expiredDate = r['expired-date'] || '';
+  var supersededBy = r['superseded-by'] || null;
 
   var isoDate = parseIsoDate(dateRaw);
   var closed_b = flags.length >= 3 && flags[2] === 'C';
   var author = fromName || from;
   var flagA = acked ? 'A' : '-', flagO = owned ? 'O' : '-';
-  var flagC = closeReason === 'canceled' ? 'C' : closeReason === 'expired' ? 'E' : closed_b ? 'R' : '-';
+  var flagC = closeReason === 'canceled' ? 'C' : closeReason === 'expired' ? 'E' : closeReason === 'superseded' ? 'S' : closed_b ? 'R' : '-';
   var flagsStr = flagA + flagO + flagC;
   var flagsScore = (acked ? 1 : 0) + (owned ? 2 : 0) + (closed_b ? 0 : 4);
   var label = _typeLabels[type] || type;
 
-  var subjectHtml = closeReason === 'canceled' ? '<em><s>' + escHtml(subject) + '</s></em>'
+  var subjectHtml = (closeReason === 'canceled' || closeReason === 'superseded')
+                  ? '<em><s>' + escHtml(subject) + '</s></em>'
                   : closed_b ? '<em>' + escHtml(subject) + '</em>' : escHtml(subject);
   var _srcType = barkConfig.sourceType || '';
-  if (archivedAt && _srcType !== 'alias' && _srcType !== 'mailbox') subjectHtml = '<a href="' + escAttr(archivedAt) + '">' + subjectHtml + '</a>';
+  if (archivedAt && _srcType !== 'alias' && _srcType !== 'mailbox') {
+    var titleAttr = supersededBy ? ' title="Superseded by: ' + escAttr(supersededBy.subject || 'another report') + '"' : '';
+    subjectHtml = '<a href="' + escAttr(archivedAt) + '"' + titleAttr + '>' + subjectHtml + '</a>';
+  }
 
   var patchHtml = '';
   if (r.patches && r.patches.length > 0) {

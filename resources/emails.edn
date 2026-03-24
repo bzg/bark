@@ -1409,4 +1409,96 @@
   :email/date-sent  #inst "2026-02-15T10:00:00"
   :email/ingested-at #inst "2026-02-15T10:00:00"
   :email/body-text  "10.0 is out with new export and config.\n"}
+
+ ;; =========================================================================
+ ;; 105 — Bug report (will be superseded)
+ ;; =========================================================================
+ {:email/imap-uid    105
+  :email/source      "direct"
+  :email/message-id  "<105@test.org>"
+  :email/subject     "[BUG] Minor crash on empty input"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-02-20T10:00:00"
+  :email/ingested-at #inst "2026-02-20T10:00:00"
+  :email/body-text  "Crashes when input is empty.\n"}
+
+ ;; =========================================================================
+ ;; 106 — Broader bug report (supersedes 105)
+ ;; =========================================================================
+ {:email/imap-uid    106
+  :email/source      "direct"
+  :email/message-id  "<106@test.org>"
+  :email/subject     "[BUG] General input validation failure"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-02-20T11:00:00"
+  :email/ingested-at #inst "2026-02-20T11:00:00"
+  :email/body-text  "All invalid inputs cause crashes, not just empty.\n"}
+
+ ;; =========================================================================
+ ;; 107 — Maintainer marks 105 as superseded by 106
+ ;; =========================================================================
+ {:email/imap-uid    107
+  :email/source      "direct"
+  :email/message-id  "<107@test.org>"
+  :email/subject     "Re: [BUG] Minor crash on empty input"
+  :email/from-address "admin@test.org"
+  :email/date-sent  #inst "2026-02-20T12:00:00"
+  :email/ingested-at #inst "2026-02-20T12:00:00"
+  :email/in-reply-to "<105@test.org>"
+  :email/references  "<105@test.org>"
+  :email/body-text  "This is a subset of the broader bug.\nSuperseded-by: <106@test.org>\n"}
+
+ ;; =========================================================================
+ ;; 108 — Second bug (will be superseded then unsuperseded)
+ ;; =========================================================================
+ {:email/imap-uid    108
+  :email/source      "direct"
+  :email/message-id  "<108@test.org>"
+  :email/subject     "[BUG] Parser error on Unicode"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-02-21T10:00:00"
+  :email/ingested-at #inst "2026-02-21T10:00:00"
+  :email/body-text  "Unicode chars cause parser errors.\n"}
+
+ ;; =========================================================================
+ ;; 109 — Maintainer supersedes 108 by 106
+ ;; =========================================================================
+ {:email/imap-uid    109
+  :email/source      "direct"
+  :email/message-id  "<109@test.org>"
+  :email/subject     "Re: [BUG] Parser error on Unicode"
+  :email/from-address "admin@test.org"
+  :email/date-sent  #inst "2026-02-21T11:00:00"
+  :email/ingested-at #inst "2026-02-21T11:00:00"
+  :email/in-reply-to "<108@test.org>"
+  :email/references  "<108@test.org>"
+  :email/body-text  "Superseded-by: 106@test.org\n"}
+
+ ;; =========================================================================
+ ;; 110 — Maintainer unsupersedes 108 (it was a different issue after all)
+ ;; =========================================================================
+ {:email/imap-uid    110
+  :email/source      "direct"
+  :email/message-id  "<110@test.org>"
+  :email/subject     "Re: [BUG] Parser error on Unicode"
+  :email/from-address "admin@test.org"
+  :email/date-sent  #inst "2026-02-21T12:00:00"
+  :email/ingested-at #inst "2026-02-21T12:00:00"
+  :email/in-reply-to "<108@test.org>"
+  :email/references  "<108@test.org>"
+  :email/body-text  "Actually this is a different issue.\nUnsuperseded\n"}
+
+ ;; =========================================================================
+ ;; 111 — User tries to supersede (should be denied — maintainer only)
+ ;; =========================================================================
+ {:email/imap-uid    111
+  :email/source      "direct"
+  :email/message-id  "<111@test.org>"
+  :email/subject     "Re: [BUG] Parser error on Unicode"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-02-21T13:00:00"
+  :email/ingested-at #inst "2026-02-21T13:00:00"
+  :email/in-reply-to "<108@test.org>"
+  :email/references  "<108@test.org>"
+  :email/body-text  "Superseded-by: <106@test.org>\n"}
 ]

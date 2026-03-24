@@ -57,7 +57,12 @@
    {:id :undeadline  :kind :directive :action :unset-deadline :attr :report/deadline :scope :maintainer
     :syntax "Undeadline" :report-types #{:bug :patch :request}}
    {:id :topic       :kind :directive :action :set-topic :attr :report/topic :scope :maintainer
-    :syntax "Topic" :param :word}])
+    :syntax "Topic" :param :word}
+   ;; Supersede
+   {:id :superseded-by  :kind :directive :action :set-superseded :attr :report/superseded-by :scope :maintainer
+    :syntax "Superseded-by" :param :message-id}
+   {:id :unsuperseded   :kind :directive :action :unset-superseded :attr :report/superseded-by :scope :maintainer
+    :syntax "Unsuperseded"}])
 
 ;; Derived indexes
 (def trigger-commands  (filterv #(= :trigger  (:kind %)) commands))
@@ -94,6 +99,7 @@
        :email-address (str "^" qs ":\\s+(\\S+@\\S+)" trailing-punct "?\\s*$")
        :date          (str "^" qs ":\\s+(\\d{4}-\\d{2}-\\d{2})" trailing-punct "?\\s*$")
        :word          (str "^" qs ":\\s+([a-zA-Z0-9_-]+)" trailing-punct "?\\s*$")
+       :message-id    (str "^" qs ":\\s+<?([^<>\\s]+@[^<>\\s]+)>?" trailing-punct "?\\s*$")
        (str "^" qs trailing-punct "?\\s*$")))))
 
 (defn- compile-trigger-words [action-map]
@@ -171,19 +177,25 @@
                                                                  {:action :set-deadline :date d})
                                                :unset-deadline {:action :unset-deadline}
                                                :set-topic      (when-let [t (nth m 1 nil)]
-                                                                 {:action :set-topic :topic t}))]
+                                                                 {:action :set-topic :topic t})
+                                               :set-superseded   (when-let [mid (nth m 1 nil)]
+                                                                   {:action :set-superseded
+                                                                    :target-message-id (str "<" mid ">")})
+                                               :unset-superseded {:action :unset-superseded})]
                                     (when base (assoc base :scope sc)))))))
                           compiled-directives)))
             vec)))))
 
 (defn resolve-commands [directives]
-  (reduce (fn [acc {:keys [action attr email-address date topic]}]
+  (reduce (fn [acc {:keys [action attr email-address date topic target-message-id]}]
             (case action
               :set   (-> acc (assoc-in [:set attr] email-address) (update :unset disj attr))
               :unset (-> acc (update :set dissoc attr) (update :unset conj attr))
               :set-deadline   (-> acc (assoc :deadline date) (dissoc :undeadline?))
               :unset-deadline (-> acc (dissoc :deadline) (assoc :undeadline? true))
-              :set-topic      (assoc acc :topic topic)))
+              :set-topic      (assoc acc :topic topic)
+              :set-superseded   (-> acc (assoc :superseded-by target-message-id) (dissoc :unsuperseded?))
+              :unset-superseded (-> acc (dissoc :superseded-by) (assoc :unsuperseded? true))))
           {:set {} :unset #{}}
           directives))
 
@@ -293,7 +305,8 @@
                           directives)]
     (when (seq permitted)
       (let [db      (d/db conn)
-            {:keys [set unset deadline undeadline? topic]} (resolve-commands permitted)
+            {:keys [set unset deadline undeadline? topic superseded-by]}
+            (resolve-commands permitted)
             report-mid (d/q '[:find ?mid . :in $ ?r :where [?r :report/message-id ?mid]] db report-eid)
             current    (d/pull db
                                (into state-attrs [:report/deadline :report/close-reason
@@ -301,6 +314,10 @@
                                                   :report/owned-proxy :report/urgent-proxy
                                                   :report/important-proxy])
                                report-eid)
+            target-eid (when superseded-by
+                         (d/q '[:find ?r . :in $ ?mid
+                                :where [?r :report/message-id ?mid]]
+                              db superseded-by))
             all-tx (-> []
                        (into (build-set-tx conn report-eid report-mid email-eid set))
                        (cond-> (contains? set :report/closed)
@@ -313,36 +330,52 @@
                        (cond-> (and undeadline? (:report/deadline current))
                          (conj [:db/retract report-eid :report/deadline (:report/deadline current)]))
                        (cond-> topic
-                         (conj [:db/add report-eid :report/topic topic])))]
+                         (conj [:db/add report-eid :report/topic topic]))
+                       (cond-> target-eid
+                         (into [[:db/add report-eid :report/superseded-by target-eid]
+                                [:db/add report-eid :report/closed email-eid]
+                                [:db/add report-eid :report/close-reason :superseded]
+                                [:db/add report-eid :report/related target-eid]
+                                [:db/add target-eid :report/related report-eid]])))]
         (when (seq all-tx)
           (d/transact! conn all-tx)
           (tracking/bump-report-updated! conn report-eid)
+          (when target-eid (tracking/bump-report-updated! conn target-eid))
           (log/info "Commands:"
                     (str/join ", " (concat (map (fn [[attr addr]] (str (name attr) " -> " addr)) set)
                                            (map #(str "un-" (name %)) unset)
                                            (when deadline [(str "deadline " deadline)])
                                            (when undeadline? ["undeadline"])
-                                           (when topic [(str "topic:" topic)])))
-                    (str "(proxy by " from-addr ")")))))))
+                                           (when topic [(str "topic:" topic)])
+                                           (when target-eid [(str "superseded-by:" superseded-by)])))
+                    (str "(proxy by " from-addr ")")))
+        (when (and superseded-by (nil? target-eid))
+          (log/warn "Superseded-by: unknown message-id" superseded-by))))))
 
-(defn- try-unclosed!
-  "If a closed report has an Unclosed directive, retract the closure."
+(defn- try-reopen!
+  "If a closed report has an Unclosed or Unsuperseded directive, reopen it."
   [conn report-eid directives is-maintainer? from-addr]
   (let [permitted (filter (fn [{:keys [action scope]}]
-                            (and (= :unset action)
+                            (and (#{:unset :unset-superseded} action)
                                  (or (= :user scope) (and (= :maintainer scope) is-maintainer?))))
                           directives)
-        {:keys [unset]} (resolve-commands permitted)]
-    (when (contains? unset :report/closed)
-      (let [current  (d/pull (d/db conn) [:report/closed :report/closed-proxy :report/close-reason] report-eid)
+        {:keys [unset unsuperseded?]} (resolve-commands permitted)]
+    (when (or (contains? unset :report/closed) unsuperseded?)
+      (let [current  (d/pull (d/db conn) [:report/closed :report/closed-proxy :report/close-reason
+                                          :report/superseded-by] report-eid)
             all-tx   (-> []
                          (into (build-unset-tx report-eid current #{:report/closed}))
                          (cond-> (:report/close-reason current)
-                           (conj [:db/retract report-eid :report/close-reason (:report/close-reason current)])))]
+                           (conj [:db/retract report-eid :report/close-reason (:report/close-reason current)]))
+                         (cond-> (and unsuperseded? (:report/superseded-by current))
+                           (conj [:db/retract report-eid :report/superseded-by
+                                  (ref-eid (:report/superseded-by current))])))]
         (when (seq all-tx)
           (d/transact! conn all-tx)
           (tracking/bump-report-updated! conn report-eid)
-          (log/info (str "Commands: un-closed (proxy by " from-addr ")")))))))
+          (log/info (str "Commands: "
+                         (if unsuperseded? "unsuperseded" "un-closed")
+                         " (proxy by " from-addr ")")))))))
 
 (defn- filter-triggers-by-scope [trig-result overrides is-maintainer?]
   (when trig-result
@@ -379,6 +412,6 @@
         (apply-vote! conn report-eid from-addr body-text email source-cfg))
 
       (if closed?
-        (try-unclosed! conn report-eid directives is-maint? from-addr)
+        (try-reopen! conn report-eid directives is-maint? from-addr)
         (do (apply-triggers! conn report-eid trig-result eid (:email/message-id email))
             (apply-directives! conn report-eid directives eid from-addr is-maint?))))))

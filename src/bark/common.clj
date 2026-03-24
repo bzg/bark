@@ -482,6 +482,7 @@
     {:report/urgent-proxy [:email/from-address]}
     {:report/important-proxy [:email/from-address]}
     :report/close-reason
+    {:report/superseded-by [:report/message-id {:report/email [:email/subject]}]}
     :report/votes-up :report/votes-down :report/votes-null
     :report/deadline :report/descendants :report/digested-at :report/updated-at
     {:report/related [:report/type :report/message-id

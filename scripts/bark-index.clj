@@ -67,19 +67,23 @@
 ;; Hiccup helpers
 ;; ---------------------------------------------------------------------------
 
-(defn- subject-el [subject _role archived-at closed? close-reason source-type]
-  (let [canceled? (and closed? (= close-reason "canceled"))
-        expired?  (and closed? (= close-reason "expired"))
-        inner     (cond canceled? [:em [:s subject]]
+(defn- subject-el [{:strs [subject archived-at close-reason superseded-by]} closed? source-type]
+  (let [canceled?    (and closed? (= close-reason "canceled"))
+        expired?     (and closed? (= close-reason "expired"))
+        superseded?  (and closed? (= close-reason "superseded"))
+        inner     (cond (or canceled? superseded?) [:em [:s subject]]
                         closed?   [:em subject]
                         :else     subject)
         linkable? (and archived-at
                        (not (#{"alias" "mailbox"} source-type)))]
     (if linkable?
       [:a (cond-> {:href archived-at}
-             canceled? (assoc :title "Canceled")
-             expired?  (assoc :title "Expired")
-             (and closed? (not canceled?) (not expired?)) (assoc :title "Resolved"))
+             canceled?    (assoc :title "Canceled")
+             expired?     (assoc :title "Expired")
+             superseded?  (assoc :title (str "Superseded by: "
+                                             (get superseded-by "subject" "another report")))
+             (and closed? (not canceled?) (not expired?) (not superseded?))
+             (assoc :title "Resolved"))
        inner]
       inner)))
 
@@ -123,7 +127,8 @@
 (defn- report-row [{:strs [type subject from from-name date date-raw flags priority
                            replies archived-at message-id related role source
                            acked owned closed urgent important patches votes
-                           deadline topic close-reason expired-date]}
+                           deadline topic close-reason expired-date superseded-by]
+                    :as report}
                    source-type]
   (let [label    (get type-labels type type)
         closed?  (and flags (>= (count flags) 3) (= (nth flags 2 \-) \C))
@@ -131,10 +136,11 @@
         author   (or (when (seq from-name) from-name) from)
         flag-a   (if (seq acked) "A" "-")
         flag-o   (if (seq owned) "O" "-")
-        flag-c   (cond (= close-reason "canceled") "C"
-                       (= close-reason "expired")  "E"
-                       closed?                     "R"
-                       :else                       "-")
+        flag-c   (cond (= close-reason "canceled")   "C"
+                       (= close-reason "expired")    "E"
+                       (= close-reason "superseded") "S"
+                       closed?                       "R"
+                       :else                         "-")
         flags-str (str flag-a flag-o flag-c)
         ;; Numeric score for sorting: acked=1, owned=2, open=4 (closed=0)
         flags-score (+ (if (seq acked) 1 0)
@@ -145,6 +151,7 @@
                                      (= flag-o "O") (conj "Owned")
                                      (= flag-c "C") (conj "Canceled")
                                      (= flag-c "E") (conj "Expired")
+                                     (= flag-c "S") (conj "Superseded")
                                      (= flag-c "R") (conj "Resolved")))]
     [:tr {:data-type        type
           :data-closed      (str closed?)
@@ -173,7 +180,7 @@
            :style "text-align:center; font-family:monospace; font-size:0.8rem; letter-spacing:0.1em"} flags-str]
      [:td (patch-link patches) (related-link related)
       (vote-badge votes)
-      (subject-el subject role archived-at closed? close-reason source-type)]
+      (subject-el report closed? source-type)]
      [:td.secondary {:title from} (if (#{"maintainer" "admin"} role) [:strong author] author)]
      [:td {:data-value iso-date} [:small (or iso-date date "")]]
      [:td {:style "text-align:center"} (or replies 0)]]))

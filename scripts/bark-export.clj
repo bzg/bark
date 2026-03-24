@@ -194,6 +194,9 @@
           arch                            (assoc :archived-at arch)
           (:report/deadline report)       (assoc :deadline (format-date-iso (:report/deadline report)))
           (:report/close-reason report)  (assoc :close-reason (name (:report/close-reason report)))
+          (:report/superseded-by report) (assoc :superseded-by
+                                                {:message-id (:report/message-id (:report/superseded-by report))
+                                                 :subject (get-in report [:report/superseded-by :report/email :email/subject])})
           (and (= :expired (:report/close-reason report))
                (:email/date-sent (:report/closed report)))
           (assoc :expired-date (format-date-iso (:email/date-sent (:report/closed report))))

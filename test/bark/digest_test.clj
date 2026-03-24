@@ -31,6 +31,7 @@
             :report/patch-seq :report/patch-source :report/message-id
             :report/acked :report/owned :report/closed
             :report/close-reason
+            {:report/superseded-by [:report/message-id {:report/email [:email/subject]}]}
             :report/urgent :report/important
             :report/deadline
             {:report/acked-proxy [:email/from-address]}
@@ -612,6 +613,64 @@
             (is (some #(= "<104@test.org>" (:report/message-id %))
                       (:report/related chg1)))
             (is (some #(= "<104@test.org>" (:report/message-id %))
-                      (:report/related chg2))))))
+                      (:report/related chg2)))))
+
+        ;; --- Emails 105-107 Superseded-by ---
+        (testing "Bug 105 superseded by 106"
+          (let [r105 (get-report db "<105@test.org>")
+                r106 (get-report db "<106@test.org>")]
+            (is (some? (:report/closed r105)) "superseded report is closed")
+            (is (= :superseded (:report/close-reason r105)))
+            (is (= "<106@test.org>"
+                    (get-in r105 [:report/superseded-by :report/message-id])))
+            ;; Bidirectional related link
+            (is (some #(= "<106@test.org>" (:report/message-id %))
+                      (:report/related r105)))
+            (is (some #(= "<105@test.org>" (:report/message-id %))
+                      (:report/related r106)))))
+
+        ;; --- Emails 108-110 Supersede then unsupersede ---
+        (testing "Bug 108 superseded then unsuperseded"
+          (let [r108 (get-report db "<108@test.org>")]
+            (is (nil? (:report/closed r108)) "unsuperseded report is reopened")
+            (is (nil? (:report/close-reason r108)))
+            (is (nil? (:report/superseded-by r108)))
+            ;; Related link from the supersede is kept
+            (is (some #(= "<106@test.org>" (:report/message-id %))
+                      (:report/related r108)))))
+
+        ;; --- Email 111 user can't supersede ---
+        (testing "Email 111 user Superseded-by denied"
+          (let [r108 (get-report db "<108@test.org>")]
+            (is (nil? (:report/closed r108)))
+            (is (nil? (:report/superseded-by r108)))))
+
+        ;; --- Directive unit tests for supersede ---
+        (testing "detect-directives: Superseded-by with angle brackets"
+          (is (= [{:action :set-superseded :target-message-id "<msg@example.com>" :scope :maintainer}]
+                 (commands/detect-directives :bug "Superseded-by: <msg@example.com>\n"))))
+
+        (testing "detect-directives: Superseded-by without angle brackets"
+          (is (= [{:action :set-superseded :target-message-id "<msg@example.com>" :scope :maintainer}]
+                 (commands/detect-directives :bug "Superseded-by: msg@example.com\n"))))
+
+        (testing "detect-directives: Unsuperseded"
+          (is (= [{:action :unset-superseded :scope :maintainer}]
+                 (commands/detect-directives :bug "Unsuperseded\n"))))
+
+        (testing "resolve-commands: superseded-by"
+          (is (= {:set {} :unset #{} :superseded-by "<mid@host>"}
+                 (commands/resolve-commands
+                  [{:action :set-superseded :target-message-id "<mid@host>"}]))))
+
+        (testing "resolve-commands: unsuperseded"
+          (is (= {:set {} :unset #{} :unsuperseded? true}
+                 (commands/resolve-commands [{:action :unset-superseded}]))))
+
+        (testing "resolve-commands: supersede then unsupersede"
+          (is (= {:set {} :unset #{} :unsuperseded? true}
+                 (commands/resolve-commands
+                  [{:action :set-superseded :target-message-id "<mid@host>"}
+                   {:action :unset-superseded}])))))
       (finally
         (teardown! ctx)))))
