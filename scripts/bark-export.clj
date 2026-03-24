@@ -45,7 +45,7 @@
          report-descendant-count all-reports report-pull-pattern
          parse-cli-args load-config build-source-map bark-schema bark-format
          get-last-modified changed-report-types-since
-         set-theme! resolve-theme-urls
+         set-theme! resolve-theme-urls votes-by-report vote-counts
          html-head footer-css bark-footer wrap-js spit-html theme-toggle-js bark-repo-url)
 
 (load-file "scripts/bark-common.clj")
@@ -94,13 +94,14 @@
 
 ;; format-date and format-date-iso are defined in bark-common.clj
 
-(defn- votes-str [report]
-  (let [up   (or (:report/votes-up report) 0)
-        down (or (:report/votes-down report) 0)
-        null (or (:report/votes-null report) 0)
-        total (+ up down null)]
-    (when (pos? total)
-      (str (- up down) "/" total))))
+(defn- votes-str
+  "Format vote counts as \"score/total\" from a seq of vote maps, or nil."
+  [votes]
+  (when (seq votes)
+    (let [{:keys [up down null]} (vote-counts votes)
+          total (+ up down null)]
+      (when (pos? total)
+        (str (- up down) "/" total)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Config & source map — loaded from bark-common.clj
@@ -156,7 +157,7 @@
               m))
           m from-address-fields))
 
-(defn report->map [report source-map maintainers-map]
+(defn report->map [report source-map maintainers-map report-votes]
   (let [email       (:report/email report)
         source-name (:email/source email)
         from        (or (:email/from-address email) "")
@@ -169,7 +170,8 @@
                       raw-arch)
         src-type    (get-in source-map [source-name :source-type])
         arch        (when-not (#{:alias :mailbox} src-type) arch)
-        votes       (votes-str report)
+        votes       (votes-str report-votes)
+        counts      (when (seq report-votes) (vote-counts report-votes))
         series      (:report/series report)
         related     (:report/related report)
         role        (sender-role from source-name source-map maintainers-map)]
@@ -201,12 +203,9 @@
                (:email/date-sent (:report/closed report)))
           (assoc :expired-date (format-date-iso (:email/date-sent (:report/closed report))))
           votes                           (assoc :votes votes)
-          (pos? (or (:report/votes-up report) 0))
-          (assoc :votes-up (:report/votes-up report))
-          (pos? (or (:report/votes-down report) 0))
-          (assoc :votes-down (:report/votes-down report))
-          (pos? (or (:report/votes-null report) 0))
-          (assoc :votes-null (:report/votes-null report))
+          (pos? (:up counts 0))           (assoc :votes-up (:up counts))
+          (pos? (:down counts 0))         (assoc :votes-down (:down counts))
+          (pos? (:null counts 0))         (assoc :votes-null (:null counts))
           series
           (assoc :series
                  (let [patches (:series/patches series)]
@@ -234,6 +233,21 @@
                              (:patch/subject p) (assoc :subject (:patch/subject p))
                              (:patch/date p)    (assoc :date    (:patch/date p))))
                          (:report/patches report))))))))
+
+;; ---------------------------------------------------------------------------
+;; Vote context (set once per export run)
+;; ---------------------------------------------------------------------------
+
+(def ^:private all-votes-atom
+  "Votes indexed by report eid. Set at the start of each export run."
+  (atom {}))
+
+(defn- map-reports
+  "Map reports through report->map, looking up votes from all-votes-atom."
+  [reports source-map maintainers-map]
+  (let [av @all-votes-atom]
+    (mapv #(report->map % source-map maintainers-map (get av (:db/id %)))
+          reports)))
 
 ;; ---------------------------------------------------------------------------
 ;; Source metadata for JSON envelope
@@ -304,7 +318,7 @@
   ([reports out-dir source-name source-map maintainers-map basename]
    (dump-json! reports out-dir source-name source-map maintainers-map basename nil))
   ([reports out-dir source-name source-map maintainers-map basename extra-meta]
-   (let [data     (mapv #(report->map % source-map maintainers-map) reports)
+   (let [data     (map-reports reports source-map maintainers-map)
          meta     (source-metadata source-name source-map)
          envelope (cond-> {:bark-format bark-format
                            :source      source-name
@@ -383,7 +397,7 @@
    (dump-rss! reports out-dir source-name source-map maintainers-map "all.xml" "reports"))
   ([reports out-dir source-name source-map maintainers-map basename feed-label]
    (let [capped   (->> reports open-reports (take rss-limit))
-         data     (mapv #(report->map % source-map maintainers-map) capped)
+         data     (map-reports capped source-map maintainers-map)
          items    (str/join "\n" (map report->rss-item data))
          list-url (get-in source-map [source-name :list-archive] "")
          filename (str out-dir "/" basename)]
@@ -470,7 +484,7 @@
   ([reports out-dir source-name source-map maintainers-map]
    (dump-org! reports out-dir source-name source-map maintainers-map "all.org" "reports"))
   ([reports out-dir source-name source-map maintainers-map basename title-label]
-   (let [data     (mapv #(report->map % source-map maintainers-map) reports)
+   (let [data     (map-reports reports source-map maintainers-map)
          entries  (str/join "\n" (map report->org-entry data))
          filename (str out-dir "/" basename)]
      (spit filename
@@ -478,6 +492,32 @@
                 "#+DATE: " (java.time.LocalDate/now) "\n\n"
                 entries))
      (log/info "Wrote" (count data) "reports to" filename))))
+
+(defn dump-votes!
+  "Export votes.json for a single source.
+  Format: {\"<mid>\": {\"+1\": [{voter, message-id}], \"-1\": [...], \"0\": [...]}}"
+  [reports out-dir]
+  (let [av       @all-votes-atom
+        entries  (reduce
+                  (fn [acc report]
+                    (let [mid   (:report/message-id report)
+                          votes (get av (:db/id report))]
+                      (if (seq votes)
+                        (let [grouped (group-by :value votes)
+                              fmt     (fn [vs]
+                                        (mapv (fn [{:keys [voter email-mid]}]
+                                                {:voter voter :message-id email-mid})
+                                              vs))]
+                          (assoc acc mid {"+1" (fmt (:up grouped))
+                                         "-1" (fmt (:down grouped))
+                                         "0"  (fmt (:null grouped))}))
+                        acc)))
+                  {}
+                  reports)]
+    (when (seq entries)
+      (let [filename (str out-dir "/votes.json")]
+        (spit filename (json/generate-string entries {:pretty true}))
+        (log/info "Wrote" (count entries) "report(s) with votes to" filename)))))
 
 (defn dump-patches!
   "Export patch files for a single source."
@@ -727,6 +767,7 @@
         (fn [fmt]
           (case fmt
             "json"    (do (dump-json! reports reports-dir source-name source-map maintainers-map)
+                          (dump-votes! reports reports-dir)
                           (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"json"})
                           (dump-open-closed! reports reports-dir source-name source-map maintainers-map #{"json"}))
             "rss"     (do (dump-rss!  reports reports-dir source-name source-map maintainers-map)
@@ -736,6 +777,7 @@
                           (dump-open-closed! reports reports-dir source-name source-map maintainers-map #{"org"}))
             "patches" (dump-patches! reports patches-dir)
             "html"    (do (dump-json! reports reports-dir source-name source-map maintainers-map)
+                          (dump-votes! reports reports-dir)
                           (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"json"})
                           (dump-open-closed! reports reports-dir source-name source-map maintainers-map #{"json"})
                           (dump-docs! base-dir source-name cli-extra)
@@ -743,6 +785,7 @@
             "stats"   (dump-stats! base-dir reports-dir source-name "json" cli-extra)))]
     (if (= format "all")
       (do (when (ef "json") (dump-json! reports reports-dir source-name source-map maintainers-map))
+          (dump-votes! reports reports-dir)
           (when (ef "rss")  (dump-rss!  reports reports-dir source-name source-map maintainers-map))
           (when (ef "org")  (dump-org!  reports reports-dir source-name source-map maintainers-map))
           (dump-per-type! reports reports-dir source-name source-map maintainers-map ef)
@@ -795,6 +838,16 @@
               source-map      (if config (build-source-map config) {})
               maintainers-map (if config (build-maintainers db source-map) {})
               all-reps        (all-reports-by-date db)
+              _               (reset! all-votes-atom
+                                (votes-by-report
+                                 (d/q '[:find ?r ?val ?voter ?emid
+                                        :where
+                                        [?v :vote/report ?r]
+                                        [?v :vote/value  ?val]
+                                        [?v :vote/voter  ?voter]
+                                        [?v :vote/email  ?e]
+                                        [?e :email/message-id ?emid]]
+                                      db)))
               source-names    (if source-name
                                 (if (contains? source-map source-name)
                                   [source-name]

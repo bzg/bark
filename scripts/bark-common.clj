@@ -12,10 +12,11 @@
                             days-between parse-delay get-header source-type
                             default-labels default-commands
                             resolve-labels-map resolve-commands-map
-                            parse-maintainer-since-entries admin-or-maintainer?
+                            parse-maintainer-since-strings admin-or-maintainer?
                             load-config build-source-map
                             report-priority report-status report-descendant-count
-                            report-pull-pattern parse-cli-args])
+                            report-pull-pattern parse-cli-args
+                            votes-by-report vote-counts])
 
 (require '[taoensso.timbre :as log])
 

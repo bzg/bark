@@ -89,18 +89,29 @@
 ;; Watermark management
 ;; ---------------------------------------------------------------------------
 
-(defn- max-contiguous-safe-uid [all-uids safe-uids]
+(defn- max-contiguous-safe-uid
+  "Walk sorted UIDs from lowest to highest and return the last UID in the
+  unbroken prefix of safe-uids.  Returns nil if the very first UID is
+  not safe — this is deliberate: we only advance the watermark past UIDs
+  that are known-good in sequence, so that a failed message is retried
+  on next reconnect rather than silently skipped."
+  [all-uids safe-uids]
   (reduce (fn [acc uid]
             (if (contains? safe-uids uid) uid (reduced acc)))
           nil all-uids))
 
 (defn- advance-watermark! [db-conn msgs safe-uids]
   (let [all-uids (->> msgs (keep :uid) sort)]
-    (when-let [new-wm (max-contiguous-safe-uid all-uids safe-uids)]
-      (when (not= new-wm (some->> all-uids last))
-        (log/warn "Watermark stopped at UID" new-wm
-                  "(some messages failed — will retry on next reconnect)"))
-      (ingest/save-imap-uid! db-conn new-wm))))
+    (if-let [new-wm (max-contiguous-safe-uid all-uids safe-uids)]
+      (do (when (not= new-wm (some->> all-uids last))
+            (log/warn "Watermark stopped at UID" new-wm
+                      "(some messages failed — will retry on next reconnect)"))
+          (ingest/save-imap-uid! db-conn new-wm))
+      ;; First UID in batch failed — watermark cannot advance at all.
+      (when (seq all-uids)
+        (log/warn "Watermark not advanced: first UID" (first all-uids)
+                  "failed — entire batch of" (count all-uids)
+                  "message(s) will be retried on next reconnect")))))
 
 ;; ---------------------------------------------------------------------------
 ;; Atomic store+process

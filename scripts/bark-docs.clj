@@ -18,7 +18,7 @@
 (declare default-labels default-commands
          resolve-labels-map resolve-commands-map
          parse-cli-args load-config build-source-map
-         load-datalevin-pod! bark-schema parse-maintainer-since-entries
+         load-datalevin-pod! bark-schema parse-maintainer-since-strings
          pico-cdn theme-cdns set-theme! bark-description footer-css bark-footer wrap-js
          spit-html theme-toggle-btn theme-toggle-js nav-bar org-inline-links)
 
@@ -414,7 +414,7 @@
         (str/replace ">" "&gt;")
         (str/replace "\"" "&quot;"))))
 
-;; parse-maintainer-since-entries is in bark-common.clj
+;; parse-maintainer-since-strings is in bark-common.clj
 
 (defn build-maintainers-html
   "Build an HTML section listing maintainers by display name,
@@ -430,7 +430,7 @@
           maint-emails (cond (nil? maint-v) []
                              (string? maint-v) [maint-v]
                              :else maint-v)
-          since-map   (parse-maintainer-since-entries roles)
+          since-map   (parse-maintainer-since-strings roles)
           ;; Resolve each email to {display, since} then deduplicate by display name
           raw-entries (mapv (fn [email]
                               {:display (or (contributor-name db source-name email) email)

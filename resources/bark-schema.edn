@@ -73,11 +73,15 @@
                           :db/unique    :db.unique/identity}
  :meta/last-modified     {:db/valueType :db.type/instant}
  :meta/last-export       {:db/valueType :db.type/instant}
- :report/votes-up        {:db/valueType :db.type/long}
- :report/votes-down      {:db/valueType :db.type/long}
- :report/votes-null      {:db/valueType :db.type/long}
- :report/voters          {:db/valueType   :db.type/string
-                          :db/cardinality :db.cardinality/many}
+
+ ;; --- Votes (one entity per voter per report) ---
+ :vote/key               {:db/valueType :db.type/string
+                          :db/unique    :db.unique/identity}  ;; "report-mid:voter-addr"
+ :vote/report            {:db/valueType :db.type/ref}
+ :vote/email             {:db/valueType :db.type/ref}
+ :vote/value             {:db/valueType :db.type/keyword}     ;; :up :down :null
+ :vote/voter             {:db/valueType :db.type/string}
+
  :report/series          {:db/valueType :db.type/ref}
  :report/related         {:db/valueType   :db.type/ref
                           :db/cardinality :db.cardinality/many}

@@ -9,19 +9,28 @@
             [taoensso.timbre :as log]
             [bark.common :as common]
             [bark.tracking :as tracking])
-  (:import [java.text SimpleDateFormat]
-           [java.util Date TimeZone]))
+  (:import [java.util Date]))
 
 ;; ---------------------------------------------------------------------------
 ;; Role queries and checks (pure, given a roles map)
 ;; ---------------------------------------------------------------------------
 
-;; Pure checks are defined in bark.common. Re-export for callers
-;; that already use the roles/ prefix.
-(def admin?              common/admin?)
-(def maintainer?         common/maintainer?)
-(def admin-or-maintainer? common/admin-or-maintainer?)
-(def ignored?            common/ignored?)
+;; Pure checks are defined in bark.common (no datalevin dependency).
+;; These re-exports are the canonical entry points for all callers
+;; outside bark.common — prefer roles/admin? over common/admin? etc.
+(def admin?
+  "True if addr is the admin for this source. Canonical entry point."
+  common/admin?)
+(def maintainer?
+  "True if addr is a maintainer. 2-arity ignores temporal constraints,
+  3-arity checks maintainer-since dates. Canonical entry point."
+  common/maintainer?)
+(def admin-or-maintainer?
+  "True if addr is admin or maintainer. Canonical entry point."
+  common/admin-or-maintainer?)
+(def ignored?
+  "True if addr is on the ignored list. Canonical entry point."
+  common/ignored?)
 
 ;; ---------------------------------------------------------------------------
 ;; Role DB operations
@@ -114,9 +123,7 @@
           entries  (common/ensure-set (:roles/maintainer-since roles))
           date-str (when date
                      (if (string? date) date
-                         (.format (doto (SimpleDateFormat. "yyyy-MM-dd")
-                                   (.setTimeZone (TimeZone/getTimeZone "UTC")))
-                                  date)))]
+                         (common/format-date-iso date)))]
       (doseq [addr addresses]
         (let [target   (when date-str (str (str/lower-case addr) ":" date-str))
               prefix   (str (str/lower-case addr) ":")

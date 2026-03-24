@@ -90,6 +90,25 @@
 ;; Expiry engine
 ;; ---------------------------------------------------------------------------
 
+(defn- find-or-create-expiry-email!
+  "Look up or create the synthetic email entity for an expiry event.
+  Uses a fresh (d/db conn) — NOT the read-only snapshot — so that
+  re-runs within the same reduce are idempotent (they see earlier inserts)."
+  [conn src report-mid now]
+  (let [synth-mid (str "<bark-expired-" report-mid ">")]
+    (or (d/q '[:find ?e . :in $ ?mid
+               :where [?e :email/message-id ?mid]]
+             (d/db conn) synth-mid)
+        (let [tempid -1
+              tx (d/transact!
+                  conn [{:db/id          tempid
+                         :email/message-id   synth-mid
+                         :email/from-address "bark-system"
+                         :email/source       src
+                         :email/date-sent    now
+                         :email/subject      (str "Auto-expired: " report-mid)}])]
+          (get (:tempids tx) tempid)))))
+
 (defn expire-reports!
   "Close open reports whose age and state match the :expiry rules for
   their source. Sets :report/close-reason to :expired."
@@ -103,8 +122,9 @@
                           [?e :email/date-sent ?date]
                           (not [?r :report/closed _])]
                         (d/db conn))
-        ;; Single snapshot for all read-only checks (report state, OP-answered, etc.)
-        ;; Synthetic email existence uses a fresh db for idempotency on re-runs.
+        ;; Immutable snapshot for all read-only checks (report state, OP-answered, etc.)
+        ;; Write operations (find-or-create-expiry-email!) deliberately use (d/db conn)
+        ;; to see their own prior inserts within this reduce.
         db-snap (d/db conn)
         expired (reduce
                  (fn [n [rid rtype src date-sent]]
@@ -117,19 +137,7 @@
                            (let [report-mid (d/q '[:find ?mid . :in $ ?r
                                                    :where [?r :report/message-id ?mid]]
                                                  db-snap rid)
-                                 synth-mid  (str "<bark-expired-" report-mid ">")
-                                 synth-eid  (or (d/q '[:find ?e . :in $ ?mid
-                                                       :where [?e :email/message-id ?mid]]
-                                                     (d/db conn) synth-mid)
-                                                (let [tempid -1
-                                                      tx (d/transact!
-                                                          conn [{:db/id          tempid
-                                                                 :email/message-id   synth-mid
-                                                                 :email/from-address "bark-system"
-                                                                 :email/source       src
-                                                                 :email/date-sent    now
-                                                                 :email/subject      (str "Auto-expired: " report-mid)}])]
-                                                  (get (:tempids tx) tempid)))]
+                                 synth-eid  (find-or-create-expiry-email! conn src report-mid now)]
                              (d/transact! conn [[:db/add rid :report/closed synth-eid]
                                                 [:db/add rid :report/close-reason :expired]])
                              (tracking/bump-report-updated! conn rid)

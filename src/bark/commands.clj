@@ -10,8 +10,8 @@
             [bark.common :as common]
             [bark.tracking :as tracking]
             [bark.roles :as roles])
-  (:import [java.text SimpleDateFormat]
-           [java.util Date TimeZone]))
+  (:import [java.time LocalDate ZoneOffset]
+           [java.util Date]))
 
 ;; ---------------------------------------------------------------------------
 ;; Trailing punctuation
@@ -132,9 +132,7 @@
 
 (defn- parse-date-iso [s]
   (try
-    (let [fmt (SimpleDateFormat. "yyyy-MM-dd")]
-      (.setTimeZone fmt (TimeZone/getTimeZone "UTC"))
-      (.parse fmt s))
+    (Date/from (.toInstant (.atStartOfDay (LocalDate/parse s) ZoneOffset/UTC)))
     (catch Exception _ nil)))
 
 (defn- match-triggers [triggers body-text]
@@ -145,6 +143,10 @@
     (let [compiled  (:compiled source-commands)
           overrides (:overrides source-commands)
           all-sets  (match-triggers compiled body-text)
+          ;; Pre-compute close-reason from unfiltered triggers so it survives
+          ;; any future refactoring of the filter step.
+          reason   (when (:report/closed all-sets)
+                     (detect-close-reason (get-in source-commands [:words :closed]) body-text))
           filtered (into {}
                          (keep (fn [[attr :as entry]]
                                  (let [cmd (attr->trigger-cmd attr)
@@ -152,9 +154,10 @@
                                                (:report-types cmd))]
                                    (when (or (nil? rt) (contains? rt report-type)) entry))))
                          all-sets)
-          reason   (when (:report/closed filtered)
-                     (detect-close-reason (get-in source-commands [:words :closed]) body-text))
-          result   (cond-> filtered reason (assoc :report/close-reason reason))]
+          ;; Only attach close-reason when :report/closed survived filtering.
+          result   (cond-> filtered
+                     (and reason (:report/closed filtered))
+                     (assoc :report/close-reason reason))]
       (when (seq result) result))))
 
 (defn detect-directives
@@ -241,24 +244,29 @@
       :mailing-list (some? (common/get-header hdrs "List-Id"))
       :alias        (some? (common/original-recipient hdrs))
       :mailbox      true
-      ;; unknown source type — allow
-      true)))
+      ;; Unknown source type — deny by default and warn.
+      (do (log/warn "Vote on unknown source-type" (:source-type source-cfg) "— denying")
+          false))))
 
 (defn- apply-vote! [conn report-eid from-addr body-text email source-cfg]
   (when-let [vote (detect-vote body-text)]
     (if-not (vote-allowed? email source-cfg)
       (log/info "Vote ignored (private email on public source)" from-addr)
-      (let [db      (d/db conn)
-            current (d/pull db [:report/voters :report/votes-up :report/votes-down
-                                :report/votes-null] report-eid)
-            voters  (set (:report/voters current))]
-        (when-not (contains? voters from-addr)
-          (let [attr (case vote :up :report/votes-up :down :report/votes-down :report/votes-null)
-                n    (or (get current attr) 0)]
-            (d/transact! conn [[:db/add report-eid attr (inc n)]
-                               [:db/add report-eid :report/voters from-addr]])
-            (tracking/bump-report-updated! conn report-eid)
-            (log/info "Vote" (case vote :up "+1" :down "-1" "0") "by" from-addr)))))))
+      (let [report-mid (d/q '[:find ?mid . :in $ ?r :where [?r :report/message-id ?mid]]
+                            (d/db conn) report-eid)
+            vote-key   (str report-mid ":" from-addr)]
+        ;; :vote/key has :db.unique/identity — if this voter already voted,
+        ;; the upsert overwrites silently (first vote wins in practice,
+        ;; since we only transact when key is new).
+        (when-not (d/q '[:find ?v . :in $ ?k :where [?v :vote/key ?k]]
+                       (d/db conn) vote-key)
+          (d/transact! conn [{:vote/key    vote-key
+                              :vote/report report-eid
+                              :vote/email  (:db/id email)
+                              :vote/value  vote
+                              :vote/voter  from-addr}])
+          (tracking/bump-report-updated! conn report-eid)
+          (log/info "Vote" (case vote :up "+1" :down "-1" "0") "by" from-addr))))))
 
 (defn- build-unset-tx
   "Build retraction datoms for unsetting attributes and their proxies."
@@ -272,8 +280,9 @@
                       proxy-cur (conj [:db/retract report-eid (proxy-attrs attr) (ref-eid proxy-cur)])))))
         attrs))
 
-(defn- build-set-tx
-  "Build assertion datoms for setting attributes via proxy directives."
+(defn- build-directive-set-tx
+  "Build assertion datoms for setting attributes via proxy directives.
+  Creates synthetic emails and sets both the attribute and its -proxy counterpart."
   [conn report-eid report-mid email-eid set-map]
   (into []
         (mapcat (fn [[attr addr]]
@@ -305,21 +314,23 @@
                           directives)]
     (when (seq permitted)
       (let [db      (d/db conn)
-            {:keys [set unset deadline undeadline? topic superseded-by]}
+            {:keys [set unset deadline undeadline? topic superseded-by unsuperseded?]}
             (resolve-commands permitted)
             report-mid (d/q '[:find ?mid . :in $ ?r :where [?r :report/message-id ?mid]] db report-eid)
             current    (d/pull db
                                (into state-attrs [:report/deadline :report/close-reason
+                                                  :report/superseded-by
                                                   :report/closed-proxy :report/acked-proxy
                                                   :report/owned-proxy :report/urgent-proxy
                                                   :report/important-proxy])
                                report-eid)
+            ;; Resolve superseded-by message-id to a report entity
             target-eid (when superseded-by
                          (d/q '[:find ?r . :in $ ?mid
                                 :where [?r :report/message-id ?mid]]
                               db superseded-by))
             all-tx (-> []
-                       (into (build-set-tx conn report-eid report-mid email-eid set))
+                       (into (build-directive-set-tx conn report-eid report-mid email-eid set))
                        (cond-> (contains? set :report/closed)
                          (conj [:db/add report-eid :report/close-reason :resolved]))
                        (into (build-unset-tx report-eid current unset))
@@ -331,15 +342,27 @@
                          (conj [:db/retract report-eid :report/deadline (:report/deadline current)]))
                        (cond-> topic
                          (conj [:db/add report-eid :report/topic topic]))
+                       ;; Supersede: set ref, close with reason, link related
                        (cond-> target-eid
                          (into [[:db/add report-eid :report/superseded-by target-eid]
                                 [:db/add report-eid :report/closed email-eid]
                                 [:db/add report-eid :report/close-reason :superseded]
                                 [:db/add report-eid :report/related target-eid]
-                                [:db/add target-eid :report/related report-eid]])))]
+                                [:db/add target-eid :report/related report-eid]]))
+                       ;; Unsupersede: retract ref, reopen, clear reason
+                       (cond-> (and unsuperseded? (:report/superseded-by current))
+                         (into (cond-> [[:db/retract report-eid :report/superseded-by
+                                         (ref-eid (:report/superseded-by current))]]
+                                 (:report/closed current)
+                                 (conj [:db/retract report-eid :report/closed
+                                        (ref-eid (:report/closed current))])
+                                 (:report/close-reason current)
+                                 (conj [:db/retract report-eid :report/close-reason
+                                        (:report/close-reason current)])))))]
         (when (seq all-tx)
           (d/transact! conn all-tx)
           (tracking/bump-report-updated! conn report-eid)
+          ;; Also bump the target report if we linked it
           (when target-eid (tracking/bump-report-updated! conn target-eid))
           (log/info "Commands:"
                     (str/join ", " (concat (map (fn [[attr addr]] (str (name attr) " -> " addr)) set)
@@ -347,13 +370,16 @@
                                            (when deadline [(str "deadline " deadline)])
                                            (when undeadline? ["undeadline"])
                                            (when topic [(str "topic:" topic)])
-                                           (when target-eid [(str "superseded-by:" superseded-by)])))
+                                           (when target-eid [(str "superseded-by:" superseded-by)])
+                                           (when (and unsuperseded? (:report/superseded-by current))
+                                             ["unsuperseded"])))
                     (str "(proxy by " from-addr ")")))
+        ;; Warn if message-id didn't resolve
         (when (and superseded-by (nil? target-eid))
           (log/warn "Superseded-by: unknown message-id" superseded-by))))))
 
-(defn- try-reopen!
-  "If a closed report has an Unclosed or Unsuperseded directive, reopen it."
+(defn- try-unclosed!
+  "If a closed report has an Unclosed or Unsuperseded directive, retract the closure."
   [conn report-eid directives is-maintainer? from-addr]
   (let [permitted (filter (fn [{:keys [action scope]}]
                             (and (#{:unset :unset-superseded} action)
@@ -412,6 +438,6 @@
         (apply-vote! conn report-eid from-addr body-text email source-cfg))
 
       (if closed?
-        (try-reopen! conn report-eid directives is-maint? from-addr)
+        (try-unclosed! conn report-eid directives is-maint? from-addr)
         (do (apply-triggers! conn report-eid trig-result eid (:email/message-id email))
             (apply-directives! conn report-eid directives eid from-addr is-maint?))))))

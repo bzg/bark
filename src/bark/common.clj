@@ -9,10 +9,11 @@
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [taoensso.timbre :as log])
-  (:import [java.text Normalizer Normalizer$Form SimpleDateFormat]
+  (:import [java.text Normalizer Normalizer$Form]
            [java.security MessageDigest]
-           [java.time LocalDate ZoneOffset]
-           [java.util Date TimeZone]))
+           [java.time LocalDate ZoneId ZoneOffset]
+           [java.time.format DateTimeFormatter]
+           [java.util Date]))
 
 ;; ---------------------------------------------------------------------------
 ;; Constants
@@ -74,24 +75,26 @@
 ;; Date formatting
 ;; ---------------------------------------------------------------------------
 
-(defn format-date
-  "Format a date as 'yyyy-MM-dd HH:mm' in UTC."
-  [date]
-  (when date
-    (.format (doto (SimpleDateFormat. "yyyy-MM-dd HH:mm")
-               (.setTimeZone (TimeZone/getTimeZone "UTC")))
-             date)))
+;; Thread-safe formatters (DateTimeFormatter is immutable and safe to share).
+(def ^:private datetime-fmt
+  (-> (DateTimeFormatter/ofPattern "yyyy-MM-dd HH:mm")
+      (.withZone (ZoneId/of "UTC"))))
 
-(defn- iso-date-formatter
-  "Create a yyyy-MM-dd formatter in UTC."
-  ^SimpleDateFormat []
-  (doto (SimpleDateFormat. "yyyy-MM-dd")
-    (.setTimeZone (TimeZone/getTimeZone "UTC"))))
+(def ^:private date-iso-fmt
+  (-> (DateTimeFormatter/ofPattern "yyyy-MM-dd")
+      (.withZone (ZoneId/of "UTC"))))
+
+(defn format-date
+  "Format a java.util.Date as 'yyyy-MM-dd HH:mm' in UTC."
+  [^Date date]
+  (when date
+    (.format datetime-fmt (.toInstant date))))
 
 (defn format-date-iso
-  "Format a java.util.Date as yyyy-MM-dd."
-  [date]
-  (when date (.format (iso-date-formatter) date)))
+  "Format a java.util.Date as yyyy-MM-dd in UTC."
+  [^Date date]
+  (when date
+    (.format date-iso-fmt (.toInstant date))))
 
 (defn days-between
   "Number of whole days between two Dates (absolute)."
@@ -209,6 +212,16 @@
                   distinct)]
     (> (count vals) 1)))
 
+(defn- original-recipient-not-in-to-cc?
+  "True when the original recipient address appears in neither To nor Cc."
+  [hdrs]
+  (let [orig (some-> (original-recipient hdrs) str/lower-case)
+        to   (some-> (get-header hdrs "To") str/lower-case)
+        cc   (some-> (get-header hdrs "Cc") str/lower-case)]
+    (boolean (and orig
+                  (not (some-> to (str/includes? orig)))
+                  (not (some-> cc (str/includes? orig)))))))
+
 (defn classify-delivery
   "Heuristic: returns :list, :alias, or :direct based on email headers."
   [headers-edn]
@@ -220,13 +233,7 @@
       :list
 
       ;; 2a. Original recipient not in To/Cc → alias
-      ;; (the let-when form is the cond test; :alias below is the result)
-      (let [orig (some-> (original-recipient hdrs) str/lower-case)
-            to   (some-> (get-header hdrs "To") str/lower-case)
-            cc   (some-> (get-header hdrs "Cc") str/lower-case)]
-        (boolean (and orig
-                      (not (some-> to (str/includes? orig)))
-                      (not (some-> cc (str/includes? orig))))))
+      (original-recipient-not-in-to-cc? hdrs)
       :alias
 
       ;; 2b. Multiple distinct Delivered-To → alias
@@ -347,9 +354,10 @@
 ;; Maintainer-since parsing
 ;; ---------------------------------------------------------------------------
 
-(defn parse-maintainer-since-entries
+(defn parse-maintainer-since-strings
   "Parse :roles/maintainer-since entries (\"email:yyyy-MM-dd\") into a map
-  of lower-cased email -> date-string."
+  of lower-cased email -> date-string (e.g. {\"alice@co\" \"2025-01-01\"}).
+  See also `parse-maintainer-since-dates` for the Date-valued variant."
   [roles]
   (let [entries (let [v (:roles/maintainer-since roles)]
                   (cond (nil? v) #{} (string? v) #{v} :else (set v)))]
@@ -359,6 +367,11 @@
                     (when (and idx (pos? idx))
                       [(subs entry 0 idx) (subs entry (inc idx))]))))
           entries)))
+
+;; Backward-compat alias — scripts still import the old name.
+(def parse-maintainer-since-entries
+  "Deprecated: use `parse-maintainer-since-strings` instead."
+  parse-maintainer-since-strings)
 
 ;; ---------------------------------------------------------------------------
 ;; Role checks (pure — operate on a roles map, no DB access)
@@ -376,13 +389,15 @@
        (= (str/lower-case (:roles/admin roles))
           (str/lower-case addr))))
 
-(defn- parse-maintainer-since [roles]
+(defn- parse-maintainer-since-dates
+  "Like `parse-maintainer-since-strings` but values are java.util.Date objects."
+  [roles]
   (into {}
         (keep (fn [[email date-str]]
                 (try [email (Date/from (.toInstant (.atStartOfDay (LocalDate/parse date-str)
                                                                   ZoneOffset/UTC)))]
                      (catch Exception _ nil))))
-        (parse-maintainer-since-entries roles)))
+        (parse-maintainer-since-strings roles)))
 
 (defn maintainer?
   ([roles addr]
@@ -391,7 +406,7 @@
    (and addr
         (has-role? roles :roles/maintainers addr)
         (if as-of
-          (let [since (get (parse-maintainer-since roles) (str/lower-case addr))]
+          (let [since (get (parse-maintainer-since-dates roles) (str/lower-case addr))]
             (or (nil? since) (not (.before ^Date as-of since))))
           true))))
 
@@ -483,7 +498,6 @@
     {:report/important-proxy [:email/from-address]}
     :report/close-reason
     {:report/superseded-by [:report/message-id {:report/email [:email/subject]}]}
-    :report/votes-up :report/votes-down :report/votes-null
     :report/deadline :report/descendants :report/digested-at :report/updated-at
     {:report/related [:report/type :report/message-id
                       {:report/email [:email/headers-edn]}]}
@@ -497,28 +511,85 @@
                     :email/headers-edn]}])
 
 ;; ---------------------------------------------------------------------------
+;; Vote helpers (pure — no datalevin dependency)
+;; ---------------------------------------------------------------------------
+
+(defn votes-by-report
+  "Group raw vote tuples into {report-eid [{:value :up :voter \"a@b\" :email-mid \"<…>\"} …]}.
+  Expects tuples of [report-eid value voter email-mid], e.g. from a Datalog query."
+  [vote-tuples]
+  (reduce (fn [acc [r val voter emid]]
+            (update acc r (fnil conj []) {:value val :voter voter :email-mid emid}))
+          {}
+          vote-tuples))
+
+(defn vote-counts
+  "Derive {:up n :down n :null n} from a seq of vote maps."
+  [votes]
+  (reduce (fn [acc {:keys [value]}]
+            (update acc value (fnil inc 0)))
+          {:up 0 :down 0 :null 0}
+          votes))
+
+;; ---------------------------------------------------------------------------
 ;; CLI arg parsing
 ;; ---------------------------------------------------------------------------
+
+(defn- flag-like?
+  "True if token starts with '-' (looks like a flag rather than a value)."
+  [s]
+  (and s (str/starts-with? s "-")))
+
+(defn- check-flag-value
+  "Validate that flag `a` has a proper value `v`.
+  Returns :ok, :missing, or :flag-as-value."
+  [a v]
+  (cond
+    (nil? v)       (do (log/warn "Flag" a "requires a value") :missing)
+    (flag-like? v) (do (log/warn "Flag" a "followed by flag" v "— missing value?") :flag-as-value)
+    :else          :ok))
 
 (defn parse-cli-args
   "Parse common CLI flags into a map.
   Recognises: -o/--output, -n/--source, -p/--min-priority, -s/--min-status,
   --json, --dir, --force, --only-open, --theme.
-  Any leading non-flag token is captured as :format."
+  Any leading non-flag token is captured as :format.
+  Warns when a valued flag is missing its argument or followed by another flag."
   [args]
   (loop [opts {} [a & [v & r :as more]] args]
     (cond
       (nil? a)                        opts
       (#{"--force"} a)                (recur (assoc opts :force-all? true) more)
       (#{"--only-open"} a)            (recur (assoc opts :only-open? true) more)
-      (#{"-o" "--output"} a)          (if v (recur (assoc opts :out-file v) r) opts)
-      (#{"-n" "--source"} a)          (if v (recur (assoc opts :source-name v) r) opts)
-      (#{"--json"} a)                 (if v (recur (assoc opts :json-file v) r) opts)
-      (#{"--dir"} a)                  (if v (recur (assoc opts :out-dir v) r) opts)
-      (#{"--theme"} a)                (if v (recur (assoc opts :theme v) r) opts)
-      (#{"-p" "--min-priority"} a)    (if v (recur (assoc opts :min-priority (parse-long v)) r) opts)
-      (#{"-s" "--min-status"} a)      (if v (recur (assoc opts :min-status (parse-long v)) r) opts)
+      (#{"-o" "--output"} a)          (case (check-flag-value a v)
+                                        :ok             (recur (assoc opts :out-file v) r)
+                                        :flag-as-value  (recur opts more)
+                                        :missing        opts)
+      (#{"-n" "--source"} a)          (case (check-flag-value a v)
+                                        :ok             (recur (assoc opts :source-name v) r)
+                                        :flag-as-value  (recur opts more)
+                                        :missing        opts)
+      (#{"--json"} a)                 (case (check-flag-value a v)
+                                        :ok             (recur (assoc opts :json-file v) r)
+                                        :flag-as-value  (recur opts more)
+                                        :missing        opts)
+      (#{"--dir"} a)                  (case (check-flag-value a v)
+                                        :ok             (recur (assoc opts :out-dir v) r)
+                                        :flag-as-value  (recur opts more)
+                                        :missing        opts)
+      (#{"--theme"} a)                (case (check-flag-value a v)
+                                        :ok             (recur (assoc opts :theme v) r)
+                                        :flag-as-value  (recur opts more)
+                                        :missing        opts)
+      (#{"-p" "--min-priority"} a)    (case (check-flag-value a v)
+                                        :ok             (recur (assoc opts :min-priority (parse-long v)) r)
+                                        :flag-as-value  (recur opts more)
+                                        :missing        opts)
+      (#{"-s" "--min-status"} a)      (case (check-flag-value a v)
+                                        :ok             (recur (assoc opts :min-status (parse-long v)) r)
+                                        :flag-as-value  (recur opts more)
+                                        :missing        opts)
       (not (:format opts))            (recur (assoc opts :format a) more)
-      :else                           (do (when (str/starts-with? a "-")
+      :else                           (do (when (flag-like? a)
                                                 (log/debug "Ignoring unrecognized flag:" a))
                                           (recur opts more)))))

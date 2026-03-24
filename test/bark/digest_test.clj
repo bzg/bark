@@ -39,7 +39,6 @@
             {:report/closed-proxy [:email/from-address]}
             {:report/urgent-proxy [:email/from-address]}
             {:report/important-proxy [:email/from-address]}
-            :report/votes-up :report/votes-down :report/votes-null :report/voters
             {:report/descendants [:email/message-id]}
             {:report/related [:report/type :report/message-id]}
             {:report/series [:series/id :series/expected :series/closed
@@ -52,6 +51,18 @@
 (defn- report-exists? [db message-id]
   (some? (d/q '[:find ?r . :in $ ?mid :where [?r :report/message-id ?mid]]
               db message-id)))
+
+(defn- get-votes
+  "Return all votes for a report as a seq of {:value :voter} maps."
+  [db message-id]
+  (let [rid (d/q '[:find ?r . :in $ ?mid :where [?r :report/message-id ?mid]]
+                 db message-id)]
+    (when rid
+      (mapv (fn [[val voter]]
+              {:value val :voter voter})
+            (d/q '[:find ?val ?voter :in $ ?r
+                   :where [?v :vote/report ?r] [?v :vote/value ?val] [?v :vote/voter ?voter]]
+                 db rid)))))
 
 (defn- get-series-by-id [db sid]
   (when-let [eid (d/q '[:find ?s . :in $ ?sid :where [?s :series/id ?sid]] db sid)]
@@ -223,11 +234,14 @@
 
         ;; --- POLL 11 votes ---
         (testing "POLL 11 votes"
-          (let [r (get-report db "<11@test.org>")]
+          (let [r     (get-report db "<11@test.org>")
+                votes (get-votes db "<11@test.org>")]
             (is (= :request (:report/type r)))
-            (is (= 1 (:report/votes-up r)))
-            (is (= 1 (:report/votes-down r)))
-            (is (= 2 (count (:report/voters r))))
+            (is (= 2 (count votes)))
+            (is (= 1 (count (filter #(= :up (:value %)) votes))))
+            (is (= 1 (count (filter #(= :down (:value %)) votes))))
+            (is (= #{"voter1@test.org" "voter2@test.org"}
+                   (set (map :voter votes))))
             (is (= 3 (count (:report/descendants r))))))
 
         ;; --- TODO 15 request lifecycle ---
@@ -477,13 +491,14 @@
 
         ;; --- POLL 75 vote variants ---
         (testing "POLL 75 vote format variants"
-          (let [r (get-report db "<75@test.org>")]
+          (let [r     (get-report db "<75@test.org>")
+                votes (get-votes db "<75@test.org>")]
             (is (= :request (:report/type r)))
-            (is (= 2 (:report/votes-up r)))
-            (is (= 1 (:report/votes-down r)))
-            (is (= 1 (:report/votes-null r)))
-            (is (= 4 (count (:report/voters r))))
-            (is (not (contains? (set (:report/voters r)) "admin@test.org")))))
+            (is (= 4 (count votes)))
+            (is (= 2 (count (filter #(= :up (:value %)) votes))))
+            (is (= 1 (count (filter #(= :down (:value %)) votes))))
+            (is (= 1 (count (filter #(= :null (:value %)) votes))))
+            (is (not (contains? (set (map :voter votes)) "admin@test.org")))))
 
         ;; --- Directive unit tests ---
         (testing "detect-directives"

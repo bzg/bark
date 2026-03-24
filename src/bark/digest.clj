@@ -34,7 +34,9 @@
 ;; ---------------------------------------------------------------------------
 
 (defn ancestor-mids
-  "Return an ordered vector of ancestor message-ids, nearest last."
+  "Return an ordered vector of ancestor message-ids from the References
+  and In-Reply-To headers.  Order follows RFC 2822: root thread ancestor
+  first, immediate parent last (suitable for `rseq` to walk nearest-first)."
   [email]
   (let [raw  (:email/references email)
         refs (if (string? raw) (re-seq #"<[^>]+>" raw) [])
@@ -157,7 +159,7 @@
                                    (str/lower-case (or (:report/topic r) ""))))))
               (d/transact! conn [{:db/id rid
                                   :report/closed email-eid
-                                  :report/close-reason :canceled}])
+                                  :report/close-reason :superseded}])
               (tracking/bump-report-updated! conn rid)
               (log/info "Auto-closed [PATCH" prev-version
                         (or (:report/topic r) "") "]"
@@ -192,7 +194,7 @@
                           (let [lc (str/lower-case bark-src)]
                             (some (fn [[k _]] (when (= (str/lower-case k) lc) k))
                                   source-map)))]
-          (when (and (common/maintainer? rroles from-addr)
+          (when (and (roles/maintainer? rroles from-addr)
                      (or (common/get-header headers "X-Bark-Source")
                          known-src))
             candidate-src))
@@ -278,8 +280,9 @@
     (if-not source-name
       (log/debug "No matching source for" message-id "— skipping")
       (let [source-cfg (get source-map source-name)
-            db         (d/db conn)
-            rroles     (roles/get-roles db source-name)]
+            ;; Snapshot for initial permission checks. Will be refreshed after
+            ;; mutations (role controls, report creation) that change DB state.
+            rroles     (roles/get-roles (d/db conn) source-name)]
         ;; Check ignored
         (if (and from-addr (roles/ignored? rroles from-addr))
           (log/debug "Ignored" from-addr "—" (:email/subject email))
@@ -292,8 +295,9 @@
                                             body-text (:email/date-sent email))
                 (roles/apply-notify-controls! conn rroles source-name from-addr body-text)))
 
-            ;; Detect & create report
-            (let [subj-patterns (detect/resolve-labels (or source-cfg {}))
+            ;; Re-fetch roles after role controls may have mutated them.
+            (let [rroles (roles/get-roles (d/db conn) source-name)
+                  subj-patterns (detect/resolve-labels (or source-cfg {}))
                   allowed-types (:report-types source-cfg)
                   report-info   (detect/detect-report email subj-patterns allowed-types)
                   permitted?    (and report-info from-addr
@@ -320,8 +324,11 @@
                 (when (seq parent-eids)
                   (doseq [rid parent-eids]
                     (add-descendant! conn rid eid))
-                  (ensure-contributor! conn source-name from-addr
-                                       (:email/from-name email) (:email/date-sent email))
+                  ;; Only call ensure-contributor! if we didn't already do it
+                  ;; during report creation above (avoids a redundant DB query).
+                  (when-not new-report?
+                    (ensure-contributor! conn source-name from-addr
+                                         (:email/from-name email) (:email/date-sent email)))
                   (doseq [rid nearest-eids]
                     (when-let [rtype (d/q '[:find ?t . :in $ ?r :where [?r :report/type ?t]]
                                           (d/db conn) rid)]

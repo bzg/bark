@@ -133,9 +133,15 @@
         (:topic from-subject)     (assoc :topic (:topic from-subject))))))
 
 (defn detect-report
-  "Detect report type from an email.  Attachment or inline patches always
-  win over subject tags (e.g. [BUG] [PATCH] with an attached .patch → patch).
-  Otherwise walks detection-table in order; first matching subject tag wins."
+  "Detect report type from an email.
+
+  Priority rules:
+    1. Attachment or inline patch content ALWAYS wins, even if the subject
+       carries another tag like [BUG].  A [BUG]-tagged email with a .patch
+       attachment becomes a :patch report, not a :bug.
+    2. Otherwise walks detection-table in order; first matching subject tag wins.
+
+  Returns a report-info map or nil."
   ([email] (detect-report email default-compiled-labels nil))
   ([email patterns] (detect-report email patterns nil))
   ([email patterns allowed-types]

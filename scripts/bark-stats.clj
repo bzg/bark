@@ -22,6 +22,7 @@
          format-date format-date-iso parse-cli-args load-config
          pico-cdn theme-cdns set-theme! bark-description bark-repo-url footer-css
          bark-footer wrap-js spit-html theme-toggle-js bark-schema
+         votes-by-report vote-counts
          nav-bar theme-toggle-btn html-head org-inline-links)
 
 (load-file "scripts/bark-common.clj")
@@ -279,17 +280,18 @@
                             resolved (- (count rs) canceled expired)]
                         [t {:canceled canceled :expired expired :resolved resolved}])))))))
 
-(defn vote-leaders [reports n]
+(defn vote-leaders [reports all-votes n]
   (->> reports
-       (filter #(pos? (+ (or (:report/votes-up %) 0)
-                         (or (:report/votes-down %) 0)
-                         (or (:report/votes-null %) 0))))
-       (map (fn [r] {:message-id (:report/message-id r)
-                     :topic      (get-in r [:report/email :email/subject])
-                     :votes-up   (or (:report/votes-up r) 0)
-                     :votes-down (or (:report/votes-down r) 0)
-                     :votes-null (or (:report/votes-null r) 0)
-                     :score      (- (or (:report/votes-up r) 0) (or (:report/votes-down r) 0))}))
+       (keep (fn [r]
+               (when-let [votes (seq (get all-votes (:db/id r)))]
+                 (let [{:keys [up down null]} (vote-counts votes)]
+                   (when (pos? (+ up down null))
+                     {:message-id (:report/message-id r)
+                      :topic      (get-in r [:report/email :email/subject])
+                      :votes-up   up
+                      :votes-down down
+                      :votes-null null
+                      :score      (- up down)})))))
        (sort-by :score >) (take n)))
 
 (defn compute-stats
@@ -301,7 +303,18 @@
          contributors  (when db (all-contributors db))
          n-maintainers (when db (total-maintainers db))
          maint-since   (when db (all-maintainer-since-dates db))
-         n-always      (when db (maintainers-without-since db))]
+         n-always      (when db (maintainers-without-since db))
+         all-votes     (if db
+                         (votes-by-report
+                          (d/q '[:find ?r ?val ?voter ?emid
+                                 :where
+                                 [?v :vote/report ?r]
+                                 [?v :vote/value  ?val]
+                                 [?v :vote/voter  ?voter]
+                                 [?v :vote/email  ?e]
+                                 [?e :email/message-id ?emid]]
+                               db))
+                         {})]
      (cond->
        {:generated-at      (str (java.util.Date.))
         :reports-per-type  (reports-per-type reports)
@@ -311,7 +324,7 @@
         :open-last-year    (count (remove :report/closed closable-yr))
         :total-last-year   (count last-year)
         :top-openers       (top-openers reports 10)
-        :vote-leaders      (vote-leaders reports 10)
+        :vote-leaders      (vote-leaders reports all-votes 10)
         :closed-cancel     (closed-cancel-breakdown reports)}
        total-emails  (assoc :email-ratio (email-vs-reports-ratio reports total-emails))
        contributors  (assoc :contributors-by-month (contributors-by-month contributors)
