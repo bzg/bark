@@ -79,8 +79,10 @@
 ;; ---------------------------------------------------------------------------
 
 (defn all-reports-by-date [db]
-  (sort-by #(get-in % [:report/email :email/date-sent]) #(compare %2 %1)
-           (all-reports db)))
+  (let [epoch (java.util.Date. 0)]
+    (sort-by #(or (get-in % [:report/email :email/date-sent]) epoch)
+             #(compare %2 %1)
+             (all-reports db))))
 
 ;; ---------------------------------------------------------------------------
 ;; Formatting helpers
