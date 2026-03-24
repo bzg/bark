@@ -333,21 +333,7 @@
           :encoding encoding}
          extra))
 
-(def stats-css (str "
-   main.container { max-width: 1600px; }
-  .kpis { display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 1rem; }
-  .kpi  { border: 1px solid var(--pico-muted-border-color); border-radius: var(--pico-border-radius);
-          padding: 0.9rem 1.3rem; min-width: 130px; flex: 1 1 130px; }
-  .kpi-v { font-size: 1.9rem; font-weight: 700; color: var(--pico-primary); }
-  .kpi-l { font-size: 0.75rem; color: var(--pico-muted-color); margin-top: 0.2rem; }
-  .kpi-s { font-size: 0.7rem;  color: var(--pico-muted-color); opacity: 0.7; margin-top: 0.1rem; }
-  .grid  { display: grid; grid-template-columns: repeat(auto-fit, minmax(max(340px, calc(33.34% - 1rem)), 1fr)); gap: 1.2rem; }
-  .box   { border: 1px solid var(--pico-muted-border-color); border-radius: var(--pico-border-radius);
-           padding: 1rem; }
-  .chart { width: 100%; }
-  .meta  { font-size: 0.78rem; color: var(--pico-muted-color); margin-bottom: 2rem; }
-  .theme-toggle { cursor: pointer; background: none; border: none; font-size: 1.2rem; padding: 0.3rem; }
-" footer-css))
+(def stats-css (slurp "resources/bark-data.css"))
 
 (defn chart-div [id spec]
   (str "<div class=\"chart\" id=\"" id "\"></div>"
