@@ -475,9 +475,7 @@
 
 (defn report-descendant-count [report]
   (let [d (:report/descendants report)]
-    (cond (sequential? d) (count d)
-          (map? d)        1
-          :else           0)))
+    (if (coll? d) (count d) 0)))
 
 ;; ---------------------------------------------------------------------------
 ;; Canonical report pull pattern

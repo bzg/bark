@@ -175,9 +175,8 @@
                          (log/debug "  by subject-match" (pr-str subj-match) ":" (count by-subj)))
                        (when topic
                          (log/debug "  by topic" (pr-str topic) ":" (count by-topic))))
-        relevant   (sort-by (juxt #(- (report-priority %))
-                                  #(- (report-descendant-count %)))
-                            compare by-topic)
+        relevant   (sort-by (juxt report-priority report-descendant-count)
+                            #(compare %2 %1) by-topic)
         owned      (filter #(owned-by? % email) relevant)
         owned-dl   (->> owned
                         (filter :report/deadline)

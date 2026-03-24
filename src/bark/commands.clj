@@ -189,7 +189,10 @@
                           compiled-directives)))
             vec)))))
 
-(defn resolve-commands [directives]
+(defn resolve-commands
+  "Fold a seq of parsed directives into a summary map.
+  NOT for trigger results (which map attrs to `true`, not addresses)."
+  [directives]
   (reduce (fn [acc {:keys [action attr email-address date topic target-message-id]}]
             (case action
               :set   (-> acc (assoc-in [:set attr] email-address) (update :unset disj attr))
