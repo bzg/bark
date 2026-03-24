@@ -19,7 +19,7 @@
 
 ;; Forward-declared for clj-kondo (provided at runtime by load-file calls below).
 (declare parse-cli-args load-config
-         pico-cdn theme-cdn set-theme! bark-description bark-repo-url
+         pico-cdn theme-cdns set-theme! bark-description bark-repo-url
          footer-css bark-footer wrap-js
          theme-toggle-btn theme-toggle-js nav-bar)
 
@@ -304,8 +304,8 @@
         [:meta {:property "og:description" :content bark-description}]
         [:meta {:property "og:type" :content "website"}]
         [:link {:rel "stylesheet" :href pico-cdn}]
-        (when-let [tc (theme-cdn)]
-          [:link {:rel "stylesheet" :href tc}])
+        (for [url (theme-cdns)]
+          [:link {:rel "stylesheet" :href url}])
         (when has-rss?
           [:link {:rel "alternate" :type "application/rss+xml"
                   :title "BARK Reports RSS" :href rss-href}])

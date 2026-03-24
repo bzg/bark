@@ -45,7 +45,7 @@
          report-descendant-count all-reports report-pull-pattern
          parse-cli-args load-config build-source-map bark-schema bark-format
          get-last-modified changed-report-types-since
-         set-theme! resolve-theme-url
+         set-theme! resolve-theme-urls
          html-head footer-css bark-footer wrap-js theme-toggle-js bark-repo-url)
 
 (load-file "scripts/bark-common.clj")

@@ -20,7 +20,7 @@
 (declare load-datalevin-pod! all-reports report-pull-pattern
          report-priority report-status report-descendant-count
          format-date format-date-iso parse-cli-args load-config
-         pico-cdn theme-cdn set-theme! bark-description bark-repo-url footer-css
+         pico-cdn theme-cdns set-theme! bark-description bark-repo-url footer-css
          bark-footer wrap-js theme-toggle-js bark-schema
          nav-bar theme-toggle-btn html-head org-inline-links)
 
