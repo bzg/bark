@@ -67,8 +67,7 @@
   (->> (d/q '[:find (pull ?e [:notify/key :notify/source :notify/email
                               :notify/enabled :notify/interval-days
                               :notify/min-priority :notify/min-status
-                              :notify/subject-match :notify/topic
-                              :notify/last-sent])
+                              :notify/subject-match :notify/topic])
               :where [?e :notify/key _]]
             db)
        (map first)))
