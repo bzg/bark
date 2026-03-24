@@ -117,9 +117,22 @@
 ;; Atomic store+process
 ;; ---------------------------------------------------------------------------
 
+(defn- try-digest!
+  "Run process-email!, returning true on success."
+  [db-conn source-map sources email mid]
+  (try
+    (digest/process-email! db-conn source-map sources email)
+    true
+    (catch Exception e
+      (log/error e "Failed to digest email" mid
+                 (or (.getMessage e) (str (class e))))
+      false)))
+
 (defn- store-and-process!
   "Classify, store, and digest an email.
-  Returns true on success, false on skip or failure."
+  Returns true on success, false on skip or failure.
+  When an email was previously stored but not fully digested (e.g. crash
+  between store and digest), re-runs process-email! which is idempotent."
   [db-conn source-map sources msg {:keys [max-size]}]
   (let [size (:size msg -1)]
     (if (and max-size (pos? size) (> size max-size))
@@ -127,20 +140,25 @@
                     "size:" size (str "bytes (max: " max-size ")"))
           false)
       (if-let [src-name (digest/pre-classify-source (d/db db-conn) source-map sources msg)]
-        (if (ingest/store-email! db-conn msg)
-          (let [mid      (:message-id msg)
-                lookup   [:email/message-id mid]]
-            ;; Stamp the pre-classified source (lookup ref avoids re-query)
-            (d/transact! db-conn [{:db/id lookup :email/source src-name}])
+        (let [mid    (:message-id msg)
+              lookup [:email/message-id mid]]
+          (if (ingest/store-email! db-conn msg)
+            ;; Freshly stored — stamp source and digest.
+            (do (d/transact! db-conn [{:db/id lookup :email/source src-name}])
+                (try-digest! db-conn source-map sources
+                             (d/pull (d/db db-conn) digest/email-pull-pattern lookup) mid))
+            ;; Already stored (duplicate message-id or UID collision).
+            ;; Re-digest to recover from a prior crash during process-email!.
             (let [email (d/pull (d/db db-conn) digest/email-pull-pattern lookup)]
-              (try
-                (digest/process-email! db-conn source-map sources email)
-                true
-                (catch Exception e
-                  (log/error e "Failed to digest email" mid
-                             (or (.getMessage e) (str (class e))))
-                  false))))
-          false)
+              (if (:db/id email)
+                (do (log/info "Re-processing previously stored email:" mid)
+                    (when-not (:email/source email)
+                      (d/transact! db-conn [{:db/id lookup :email/source src-name}]))
+                    (try-digest! db-conn source-map sources email mid))
+                ;; Lookup miss → UID collision (different message-id already
+                ;; occupies this UID).  The original message was fully handled,
+                ;; so this UID is safe to advance past.
+                true))))
         (do (log/debug "No matching source for UID:" (:uid msg) "— not stored")
             false)))))
 
