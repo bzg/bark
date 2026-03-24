@@ -167,6 +167,8 @@
         arch        (if (and fmt-str mid)
                       (str/replace fmt-str "%s" mid)
                       raw-arch)
+        src-type    (get-in source-map [source-name :source-type])
+        arch        (when-not (#{:alias :mailbox} src-type) arch)
         votes       (votes-str report)
         series      (:report/series report)
         related     (:report/related report)
@@ -202,20 +204,23 @@
           (assoc :votes-down (:report/votes-down report))
           (pos? (or (:report/votes-null report) 0))
           (assoc :votes-null (:report/votes-null report))
-          series                          (assoc :series
-                                                 (let [patches (:series/patches series)]
-                                                   {:received (count patches)
-                                                    :expected (:series/expected series)
-                                                    :complete (= (count patches)
-                                                                 (:series/expected series))
-                                                    :closed   (some? (:series/closed series))}))
-          (seq related)                   (assoc :related
-                                                 (mapv (fn [r]
-                                                         (let [arch (archived-at (:report/email r))]
-                                                           (cond-> {:type       (name (:report/type r))
-                                                                    :message-id (:report/message-id r)}
-                                                             arch (assoc :archived-at arch))))
-                                                       related))
+          series
+          (assoc :series
+                 (let [patches (:series/patches series)]
+                   {:received (count patches)
+                    :expected (:series/expected series)
+                    :complete (= (count patches)
+                                 (:series/expected series))
+                    :closed   (some? (:series/closed series))}))
+          (seq related)
+          (assoc :related
+                 (mapv (fn [r]
+                         (let [arch (when-not (#{:alias :mailbox} src-type)
+                                      (archived-at (:report/email r)))]
+                           (cond-> {:type       (name (:report/type r))
+                                    :message-id (:report/message-id r)}
+                             arch (assoc :archived-at arch))))
+                       related))
           (seq (:report/patches report))
           (assoc :patches
                  (let [h (mid-hash (:report/message-id report))]
@@ -715,23 +720,24 @@
         _           (doseq [d [reports-dir patches-dir]]
                       (.mkdirs (io/file d)))
         ef          (resolve-export-formats source-name source-map)
-        do-format   (fn [fmt]
-                      (case fmt
-                        "json"    (do (dump-json! reports reports-dir source-name source-map maintainers-map)
-                                      (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"json"})
-                                      (dump-open-closed! reports reports-dir source-name source-map maintainers-map #{"json"}))
-                        "rss"     (do (dump-rss!  reports reports-dir source-name source-map maintainers-map)
-                                      (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"rss"}))
-                        "org"     (do (dump-org!  reports reports-dir source-name source-map maintainers-map)
-                                      (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"org"})
-                                      (dump-open-closed! reports reports-dir source-name source-map maintainers-map #{"org"}))
-                        "patches" (dump-patches! reports patches-dir)
-                        "html"    (do (dump-json! reports reports-dir source-name source-map maintainers-map)
-                                      (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"json"})
-                                      (dump-open-closed! reports reports-dir source-name source-map maintainers-map #{"json"})
-                                      (dump-docs! base-dir source-name cli-extra)
-                                      (dump-html! base-dir reports-dir cli-extra))
-                        "stats"   (dump-stats! base-dir reports-dir source-name "json" cli-extra)))]
+        do-format
+        (fn [fmt]
+          (case fmt
+            "json"    (do (dump-json! reports reports-dir source-name source-map maintainers-map)
+                          (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"json"})
+                          (dump-open-closed! reports reports-dir source-name source-map maintainers-map #{"json"}))
+            "rss"     (do (dump-rss!  reports reports-dir source-name source-map maintainers-map)
+                          (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"rss"}))
+            "org"     (do (dump-org!  reports reports-dir source-name source-map maintainers-map)
+                          (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"org"})
+                          (dump-open-closed! reports reports-dir source-name source-map maintainers-map #{"org"}))
+            "patches" (dump-patches! reports patches-dir)
+            "html"    (do (dump-json! reports reports-dir source-name source-map maintainers-map)
+                          (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"json"})
+                          (dump-open-closed! reports reports-dir source-name source-map maintainers-map #{"json"})
+                          (dump-docs! base-dir source-name cli-extra)
+                          (dump-html! base-dir reports-dir cli-extra))
+            "stats"   (dump-stats! base-dir reports-dir source-name "json" cli-extra)))]
     (if (= format "all")
       (do (when (ef "json") (dump-json! reports reports-dir source-name source-map maintainers-map))
           (when (ef "rss")  (dump-rss!  reports reports-dir source-name source-map maintainers-map))
@@ -795,9 +801,9 @@
                                       (System/exit 1)))
                                 (mapv :name (:sources config)))
               cli-extra       (let [drop (disj (hash-set format "-n" source-name
-                                                          "--force" "--theme" theme) nil)]
+                                                         "--force" "--theme" theme) nil)]
                                 (cond-> (vec (remove drop (rest *command-line-args*)))
-                                effective-theme (into ["--theme" effective-theme])))]
+                                  effective-theme (into ["--theme" effective-theme])))]
           (when (and incremental? (seq changed-types))
             (log/info "Incremental: changed types:" (str/join ", " (map name changed-types))))
           (when-not (= format "root")

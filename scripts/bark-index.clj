@@ -67,13 +67,15 @@
 ;; Hiccup helpers
 ;; ---------------------------------------------------------------------------
 
-(defn- subject-el [subject _role archived-at closed? close-reason]
+(defn- subject-el [subject _role archived-at closed? close-reason source-type]
   (let [canceled? (and closed? (= close-reason "canceled"))
         expired?  (and closed? (= close-reason "expired"))
         inner     (cond canceled? [:em [:s subject]]
                         closed?   [:em subject]
-                        :else     subject)]
-    (if archived-at
+                        :else     subject)
+        linkable? (and archived-at
+                       (not (#{"alias" "mailbox"} source-type)))]
+    (if linkable?
       [:a (cond-> {:href archived-at}
              canceled? (assoc :title "Canceled")
              expired?  (assoc :title "Expired")
@@ -121,7 +123,8 @@
 (defn- report-row [{:strs [type subject from from-name date date-raw flags priority
                            replies archived-at message-id related role source
                            acked owned closed urgent important patches votes
-                           deadline topic close-reason expired-date]}]
+                           deadline topic close-reason expired-date]}
+                   source-type]
   (let [label    (get type-labels type type)
         closed?  (and flags (>= (count flags) 3) (= (nth flags 2 \-) \C))
         iso-date (or (parse-to-iso-date (or date-raw date "")) "")
@@ -170,7 +173,7 @@
            :style "text-align:center; font-family:monospace; font-size:0.8rem; letter-spacing:0.1em"} flags-str]
      [:td (patch-link patches) (related-link related)
       (vote-badge votes)
-      (subject-el subject role archived-at closed? close-reason)]
+      (subject-el subject role archived-at closed? close-reason source-type)]
      [:td.secondary {:title from} (if (#{"maintainer" "admin"} role) [:strong author] author)]
      [:td {:data-value iso-date} [:small (or iso-date date "")]]
      [:td {:style "text-align:center"} (or replies 0)]]))
@@ -254,12 +257,14 @@
 
 (def ^:private index-js (slurp "resources/bark-index.js"))
 
-(defn page-js [types-json total open-count closed-count]
+(defn page-js [types-json total open-count closed-count source-type]
   (wrap-js (str "var barkConfig = {types:" types-json
                 ",total:" total
                 ",openCount:" open-count
                 ",closedCount:" closed-count
                 ",closedJsonUrl:'reports/all-closed.json'"
+                (when source-type
+                  (str ",sourceType:'" source-type "'"))
                 "};\n"
                 index-js "\n"
                 theme-toggle-js)))
@@ -269,7 +274,8 @@
 ;; ---------------------------------------------------------------------------
 
 (defn index-page [reports reports-dir envelope]
-  (let [types        (vec (distinct (map #(get % "type") reports)))
+  (let [source-type  (get envelope "source-type")
+        types        (vec (distinct (map #(get % "type") reports)))
         types-json   (json/generate-string types)
         total        (get envelope "total" (count reports))
         open-count   (get envelope "open-count" (count reports))
@@ -335,8 +341,8 @@
            [:thead [:tr (seq cols)]]
            [:tbody
             (for [r reports]
-              (report-row r))]]]
-         [:script (h/raw (page-js types-json total open-count closed-count))]]
+              (report-row r source-type))]]]
+         [:script (h/raw (page-js types-json total open-count closed-count source-type))]]
         (bark-footer)]]))))
 
 ;; ---------------------------------------------------------------------------

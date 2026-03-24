@@ -302,7 +302,8 @@ function buildRowElement(r) {
 
   var subjectHtml = closeReason === 'canceled' ? '<em><s>' + escHtml(subject) + '</s></em>'
                   : closed_b ? '<em>' + escHtml(subject) + '</em>' : escHtml(subject);
-  if (archivedAt) subjectHtml = '<a href="' + escAttr(archivedAt) + '">' + subjectHtml + '</a>';
+  var _srcType = barkConfig.sourceType || '';
+  if (archivedAt && _srcType !== 'alias' && _srcType !== 'mailbox') subjectHtml = '<a href="' + escAttr(archivedAt) + '">' + subjectHtml + '</a>';
 
   var patchHtml = '';
   if (r.patches && r.patches.length > 0) {
