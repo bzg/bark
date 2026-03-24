@@ -56,11 +56,6 @@
                   (re-find #"^\w+ (\w+) (\d+) .* (\d{4})$" s)]
          (when-let [m (month-numbers mon)]
            (str year "-" m "-" (format "%02d" (parse-long day)))))
-       (when-let [[_ mon day]
-                  (re-find #"^\w+ (\w+) (\d+) " s)]
-         (when-let [m (month-numbers mon)]
-           (str (.getYear (java.time.LocalDate/now))
-                "-" m "-" (format "%02d" (parse-long day)))))
        ""))))
 
 ;; ---------------------------------------------------------------------------
