@@ -331,7 +331,8 @@
                               db superseded-by))
             all-tx (-> []
                        (into (build-directive-set-tx conn report-eid report-mid email-eid set))
-                       (cond-> (contains? set :report/closed)
+                       (cond-> (and (contains? set :report/closed)
+                                    (not (:report/close-reason current)))
                          (conj [:db/add report-eid :report/close-reason :resolved]))
                        (into (build-unset-tx report-eid current unset))
                        (cond-> (and (contains? unset :report/closed) (:report/close-reason current))
