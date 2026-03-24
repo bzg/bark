@@ -17,7 +17,7 @@
 
 (def ^:private pico-themes-cdn
   "Base URL for bzg/pico-themes on jsDelivr."
-  "https://cdn.jsdelivr.net/gh/bzg/pico-themes@main/")
+  "https://cdn.jsdelivr.net/gh/bzg/pico-themes@latest/")
 
 (def ^:private theme-shortnames
   "Recognised short names for --theme / :theme."
