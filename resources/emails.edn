@@ -1501,4 +1501,35 @@
   :email/in-reply-to "<108@test.org>"
   :email/references  "<108@test.org>"
   :email/body-text  "Superseded-by: <106@test.org>\n"}
+
+ ;; =========================================================================
+ ;; 112 — Public reply to list bug 30, sent through the list (has List-Id).
+ ;;       Should be a descendant and trigger acked.
+ ;; =========================================================================
+ {:email/imap-uid    112
+  :email/source      "public-list"
+  :email/message-id  "<112@test.org>"
+  :email/subject     "Re: [BUG] List bug via list"
+  :email/from-address "admin@test.org"
+  :email/date-sent  #inst "2026-02-22T10:00:00"
+  :email/ingested-at #inst "2026-02-22T10:00:00"
+  :email/in-reply-to "<30@test.org>"
+  :email/references  "<30@test.org>"
+  :email/body-text  "Confirmed.\n"
+  :email/headers-edn "{\"List-Id\" \"<list.test.org>\"}"}
+
+ ;; =========================================================================
+ ;; 113 — Private reply to list bug 30, sent directly (no List-Id).
+ ;;       Should NOT be a descendant, but commands (Handled → owned) still apply.
+ ;; =========================================================================
+ {:email/imap-uid    113
+  :email/source      "public-list"
+  :email/message-id  "<113@test.org>"
+  :email/subject     "Re: [BUG] List bug via list"
+  :email/from-address "admin@test.org"
+  :email/date-sent  #inst "2026-02-22T11:00:00"
+  :email/ingested-at #inst "2026-02-22T11:00:00"
+  :email/in-reply-to "<30@test.org>"
+  :email/references  "<30@test.org>"
+  :email/body-text  "Handled.\n"}
 ]

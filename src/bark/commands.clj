@@ -241,19 +241,9 @@
                                                                    " for " report-message-id)}])]
           (get (:tempids tx) tempid)))))
 
-(defn- vote-allowed? [email source-cfg]
-  (let [hdrs (:email/headers-edn email)]
-    (case (:source-type source-cfg)
-      :mailing-list (some? (common/get-header hdrs "List-Id"))
-      :alias        (some? (common/original-recipient hdrs))
-      :mailbox      true
-      ;; Unknown source type — deny by default and warn.
-      (do (log/warn "Vote on unknown source-type" (:source-type source-cfg) "— denying")
-          false))))
-
-(defn- apply-vote! [conn report-eid from-addr body-text email source-cfg]
+(defn- apply-vote! [conn report-eid from-addr body-text email delivery source-cfg]
   (when-let [vote (detect-vote body-text)]
-    (if-not (vote-allowed? email source-cfg)
+    (if-not (common/sent-via-source-channel? delivery source-cfg)
       (log/info "Vote ignored (private email on public source)" from-addr)
       (let [report-mid (d/q '[:find ?mid . :in $ ?r :where [?r :report/message-id ?mid]]
                             (d/db conn) report-eid)
@@ -422,7 +412,7 @@
 
 (defn apply-commands!
   "Detect and apply all commands from an email's body text."
-  [conn report-eid report-type email source-map roles]
+  [conn report-eid report-type email source-map roles delivery]
   (when-let [body-text (common/email-body-text email)]
     (let [db          (d/db conn)
           from-addr   (:email/from-address email)
@@ -439,7 +429,7 @@
           closed?     (some? (:report/closed (d/pull db [:report/closed] report-eid)))]
 
       (when (and (= :request report-type) from-addr (not closed?))
-        (apply-vote! conn report-eid from-addr body-text email source-cfg))
+        (apply-vote! conn report-eid from-addr body-text email delivery source-cfg))
 
       (if closed?
         (try-unclosed! conn report-eid directives is-maint? from-addr)

@@ -322,8 +322,9 @@
                     parent-eids (find-reports-for-email email db)
                     nearest-eids (find-nearest-report email db)]
                 (when (seq parent-eids)
-                  (doseq [rid parent-eids]
-                    (add-descendant! conn rid eid))
+                  (when (common/sent-via-source-channel? delivery source-cfg)
+                    (doseq [rid parent-eids]
+                      (add-descendant! conn rid eid)))
                   ;; Only call ensure-contributor! if we didn't already do it
                   ;; during report creation above (avoids a redundant DB query).
                   (when-not new-report?
@@ -336,7 +337,7 @@
                                           :where [?rid :report/email ?e] [?e :email/source ?src]]
                                         (d/db conn) rid)
                             rroles (if rsrc (roles/get-roles (d/db conn) rsrc) rroles)]
-                        (commands/apply-commands! conn rid rtype email source-map rroles))))
+                        (commands/apply-commands! conn rid rtype email source-map rroles delivery))))
                   (tracking/bump-report-updated! conn parent-eids))
 
                 ;; Post-creation hooks

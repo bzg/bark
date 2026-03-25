@@ -228,3 +228,30 @@
         ov  (common/resolve-command-overrides cfg)]
     (is (= :maintainer (:scope (:acked ov))))
     (is (= #{:bug} (:report-types (:acked ov))))))
+
+;; ---------------------------------------------------------------------------
+;; sent-via-source-channel?
+;; ---------------------------------------------------------------------------
+
+(deftest sent-via-source-channel-test
+  (testing "mailing-list source: only :list delivery is via channel"
+    (let [cfg {:source-type :mailing-list}]
+      (is (true?  (common/sent-via-source-channel? :list cfg)))
+      (is (false? (common/sent-via-source-channel? :direct cfg)))
+      (is (false? (common/sent-via-source-channel? :alias cfg)))))
+
+  (testing "alias source: only :alias delivery is via channel"
+    (let [cfg {:source-type :alias}]
+      (is (true?  (common/sent-via-source-channel? :alias cfg)))
+      (is (false? (common/sent-via-source-channel? :direct cfg)))
+      (is (false? (common/sent-via-source-channel? :list cfg)))))
+
+  (testing "mailbox source: all deliveries are via channel"
+    (let [cfg {:source-type :mailbox}]
+      (is (true? (common/sent-via-source-channel? :direct cfg)))
+      (is (true? (common/sent-via-source-channel? :list cfg)))
+      (is (true? (common/sent-via-source-channel? :alias cfg)))))
+
+  (testing "unknown source-type: always false"
+    (is (false? (common/sent-via-source-channel? :direct {})))
+    (is (false? (common/sent-via-source-channel? :list {})))))

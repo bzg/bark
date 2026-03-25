@@ -196,6 +196,16 @@
     (:alias source) :alias
     (:to source)    :mailbox))
 
+(defn sent-via-source-channel?
+  "True when the email was delivered through the source's public channel,
+  or when the source is a mailbox (no public/private distinction)."
+  [delivery source-cfg]
+  (case (:source-type source-cfg)
+    :mailing-list (= :list delivery)
+    :alias        (= :alias delivery)
+    :mailbox      true
+    false))
+
 (defn original-recipient
   "Extract the original recipient address from MTA headers.
   Checks X-Original-To, Envelope-To, X-Envelope-To in order."

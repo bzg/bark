@@ -317,6 +317,19 @@
         (testing "Email 30 bug via list"
           (is (= :bug (:report/type (get-report db "<30@test.org>")))))
 
+        ;; --- Emails 112-113: descendant channel gating ---
+        (testing "Descendant channel gating on public-list source"
+          (let [r (get-report db "<30@test.org>")]
+            ;; Only the public reply (112) is a descendant;
+            ;; the private reply (113) is excluded.
+            (is (= 1 (count (:report/descendants r))))
+            (is (= "<112@test.org>"
+                    (:email/message-id (first (:report/descendants r)))))
+            ;; But commands from the private reply still apply:
+            ;; 112 → acked (Confirmed.), 113 → owned (Handled.)
+            (is (some? (:report/acked r)))
+            (is (some? (:report/owned r)))))
+
         ;; --- Email 31 bypassing list ---
         (testing "Email 31 bypassing list"
           (is (not (report-exists? db "<31@test.org>"))))
