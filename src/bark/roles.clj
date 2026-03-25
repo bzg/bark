@@ -8,8 +8,7 @@
             [datalevin.core :as d]
             [taoensso.timbre :as log]
             [bark.common :as common]
-            [bark.tracking :as tracking])
-  (:import [java.util Date]))
+            [bark.tracking :as tracking]))
 
 ;; ---------------------------------------------------------------------------
 ;; Role queries and checks (pure, given a roles map)

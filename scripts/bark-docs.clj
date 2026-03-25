@@ -11,8 +11,10 @@
 ;;   bb scripts/bark-docs.clj -n my-source -o out.html  -> writes out.html
 ;;   bb scripts/bark-docs.clj                           -> public/docs.html (defaults)
 
-(require '[clojure.string :as str]
-         '[hiccup2.core :as h])
+(require '[clojure.java.io :as io]
+         '[clojure.string :as str]
+         '[hiccup2.core :as h]
+         '[taoensso.timbre :as log])
 
 ;; Forward-declared for clj-kondo (provided at runtime by load-file calls below).
 (declare default-labels default-commands
@@ -340,7 +342,7 @@
                   cell
                   #"\[\[([^\]]+)\]\[([^\]]+)\]\]"
                   (fn [[_ target label]]
-                    (if (.exists (clojure.java.io/file out-dir target))
+                    (if (.exists (io/file out-dir target))
                       (str "[[" target "][" label "]]")
                       "")))
         ;; Clean up separators: collapse multiple ", " and trim
@@ -421,7 +423,7 @@
   with since-dates when available. Only current maintainers are shown.
   Maintainers sharing the same display name (or contributor name) are
   deduplicated, keeping the earliest since-date."
-  [db source-name source-cfg]
+  [db source-name _source-cfg]
   (when source-name
     (let [dp          (resolve 'pod.huahaiy.datalevin/pull)
           roles       (dp db '[:roles/admin :roles/maintainers :roles/maintainer-since]
@@ -474,7 +476,7 @@
                         "public/web/docs.html"))
       ;; Infer out-dir from out-file when not given explicitly
       effective-dir (or out-dir
-                        (.getParent (clojure.java.io/file out-file)))
+                        (.getParent (io/file out-file)))
       ;; Load DB for maintainer names
       db-path     (or (System/getenv "BARK_DB") "data/bark-db")
       _           (load-datalevin-pod!)
@@ -488,7 +490,7 @@
                     maint-html (str "\n" maint-html))
       html        (docs-page body-html)]
   ((resolve 'pod.huahaiy.datalevin/close) conn)
-  (.mkdirs (.getParentFile (clojure.java.io/file out-file)))
+  (.mkdirs (.getParentFile (io/file out-file)))
   (spit-html out-file html)
   (binding [*out* *err*]
     (log/info "Wrote" out-file)))

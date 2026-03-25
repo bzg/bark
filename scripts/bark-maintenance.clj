@@ -68,7 +68,7 @@
   Includes config-level :admin, per-source :admin, and DB :roles/maintainers."
   [db config source-map]
   (let [global-admin (some-> (:admin config) str/lower-case)
-        cfg-addrs    (for [[src-name cfg] source-map
+        cfg-addrs    (for [[_src-name cfg] source-map
                            addr (concat
                                  (when-let [a (:admin cfg)] [a])
                                  (map :email (:maintainers cfg)))]

@@ -167,7 +167,7 @@
      (let [lines (str/split-lines body-text)]
        (->> lines
             (keep (fn [line]
-                    (some (fn [[{:keys [id action attr param scope report-types]} pattern]]
+                    (some (fn [[{:keys [id action attr _param scope report-types]} pattern]]
                             (let [rt (or (:report-types (get overrides id)) report-types)
                                   sc (or (:scope (get overrides id)) scope)]
                               (when (or (nil? rt) (contains? rt report-type))

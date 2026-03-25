@@ -693,7 +693,7 @@
 (defn dump-root-index!
   "Generate public/index.html listing all exported sources.
   Reads each source's reports/meta.json for summary counts."
-  [source-names source-map]
+  [source-names _source-map]
   (let [rows (for [src-name source-names
                    :let [slug     (slugify src-name)
                          base-dir (str "public/" slug)

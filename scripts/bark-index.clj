@@ -120,9 +120,9 @@
        votes])))
 
 (defn- report-row [{:strs [type subject from from-name date date-raw flags priority
-                           replies archived-at message-id related role source
+                           replies _archived-at message-id related role source
                            acked owned closed urgent important patches votes
-                           deadline topic close-reason expired-date superseded-by]
+                           deadline topic close-reason expired-date _superseded-by]
                     :as report}
                    source-type]
   (let [label    (get type-labels type type)
