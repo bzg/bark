@@ -1,5 +1,7 @@
 * BARK! Another Report Keeper
 
+[[bark-logo.jpg]]
+
 BARK is an email-driven report tracker - see the [[docs/bark-manual.org#rationale][rationale]].
 
 BARK monitors a single IMAP mailbox, classifies incoming emails into

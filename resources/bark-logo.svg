@@ -1,0 +1,8 @@
+<svg width="60" height="60" viewBox="280 0 120 80" xmlns="http://www.w3.org/2000/svg">
+  <g font-family="monospace" font-size="48" fill="#000000">
+    <text x="310" y="38">\</text>
+    <text x="331" y="38">•</text>
+    <text x="352" y="38">/</text>
+  </g>
+  <text x="345" y="68" text-anchor="middle" font-family="monospace" font-size="48" fill="#000">~~~</text>
+</svg>

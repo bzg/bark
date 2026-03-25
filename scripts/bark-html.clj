@@ -3,7 +3,8 @@
 ;; Usage: (load-file "scripts/bark-html.clj")
 
 (require '[clojure.string :as str]
-         '[cheshire.core :as json])
+         '[cheshire.core :as json]
+         '[hiccup2.core :as h])
 
 ;; ---------------------------------------------------------------------------
 ;; Shared CDN
@@ -120,6 +121,14 @@
    [:span#theme-icon "🌙"]])
 
 ;; ---------------------------------------------------------------------------
+;; Inline SVG logo (loaded from resources/ at build time)
+;; ---------------------------------------------------------------------------
+
+(def bark-logo-svg
+  "Inline SVG logo for the nav bar, scaled to match text height."
+  (slurp "resources/bark-logo.svg"))
+
+;; ---------------------------------------------------------------------------
 ;; Shared nav bar (hiccup vector)
 ;; ---------------------------------------------------------------------------
 
@@ -130,11 +139,13 @@
    ["data"    "Data"    "data.html"]])
 
 (defn nav-bar
-  "Render a <nav> with BARK title and Reports/Docs/Data links.
+  "Render a <nav> with BARK logo, title, and Reports/Docs/Data links.
   `current` is the id of the active page (bolded)."
   [title current]
   [:nav
-   [:ul [:li [:strong title]]]
+   [:ul [:li {:style "display:flex;align-items:center;gap:0.5rem"}
+         (h/raw bark-logo-svg)
+         [:strong title]]]
    [:ul
     (for [[id label href] nav-pages]
       [:li (if (= id current)
