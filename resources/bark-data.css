@@ -1,13 +1,6 @@
 /* ==========================================================================
    BARK Dashboard — KPIs, charts, layout
-   Append this block to each theme CSS (swh.css, doric.css, dsfr.css, org.css)
-   or load it as a separate file after the theme.
    ========================================================================== */
-
-/* ---- Missing Pico variable ---- */
-/* Add this inside each theme's :root { … } block:
-   --pico-border-radius: 0.375rem;
-*/
 
 /* ---- KPI cards ---- */
 

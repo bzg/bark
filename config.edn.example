@@ -13,7 +13,7 @@
  :db {:path "data/bark-db"}
 
  ;; Theme for HTML pages (optional).
- ;; Short names: "org", "dsfr", "swh", "doric" (loaded from jsDelivr/pico-themes).
+ ;; Short names: "org", "dsfr", "swh", "doric", "lincoln" (from jsDelivr/pico-themes).
  ;; Or a full URL to any CSS file.
  ;; CLI override: bb export --theme org
  ;; Set to "none" to disable theming.
