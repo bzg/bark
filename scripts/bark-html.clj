@@ -22,13 +22,13 @@
 
 (def ^:private theme-shortnames
   "Recognised short names for --theme / :theme."
-  #{"org" "dsfr" "swh" "doric" "lincoln"})
+  #{"org" "dsfr" "swh" "doric" "lincoln" "teletype"})
 
 (defn resolve-theme-urls
   "Resolve a theme value to a vector of CSS URLs, or nil.
   For short names, returns [base-theme bark-overlay].
   For arbitrary URLs, returns [url].
-  Accepts: nil, a short name (\"org\", \"dsfr\", \"swh\", \"doric\", \"lincoln\"),
+  Accepts: nil, a short name amont (\"org\", \"dsfr\", \"swh\", \"doric\", \"lincoln\", \"teletype\"),
   or an arbitrary URL (starts with \"http\")."
   [theme]
   (when (and theme (not= theme "none"))

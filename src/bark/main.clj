@@ -246,7 +246,9 @@
                      (log/info "New message via IDLE — UID:" (:uid msg)
                                "Subject:" (:subject msg))
                      (try
-                       (store-and-process! db-conn source-map sources msg ingest-opts)
+                       (let [ok? (store-and-process! db-conn source-map sources msg ingest-opts)]
+                         (when (and ok? (:uid msg))
+                           (ingest/save-imap-uid! db-conn (:uid msg))))
                        (catch Exception e
                          (log/error e "Error processing IDLE message UID:" (:uid msg)
                                     (str "(" (.getName (class e)) ": "
