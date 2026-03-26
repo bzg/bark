@@ -314,7 +314,8 @@
                                     (tracking/bump-report-updated! conn rid)
                                     rid))]
 
-              (when (and report-info (not permitted?) (not new-report?))
+              (when (and report-info (not permitted?)
+                         (not (report-exists? (d/db conn) message-id)))
                 (log/warn "Denied:" from-addr "cannot create" (name (:type report-info))))
 
               ;; Thread descendants

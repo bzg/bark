@@ -140,25 +140,28 @@
                     "size:" size (str "bytes (max: " max-size ")"))
           false)
       (if-let [src-name (digest/pre-classify-source (d/db db-conn) source-map sources msg)]
-        (let [mid    (:message-id msg)
-              lookup [:email/message-id mid]]
-          (if (ingest/store-email! db-conn msg)
-            ;; Freshly stored — stamp source and digest.
-            (do (d/transact! db-conn [{:db/id lookup :email/source src-name}])
-                (try-digest! db-conn source-map sources
-                             (d/pull (d/db db-conn) digest/email-pull-pattern lookup) mid))
-            ;; Already stored (duplicate message-id or UID collision).
-            ;; Re-digest to recover from a prior crash during process-email!.
-            (let [email (d/pull (d/db db-conn) digest/email-pull-pattern lookup)]
-              (if (:db/id email)
-                (do (log/info "Re-processing previously stored email:" mid)
-                    (when-not (:email/source email)
-                      (d/transact! db-conn [{:db/id lookup :email/source src-name}]))
-                    (try-digest! db-conn source-map sources email mid))
-                ;; Lookup miss → UID collision (different message-id already
-                ;; occupies this UID).  The original message was fully handled,
-                ;; so this UID is safe to advance past.
-                true))))
+        (let [mid (:message-id msg)]
+          (if (nil? mid)
+            (do (log/warn "No Message-ID for UID:" (:uid msg) "— skipping")
+                false)
+            (let [lookup [:email/message-id mid]]
+              (if (ingest/store-email! db-conn msg)
+                ;; Freshly stored — stamp source and digest.
+                (do (d/transact! db-conn [{:db/id lookup :email/source src-name}])
+                    (try-digest! db-conn source-map sources
+                                 (d/pull (d/db db-conn) digest/email-pull-pattern lookup) mid))
+                ;; Already stored (duplicate message-id or UID collision).
+                ;; Re-digest to recover from a prior crash during process-email!.
+                (let [email (d/pull (d/db db-conn) digest/email-pull-pattern lookup)]
+                  (if (:db/id email)
+                    (do (log/info "Re-processing previously stored email:" mid)
+                        (when-not (:email/source email)
+                          (d/transact! db-conn [{:db/id lookup :email/source src-name}]))
+                        (try-digest! db-conn source-map sources email mid))
+                    ;; Lookup miss → UID collision (different message-id already
+                    ;; occupies this UID).  The original message was fully handled,
+                    ;; so this UID is safe to advance past.
+                    true))))))
         (do (log/debug "No matching source for UID:" (:uid msg) "— not stored")
             false)))))
 
