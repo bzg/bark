@@ -10,16 +10,68 @@ report using predefined commands. Admins and maintainers can also
 update reports by writing directly to the monitored inbox, manage
 roles, and receive periodic digest emails.
 
-** Rationale and design choices
+BARK can export reports as a HTML website and as json, rss and org.
+
+* Example
+
+Imagine Alice sends this email to a mailing list:
+
+: From: alice@email.com
+: Subject: [BUG] Wrong output
+: To: project-mailing-list@lists.org
+: Date: Fri, 6 Mar 2026 16:31:14 +0000
+: 
+: Hi all,
+: 
+: when doing X, I get the wrong output, probably a bug.
+
+Then Bob replies:
+
+: From: bob@email.com
+: Subject: [BUG] Wrong output
+: To: alice@email.com
+: Cc: project-mailing-list@lists.org
+: Date: Fri, 6 Mar 2026 16:38:42 +0000
+: 
+: > when doing X, I get the wrong output, probably a bug.
+: 
+: Confirmed, I see this too, this should not happen.
+
+And Eve, the maintainer, concludes:
+
+: From: eve@email.com
+: Subject: [BUG] Wrong output
+: To: project-mailing-list@lists.org
+: Date: Fri, 6 Mar 2026 16:42:03 +0000
+: 
+: >> when doing X, I get the wrong output, probably a bug.
+: 
+: > Confirmed, I see this too, this should not happen.
+: 
+: Fixed in commit0 bc12c0c, thanks to both of you!
+
+What happened here?  
+
+1. Someone reported a bug
+2. Someone else confirmed it
+3. The maintainers fixed it
+
+Alice, Bob and Eve all have access to the same information and receive
+all emails. When things are running smoothly, as in the above example,
+there is no real need for a bug tracker. However, when the mailing
+list receives bug reports, patches and general discussions, it is
+necessary to keep all of this information in a database. This is what
+BARK is for: storing reports sent to a mailbox in a database.
+
+* Design
 
 - *Email-native* :: BARK is a tool for email-based workflows.
 
-- *One place* :: The [[https://orgmode.org][Org Mode]] was born out of the idea that to-do items
-  come from notes, and that both should live in the same space.
-  Similarly, bug reports, patches, and feature requests should be
-  discussed in general discussion areas: it should be the tracker's
-  job to filter out the noise and help contributors focus on how to
-  help.
+- *One place* :: [[https://orgmode.org][Org mode]] was born out of the idea that to-do items and
+  free-form notes should be edited in the same space. Similarly, bug
+  reports, patches and feature requests should be handled where users
+  and developers discuss them. It is the tracker's job to filter out
+  the noise and help everyone focus on how they can contribute.
 
 - *KISS* :: BARK provides a simple framework for acting on reports, with
   a fixed vocabulary: =acked=, =owned=, or =closed= for status; =urgency= and
@@ -27,11 +79,10 @@ roles, and receive periodic digest emails.
   status or manually set a report to P0.
 
 - *Immutable* :: No web form, no API endpoint, no account. Users report
-  bugs and request features by sending an email to a list. Maintainers
-  act by replying to that same thread: an =Acked.= line marks the bug as
-  acked. Because every state change is encoded in an email, the entire
-  tracker state can be reconstructed at any time by replaying the
-  mailbox from scratch.
+  bugs and request features by emailing a list. Maintainers respond by
+  replying to the same thread. As every state change is encoded in an
+  email, the entire tracker state can be reconstructed at any time by
+  re-monitoring the mailbox from scratch.
 
 - *Local-first* :: BARK exports to JSON, RSS, Org. Companion tools like
   =bone= (TUI browser), =gnus-bone.el= (Emacs/Gnus) and =notmuch-bone.el=
@@ -69,10 +120,11 @@ replying with:
 
 State changes occur when a reply in the same thread contains a
 case-sensitive command keyword at the start of a line, followed by a
-punctuation mark (=.= =,= =;= =:= =?= =!=). For example, a reply to a bug report
-with a line starting with =Confirmed.= marks the bug as "acked"; a reply
-to a patch with a line starting with =Applied.= marks the patch as
-"closed".
+punctuation mark (=.= =,= =;= =:= =?= =!=). 
+
+For example, a reply to a bug report with a line starting with
+=Confirmed.= marks the bug as "acked"; a reply to a patch with a line
+starting with =Applied.= marks the patch as "closed".
 
 See the [[#command-keywords][command keywords]] below for the full list.
 
@@ -126,8 +178,8 @@ to its thread with:
 
 : Superseded-by: <target-message-id@example.com>
 
-The angle brackets around the message-id are optional.  This does
-three things automatically:
+The angle brackets around the message-id are optional. This does three
+things automatically:
 
 1. Sets =:report/superseded-by= on the old report (a reference to the
    target report).
@@ -135,22 +187,22 @@ three things automatically:
 3. Links the two reports as related (bidirectional).
 
 In the index, superseded reports appear struck through (like canceled
-reports) and display an "S" status flag.  The subject tooltip shows
-the title of the superseding report.
+reports) and display an "S" status flag. The subject tooltip shows the
+title of the superseding report.
 
 To undo:
 
 : Unsuperseded.
 
 This retracts the supersede reference, reopens the report, and clears
-the close-reason.  The related link is kept.
+the close-reason. The related link is kept.
 
 ** Updating offlist
 
-Maintainers can write directly to the watched inbox to update a
-report without notifying the list.  To route the email to the correct
-source, add either a =X-Bark-Source: source-name= header or a
-=[source-name]= prefix to the subject.
+Maintainers can write directly to the watched inbox to update a report
+without notifying the list. To route the email to the correct source,
+add either a =X-Bark-Source: source-name= header or a =[source-name]=
+prefix to the subject.
 
 For example, the maintainer can clean up old issues by marking them as
 =Canceled= in the body of a reply sent to the monitored inbox (with the
@@ -415,13 +467,13 @@ You can also export a single format:
 : bb export html
 : bb export stats
 
-Use =-n <source>= to restrict to one source, =-p <N>= to filter by
-minimum priority, and =-s <N>= to filter by minimum status.
+Use =-n <source>= to restrict to one source, =-p <N>= to filter by minimum
+priority, and =-s <N>= to filter by minimum status.
 
 ** Vote transparency
 
 Votes on =request= reports are stored as individual entities, each
-recording who voted and in which email.  The export produces a
+recording who voted and in which email. The export produces a
 =votes.json= file for each source so that anyone can audit votes:
 
 #+begin_src json
@@ -434,10 +486,10 @@ recording who voted and in which email.  The export produces a
 }
 #+end_src
 
-Each voter can only vote once per report (first vote wins).  Summary
-counts (=votes=, =votes-up=, =votes-down=, =votes-null=) are still
-included in the JSON report objects for display convenience, derived
-from these entities at export time.
+Each voter can only vote once per report (first vote wins). Summary
+counts (=votes=, =votes-up=, =votes-down=, =votes-null=) are still included in
+the JSON report objects for display convenience, derived from these
+entities at export time.
 
 ** Browsing BARK reports online
 
@@ -464,8 +516,7 @@ The search field has a minimal syntax:
 
 ** The =bone= CLI tool, =gnus-bone.el= and =notmuch-bone.el=
 
-- [[https://codeberg.org/bzg/bone][bone]] lets you browse and filter BARK reports interactively from the
-  terminal.
+- [[https://codeberg.org/bzg/bone][bone]] lets you browse and filter BARK reports from the terminal.
 - [[https://codeberg.org/bzg/gnus-bone][gnus-bone.el]] lets you explore BARK reports from within [[https://gnus.org/][Emacs Gnus]].
 - [[https://codeberg.org/bzg/notmuch-bone][notmuch-bone.el]] provides the same integration for [[https://notmuchmail.org/][notmuch]].
 
@@ -524,7 +575,7 @@ emails, not from the mailing list.
 
 * Config
 
-BARK is configured via a =config.edn= file.  Use =bb test-config= to
+BARK is configured via a =config.edn= file. Use =bb test-config= to
 validate it.
 
 ** Minimal example
