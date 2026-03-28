@@ -47,14 +47,24 @@
   (-> (d/q '[:find (count ?e) :where [?e :email/message-id _]] db)
       ffirst (or 0)))
 
-(defn all-contributors
-  "Fetch all contributor entities from the database."
+(defn all-participants
+  "Fetch all participant entities from the database."
   [db]
   (d/q '[:find ?email ?source ?since
          :where
-         [?e :contributor/email ?email]
-         [?e :contributor/source ?source]
-         [?e :contributor/since ?since]]
+         [?e :participant/email ?email]
+         [?e :participant/source ?source]
+         [?e :participant/since ?since]]
+       db))
+
+(defn all-contributors
+  "Fetch participants who have submitted code (contributor-since is set)."
+  [db]
+  (d/q '[:find ?email ?source ?since
+         :where
+         [?e :participant/email ?email]
+         [?e :participant/source ?source]
+         [?e :participant/contributor-since ?since]]
        db))
 
 (defn total-maintainers
@@ -206,6 +216,15 @@
                    frequencies)]
     (cumulative-by-month by-ym 0)))
 
+(defn participants-by-month
+  "Cumulative participant count per month over the last 12 months.
+  `participants` is the result of `all-participants` (tuples of [email source since])."
+  [participants]
+  (let [by-ym (->> participants
+                   (keep (fn [[_ _ since]] (date->ym since)))
+                   frequencies)]
+    (cumulative-by-month by-ym 0)))
+
 (defn maintainers-by-month
   "Cumulative maintainer count per month over the last 12 months.
   `since-dates` is a seq of \"yyyy-MM-dd\" strings from :roles/maintainer-since.
@@ -303,6 +322,8 @@
          total-emails  (when db (total-emails db))
          contributors  (when db (cond->> (all-contributors db)
                                   source-name (filter #(= source-name (second %)))))
+         participants  (when db (cond->> (all-participants db)
+                                  source-name (filter #(= source-name (second %)))))
          n-maintainers (when db (total-maintainers db))
          maint-since   (when db (all-maintainer-since-dates db))
          n-always      (when db (maintainers-without-since db))
@@ -331,6 +352,8 @@
        total-emails  (assoc :email-ratio (email-vs-reports-ratio reports total-emails))
        contributors  (assoc :contributors-by-month (contributors-by-month contributors)
                             :total-contributors (count contributors))
+       participants  (assoc :participants-by-month (participants-by-month participants)
+                            :total-participants (count participants))
        n-maintainers (assoc :total-maintainers n-maintainers)
        maint-since   (assoc :maintainers-by-month
                            (maintainers-by-month maint-since (or n-always 0)))))))
@@ -403,16 +426,18 @@
          :color   {:field "reason" :type "nominal"       :title "Close reason"}
          :xOffset {:field "reason"}})))
 
-(defn chart-contributors
-  "Contributors & maintainers line chart with separate lines and legend."
-  [contributors-by-month maintainers-by-month]
-  (let [contrib-data (mapv (fn [[m c]] {"month" m "count" c "role" "Contributors"})
+(defn chart-people
+  "Participants, contributors & maintainers line chart with separate lines and legend."
+  [participants-by-month contributors-by-month maintainers-by-month]
+  (let [partic-data  (mapv (fn [[m c]] {"month" m "count" c "role" "Participants"})
+                           participants-by-month)
+        contrib-data (mapv (fn [[m c]] {"month" m "count" c "role" "Contributors"})
                            contributors-by-month)
         maint-data   (mapv (fn [[m c]] {"month" m "count" c "role" "Maintainers"})
                            maintainers-by-month)
-        data         (into contrib-data maint-data)]
+        data         (into (into partic-data contrib-data) maint-data)]
     {:$schema  "https://vega.github.io/schema/vega-lite/v5.json"
-     :title    "Contributors & maintainers (last 12 months)"
+     :title    "Participants, contributors & maintainers (last 12 months)"
      :width    "container"
      :data     {:values data}
      :mark     {:type "line" :point true :tooltip true}
@@ -421,7 +446,7 @@
                 :y     {:field "count" :type "quantitative"
                         :title "People"}
                 :color {:field "role" :type "nominal" :title "Role"
-                        :scale {:range ["#4c78a8" "#e45756"]}}}}))
+                        :scale {:range ["#72b362" "#4c78a8" "#e45756"]}}}}))
 
 ;; HTML assembly
 
@@ -490,8 +515,8 @@
   (let [{:keys [generated-at reports-per-type reports-by-month
                 time-to-close open-closed-ratio open-last-year
                 top-openers email-ratio closed-cancel
-                contributors-by-month maintainers-by-month
-                total-contributors total-maintainers]} stats
+                participants-by-month contributors-by-month maintainers-by-month
+                total-participants total-contributors total-maintainers]} stats
         nav-html (str (h/html (nav-bar "BARK — Data" "data")))
         data-section (render-data-section out-dir)
         vega-scripts (str "<script src=\"https://cdn.jsdelivr.net/npm/vega@5/build/vega.min.js\"></script>\n"
@@ -520,6 +545,7 @@
       var ttc = s['time-to-close'];
       var er  = s['email-ratio'];
       var openYr = s['open-last-year'] || 0;
+      var totalP = s['total-participants'];
       var totalC = s['total-contributors'];
       var totalM = s['total-maintainers'];
       var pct = (ocr.open + ocr.closed) > 0
@@ -533,8 +559,9 @@
       if (er)  h += kpi(er.ratio || '\\u2014', 'Report/email ratio',
                         er['reports-last-year'] + ' reports / ' +
                         er['total-emails'] + ' emails');
-      if (totalC) h += kpi(totalC, 'Contributors',
-                           totalM ? totalM + ' maintainers' : '');
+      if (totalP) h += kpi(totalP, 'Participants',
+                           totalC ? totalC + ' contributors' : '');
+      if (totalM) h += kpi(totalM, 'Maintainers');
       el.innerHTML = h;
     })
     .catch(function(e) { console.error('Failed to load stats.json:', e); });
@@ -568,18 +595,21 @@
        (kpi (or (:ratio email-ratio) "—") "Report/email ratio"
             (str (:reports-last-year email-ratio) " reports / "
                  (:total-emails email-ratio) " emails")))
-     (when total-contributors
-       (kpi total-contributors "Contributors"
-            (when total-maintainers (str total-maintainers " maintainers"))))
+     (when total-participants
+       (kpi total-participants "Participants"
+            (when total-contributors (str total-contributors " contributors"))))
+     (when total-maintainers
+       (kpi total-maintainers "Maintainers"))
      "</div>\n"
 
      "<div class=\"grid\">\n"
      (chart-box "chart-month"   (chart-by-month reports-by-month))
      (chart-box "chart-type"    (chart-per-type reports-per-type))
-     (when (seq contributors-by-month)
-       (chart-box "chart-contributors"
-                  (chart-contributors contributors-by-month
-                                      (or maintainers-by-month []))))
+     (when (or (seq participants-by-month) (seq contributors-by-month))
+       (chart-box "chart-people"
+                  (chart-people (or participants-by-month [])
+                                (or contributors-by-month [])
+                                (or maintainers-by-month []))))
      (when time-to-close
        (chart-box "chart-ttc"   (chart-ttc time-to-close)))
      (chart-box "chart-openers" (chart-openers top-openers))

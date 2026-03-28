@@ -393,16 +393,16 @@
 ;; Maintainers section
 ;; ---------------------------------------------------------------------------
 
-(defn- contributor-name
-  "Look up a contributor's display name by email for a given source.
+(defn- participant-name
+  "Look up a participant's display name by email for a given source.
   Returns the name if found and non-blank, otherwise nil."
   [db source-name email]
   (let [dq (resolve 'pod.huahaiy.datalevin/q)
         k  (str source-name ":" (str/lower-case email))]
     (when-let [n (dq '[:find ?n .
                        :in $ ?k
-                       :where [?e :contributor/key ?k]
-                       [?e :contributor/name ?n]]
+                       :where [?e :participant/key ?k]
+                       [?e :participant/name ?n]]
                      db k)]
       (when-not (str/blank? n) n))))
 
@@ -421,7 +421,7 @@
 (defn build-maintainers-html
   "Build an HTML section listing maintainers by display name,
   with since-dates when available. Only current maintainers are shown.
-  Maintainers sharing the same display name (or contributor name) are
+  Maintainers sharing the same display name (or participant name) are
   deduplicated, keeping the earliest since-date."
   [db source-name _source-cfg]
   (when source-name
@@ -435,7 +435,7 @@
           since-map   (parse-maintainer-since-strings roles)
           ;; Resolve each email to {display, since} then deduplicate by display name
           raw-entries (mapv (fn [email]
-                              {:display (or (contributor-name db source-name email) email)
+                              {:display (or (participant-name db source-name email) email)
                                :since   (get since-map (str/lower-case email))})
                             maint-emails)
           ;; Group by display name, keep earliest since-date per person
