@@ -13,11 +13,20 @@
  :db {:path "data/bark-db"}
 
  ;; Theme for HTML pages (optional).
- ;; Short names: "org", "dsfr", "swh", "doric", "lincoln", "teletype"
- ;; Themes are loaded from jsDelivr/pico-themes.
- ;; Or a full URL to any CSS file.
- ;; CLI override: bb export --theme org
+ ;; Resolved in this order:
+ ;;   1. https:// URL        → external <link> stylesheet
+ ;;   2. file:///path         → inline <style> from local file
+ ;;   3. path ending in .css  → inline <style> (relative or absolute path)
+ ;;   4. bare name            → pico-themes CDN (base + bark overlay)
  ;; Set to "none" to disable theming.
+ ;;
+ ;; Examples:
+ ;; :theme "org"                                    ;; pico-themes shortname
+ ;; :theme "https://example.com/custom.css"         ;; external URL
+ ;; :theme "file:///home/user/my-theme.css"         ;; local file (inline)
+ ;; :theme "themes/custom.css"                      ;; relative path (inline)
+ ;;
+ ;; CLI override: bb export --theme org
  ;;
  ;; :theme "org"
 

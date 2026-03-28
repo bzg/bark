@@ -111,11 +111,32 @@ Read-only bb scripts live under =scripts/=:
 bb export [json|rss|org|html|stats|all]   Export reports (default: all)
        [-n source] [-p 1|2|3] [-s 1-7]   Filter by source, priority, status
        [--force]                          Ignore timestamps, full export
+       [--theme THEME]                    Override CSS theme (see below)
 bb notify [--dry-run] [--force] [--debug] Send notification emails
 bb test-config [path]                     Validate config.edn
 bb test-smtp [--to addr] [--dry-run]      Test SMTP configuration
 bb clean                                  Remove all files in public/
 #+end_example
+
+*** Theme (=--theme= / =:theme=)
+
+The =--theme= flag (or =:theme= in =config.edn=) controls the CSS
+theme for HTML exports.  The value is resolved in order:
+
+1. *https:// URL* — used as an external =<link>= stylesheet.
+2. *file:///path* — the local file is read and inlined in a =<style>= block.
+3. *Path ending in .css* — relative or absolute; inlined in =<style>=.
+4. *Bare name* (no spaces, no =.css= suffix) — treated as a [[https://github.com/bzg/pico-themes][pico-themes]] name; the base theme and bark overlay are loaded from jsDelivr.
+
+Set to ="none"= to disable theming entirely.
+
+#+begin_src sh
+bb export html --theme org                                  # pico-themes name
+bb export html --theme https://example.com/custom.css       # external URL
+bb export html --theme file:///home/user/my-theme.css       # local file (inlined)
+bb export html --theme themes/custom.css                    # relative path (inlined)
+bb export html --theme none                                 # no theme
+#+end_src
 
 ** Config
 

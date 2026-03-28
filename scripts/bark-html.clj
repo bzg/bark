@@ -17,41 +17,57 @@
 ;; ---------------------------------------------------------------------------
 
 (def ^:private themes-cdn
-  "Base URL for bzg/themes on jsDelivr."
+  "Base URL for bzg/pico-themes on jsDelivr."
   "https://cdn.jsdelivr.net/gh/bzg/pico-themes@latest/")
 
-(def ^:private theme-shortnames
-  "Recognised short names for --theme / :theme."
-  #{"org" "dsfr" "swh" "doric" "lincoln" "teletype"})
+(defn resolve-css-theme
+  "Resolve a --theme / :theme value to a seq of maps, or nil.
+  Each map is either {:link url} or {:inline css-content}.
 
-(defn resolve-theme-urls
-  "Resolve a theme value to a vector of CSS URLs, or nil.
-  For short names, returns [base-theme bark-overlay].
-  For arbitrary URLs, returns [url].
-  Accepts: nil, a short name amont (\"org\", \"dsfr\", \"swh\", \"doric\", \"lincoln\", \"teletype\"),
-  or an arbitrary URL (starts with \"http\")."
+  Resolution order:
+  1. https:// URL           → [{:link url}]
+  2. file:///path           → [{:inline (slurp path)}]
+  3. path ending in .css    → [{:inline (slurp path)}] (relative or absolute)
+  4. bare name (no spaces)  → pico-themes CDN [{:link base} {:link bark-overlay}]
+  5. \"none\" or nil          → nil"
   [theme]
   (when (and theme (not= theme "none"))
     (cond
-      (theme-shortnames theme) [(str themes-cdn theme ".css")
-                                (str themes-cdn "bark/" theme ".css")]
-      (str/starts-with? theme "http") [theme]
-      :else (do (binding [*out* *err*]
-                  (println (str "Warning: unknown theme '" theme
-                                "', expected: org, dsfr, swh, doric or a URL")))
-                nil))))
+      (str/starts-with? theme "https://")
+      [{:link theme}]
 
-(def ^:private theme-cdn-atom (atom nil))
+      (str/starts-with? theme "file:///")
+      (let [path (subs theme (count "file://"))]
+        [{:inline (slurp path)}])
+
+      (str/ends-with? theme ".css")
+      (let [f (java.io.File. theme)]
+        (if (.isFile f)
+          [{:inline (slurp f)}]
+          (do (binding [*out* *err*]
+                (println (str "Warning: CSS file not found: " theme)))
+              nil)))
+
+      (not (str/includes? theme " "))
+      [{:link (str themes-cdn theme ".css")}
+       {:link (str themes-cdn "bark/" theme ".css")}]
+
+      :else
+      (do (binding [*out* *err*]
+            (println (str "Warning: cannot resolve theme '" theme "'")))
+          nil))))
+
+(def ^:private theme-atom (atom nil))
 
 (defn set-theme!
-  "Set the theme URLs from a short name or URL. Called by each script at startup."
+  "Set the resolved theme from a name, path, or URL. Called by each script at startup."
   [theme]
-  (reset! theme-cdn-atom (resolve-theme-urls theme)))
+  (reset! theme-atom (resolve-css-theme theme)))
 
-(defn theme-cdns
-  "Current theme CDN URLs as a vector, or nil."
+(defn resolved-theme
+  "Current resolved theme entries as a seq of maps, or nil."
   []
-  @theme-cdn-atom)
+  @theme-atom)
 
 ;; ---------------------------------------------------------------------------
 ;; Shared metadata
@@ -101,8 +117,12 @@
        "<meta property=\"og:description\" content=\"" bark-description "\">\n"
        "<meta property=\"og:type\" content=\"website\">\n"
        "<link rel=\"stylesheet\" href=\"" pico-cdn "\">\n"
-       (when-let [urls (theme-cdns)]
-         (str/join (map #(str "<link rel=\"stylesheet\" href=\"" % "\">\n") urls)))
+       (when-let [entries (resolved-theme)]
+         (str/join (map (fn [{:keys [link inline]}]
+                          (if link
+                            (str "<link rel=\"stylesheet\" href=\"" link "\">\n")
+                            (str "<style>\n" inline "\n</style>\n")))
+                        entries)))
        (when rss-href
          (str "<link rel=\"alternate\" type=\"application/rss+xml\" "
               "title=\"BARK Reports RSS\" href=\"" rss-href "\">\n"))

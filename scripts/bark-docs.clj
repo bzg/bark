@@ -21,7 +21,7 @@
          resolve-labels-map resolve-commands-map
          parse-cli-args load-config build-source-map
          load-datalevin-pod! bark-schema parse-maintainer-since-strings
-         pico-cdn theme-cdns set-theme! bark-description footer-css bark-footer wrap-js
+         pico-cdn resolved-theme set-theme! bark-description footer-css bark-footer wrap-js
          spit-html theme-toggle-btn theme-toggle-js nav-bar org-inline-links)
 
 (load-file "scripts/bark-common.clj")
@@ -316,8 +316,10 @@
         [:meta {:property "og:description" :content bark-description}]
         [:meta {:property "og:type" :content "website"}]
         [:link {:rel "stylesheet" :href pico-cdn}]
-        (for [url (theme-cdns)]
-          [:link {:rel "stylesheet" :href url}])
+        (for [{:keys [link inline]} (resolved-theme)]
+          (if link
+            [:link {:rel "stylesheet" :href link}]
+            [:style (h/raw inline)]))
         [:title title]
         [:style (h/raw docs-css)]]
        [:body
