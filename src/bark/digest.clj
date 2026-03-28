@@ -75,17 +75,34 @@
 ;; DB operations
 ;; ---------------------------------------------------------------------------
 
-(defn- ensure-contributor! [conn source-name from-addr from-name date-sent]
+(defn- ensure-participant!
+  "Record a participant (and optionally mark as contributor for patches).
+  Creates the entity on first encounter; on subsequent calls for a patch,
+  stamps :participant/contributor-since if not already set."
+  [conn source-name from-addr from-name date-sent & {:keys [contributor?]}]
   (when (and source-name from-addr)
-    (let [k (str source-name ":" (str/lower-case from-addr))]
-      (when-not (d/q '[:find ?e . :in $ ?k :where [?e :contributor/key ?k]]
-                     (d/db conn) k)
-        (d/transact! conn [{:contributor/key    k
-                            :contributor/source source-name
-                            :contributor/email  (str/lower-case from-addr)
-                            :contributor/name   (or from-name "")
-                            :contributor/since  (or date-sent (Date.))}])
-        (log/info "New contributor:" from-addr "on" source-name)))))
+    (let [k  (str source-name ":" (str/lower-case from-addr))
+          db (d/db conn)
+          e  (d/q '[:find ?e . :in $ ?k :where [?e :participant/key ?k]] db k)]
+      (if e
+        ;; Already a participant — stamp contributor-since if needed
+        (when (and contributor?
+                   (not (d/q '[:find ?d . :in $ ?e
+                               :where [?e :participant/contributor-since ?d]] db e)))
+          (d/transact! conn [{:db/id e
+                              :participant/contributor-since (or date-sent (Date.))}])
+          (log/info "Participant promoted to contributor:" from-addr "on" source-name))
+        ;; New participant
+        (do
+          (d/transact! conn [(cond-> {:participant/key    k
+                                      :participant/source source-name
+                                      :participant/email  (str/lower-case from-addr)
+                                      :participant/name   (or from-name "")
+                                      :participant/since  (or date-sent (Date.))}
+                               contributor? (assoc :participant/contributor-since
+                                                   (or date-sent (Date.))))])
+          (log/info "New participant:" from-addr "on" source-name
+                    (when contributor? "(contributor)")))))))
 
 (defn- report-exists? [db message-id]
   (some? (d/q '[:find ?r . :in $ ?mid :where [?r :report/message-id ?mid]] db message-id)))
@@ -307,8 +324,9 @@
                   report-eid    (when new-report?
                                   (log/info (str "[" (name (:type report-info)) "]") (:email/subject email))
                                   (create-report! conn eid message-id report-info)
-                                  (ensure-contributor! conn source-name from-addr
-                                                       (:email/from-name email) (:email/date-sent email))
+                                  (ensure-participant! conn source-name from-addr
+                                                       (:email/from-name email) (:email/date-sent email)
+                                                       :contributor? (= :patch (:type report-info)))
                                   (let [rid (d/q '[:find ?r . :in $ ?mid :where [?r :report/message-id ?mid]]
                                                  (d/db conn) message-id)]
                                     (tracking/bump-report-updated! conn rid)
@@ -336,9 +354,9 @@
                               rroles (if rsrc (roles/get-roles (d/db conn) rsrc) rroles)]
                           (when (commands/apply-commands! conn rid rtype email source-map rroles delivery)
                             (vreset! any-cmd? true)))))
-                    ;; Only count as contributor if the email carried a command.
+                    ;; Only count as participant if the email carried a command.
                     (when (and @any-cmd? (not new-report?))
-                      (ensure-contributor! conn source-name from-addr
+                      (ensure-participant! conn source-name from-addr
                                            (:email/from-name email) (:email/date-sent email))))
                   (tracking/bump-report-updated! conn parent-eids))
 
