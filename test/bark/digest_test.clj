@@ -77,6 +77,15 @@
     (count (d/q '[:find [?r ...] :in $ ?s :where [?s :series/patches ?r]]
                 db eid))))
 
+(defn- get-participant
+  "Return the participant entity for a given source and email address, or nil."
+  [db source-name email]
+  (let [k (str source-name ":" (.toLowerCase email))]
+    (when-let [eid (d/q '[:find ?e . :in $ ?k :where [?e :participant/key ?k]] db k)]
+      (d/pull db '[:participant/key :participant/source :participant/email
+                   :participant/name :participant/since :participant/contributor-since]
+              eid))))
+
 ;; ---------------------------------------------------------------------------
 ;; Fixture data
 ;; ---------------------------------------------------------------------------
@@ -699,6 +708,50 @@
           (is (= {:set {} :unset #{} :unsuperseded? true}
                  (commands/resolve-commands
                   [{:action :set-superseded :target-message-id "<mid@host>"}
-                   {:action :unset-superseded}])))))
+                   {:action :unset-superseded}]))))
+
+        ;; ---------------------------------------------------------------
+        ;; Participant / contributor tracking
+        ;; ---------------------------------------------------------------
+
+        (testing "Bug reporter is a participant without contributor-since"
+          (let [p (get-participant db "direct" "user@test.org")]
+            (is (some? p) "user@test.org should be a participant")
+            (is (some? (:participant/since p)))
+            (is (some? (:participant/contributor-since p))
+                "user@test.org also submitted patches, so contributor-since must be set")))
+
+        (testing "Patch submitter gets contributor-since stamped"
+          ;; user@test.org submitted [PATCH org-agenda 1/2] Fix sorting (<07@test.org>)
+          (let [p (get-participant db "direct" "user@test.org")]
+            (is (some? (:participant/contributor-since p))
+                "contributor-since should be set for a patch submitter")
+            (is (inst? (:participant/contributor-since p)))))
+
+        (testing "Command applier becomes a participant"
+          ;; maint@test.org applies Confirmed/Urgent/Fixed on bug <02@test.org>
+          (let [p (get-participant db "direct" "maint@test.org")]
+            (is (some? p) "maint@test.org should be a participant via commands")))
+
+        (testing "Command-only participant has no contributor-since"
+          ;; newadmin@test.org only applied "Closed." on <53@test.org>
+          (let [p (get-participant db "direct" "newadmin@test.org")]
+            (is (some? p) "newadmin@test.org should be a participant via Closed command")
+            (is (nil? (:participant/contributor-since p))
+                "newadmin@test.org never submitted a patch")))
+
+        (testing "Participant entity is unique per source+email (idempotent)"
+          (let [count (d/q '[:find (count ?e) .
+                             :where
+                             [?e :participant/email "user@test.org"]
+                             [?e :participant/source "direct"]]
+                           db)]
+            (is (= 1 count)
+                "Multiple reports/patches from same person should not create duplicates")))
+
+        (testing "Participant on public-list source is separate from direct"
+          ;; <30@test.org> is a bug on public-list by user@test.org
+          (let [p (get-participant db "public-list" "user@test.org")]
+            (is (some? p) "user@test.org should also be a participant on public-list"))))
       (finally
         (teardown! ctx)))))
