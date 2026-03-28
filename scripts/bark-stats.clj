@@ -295,12 +295,14 @@
        (sort-by :score >) (take n)))
 
 (defn compute-stats
-  ([reports] (compute-stats reports nil))
-  ([reports db]
+  ([reports] (compute-stats reports nil nil))
+  ([reports db] (compute-stats reports db nil))
+  ([reports db source-name]
    (let [last-year     (filter #(within-last-year? (report-date %)) reports)
          closable-yr   (filter #(closable-types (:report/type %)) last-year)
          total-emails  (when db (total-emails db))
-         contributors  (when db (all-contributors db))
+         contributors  (when db (cond->> (all-contributors db)
+                                  source-name (filter #(= source-name (second %)))))
          n-maintainers (when db (total-maintainers db))
          maint-since   (when db (all-maintainer-since-dates db))
          n-always      (when db (maintainers-without-since db))
@@ -610,7 +612,7 @@
             reports  (if source-name
                        (filter #(= source-name (get-in % [:report/email :email/source])) all-reps)
                        all-reps)
-            stats    (compute-stats reports db)]
+            stats    (compute-stats reports db source-name)]
         (io/make-parents out-file)
         (if html?
           (do (spit-html out-file (render-html stats out-dir))

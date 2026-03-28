@@ -326,19 +326,20 @@
                   (when (common/sent-via-source-channel? delivery source-cfg)
                     (doseq [rid parent-eids]
                       (add-descendant! conn rid eid)))
-                  ;; Only call ensure-contributor! if we didn't already do it
-                  ;; during report creation above (avoids a redundant DB query).
-                  (when-not new-report?
-                    (ensure-contributor! conn source-name from-addr
-                                         (:email/from-name email) (:email/date-sent email)))
-                  (doseq [rid nearest-eids]
-                    (when-let [rtype (d/q '[:find ?t . :in $ ?r :where [?r :report/type ?t]]
-                                          (d/db conn) rid)]
-                      (let [rsrc   (d/q '[:find ?src . :in $ ?rid
-                                          :where [?rid :report/email ?e] [?e :email/source ?src]]
-                                        (d/db conn) rid)
-                            rroles (if rsrc (roles/get-roles (d/db conn) rsrc) rroles)]
-                        (commands/apply-commands! conn rid rtype email source-map rroles delivery))))
+                  (let [any-cmd? (volatile! false)]
+                    (doseq [rid nearest-eids]
+                      (when-let [rtype (d/q '[:find ?t . :in $ ?r :where [?r :report/type ?t]]
+                                            (d/db conn) rid)]
+                        (let [rsrc   (d/q '[:find ?src . :in $ ?rid
+                                            :where [?rid :report/email ?e] [?e :email/source ?src]]
+                                          (d/db conn) rid)
+                              rroles (if rsrc (roles/get-roles (d/db conn) rsrc) rroles)]
+                          (when (commands/apply-commands! conn rid rtype email source-map rroles delivery)
+                            (vreset! any-cmd? true)))))
+                    ;; Only count as contributor if the email carried a command.
+                    (when (and @any-cmd? (not new-report?))
+                      (ensure-contributor! conn source-name from-addr
+                                           (:email/from-name email) (:email/date-sent email))))
                   (tracking/bump-report-updated! conn parent-eids))
 
                 ;; Post-creation hooks

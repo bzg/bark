@@ -411,9 +411,11 @@
                                                     (:report/close-reason trig-result)))))))
 
 (defn apply-commands!
-  "Detect and apply all commands from an email's body text."
+  "Detect and apply all commands from an email's body text.
+  Returns true when at least one command (trigger, directive, or vote)
+  was detected, false otherwise."
   [conn report-eid report-type email source-map roles delivery]
-  (when-let [body-text (common/email-body-text email)]
+  (if-let [body-text (common/email-body-text email)]
     (let [db          (d/db conn)
           from-addr   (:email/from-address email)
           eid         (:db/id email)
@@ -428,10 +430,13 @@
           directives  (detect-directives report-type body-text overrides)
           closed?     (some? (:report/closed (d/pull db [:report/closed] report-eid)))]
 
-      (when (and (= :request report-type) from-addr (not closed?))
-        (apply-vote! conn report-eid from-addr body-text email delivery source-cfg))
-
       (if closed?
-        (try-unclosed! conn report-eid directives is-maint? from-addr)
-        (do (apply-triggers! conn report-eid trig-result eid (:email/message-id email))
-            (apply-directives! conn report-eid directives eid from-addr is-maint?))))))
+        (do (try-unclosed! conn report-eid directives is-maint? from-addr)
+            (boolean (seq directives)))
+        (let [voted? (when (and (= :request report-type) from-addr)
+                       (apply-vote! conn report-eid from-addr body-text email delivery source-cfg)
+                       (some? (detect-vote body-text)))]
+          (apply-triggers! conn report-eid trig-result eid (:email/message-id email))
+          (apply-directives! conn report-eid directives eid from-addr is-maint?)
+          (boolean (or (seq trig-result) (seq directives) voted?)))))
+    false))
