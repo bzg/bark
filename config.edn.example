@@ -56,7 +56,7 @@
             ;;               {:email "co-maint@example.org"}]
             ;;
             ;; Base URL where this source's public/ directory is served (optional)
-            :bark-path "https://bark.example.org/public/public-list/"
+            :base-url "https://bark.example.org/public/public-list/"
             ;;
             ;; URL of the list archive (informational, used in HTML reports)
             :list-archive "https://list.example.org"

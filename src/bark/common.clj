@@ -458,7 +458,7 @@
                       (merge {:admin (or (:admin src) default-admin)
                               :source-type stype}
                            (select-keys src [:list :alias :to :commands :labels :notifications
-                                             :archive-format-string :list-archive :bark-path
+                                             :archive-format-string :list-archive :base-url
                                              :maintainers])
                            (when global-st {:global-labels global-st})
                            (when global-cmd {:global-commands global-cmd})

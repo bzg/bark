@@ -62,7 +62,7 @@
 (s/def :source/to :match/to)
 (s/def :source/admin ::email)
 (s/def :source/list-archive (s/and ::non-blank-string #(re-find #"^https?://" %)))
-(s/def :source/bark-path ::non-blank-string)
+(s/def :source/base-url ::non-blank-string)
 
 ;; Per-source notifications (optional) — override global notification gate
 (s/def :source-notif/enable boolean?)
