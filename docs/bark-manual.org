@@ -637,7 +637,7 @@ The source name must match a source's =:name= exactly
 | =:list-archive=          | URL of the list archive (shown in HTML reports)                            |
 | =:archive-format-string= | URL template for message-ids (=%s= is replaced), used when the               |
 |                        | =Archived-At= header is absent                                               |
-| =:bark-path=             | Base URL where this source's public directory is served                    |
+| =:base-url=              | Base URL where this source's public directory is served                    |
 | =:labels=                | Per-source label overrides (see [[#customising-subject-labels]])               |
 | =:commands=              | Per-source command overrides (see [[#customising-command-keywords]])           |
 | =:maintainers=           | Initial maintainers, e.g. =[{:email "dev@example.org" :since "2025-01-01"}]= |

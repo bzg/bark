@@ -264,7 +264,7 @@
       (:alias cfg)         (assoc :alias         (:alias cfg))
       (:to cfg)            (assoc :to            (:to cfg))
       (:list-archive cfg)  (assoc :list-archive  (:list-archive cfg))
-      (:bark-path cfg)     (assoc :bark-path     (:bark-path cfg)))))
+      (:base-url cfg)      (assoc :base-url      (:base-url cfg)))))
 
 ;; ---------------------------------------------------------------------------
 ;; XML helpers
