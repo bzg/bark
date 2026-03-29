@@ -155,6 +155,8 @@
  ;;   :op-answered   — false: don't expire if the OP posted the last reply [optional]
  ;;
  ;; All conditions are conjunctive (all must be true to expire).
+ ;; Maintainers can also set a per-report expiry date via the
+ ;; "Expiry: <date-or-duration>" directive, which overrides these rules.
  ;;
  ;; Example:
  ;; :expiry {:announcement {:delay "30d"}

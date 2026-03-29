@@ -506,7 +506,7 @@
     {:report/important-proxy [:email/from-address]}
     :report/close-reason
     {:report/superseded-by [:report/message-id {:report/email [:email/subject]}]}
-    :report/deadline :report/descendants :report/digested-at :report/updated-at
+    :report/deadline :report/expiry :report/descendants :report/digested-at :report/updated-at
     {:report/related [:report/type :report/message-id
                       {:report/email [:email/headers-edn]}]}
     {:report/series [:series/id :series/expected :series/closed

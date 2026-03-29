@@ -118,11 +118,13 @@
         pri     (report-priority report)
         replies (report-descendant-count report)
         deadline (:report/deadline report)
+        expiry   (:report/expiry report)
         arch    (get-header (:email/headers-edn email) "Archived-At")]
     (str "  [" type "] " subject "\n"
          "    from: " from " — " date
          " — priority:" pri " replies:" replies
          (when deadline (str " deadline:" (format-date-iso deadline)))
+         (when expiry (str " expiry:" (format-date-iso expiry)))
          (when arch (str "\n    " arch)))))
 
 (defn- section
