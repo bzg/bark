@@ -1,5 +1,4 @@
-{ ;; Default admin email
- :admin "admin@example.com"
+{ ;; ---- Connection --------------------------------------------------------
 
  ;; Connection to the monitored mailbox
  :imap {:host     "imap.example.com"
@@ -12,26 +11,10 @@
  ;; Datalevin database path
  :db {:path "data/bark-db"}
 
- ;; Theme for HTML pages (optional).
- ;; Resolved in this order:
- ;;   1. https:// URL        → external <link> stylesheet
- ;;   2. file:///path         → inline <style> from local file
- ;;   3. path ending in .css  → inline <style> (relative or absolute path)
- ;;   4. bare name            → pico-themes CDN (base + bark overlay)
- ;; Set to "none" to disable theming.
- ;;
- ;; Examples:
- ;; :theme "org"                                    ;; pico-themes shortname
- ;; :theme "https://example.com/custom.css"         ;; external URL
- ;; :theme "file:///home/user/my-theme.css"         ;; local file (inline)
- ;; :theme "themes/custom.css"                      ;; relative path (inline)
- ;;
- ;; CLI override: bb export --theme org
- ;;
- ;; :theme "org"
+ ;; ---- Who monitors what --------------------------------------------------
 
- ;; Ingest settings
- :ingest {:initial-fetch 50}
+ ;; Default admin email
+ :admin "admin@example.com"
 
  :sources [
            ;; --- Use-case 1: mailing list ---
@@ -65,6 +48,11 @@
             ;; URLs from message-ids (%s is replaced by the
             ;; message-id).
             :archive-format-string "https://list.example.org/%s"
+            ;;
+            ;; Per-source notification toggle (optional).
+            ;; Default: true (notifications sent if :notifications is configured).
+            ;; Set to false to silence notifications for this source.
+            ;; :notifications {:enable false}
             }
 
            ;; --- Use-case 2: email alias ---
@@ -88,14 +76,21 @@
  ;; The source-name must match a source's :name exactly (case-insensitive).
  ;; Non-maintainer direct emails to :list or :alias sources are ignored.
 
- ;; Notification settings (optional — notifications disabled if absent)
- :notifications {:enabled true
-                 :smtp {:host     "smtp.example.com"
-                        :port     587
-                        :tls      true
-                        :user     "notify@example.com"
-                        :password "secret"
-                        :from     "bark@example.com"}}
+ ;; ---- Ingestion -----------------------------------------------------------
+
+ ;; :initial-fetch controls how many emails to fetch on first run
+ ;; (when no watermark exists yet).  Accepted values:
+ ;;   integer       — fetch the N most recent emails (e.g. 50)
+ ;;   "Nd/w/m/y"   — fetch emails from the last N days/weeks/months/years (e.g. "30d", "6m")
+ ;;   "yyyy-MM-dd"  — fetch emails since this date (e.g. "2025-01-15")
+ ;; Can be overridden via CLI: clj -M:run -- --initial-fetch 4d
+ ;;
+ ;; :max-size skips emails larger than N bytes (optional, no limit by default).
+ :ingest {:initial-fetch 50
+          ;; :max-size 1048576
+          }
+
+ ;; ---- Customization -------------------------------------------------------
 
  ;; Global labels (optional) — override built-in subject tag lists.
  ;; Merged on top of defaults; specify only the types you want to change.
@@ -143,6 +138,20 @@
  ;;   :urgent    ["Urgent"]
  ;;   :important ["Important"]
 
+ ;; Supported report types (optional) — restricts which report types
+ ;; are detected and created during digest.  Emails matching a disabled
+ ;; type are silently ignored (they still thread as descendants).
+ ;; When set per source, it overrides the global value.
+ ;; Default: all types (when absent).
+ ;; :report-types #{:bug :patch :request :announcement :release :change}
+ ;;
+ ;; Example — a source that only tracks bugs and patches:
+ ;; {:name "kernel-patches"
+ ;;  :list "lkml.org"
+ ;;  :report-types #{:bug :patch}}
+
+ ;; ---- Lifecycle -----------------------------------------------------------
+
  ;; Expiry rules (optional) — auto-close open reports when age and state
  ;; match configured conditions. Applies to any report type.
  ;; When set per source, it overrides the global value.
@@ -169,6 +178,17 @@
  ;;          :request      {:delay "1000d"
  ;;                         :max-status 0}}
 
+ ;; Maintenance (optional) — settings for `bb maintenance`.
+ ;; Run only when the JVM daemon is stopped.
+ ;;   :orphan-delay — delete orphan emails older than this duration.
+ ;;                   An orphan is an email not referenced by any report
+ ;;                   and not sent by a maintainer or admin.
+ ;;                   Accepts a duration string ("30d", "6w", "3m", "1y")
+ ;;                   or an integer (days). Default: 90 days.
+ ;; :maintenance {:orphan-delay "90d"}
+
+ ;; ---- Exports -------------------------------------------------------------
+
  ;; Global export formats (optional) — controls which per-type feed files
  ;; are generated (e.g. bugs.json, patches.xml, announcements.org).
  ;; Also controls which of reports.json/org/rss are emitted during `bb export all`.
@@ -182,19 +202,37 @@
  ;; Default: all types (when absent).
  ;; :export-reports #{:bug :patch :request :announcement :release :change}
 
- ;; Supported report types (optional) — restricts which report types
- ;; are detected and created during digest.  Emails matching a disabled
- ;; type are silently ignored (they still thread as descendants).
- ;; When set per source, it overrides the global value.
- ;; Default: all types (when absent).
- ;; :report-types #{:bug :patch :request :announcement :release :change}
+ ;; Theme for HTML pages (optional).
+ ;; Resolved in this order:
+ ;;   1. https:// URL        → external <link> stylesheet
+ ;;   2. file:///path         → inline <style> from local file
+ ;;   3. path ending in .css  → inline <style> (relative or absolute path)
+ ;;   4. bare name            → pico-themes CDN (base + bark overlay)
+ ;; Set to "none" to disable theming.
  ;;
- ;; Example — a source that only tracks bugs and patches:
- ;; {:name "kernel-patches"
- ;;  :list "lkml.org"
- ;;  :report-types #{:bug :patch}}
+ ;; Examples:
+ ;; :theme "org"                                    ;; pico-themes shortname
+ ;; :theme "https://example.com/custom.css"         ;; external URL
+ ;; :theme "file:///home/user/my-theme.css"         ;; local file (inline)
+ ;; :theme "themes/custom.css"                      ;; relative path (inline)
+ ;;
+ ;; CLI override: bb export --theme org
+ ;;
+ ;; :theme "org"
 
- ;; Logging (optional — logs go to stdout only when absent)
+ ;; ---- Notifications -------------------------------------------------------
+
+ ;; Notification settings (optional — notifications disabled if absent)
+ :notifications {:enabled true
+                 :smtp {:host     "smtp.example.com"
+                        :port     587
+                        :tls      true
+                        :user     "notify@example.com"
+                        :password "secret"
+                        :from     "bark@example.com"}}
+
+ ;; ---- Logging -------------------------------------------------------------
+
  ;; :logging {:file     "logs/bark.log"    ;; path to log file (optional)
  ;;           :level    :warn              ;; minimum level for file (:debug :info :warn :error)
  ;;           :max-size "10MB"             ;; rotate when file exceeds this size (default: 10MB)
@@ -202,14 +240,5 @@
  ;;           ;; Email logging — requires :notifications :smtp to be configured.
  ;;           :email    {:to    "admin@example.com"  ;; recipient address
  ;;                      :level :error}}             ;; minimum level to email (default: :error)
-
- ;; Maintenance (optional) — settings for `bb maintenance`.
- ;; Run only when the JVM daemon is stopped.
- ;;   :orphan-delay — delete orphan emails older than this duration.
- ;;                   An orphan is an email not referenced by any report
- ;;                   and not sent by a maintainer or admin.
- ;;                   Accepts a duration string ("30d", "6w", "3m", "1y")
- ;;                   or an integer (days). Default: 90 days.
- ;; :maintenance {:orphan-delay "90d"}
 
  }
