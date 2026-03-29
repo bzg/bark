@@ -123,7 +123,8 @@
   #{:acked :owned :closed :urgent :important
     :acked-by :owned-by :closed-by :urgent-by :important-by
     :unacked :unowned :unclosed :unurgent :unimportant
-    :deadline :undeadline :topic})
+    :deadline :undeadline :expiry :unexpiry
+    :topic :untopic :superseded-by :unsuperseded})
 
 ;; Per-source commands (optional)
 ;; Values can be vectors (word lists) or maps with
@@ -156,6 +157,11 @@
 ;; Global commands (optional) — same shape as per-source
 (s/def :bark/commands ::commands-map)
 
+;; Command aliases (optional) — maps old syntax to new for backward compatibility
+;; e.g. {"Unacked" "Not acked", "Unexpiry" "No expiry"}
+(s/def ::command-aliases (s/map-of ::non-blank-string ::non-blank-string))
+(s/def :bark/command-aliases ::command-aliases)
+
 ;; Subject triggers: map of report-type keyword -> vector of tag strings
 ;; e.g. {:bug ["BUG" "DEFECT"] :request ["POLL" "FR" "TODO"]}
 (s/def ::label-tags (s/coll-of ::non-blank-string :kind vector? :min-count 1))
@@ -179,16 +185,16 @@
 (s/def :bark/report-types ::report-types)
 
 ;; Expiry rules (optional)
-;; Each report type maps to a rule map with :delay and optional conditions.
-(s/def :expiry/delay (s/or :string (s/and ::non-blank-string #(re-seq #"\d+\s*[ydwm]" %))
+;; Each report type maps to a rule map with :after and optional conditions.
+(s/def :expiry/after (s/or :deadline #{:deadline}
+                           :string (s/and ::non-blank-string #(re-seq #"\d+\s*[ydwm]" %))
                            :int pos-int?))
 (s/def :expiry/max-status (s/and int? #(<= 0 % 3)))
 (s/def :expiry/max-priority (s/and int? #(<= 0 % 3)))
-(s/def :expiry/op-answered boolean?)
 
 (s/def ::expiry-rule
-  (s/keys :req-un [:expiry/delay]
-          :opt-un [:expiry/max-status :expiry/max-priority :expiry/op-answered]))
+  (s/keys :req-un [:expiry/after]
+          :opt-un [:expiry/max-status :expiry/max-priority]))
 
 (s/def ::expiry
   (s/map-of valid-report-types ::expiry-rule))
@@ -218,7 +224,8 @@
 (s/def ::config
   (s/keys :req-un [:bark/admin :bark/imap :bark/sources :bark/db]
           :opt-un [:bark/ingest :bark/notifications :bark/labels
-                   :bark/commands :bark/export-reports :bark/report-types
+                   :bark/commands :bark/command-aliases
+                   :bark/export-reports :bark/report-types
                    :bark/expiry :bark/logging :bark/maintenance]))
 
 ;; ---------------------------------------------------------------------------

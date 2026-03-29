@@ -5,8 +5,7 @@
 (ns bark.expire
   "Close open reports when their age and state match the configured
   :expiry rules. Runs inside the daemon."
-  (:require [clojure.string :as str]
-            [datalevin.core :as d]
+  (:require [datalevin.core :as d]
             [taoensso.timbre :as log]
             [bark.common :as common]
             [bark.tracking :as tracking])
@@ -17,12 +16,15 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- parse-expiry-rule
-  "Normalize an expiry rule map into a map with :delay-days.
-  Expects a map with at least :delay (integer or duration string)."
+  "Normalize an expiry rule map.
+  Expects a map with :after (integer, duration string, or :deadline)."
   [v]
   (when (map? v)
-    (when-let [d (common/parse-delay (:delay v))]
-      (assoc v :delay-days d))))
+    (let [after (:after v)]
+      (if (= :deadline after)
+        (assoc v :expires-on-deadline true)
+        (when-let [d (common/parse-delay after)]
+          (assoc v :delay-days d))))))
 
 (defn- report-activity-score
   "Compute activity score from a pulled report: acked (1) + owned (2).
@@ -38,53 +40,25 @@
   (+ (if (:report/urgent report) 2 0)
      (if (:report/important report) 1 0)))
 
-(defn- last-descendant-from
-  "Return the :email/from-address of the most recent descendant email (by date)."
-  [db report-eid]
-  (let [descendants (d/q '[:find ?addr ?date
-                           :in $ ?r
-                           :where
-                           [?r :report/descendants ?e]
-                           [?e :email/from-address ?addr]
-                           [?e :email/date-sent ?date]]
-                         db report-eid)]
-    (when (seq descendants)
-      (first (last (sort-by second descendants))))))
-
-(defn- op-address
-  "Return the from-address of the report's founding email."
-  [db report-eid]
-  (d/q '[:find ?addr .
-         :in $ ?r
-         :where [?r :report/email ?e] [?e :email/from-address ?addr]]
-       db report-eid))
-
 (defn- rule-matches?
   "Check whether a report matches all expiry rule conditions.
   Returns true if the report should be expired."
-  [db report-eid rule report-data now date-sent]
-  (let [{:keys [delay-days max-status max-priority op-answered]} rule]
+  [rule report-data now]
+  (let [{:keys [delay-days expires-on-deadline max-status max-priority]} rule
+        last-activity (:report/last-activity report-data)]
     (and
-     ;; Age check
-     delay-days date-sent
-     (> (common/days-between date-sent now) delay-days)
+     ;; Age check: either deadline-based or delay from last activity
+     (if expires-on-deadline
+       (when-let [deadline (:report/deadline report-data)]
+         (.before ^Date deadline now))
+       (and delay-days last-activity
+            (> (common/days-between last-activity now) delay-days)))
      ;; Status ceiling (activity score: acked=1 + owned=2, range 0–3)
      (or (nil? max-status)
          (<= (report-activity-score report-data) max-status))
      ;; Priority ceiling
      (or (nil? max-priority)
-         (<= (report-priority-value report-data) max-priority))
-     ;; OP-answered check
-     (or (nil? op-answered)
-         (let [op   (op-address db report-eid)
-               last (last-descendant-from db report-eid)]
-           (if (false? op-answered)
-             ;; Expire when the last reply is NOT from the OP
-             (or (nil? last) (not= (some-> op str/lower-case)
-                                   (some-> last str/lower-case)))
-             ;; op-answered true: expire only when last IS from OP
-             (and last (= (some-> op str/lower-case)
-                          (some-> last str/lower-case)))))))))
+         (<= (report-priority-value report-data) max-priority)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Expiry engine
@@ -114,32 +88,32 @@
   their source. Sets :report/close-reason to :expired."
   [conn source-map]
   (let [now (Date.)
-        candidates (d/q '[:find ?r ?type ?src ?date
+        candidates (d/q '[:find ?r ?type ?src
                           :where
                           [?r :report/type ?type]
                           [?r :report/email ?e]
                           [?e :email/source ?src]
-                          [?e :email/date-sent ?date]
                           (not [?r :report/closed _])]
                         (d/db conn))
-        ;; Immutable snapshot for all read-only checks (report state, OP-answered, etc.)
+        ;; Immutable snapshot for all read-only checks.
         ;; Write operations (find-or-create-expiry-email!) deliberately use (d/db conn)
         ;; to see their own prior inserts within this reduce.
         db-snap (d/db conn)
         expired (reduce
-                 (fn [n [rid rtype src date-sent]]
+                 (fn [n [rid rtype src]]
                    (let [report-data (d/pull db-snap [:report/acked :report/owned
                                                       :report/urgent :report/important
-                                                      :report/expiry] rid)
+                                                      :report/expiry :report/deadline
+                                                      :report/last-activity] rid)
                          explicit-expiry (:report/expiry report-data)
-                         ;; Per-report expiry date takes precedence over global rules
+                         ;; Per-report expiry takes precedence over source-level rules
                          should-expire?
                          (if explicit-expiry
                            (.before ^Date explicit-expiry now)
                            (let [expiry-cfg (:expiry (get source-map src))
                                  rule-raw   (get expiry-cfg (keyword rtype))]
                              (when-let [rule (parse-expiry-rule rule-raw)]
-                               (rule-matches? db-snap rid rule report-data now date-sent))))]
+                               (rule-matches? rule report-data now))))]
                      (if should-expire?
                        (let [report-mid (d/q '[:find ?mid . :in $ ?r
                                                :where [?r :report/message-id ?mid]]

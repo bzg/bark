@@ -157,26 +157,38 @@
  ;; When set per source, it overrides the global value.
  ;;
  ;; Each entry maps a report type to a rule map:
- ;;   :delay         — duration string ("30d", "6w", "3m", "1y") [required]
+ ;;   :after         — duration string ("30d", "6w", "3m", "1y"), or :deadline [required]
+ ;;                    Duration is measured from the last email in the thread.
+ ;;                    :deadline means "expire when the report's deadline is past".
  ;;   :max-status    — don't expire if activity score > this (0=none, 1=acked,
  ;;                    2=owned, 3=acked+owned) [optional]
  ;;   :max-priority  — don't expire if priority > this (0-3) [optional]
- ;;   :op-answered   — false: don't expire if the OP posted the last reply [optional]
  ;;
  ;; All conditions are conjunctive (all must be true to expire).
  ;; Maintainers can also set a per-report expiry date via the
  ;; "Expiry: <date-or-duration>" directive, which overrides these rules.
  ;;
  ;; Example:
- ;; :expiry {:announcement {:delay "30d"}
- ;;          :release      {:delay "6w"}
- ;;          :change       {:delay "3m"}
- ;;          :bug          {:delay "1000d"
+ ;; :expiry {:announcement {:after "30d"}
+ ;;          :release      {:after "6w"}
+ ;;          :change       {:after "3m"}
+ ;;          :bug          {:after "1000d"
  ;;                         :max-status 0       ;; only open, unacked, unowned
- ;;                         :max-priority 0     ;; only non-urgent, non-important
- ;;                         :op-answered false}  ;; only when OP is NOT the last to reply
- ;;          :request      {:delay "1000d"
+ ;;                         :max-priority 0}    ;; only non-urgent, non-important
+ ;;          :request      {:after "1000d"
  ;;                         :max-status 0}}
+ ;;
+ ;; Command aliases (optional) — maps old command syntax to the current form.
+ ;; Useful for backward compatibility when re-parsing archived emails.
+ ;;
+ ;; :command-aliases {"Unacked"      "Not acked"
+ ;;                   "Unowned"      "Not owned"
+ ;;                   "Unclosed"     "Not closed"
+ ;;                   "Unurgent"     "Not urgent"
+ ;;                   "Unimportant"  "Not important"
+ ;;                   "Undeadline"   "No deadline"
+ ;;                   "Unexpiry"     "No expiry"
+ ;;                   "Unsuperseded" "Not superseded"}
 
  ;; Maintenance (optional) — settings for `bb maintenance`.
  ;; Run only when the JVM daemon is stopped.
