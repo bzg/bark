@@ -36,15 +36,14 @@
          '[cheshire.core :as json]
          '[clojure.string :as str]
          '[clojure.edn :as edn]
-         '[clojure.java.io :as io]
-         '[clojure.set])
+         '[clojure.java.io :as io])
 
 ;; Forward-declared for clj-kondo (provided at runtime by load-file below).
 (declare load-datalevin-pod! get-header slugify mid-hash email-body-text
          ensure-set format-date format-date-iso report-priority report-status
          report-descendant-count all-reports report-pull-pattern
          parse-cli-args load-config build-source-map bark-schema bark-format
-         get-last-modified changed-report-types-since
+         get-last-modified changed-sources-since
          set-theme! resolve-css-theme votes-by-report vote-counts
          html-head footer-css bark-footer wrap-js spit-html theme-toggle-js bark-repo-url)
 
@@ -799,7 +798,8 @@
             "stats"   (dump-stats! base-dir reports-dir source-name "json" cli-extra)))]
     (if (= format "all")
       (do (when (ef "json") (dump-json! reports reports-dir source-name source-map maintainers-map))
-          (dump-votes! reports reports-dir)
+          ;; Votes are only consumed by JSON and HTML outputs.
+          (when (or (ef "json") (ef "html")) (dump-votes! reports reports-dir))
           (when (ef "rss")  (dump-rss!  reports reports-dir source-name source-map maintainers-map))
           (when (ef "org")  (dump-org!  reports reports-dir source-name source-map maintainers-map))
           (dump-per-type! reports reports-dir source-name source-map maintainers-map ef)
@@ -844,24 +844,12 @@
                                    (.getTime ^java.util.Date last-export)))]
       (if skip?
         (log/info "Nothing changed since last export, skipping.")
-        (let [changed-types   (when (and incremental? last-export)
-                                (changed-report-types-since db last-export))
-              config          (load-config)
+        ;; Resolve config and source list *before* the expensive DB pull
+        ;; so we can determine which sources actually need re-export.
+        (let [config          (load-config)
               effective-theme (or theme (:theme config))
               _               (when effective-theme (set-theme! effective-theme))
               source-map      (if config (build-source-map config) {})
-              maintainers-map (if config (build-maintainers db source-map) {})
-              all-reps        (all-reports-by-date db)
-              _               (reset! all-votes-atom
-                                (votes-by-report
-                                 (d/q '[:find ?r ?val ?voter ?emid
-                                        :where
-                                        [?v :vote/report ?r]
-                                        [?v :vote/value  ?val]
-                                        [?v :vote/voter  ?voter]
-                                        [?v :vote/email  ?e]
-                                        [?e :email/message-id ?emid]]
-                                      db)))
               source-names    (if source-name
                                 (if (contains? source-map source-name)
                                   [source-name]
@@ -870,38 +858,60 @@
                                                  (str/join ", " (keys source-map)))
                                       (System/exit 1)))
                                 (mapv :name (:sources config)))
-              cli-extra       (let [drop (disj (hash-set format "-n" source-name
-                                                         "--force" "--theme" theme) nil)]
-                                (cond-> (vec (remove drop (rest *command-line-args*)))
-                                  effective-theme (into ["--theme" effective-theme])))]
-          (when (and incremental? (seq changed-types))
-            (log/info "Incremental: changed types:" (str/join ", " (map name changed-types))))
-          (when-not (= format "root")
-            (doseq [src-name source-names]
-              (let [reports  (filter-reports all-reps {:source       src-name
-                                                       :min-priority min-priority
-                                                       :min-status   min-status})
-                    er       (resolve-export-reports src-name source-map)
-                    reports  (if er (filter #(contains? er (:report/type %)) reports) reports)
-                    src-types (when incremental? (set (map :report/type reports)))
-                    skip-src? (and incremental? (seq changed-types)
-                                   (empty? (clojure.set/intersection changed-types src-types)))
-                    base-dir (str "public/" (slugify src-name))]
-                (cond
-                  skip-src?
-                  (log/info (str "[" src-name "]") "no changed types, skipping.")
-
-                  (empty? reports)
-                  (log/info "No reports for source" (str "'" src-name "'") ", skipping.")
-
-                  :else
-                  (do (log/info (str "[" src-name "] " (count reports) " report(s)"
-                                     " (" (count (open-reports reports)) " open)"
-                                     (if incremental? " (incremental)" "")))
-                      (export-source! format reports base-dir src-name
-                                      source-map maintainers-map cli-extra))))))
-          (when (#{"all" "root"} format)
-            (dump-root-index! source-names source-map))
+              ;; Per-source change detection: more precise than type-based,
+              ;; avoids re-exporting sources that merely share a report type.
+              changed-srcs    (when (and incremental? last-export)
+                                (changed-sources-since db last-export))
+              export-names    (if (and incremental? (seq changed-srcs))
+                                (filterv (fn [s] (contains? changed-srcs s)) source-names)
+                                source-names)]
+          (when (and incremental? (seq changed-srcs))
+            (log/info "Incremental: changed sources:" (str/join ", " changed-srcs)))
+          (when (and incremental? (seq changed-srcs) (< (count export-names) (count source-names)))
+            (let [skipped (remove (set export-names) source-names)]
+              (doseq [s skipped]
+                (log/info (str "[" s "]") "no changes, skipping."))))
+          ;; Only load all reports and votes when there is actual work to do.
+          ;; Track whether any source was actually exported so we can skip
+          ;; the root index when nothing changed.
+          (let [any-exported? (volatile! false)]
+            (when (and (not= format "root") (seq export-names))
+              (let [maintainers-map (if config (build-maintainers db source-map) {})
+                    all-reps        (all-reports-by-date db)
+                    _               (reset! all-votes-atom
+                                      (votes-by-report
+                                       (d/q '[:find ?r ?val ?voter ?emid
+                                              :where
+                                              [?v :vote/report ?r]
+                                              [?v :vote/value  ?val]
+                                              [?v :vote/voter  ?voter]
+                                              [?v :vote/email  ?e]
+                                              [?e :email/message-id ?emid]]
+                                            db)))
+                    cli-extra       (let [drop (disj (hash-set format "-n" source-name
+                                                               "--force" "--theme" theme) nil)]
+                                      (cond-> (vec (remove drop (rest *command-line-args*)))
+                                        effective-theme (into ["--theme" effective-theme])))]
+                (doseq [src-name export-names]
+                  (let [reports  (filter-reports all-reps {:source       src-name
+                                                           :min-priority min-priority
+                                                           :min-status   min-status})
+                        er       (resolve-export-reports src-name source-map)
+                        reports  (if er (filter #(contains? er (:report/type %)) reports) reports)
+                        base-dir (str "public/" (slugify src-name))]
+                    (if (empty? reports)
+                      (log/info "No reports for source" (str "'" src-name "'") ", skipping.")
+                      (do (vreset! any-exported? true)
+                          (log/info (str "[" src-name "] " (count reports) " report(s)"
+                                         " (" (count (open-reports reports)) " open)"
+                                         (if incremental? " (incremental)" "")))
+                          (export-source! format reports base-dir src-name
+                                          source-map maintainers-map cli-extra)))))))
+            ;; Only regenerate root index when at least one source was exported,
+            ;; or when explicitly requested via "bb export root".
+            (when (and (#{"all" "root"} format)
+                       (or (= format "root") @any-exported?))
+              (dump-root-index! source-names source-map)))
           (save-last-export! (java.util.Date.)))))
     (finally
       (d/close conn))))
