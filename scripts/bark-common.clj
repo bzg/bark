@@ -67,3 +67,15 @@
              :in $ ?since
              :where [?r :report/updated-at ?u] [(> ?u ?since)] [?r :report/type ?t]]
            db since-ts)))
+
+(defn changed-sources-since
+  "Return the set of source names that have at least one report updated
+  after `since-ts`.  More precise than type-based detection: avoids
+  re-exporting unrelated sources that happen to share a report type."
+  [db since-ts]
+  (set (dq '[:find [?src ...]
+             :in $ ?since
+             :where
+             [?r :report/updated-at ?u] [(> ?u ?since)]
+             [?r :report/email ?e] [?e :email/source ?src]]
+           db since-ts)))
