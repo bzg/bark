@@ -21,7 +21,7 @@
 
 (def bark-format
   "BARK export format version. Bump when the JSON/Org export shape changes."
-  "0.3.0")
+  "0.4.0")
 
 (def bark-schema
   (edn/read-string (slurp (io/resource "bark-schema.edn"))))
@@ -125,7 +125,7 @@
               0 valid-parts))))
 
 (defn parse-delay
-  "Parse a :delay value into a number of days.
+  "Parse an :after value into a number of days.
   Accepts an integer (days) or a duration string (\"30d\", \"6w\", \"3m\").
   Note: \"0d\" returns 0, meaning 'expire immediately'."
   [v]
@@ -441,13 +441,14 @@
 (defn build-source-map
   "Build source-name -> config map from config."
   [config]
-  (let [default-admin (:admin config)
-        global-st     (:labels config)
-        global-cmd    (:commands config)
-        global-ef     (:export-formats config)
-        global-er     (:export-reports config)
-        global-expiry (:expiry config)
-        global-rt     (:report-types config)]
+  (let [default-admin   (:admin config)
+        global-st       (:labels config)
+        global-cmd      (:commands config)
+        global-aliases  (:command-aliases config)
+        global-ef       (:export-formats config)
+        global-er       (:export-reports config)
+        global-expiry   (:expiry config)
+        global-rt       (:report-types config)]
     (into {}
           (keep (fn [src]
                  (let [stype (source-type src)]
@@ -462,6 +463,7 @@
                                              :maintainers])
                            (when global-st {:global-labels global-st})
                            (when global-cmd {:global-commands global-cmd})
+                           (when global-aliases {:command-aliases global-aliases})
                            {:export-formats (set (or (:export-formats src) global-ef ["json" "org" "rss"]))
                             :export-reports (when-let [er (or (:export-reports src) global-er)]
                                               (set (map keyword er)))
@@ -506,7 +508,8 @@
     {:report/important-proxy [:email/from-address]}
     :report/close-reason
     {:report/superseded-by [:report/message-id {:report/email [:email/subject]}]}
-    :report/deadline :report/expiry :report/descendants :report/digested-at :report/updated-at
+    :report/deadline :report/expiry
+    :report/last-activity :report/descendants :report/digested-at :report/updated-at
     {:report/related [:report/type :report/message-id
                       {:report/email [:email/headers-edn]}]}
     {:report/series [:series/id :series/expected :series/closed

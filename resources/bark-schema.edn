@@ -64,8 +64,9 @@
  :report/important-proxy {:db/valueType :db.type/ref}
  :report/close-reason    {:db/valueType :db.type/keyword}
  :report/superseded-by   {:db/valueType :db.type/ref}
- :report/deadline        {:db/valueType :db.type/instant}
- :report/expiry          {:db/valueType :db.type/instant}
+ :report/deadline              {:db/valueType :db.type/instant}
+ :report/expiry               {:db/valueType :db.type/instant}
+ :report/last-activity        {:db/valueType :db.type/instant}
  :report/digested-at     {:db/valueType :db.type/instant}
  :report/updated-at     {:db/valueType :db.type/instant}
 

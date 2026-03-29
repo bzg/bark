@@ -359,9 +359,18 @@
             (is (= "<34@test.org>" (get-in v1 [:series/cover-letter :email/message-id])))
             (is (= 3 (series-patch-count db "parser|user@test.org|3")))
             (is (some? (:series/closed v1))))
-          (let [r35 (get-report db "<35@test.org>")]
+          (let [r35 (get-report db "<35@test.org>")
+                r36 (get-report db "<36@test.org>")
+                r37 (get-report db "<37@test.org>")]
             (is (some? (:report/series r35)))
-            (is (= "1/3" (:report/patch-seq r35)))))
+            (is (= "1/3" (:report/patch-seq r35)))
+            ;; All 3 patches in the series are mutually related
+            (is (some #(= "<36@test.org>" (:report/message-id %))
+                      (:report/related r35)))
+            (is (some #(= "<37@test.org>" (:report/message-id %))
+                      (:report/related r35)))
+            (is (some #(= "<35@test.org>" (:report/message-id %))
+                      (:report/related r37)))))
 
         ;; --- Series v2 ---
         (testing "Series v2 emails 38-39"
@@ -501,7 +510,12 @@
             (is (= "1/2" (:report/patch-seq r68)))
             (is (= "2/2" (:report/patch-seq r69)))
             (is (some? (:report/series r68)))
-            (is (some? (:report/series r69)))))
+            (is (some? (:report/series r69)))
+            ;; Patches in the same series are related to each other
+            (is (some #(= "<69@test.org>" (:report/message-id %))
+                      (:report/related r68)))
+            (is (some #(= "<68@test.org>" (:report/message-id %))
+                      (:report/related r69)))))
 
         ;; --- Email 70 different sender ---
         (testing "Email 70 different sender same topic"
@@ -530,15 +544,17 @@
                   {:action :set :attr :report/urgent :email-address "x@y.com" :scope :maintainer}]
                  (commands/detect-directives :bug "Owned-by: x@y.com\nUrgent-by: x@y.com\n")))
           (is (= [{:action :unset :attr :report/acked :scope :maintainer}]
-                 (commands/detect-directives :bug "Unacked\n")))
+                 (commands/detect-directives :bug "Not acked\n")))
           (is (= [{:action :unset :attr :report/urgent :scope :maintainer}]
-                 (commands/detect-directives :bug "Unurgent\n")))
+                 (commands/detect-directives :bug "Not urgent\n")))
           (is (= [{:action :unset :attr :report/important :scope :maintainer}]
-                 (commands/detect-directives :bug "Unimportant\n")))
+                 (commands/detect-directives :bug "Not important\n")))
           (is (= [{:action :set-deadline :date (parse-date-iso "2026-06-15") :scope :maintainer}]
                  (commands/detect-directives :bug "Deadline: 2026-06-15\n")))
           (is (= [{:action :unset-deadline :scope :maintainer}]
-                 (commands/detect-directives :bug "Undeadline\n")))
+                 (commands/detect-directives :bug "No deadline\n")))
+          (is (= [{:action :unset-topic :scope :maintainer}]
+                 (commands/detect-directives :bug "No topic\n")))
           (is (= [{:action :set-topic :topic "my-topic" :scope :maintainer}]
                  (commands/detect-directives :bug "Topic: my-topic\n")))
           (is (= [{:action :set :attr :report/acked :email-address "a@b.com" :scope :maintainer}
@@ -553,7 +569,9 @@
           (is (= [{:action :set-expiry :date (parse-date-iso "2026-09-01") :scope :maintainer}]
                  (commands/detect-directives :bug "Expiry: 2026-09-01\n")))
           (is (= [{:action :unset-expiry :scope :maintainer}]
-                 (commands/detect-directives :bug "Unexpiry\n")))
+                 (commands/detect-directives :bug "No expiry\n")))
+          ;; "Expiry: deadline" is no longer a valid command (use :after :deadline in config)
+          (is (= [] (commands/detect-directives :bug "Expiry: deadline\n")))
           ;; Deadline with duration (relative to email date)
           (let [email-date (parse-date-iso "2026-01-10")
                 result (commands/detect-directives :bug "Deadline: 30d\n" nil email-date)]
@@ -596,7 +614,11 @@
                  (commands/resolve-commands [{:action :set-expiry :date (parse-date-iso "2026-09-01")}])))
           (is (= {:set {} :unset #{} :unexpiry? true}
                  (commands/resolve-commands [{:action :set-expiry :date (parse-date-iso "2026-09-01")}
-                                             {:action :unset-expiry}]))))
+                                             {:action :unset-expiry}])))
+          ;; Untopic resolve
+          (is (= {:set {} :unset #{} :untopic? true}
+                 (commands/resolve-commands [{:action :set-topic :topic "foo"}
+                                             {:action :unset-topic}]))))
 
         ;; --- Bug 81 directives ---
         (testing "Bug 81 Acked-by directive"
@@ -698,19 +720,36 @@
 
         ;; --- Emails 108-110 Supersede then unsupersede ---
         (testing "Bug 108 superseded then unsuperseded"
-          (let [r108 (get-report db "<108@test.org>")]
+          (let [r108 (get-report db "<108@test.org>")
+                r106 (get-report db "<106@test.org>")]
             (is (nil? (:report/closed r108)) "unsuperseded report is reopened")
             (is (nil? (:report/close-reason r108)))
             (is (nil? (:report/superseded-by r108)))
-            ;; Related link from the supersede is kept
-            (is (some #(= "<106@test.org>" (:report/message-id %))
-                      (:report/related r108)))))
+            ;; Related link from the supersede is removed
+            (is (not (some #(= "<106@test.org>" (:report/message-id %))
+                           (:report/related r108))))
+            (is (not (some #(= "<108@test.org>" (:report/message-id %))
+                           (:report/related r106))))))
 
         ;; --- Email 111 user can't supersede ---
         (testing "Email 111 user Superseded-by denied"
           (let [r108 (get-report db "<108@test.org>")]
             (is (nil? (:report/closed r108)))
             (is (nil? (:report/superseded-by r108)))))
+
+        ;; --- Emails 114-116 Not closed on superseded report ---
+        (testing "Bug 114 superseded then reopened via Not closed"
+          (let [r114 (get-report db "<114@test.org>")
+                r106 (get-report db "<106@test.org>")]
+            (is (nil? (:report/closed r114)) "report is reopened")
+            (is (nil? (:report/close-reason r114)) "close-reason is cleared")
+            (is (nil? (:report/superseded-by r114)) "superseded-by is cleared")
+            (is (not (some #(= "<106@test.org>" (:report/message-id %))
+                           (:report/related r114)))
+                "related link to superseder is removed")
+            (is (not (some #(= "<114@test.org>" (:report/message-id %))
+                           (:report/related r106)))
+                "reverse related link is removed")))
 
         ;; --- Directive unit tests for supersede ---
         (testing "detect-directives: Superseded-by with angle brackets"
@@ -721,9 +760,9 @@
           (is (= [{:action :set-superseded :target-message-id "<msg@example.com>" :scope :maintainer}]
                  (commands/detect-directives :bug "Superseded-by: msg@example.com\n"))))
 
-        (testing "detect-directives: Unsuperseded"
+        (testing "detect-directives: Not superseded"
           (is (= [{:action :unset-superseded :scope :maintainer}]
-                 (commands/detect-directives :bug "Unsuperseded\n"))))
+                 (commands/detect-directives :bug "Not superseded\n"))))
 
         (testing "resolve-commands: superseded-by"
           (is (= {:set {} :unset #{} :superseded-by "<mid@host>"}
