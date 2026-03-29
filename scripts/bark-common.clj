@@ -62,20 +62,17 @@
         :where [?e :meta/ident "global"] [?e :meta/last-modified ?t]]
       db))
 
-(defn changed-report-types-since [db since-ts]
-  (set (dq '[:find [?t ...]
-             :in $ ?since
-             :where [?r :report/updated-at ?u] [(> ?u ?since)] [?r :report/type ?t]]
-           db since-ts)))
-
-(defn changed-sources-since
-  "Return the set of source names that have at least one report updated
-  after `since-ts`.  More precise than type-based detection: avoids
-  re-exporting unrelated sources that happen to share a report type."
+(defn changed-source-types-since
+  "Return a map {source-name #{report-type ...}} for reports updated
+  after `since-ts`.  Enables both source-level and per-type skip logic."
   [db since-ts]
-  (set (dq '[:find [?src ...]
-             :in $ ?since
-             :where
-             [?r :report/updated-at ?u] [(> ?u ?since)]
-             [?r :report/email ?e] [?e :email/source ?src]]
-           db since-ts)))
+  (reduce (fn [m [src rtype]]
+            (update m src (fnil conj #{}) rtype))
+          {}
+          (dq '[:find ?src ?t
+                 :in $ ?since
+                 :where
+                 [?r :report/updated-at ?u] [(> ?u ?since)]
+                 [?r :report/type ?t]
+                 [?r :report/email ?e] [?e :email/source ?src]]
+               db since-ts)))

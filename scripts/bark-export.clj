@@ -43,7 +43,7 @@
          ensure-set format-date format-date-iso report-priority report-status
          report-descendant-count all-reports report-pull-pattern
          parse-cli-args load-config build-source-map bark-schema bark-format
-         get-last-modified changed-sources-since
+         get-last-modified changed-source-types-since
          set-theme! resolve-css-theme votes-by-report vote-counts
          html-head footer-css bark-footer wrap-js spit-html theme-toggle-js bark-repo-url)
 
@@ -599,12 +599,15 @@
   (get-in source-map [source-name :export-reports]))
 
 (defn- dump-per-type!
-  "Export per-type JSON, Org, and RSS files for all report types present."
-  [reports reports-dir source-name source-map maintainers-map fmts]
+  "Export per-type JSON, Org, and RSS files for all report types present.
+  When `changed-types` is non-nil, only re-export files for those types."
+  [reports reports-dir source-name source-map maintainers-map fmts
+   & {:keys [changed-types]}]
   (doseq [rtype report-types
           :let [typed (filter-reports reports {:type rtype})
                 plural (type->plural rtype)]
-          :when (seq typed)]
+          :when (and (seq typed)
+                     (or (nil? changed-types) (changed-types rtype)))]
     (when (fmts "json")
       (dump-json! typed reports-dir source-name source-map maintainers-map
                   (str plural ".json")))
@@ -620,8 +623,11 @@
   all-open.json is loaded by index.html on first paint (fast).
   all-closed.json is lazy-loaded when user deactivates the Open filter.
   meta.json contains summary counts per type, used by data.html for KPIs.
-  Produces per-type -open and -closed files in all enabled formats."
-  [reports reports-dir source-name source-map maintainers-map fmts]
+  Produces per-type -open and -closed files in all enabled formats.
+  When `changed-types` is non-nil, only re-export per-type files for those types
+  (the aggregate all-open/all-closed and meta.json are always regenerated)."
+  [reports reports-dir source-name source-map maintainers-map fmts
+   & {:keys [changed-types]}]
   (let [open       (vec (open-reports reports))
         closed     (vec (filter :report/closed reports))
         counts     {:total        (count reports)
@@ -663,8 +669,9 @@
     (when (fmts "org")
       (dump-org! closed reports-dir source-name source-map maintainers-map
                  "all-closed.org" "closed reports"))
-    ;; --- Per-type open & closed ---
+    ;; --- Per-type open & closed (skip unchanged types when incremental) ---
     (doseq [rtype report-types
+            :when (or (nil? changed-types) (changed-types rtype))
             :let [plural (type->plural rtype)
                   t-open   (filter-reports open {:type rtype})
                   t-closed (filter-reports closed {:type rtype})]]
@@ -769,8 +776,11 @@
 (defn export-source!
   "Export a single source in the given format(s).
   Always produces all-open.json and all-closed.json (used by index.html).
-  When format is \"all\", per-type feeds respect :export-formats from config."
-  [format reports base-dir source-name source-map maintainers-map cli-extra]
+  When format is \"all\", per-type feeds respect :export-formats from config.
+  `changed-types` (optional set of keywords) limits per-type file regeneration
+  to those types during incremental export; aggregate files are always rebuilt."
+  [format reports base-dir source-name source-map maintainers-map cli-extra
+   & {:keys [changed-types]}]
   (let [reports-dir (str base-dir "/reports")
         patches-dir (str base-dir "/patches")
         _           (doseq [d [reports-dir patches-dir]]
@@ -802,8 +812,10 @@
           (when (or (ef "json") (ef "html")) (dump-votes! reports reports-dir))
           (when (ef "rss")  (dump-rss!  reports reports-dir source-name source-map maintainers-map))
           (when (ef "org")  (dump-org!  reports reports-dir source-name source-map maintainers-map))
-          (dump-per-type! reports reports-dir source-name source-map maintainers-map ef)
-          (dump-open-closed! reports reports-dir source-name source-map maintainers-map ef)
+          (dump-per-type! reports reports-dir source-name source-map maintainers-map ef
+                          :changed-types changed-types)
+          (dump-open-closed! reports reports-dir source-name source-map maintainers-map ef
+                             :changed-types changed-types)
           (dump-patches! reports patches-dir)
           (dump-docs! base-dir source-name cli-extra)
           (dump-html! base-dir reports-dir cli-extra)
@@ -858,16 +870,18 @@
                                                  (str/join ", " (keys source-map)))
                                       (System/exit 1)))
                                 (mapv :name (:sources config)))
-              ;; Per-source change detection: more precise than type-based,
-              ;; avoids re-exporting sources that merely share a report type.
-              changed-srcs    (when (and incremental? last-export)
-                                (changed-sources-since db last-export))
-              export-names    (if (and incremental? (seq changed-srcs))
-                                (filterv (fn [s] (contains? changed-srcs s)) source-names)
+              ;; Per-source, per-type change detection: {source -> #{types}}.
+              ;; Enables both source-level skip and intra-source per-type skip.
+              changed-st      (when (and incremental? last-export)
+                                (changed-source-types-since db last-export))
+              export-names    (if (and incremental? (seq changed-st))
+                                (filterv (fn [s] (contains? changed-st s)) source-names)
                                 source-names)]
-          (when (and incremental? (seq changed-srcs))
-            (log/info "Incremental: changed sources:" (str/join ", " changed-srcs)))
-          (when (and incremental? (seq changed-srcs) (< (count export-names) (count source-names)))
+          (when (and incremental? (seq changed-st))
+            (log/info "Incremental: changed sources:"
+                      (str/join ", " (map (fn [[s ts]] (str s " (" (str/join " " (map name ts)) ")"))
+                                          changed-st))))
+          (when (and incremental? (seq changed-st) (< (count export-names) (count source-names)))
             (let [skipped (remove (set export-names) source-names)]
               (doseq [s skipped]
                 (log/info (str "[" s "]") "no changes, skipping."))))
@@ -898,7 +912,10 @@
                                                            :min-status   min-status})
                         er       (resolve-export-reports src-name source-map)
                         reports  (if er (filter #(contains? er (:report/type %)) reports) reports)
-                        base-dir (str "public/" (slugify src-name))]
+                        base-dir (str "public/" (slugify src-name))
+                        ;; Per-type granularity: only re-export per-type files
+                        ;; for types that actually changed in this source.
+                        src-changed (when (seq changed-st) (get changed-st src-name))]
                     (if (empty? reports)
                       (log/info "No reports for source" (str "'" src-name "'") ", skipping.")
                       (do (vreset! any-exported? true)
@@ -906,7 +923,8 @@
                                          " (" (count (open-reports reports)) " open)"
                                          (if incremental? " (incremental)" "")))
                           (export-source! format reports base-dir src-name
-                                          source-map maintainers-map cli-extra)))))))
+                                          source-map maintainers-map cli-extra
+                                          :changed-types src-changed)))))))
             ;; Only regenerate root index when at least one source was exported,
             ;; or when explicitly requested via "bb export root".
             (when (and (#{"all" "root"} format)
