@@ -830,7 +830,7 @@ All tasks are run via [[https://babashka.org/][Babashka]]:
 | =bb export --drop-closed 1y= | Exclude reports closed more than 1 year ago             |
 | =bb notify=                  | Send notification emails                                |
 | =bb notify --dry-run=        | Preview notifications without sending                   |
-| =bb clean=                   | Remove all generated files (=public/=, =classes/=, =target/=) |
+| =bb clean=                   | Remove all generated files (=public/=, =classes/=, =docs/=)   |
 | =bb test-config=             | Validate =config.edn=                                     |
 | =bb test-smtp=               | Test SMTP configuration (=--to addr=, =--dry-run=)          |
 

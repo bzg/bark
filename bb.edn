@@ -13,7 +13,7 @@
               :task (apply shell "bb scripts/bark-notify.clj" *command-line-args*)}
 
   clean      {:doc  "Remove all files in classes/, public/ and docs/"
-              :task (doseq [d ["public" "classes" "target" "docs"]]
+              :task (doseq [d ["public" "classes" "docs"]]
                       (let [dir (clojure.java.io/file d)]
                         (when (.exists dir)
                           (doseq [f (reverse (file-seq dir))]
