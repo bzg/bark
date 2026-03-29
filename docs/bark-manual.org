@@ -63,9 +63,12 @@ list receives bug reports, patches and general discussions, it is
 necessary to keep all of this information in a database. This is what
 BARK is for: storing reports sent to a mailbox in a database.
 
-* Design
+* Principles
 
-- *Email-native* :: BARK is a tool for email-based workflows.
+- *Email-native* :: No account to create, no platform to maintain, no
+  vendor lock-in.  Users report bugs and review patches with whatever
+  mail client they already use.  The mailing list archive *is* the
+  tracker history — BARK simply indexes it.
 
 - *One place* :: [[https://orgmode.org][Org mode]] was born out of the idea that to-do items and
   free-form notes should be edited in the same space. Similarly, bug
@@ -76,13 +79,22 @@ BARK is for: storing reports sent to a mailbox in a database.
 - *KISS* :: BARK provides a simple framework for acting on reports, with
   a fixed vocabulary: =acked=, =owned=, or =closed= for status; =urgency= and
   =importance= for priority. You cannot invent a custom =WONTFIX-MAYBE=
-  status or manually set a report to P0.
+  status or manually set a report to P0.  This is deliberate: a fixed
+  vocabulary prevents the label proliferation that eventually makes
+  trackers unusable.
 
 - *Immutable* :: No web form, no API endpoint, no account. Users report
   bugs and request features by emailing a list. Maintainers respond by
   replying to the same thread. As every state change is encoded in an
   email, the entire tracker state can be reconstructed at any time by
-  re-monitoring the mailbox from scratch.
+  re-monitoring the mailbox from scratch.  This means no tracker backup
+  to manage and no database migration between BARK versions — the
+  mailbox is the source of truth.
+
+- *Low ops* :: BARK exports static HTML, JSON, RSS and Org files.  There
+  is no application server to keep running, no database to back up
+  (beyond the mailbox itself), and no user accounts to administer.  A
+  cron job and a web server serving static files are all you need.
 
 - *Local-first* :: BARK exports to JSON, RSS, Org. Companion tools like
   =bone= (TUI browser), =gnus-bone.el= (Emacs/Gnus) and =notmuch-bone.el=
@@ -666,6 +678,9 @@ The source name must match a source's =:name= exactly
 | =:export-formats=        | Output formats, e.g. =["json" "rss"]=  (default: =["json" "org" "rss"]=)       |
 | =:export-reports=        | Restrict exported types, e.g. =#{:bug :patch :request}=                      |
 | =:expiry=                | Auto-close rules per report type (see below)                               |
+| =:notifications=         | #ERROR                                                                     |
+|                        |                                                                            |
+#+TBLFM: $2={:enable false}= to silence notifications for this source (default: =true=)
 
 The =:since= date on a maintainer entry restricts their privileges to
 emails dated on or after that date.  Omit =:since= for immediate
@@ -723,6 +738,30 @@ per-report expiry date using the =Expiry:= directive (see [[*Setting an expiry d
 expiry date]]).  A per-report expiry overrides the source-level rules:
 if a report has an explicit expiry date, only that date is checked.
 
+** Ingestion
+
+#+begin_src edn
+:ingest {:initial-fetch 50       ;; or "30d", "2025-01-15"
+         :max-size      1048576} ;; skip emails > 1 MB (optional)
+#+end_src
+
+- =:initial-fetch= — how many emails to fetch on first run (no watermark
+  yet).  Accepts an integer (count), a duration string (="30d"=, ="6m"=,
+  ="1y"=), or an ISO date (="2025-01-15"=).  Default: =50=.  CLI override:
+  =clj -M:run -- --initial-fetch 4d=.
+- =:max-size= — skip emails larger than N bytes.  No limit by default.
+
+** Maintenance
+
+#+begin_src edn
+:maintenance {:orphan-delay "90d"}
+#+end_src
+
+- =:orphan-delay= — delete orphan emails (not referenced by any report,
+  not from a maintainer or admin) older than this duration.  Accepts a
+  duration string or an integer (days).  Default: =90= days.  Run with
+  =bb maintenance= (daemon must be stopped).
+
 ** Notifications (SMTP)
 
 #+begin_src edn
@@ -771,3 +810,129 @@ All tasks are run via [[https://babashka.org/][Babashka]]:
 
 Export accepts flags: =-n <source>= (restrict to one source), =-p <N>=
 (minimum priority), =-s <N>= (minimum status).
+
+* Appendix: workflow examples
+
+** Patch review cycle
+
+A contributor submits a patch series:
+
+: From: carol@dev.org
+: Subject: [PATCH parser v1 0/2] Refactor tokenizer
+:
+: Cover letter: this series splits the tokenizer into two passes.
+
+: From: carol@dev.org
+: Subject: [PATCH parser v1 1/2] Extract lexer phase
+:
+: <inline patch>
+
+: From: carol@dev.org
+: Subject: [PATCH parser v1 2/2] Add second pass
+:
+: <inline patch>
+
+BARK creates a patch series (3 emails, cover + 2 patches).  The
+maintainer reviews and asks for changes:
+
+: From: eve@project.org
+: Subject: Re: [PATCH parser v1 1/2] Extract lexer phase
+:
+: > <inline patch>
+:
+: The naming is confusing, can you rename foo to bar?
+
+Carol resubmits as v2:
+
+: From: carol@dev.org
+: Subject: [PATCH parser v2 0/2] Refactor tokenizer
+:
+: v2: renamed foo to bar as requested.
+
+BARK automatically closes the v1 series and opens a new v2 series.
+The maintainer applies:
+
+: From: eve@project.org
+: Subject: Re: [PATCH parser v2 0/2] Refactor tokenizer
+:
+: Applied, thanks!
+
+The v2 series is now closed (resolved).
+
+** Maintainer triage
+
+A bug comes in with no response for a while.  The maintainer triages
+offlist by sending directly to the BARK inbox:
+
+: From: eve@project.org
+: To: bark-inbox@project.org
+: Subject: Re: [BUG] Crash on startup
+: X-Bark-Source: my-project
+:
+: Confirmed.
+: Owned.
+: Urgent.
+
+The bug is now acked, owned, and urgent — without notifying the list.
+
+Later, the fix lands:
+
+: From: eve@project.org
+: To: bugs-list@project.org
+: Subject: Re: [BUG] Crash on startup
+:
+: Fixed in commit abc123, thanks for reporting!
+
+** Role management
+
+The admin adds a new maintainer:
+
+: From: admin@project.org
+: To: bark-inbox@project.org
+: X-Bark-Source: my-project
+:
+: Add maintainer: newdev@project.org
+
+A maintainer flags a spammer:
+
+: From: eve@project.org
+: To: bark-inbox@project.org
+: X-Bark-Source: my-project
+:
+: Ignore: spammer@example.com
+
+Later, the admin reverses the decision:
+
+: From: admin@project.org
+: To: bark-inbox@project.org
+: X-Bark-Source: my-project
+:
+: Unignore: spammer@example.com
+
+Only the admin can =Remove maintainer:= and =Unignore:=.
+
+** Automatic expiry and override
+
+With this config:
+
+#+begin_src edn
+:expiry {:bug {:delay "90d" :max-status 0}}
+#+end_src
+
+A bug reported 91 days ago, still unacked and unowned, is
+automatically closed with reason "expired" on the next =bb digest= run.
+
+A maintainer notices a legitimately old bug that should stay open and
+sets a far-future expiry to protect it:
+
+: From: eve@project.org
+: To: bugs-list@project.org
+: Subject: Re: [BUG] Legacy encoding issue
+:
+: This is still relevant, keeping it open.
+: Unexpiry.
+: Owned.
+
+By marking the bug as owned, it no longer matches =:max-status 0= and
+won't be expired by the rule.  =Unexpiry.= clears any per-report expiry
+date that may have been set previously.
