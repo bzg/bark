@@ -539,8 +539,11 @@
                         (let [h   (mid-hash (:report/message-id report))
                               dir (io/file patches-dir h)]
                           (.mkdirs dir)
-                          (doseq [p (:report/patches report)]
-                            (spit (io/file dir (:patch/filename p)) (:patch/text p)))
+                          (doseq [p (:report/patches report)
+                                  ;; patch/filename may be an absolute path;
+                                  ;; extract the basename so io/file stays relative.
+                                  :let [fname (.getName (io/file (:patch/filename p)))]]
+                            (spit (io/file dir fname) (:patch/text p)))
                           (+ n (count (:report/patches report)))))
                       0
                       (filter #(seq (:report/patches %)) reports))]
