@@ -122,7 +122,8 @@
 (defn- report-row [{:strs [type subject from from-name date date-raw flags priority
                            replies _archived-at message-id related role source
                            acked owned closed urgent important patches votes
-                           deadline topic close-reason expired-date _superseded-by]
+                           deadline topic close-reason expired-date expiry
+                           _superseded-by]
                     :as report}
                    source-type]
   (let [label    (get type-labels type type)
@@ -177,7 +178,10 @@
       (vote-badge votes)
       (subject-el report closed? source-type)]
      [:td.secondary {:title from} (if (#{"maintainer" "admin"} role) [:strong author] author)]
-     [:td {:data-value iso-date} [:small (or iso-date date "")]]
+     [:td {:data-value iso-date}
+      (if expiry
+        [:small {:title (str "Expires on " expiry)} [:em (or iso-date date "")]]
+        [:small (or iso-date date "")])]
      [:td {:style "text-align:center"} (or replies 0)]]))
 
 ;; ---------------------------------------------------------------------------

@@ -33,7 +33,7 @@
             :report/close-reason
             {:report/superseded-by [:report/message-id {:report/email [:email/subject]}]}
             :report/urgent :report/important
-            :report/deadline
+            :report/deadline :report/expiry
             {:report/acked-proxy [:email/from-address]}
             {:report/owned-proxy [:email/from-address]}
             {:report/closed-proxy [:email/from-address]}
@@ -548,7 +548,31 @@
           (is (= [{:action :set :attr :report/owned :email-address "x@y.com" :scope :maintainer}]
                  (commands/detect-directives :bug "Thanks for the report.\nOwned-by: x@y.com\nWill look into it.\n")))
           (is (= [] (commands/detect-directives :bug "Just a normal reply.\n")))
-          (is (nil? (commands/detect-directives :bug nil))))
+          (is (nil? (commands/detect-directives :bug nil)))
+          ;; Expiry directive
+          (is (= [{:action :set-expiry :date (parse-date-iso "2026-09-01") :scope :maintainer}]
+                 (commands/detect-directives :bug "Expiry: 2026-09-01\n")))
+          (is (= [{:action :unset-expiry :scope :maintainer}]
+                 (commands/detect-directives :bug "Unexpiry\n")))
+          ;; Deadline with duration (relative to email date)
+          (let [email-date (parse-date-iso "2026-01-10")
+                result (commands/detect-directives :bug "Deadline: 30d\n" nil email-date)]
+            (is (= 1 (count result)))
+            (is (= :set-deadline (:action (first result))))
+            (is (= (parse-date-iso "2026-02-09") (:date (first result)))))
+          ;; Expiry with duration (relative to email date)
+          (let [email-date (parse-date-iso "2026-01-03")
+                result (commands/detect-directives :bug "Expiry: 3d\n" nil email-date)]
+            (is (= 1 (count result)))
+            (is (= :set-expiry (:action (first result))))
+            (is (= (parse-date-iso "2026-01-06") (:date (first result)))))
+          ;; Compound duration
+          (let [email-date (parse-date-iso "2026-01-01")
+                result (commands/detect-directives :bug "Expiry: 1m 2w\n" nil email-date)]
+            (is (= 1 (count result)))
+            (is (= (parse-date-iso "2026-02-14") (:date (first result)))))
+          ;; Expiry not applicable to announcements
+          (is (= [] (commands/detect-directives :announcement "Expiry: 2026-09-01\n"))))
 
         ;; --- resolve-commands unit tests ---
         (testing "resolve-commands"
@@ -566,7 +590,13 @@
                                              {:action :set-deadline :date (parse-date-iso "2026-06-01")}])))
           (is (= {:set {} :unset #{} :topic "second"}
                  (commands/resolve-commands [{:action :set-topic :topic "first"}
-                                             {:action :set-topic :topic "second"}]))))
+                                             {:action :set-topic :topic "second"}])))
+          ;; Expiry resolve
+          (is (= {:set {} :unset #{} :expiry (parse-date-iso "2026-09-01")}
+                 (commands/resolve-commands [{:action :set-expiry :date (parse-date-iso "2026-09-01")}])))
+          (is (= {:set {} :unset #{} :unexpiry? true}
+                 (commands/resolve-commands [{:action :set-expiry :date (parse-date-iso "2026-09-01")}
+                                             {:action :unset-expiry}]))))
 
         ;; --- Bug 81 directives ---
         (testing "Bug 81 Acked-by directive"

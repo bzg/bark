@@ -128,22 +128,28 @@
         db-snap (d/db conn)
         expired (reduce
                  (fn [n [rid rtype src date-sent]]
-                   (let [expiry-cfg (:expiry (get source-map src))
-                         rule-raw   (get expiry-cfg (keyword rtype))]
-                     (if-let [rule (parse-expiry-rule rule-raw)]
-                       (let [report-data (d/pull db-snap [:report/acked :report/owned
-                                                          :report/urgent :report/important] rid)]
-                         (if (rule-matches? db-snap rid rule report-data now date-sent)
-                           (let [report-mid (d/q '[:find ?mid . :in $ ?r
-                                                   :where [?r :report/message-id ?mid]]
-                                                 db-snap rid)
-                                 synth-eid  (find-or-create-expiry-email! conn src report-mid now)]
-                             (d/transact! conn [[:db/add rid :report/closed synth-eid]
-                                                [:db/add rid :report/close-reason :expired]])
-                             (tracking/bump-report-updated! conn rid)
-                             (log/info "Expired" (name rtype) "report:" report-mid)
-                             (inc n))
-                           n))
+                   (let [report-data (d/pull db-snap [:report/acked :report/owned
+                                                      :report/urgent :report/important
+                                                      :report/expiry] rid)
+                         explicit-expiry (:report/expiry report-data)
+                         ;; Per-report expiry date takes precedence over global rules
+                         should-expire?
+                         (if explicit-expiry
+                           (.before ^Date explicit-expiry now)
+                           (let [expiry-cfg (:expiry (get source-map src))
+                                 rule-raw   (get expiry-cfg (keyword rtype))]
+                             (when-let [rule (parse-expiry-rule rule-raw)]
+                               (rule-matches? db-snap rid rule report-data now date-sent))))]
+                     (if should-expire?
+                       (let [report-mid (d/q '[:find ?mid . :in $ ?r
+                                               :where [?r :report/message-id ?mid]]
+                                             db-snap rid)
+                             synth-eid  (find-or-create-expiry-email! conn src report-mid now)]
+                         (d/transact! conn [[:db/add rid :report/closed synth-eid]
+                                            [:db/add rid :report/close-reason :expired]])
+                         (tracking/bump-report-updated! conn rid)
+                         (log/info "Expired" (name rtype) "report:" report-mid)
+                         (inc n))
                        n)))
                  0 candidates)]
     (when (pos? expired)
