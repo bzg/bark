@@ -404,9 +404,10 @@ command) and =:report-types= (which report types it applies to):
 
 #+begin_src edn
 :commands {:acked    {:words        ["Approved" "LGTM"]
-                      :scope        :maintainer}        ;; restrict to maintainers
-           :deadline {:report-types #{:bug :patch :request :change}} ;; widen to changes
-           :closed   ["Canceled" "Fixed" "Wontfix"]}    ;; simple form still works
+                      :scope        :maintainer}        ;; Restrict to maintainers
+           :deadline {:report-types
+                      #{:bug :patch :request :change}}  ;; Widen to changes
+           :closed   ["Canceled" "Fixed" "Wontfix"]}    ;; Simple form still works
 #+end_src
 
 - =:scope= can be =:user= (anyone) or =:maintainer= (maintainer only).
