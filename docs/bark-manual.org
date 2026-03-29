@@ -511,6 +511,19 @@ You can also export a single format:
 Use =-n <source>= to restrict to one source, =-p <N>= to filter by minimum
 priority, and =-s <N>= to filter by minimum status.
 
+Use =--page-size <N>= to paginate the HTML report table (e.g.
+=bb export --page-size 100=).  Pagination is client-side: all data is
+still exported, but only one page of rows is rendered at a time,
+improving browser responsiveness on large trackers.
+
+Use =--drop-closed <date-or-duration>= to exclude old closed reports
+from all exports.  Accepts an ISO date (=2024-01-01=) or a duration
+(=1y=, =6m=, =90d=).  For instance, =bb export --drop-closed 1y=
+drops all reports closed more than one year ago.
+
+Both options can be set permanently in =config.edn= as =:page-size=
+and =:drop-closed=; the CLI flags override the config values.
+
 ** Vote transparency
 
 Votes on =request= reports are stored as individual entities, each
@@ -803,21 +816,23 @@ configured.
 
 All tasks are run via [[https://babashka.org/][Babashka]]:
 
-| Task                | Description                                             |
-|---------------------+---------------------------------------------------------|
-| =bb digest=           | Ingest new emails and create/update reports             |
-| =bb digest --all=     | Re-process all emails from scratch                      |
-| =bb export all=       | Export all formats for all sources                      |
-| =bb export html=      | Export HTML pages only                                  |
-| =bb export json=      | Export JSON feeds only                                  |
-| =bb export rss=       | Export RSS feeds only                                   |
-| =bb export org=       | Export Org feeds only                                   |
-| =bb export stats=     | Export stats pages only                                 |
-| =bb notify=           | Send notification emails                                |
-| =bb notify --dry-run= | Preview notifications without sending                   |
-| =bb clean=            | Remove all generated files (=public/=, =classes/=, =target/=) |
-| =bb test-config=      | Validate =config.edn=                                     |
-| =bb test-smtp=        | Test SMTP configuration (=--to addr=, =--dry-run=)          |
+| Task                       | Description                                             |
+|----------------------------+---------------------------------------------------------|
+| =bb digest=                  | Ingest new emails and create/update reports             |
+| =bb digest --all=            | Re-process all emails from scratch                      |
+| =bb export all=              | Export all formats for all sources                      |
+| =bb export html=             | Export HTML pages only                                  |
+| =bb export json=             | Export JSON feeds only                                  |
+| =bb export rss=              | Export RSS feeds only                                   |
+| =bb export org=              | Export Org feeds only                                   |
+| =bb export stats=            | Export stats pages only                                 |
+| =bb export --page-size 100=  | Paginate HTML table (100 reports/page)                  |
+| =bb export --drop-closed 1y= | Exclude reports closed more than 1 year ago             |
+| =bb notify=                  | Send notification emails                                |
+| =bb notify --dry-run=        | Preview notifications without sending                   |
+| =bb clean=                   | Remove all generated files (=public/=, =classes/=, =target/=) |
+| =bb test-config=             | Validate =config.edn=                                     |
+| =bb test-smtp=               | Test SMTP configuration (=--to addr=, =--dry-run=)          |
 
 Export accepts flags: =-n <source>= (restrict to one source), =-p <N>=
 (minimum priority), =-s <N>= (minimum status).

@@ -563,7 +563,7 @@
 (defn parse-cli-args
   "Parse common CLI flags into a map.
   Recognises: -o/--output, -n/--source, -p/--min-priority, -s/--min-status,
-  --json, --dir, --force, --only-open, --theme.
+  --json, --dir, --force, --only-open, --theme, --page-size, --drop-closed.
   Any leading non-flag token is captured as :format.
   Warns when a valued flag is missing its argument or followed by another flag."
   [args]
@@ -598,6 +598,14 @@
                                         :missing        opts)
       (#{"-s" "--min-status"} a)      (case (check-flag-value a v)
                                         :ok             (recur (assoc opts :min-status (parse-long v)) r)
+                                        :flag-as-value  (recur opts more)
+                                        :missing        opts)
+      (#{"--page-size"} a)             (case (check-flag-value a v)
+                                        :ok             (recur (assoc opts :page-size (parse-long v)) r)
+                                        :flag-as-value  (recur opts more)
+                                        :missing        opts)
+      (#{"--drop-closed"} a)           (case (check-flag-value a v)
+                                        :ok             (recur (assoc opts :drop-closed v) r)
                                         :flag-as-value  (recur opts more)
                                         :missing        opts)
       (not (:format opts))            (recur (assoc opts :format a) more)

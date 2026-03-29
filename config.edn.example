@@ -208,6 +208,18 @@
  ;; Default: ["json" "org" "rss"]
  ;; :export-formats ["json" "rss"]
 
+ ;; Page size for HTML pagination (optional).
+ ;; When set, the report table is paginated client-side with this many
+ ;; reports per page. 0 or absent means no pagination (all rows visible).
+ ;; CLI override: bb export --page-size 100
+ ;; :page-size 100
+
+ ;; Drop old closed reports from exports (optional).
+ ;; Accepts a duration ("1y", "6m", "90d") or an ISO date ("2024-01-01").
+ ;; Reports closed before the resolved date are excluded from all exports.
+ ;; CLI override: bb export --drop-closed 1y
+ ;; :drop-closed "1y"
+
  ;; Global export reports (optional) — restricts which report types are
  ;; included in all exports (JSON, RSS, Org, HTML, stats, patches).
  ;; When set per source, it overrides the global value.
