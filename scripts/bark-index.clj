@@ -263,7 +263,7 @@
 
 (def ^:private index-js (slurp "resources/bark-index.js"))
 
-(defn page-js [types-json total open-count closed-count source-type]
+(defn page-js [types-json total open-count closed-count source-type page-size]
   (wrap-js (str "var barkConfig = {types:" types-json
                 ",total:" total
                 ",openCount:" open-count
@@ -271,6 +271,8 @@
                 ",closedJsonUrl:'reports/all-closed.json'"
                 (when source-type
                   (str ",sourceType:'" source-type "'"))
+                (when page-size
+                  (str ",pageSize:" page-size))
                 "};\n"
                 index-js "\n"
                 theme-toggle-js)))
@@ -279,7 +281,7 @@
 ;; Page assembly
 ;; ---------------------------------------------------------------------------
 
-(defn index-page [reports reports-dir envelope]
+(defn index-page [reports reports-dir envelope page-size]
   (let [source-type  (get envelope "source-type")
         types        (vec (distinct (map #(get % "type") reports)))
         types-json   (json/generate-string types)
@@ -350,14 +352,15 @@
            [:tbody
             (for [r reports]
               (report-row r source-type))]]]
-         [:script (h/raw (page-js types-json total open-count closed-count source-type))]]
+         [:div#pagination]
+         [:script (h/raw (page-js types-json total open-count closed-count source-type page-size))]]
         (bark-footer)]]))))
 
 ;; ---------------------------------------------------------------------------
 ;; Main
 ;; ---------------------------------------------------------------------------
 
-(let [{:keys [out-file json-file out-dir theme]}
+(let [{:keys [out-file json-file out-dir theme page-size]}
       (parse-cli-args *command-line-args*)
       _           (when theme (set-theme! theme))
       json-file   (or json-file default-json)
@@ -368,7 +371,7 @@
   (.mkdirs (clojure.java.io/file (.getParent (clojure.java.io/file out-file))))
   (let [envelope (json/parse-string (slurp json-file))
         reports  (get envelope "reports" envelope)
-        html     (index-page reports reports-dir envelope)]
+        html     (index-page reports reports-dir envelope page-size)]
     (spit-html out-file html)
     (binding [*out* *err*]
       (log/info "Wrote" (count reports) "reports to" out-file))))

@@ -650,5 +650,6 @@
           (do (spit out-file (json/generate-string stats {:pretty true}))
               (log/info "Wrote" out-file "(JSON," (count reports) "reports)"))))
       (finally
-        (d/close conn)))))
+        (try (d/close conn)
+             (catch Exception _ nil))))))
 (apply -main *command-line-args*)

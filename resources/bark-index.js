@@ -8,6 +8,7 @@
 //   .openCount      — open report count
 //   .closedCount    — closed report count
 //   .closedJsonUrl  — URL of all-closed.json (lazy-loaded)
+//   .pageSize       — reports per page (0 = no pagination)
 
 var allTypes = barkConfig.types;
 var activeTypes = {};
@@ -19,10 +20,14 @@ var onlyOwned   = false;
 var closedLoaded = false;
 var closedLoading = false;
 
+var pageSize    = barkConfig.pageSize || 0; // 0 = show all (no pagination)
+var currentPage = 1;
+
 function getSearchInput() { return document.getElementById('si'); }
 
 function setSearch(val) {
   getSearchInput().value = val;
+  currentPage = 1;
   filterRows();
   pushURL();
 }
@@ -239,24 +244,112 @@ function restripe() {
   _restripeHooks.forEach(function(fn) { fn(); });
 }
 
+// _visibleRows holds the filtered (and sorted) rows for pagination.
+var _visibleRows = [];
+
 function filterRows() {
   var raw = getSearchInput().value;
   var clauses = raw.split(/\s*\|\s*/).map(parseClause);
   var rows = getCachedRows();
-  var visible = 0, i = 0;
+  _visibleRows = [];
   for (var k = 0; k < rows.length; k++) {
     var tr = rows[k];
-    var show = matchRow(tr, clauses);
+    if (matchRow(tr, clauses)) {
+      _visibleRows.push(tr);
+    }
+  }
+  paginate();
+}
+
+function paginate() {
+  var rows = getCachedRows();
+  var total = _visibleRows.length;
+  var visibleSet;
+
+  if (pageSize > 0 && total > pageSize) {
+    var totalPages = Math.ceil(total / pageSize);
+    if (currentPage > totalPages) currentPage = totalPages;
+    if (currentPage < 1) currentPage = 1;
+    var start = (currentPage - 1) * pageSize;
+    var end = Math.min(start + pageSize, total);
+    visibleSet = new Set(_visibleRows.slice(start, end));
+    renderPagination(currentPage, totalPages, total);
+  } else {
+    visibleSet = new Set(_visibleRows);
+    renderPagination(0, 0, total);
+  }
+
+  var i = 0;
+  for (var k = 0; k < rows.length; k++) {
+    var tr = rows[k];
+    var show = visibleSet.has(tr);
     tr.classList.toggle('hidden', !show);
     if (show) {
       tr.classList.toggle('stripe', i++ % 2 === 1);
-      visible++;
     } else {
       tr.classList.remove('stripe');
     }
   }
-  document.getElementById('status').textContent = visible + '/' + barkConfig.total + ' reports';
+  document.getElementById('status').textContent =
+    total + '/' + barkConfig.total + ' reports';
   _restripeHooks.forEach(function(fn) { fn(); });
+}
+
+function renderPagination(page, totalPages, totalVisible) {
+  var el = document.getElementById('pagination');
+  if (!el) return;
+  if (totalPages <= 1) { el.innerHTML = ''; return; }
+
+  var html = '<nav aria-label="Pagination" style="display:flex;align-items:center;' +
+    'justify-content:center;gap:0.3rem;margin-top:0.8rem;font-size:0.85rem">';
+  html += '<button ' + (page <= 1 ? 'disabled ' : '') +
+    'onclick="goToPage(' + (page - 1) + ')" ' +
+    'style="padding:0.2rem 0.5rem;margin:0">&lsaquo;</button>';
+
+  // Show at most 7 page buttons with ellipsis
+  var pages = compactPageRange(page, totalPages, 7);
+  for (var i = 0; i < pages.length; i++) {
+    var p = pages[i];
+    if (p === '...') {
+      html += '<span style="padding:0 0.2rem">\u2026</span>';
+    } else {
+      html += '<button onclick="goToPage(' + p + ')" ' +
+        (p === page ? 'class="outline" aria-current="page" ' : '') +
+        'style="padding:0.2rem 0.5rem;margin:0;' +
+        (p === page ? 'font-weight:700;border-width:2px' : '') + '">' + p + '</button>';
+    }
+  }
+
+  html += '<button ' + (page >= totalPages ? 'disabled ' : '') +
+    'onclick="goToPage(' + (page + 1) + ')" ' +
+    'style="padding:0.2rem 0.5rem;margin:0">&rsaquo;</button>';
+  html += '</nav>';
+  el.innerHTML = html;
+}
+
+function compactPageRange(current, total, maxButtons) {
+  if (total <= maxButtons) {
+    var r = [];
+    for (var i = 1; i <= total; i++) r.push(i);
+    return r;
+  }
+  var pages = [1];
+  var left = Math.max(2, current - 1);
+  var right = Math.min(total - 1, current + 1);
+  if (left > 2) pages.push('...');
+  for (var i = left; i <= right; i++) pages.push(i);
+  if (right < total - 1) pages.push('...');
+  pages.push(total);
+  return pages;
+}
+
+function goToPage(p) {
+  currentPage = p;
+  paginate();
+  pushURL();
+  // Scroll to top of table
+  var tbl = document.querySelector('figure');
+  if (tbl) tbl.scrollIntoView({behavior: 'smooth', block: 'start'});
 }
 
 /* ── Lazy-load closed reports ──────────────────────────────── */
@@ -437,6 +530,7 @@ function buildURL() {
     params.set('sort', sortKeys[0]);
     params.set('dir', sortState[sortKeys[0]]);
   }
+  if (pageSize > 0 && currentPage > 1) params.set('page', String(currentPage));
   var qs = params.toString();
   return location.pathname + (qs ? '?' + qs : '');
 }
@@ -449,6 +543,7 @@ function replaceURL() { history.replaceState(null, '', buildURL()); }
 function toggleType(type, btn) {
   activeTypes[type] = !activeTypes[type];
   btn.classList.toggle('outline');
+  currentPage = 1;
   filterRows();
   pushURL();
 }
@@ -467,6 +562,7 @@ function isolateType(type) {
     allTypes.forEach(function(t) { activeTypes[t] = (t === type); });
   }
   syncToolbarButtons();
+  currentPage = 1;
   filterRows();
   pushURL();
 }
@@ -474,6 +570,7 @@ function isolateType(type) {
 function toggleAcked(btn) {
   onlyAcked = !onlyAcked;
   btn.classList.toggle('outline');
+  currentPage = 1;
   filterRows();
   pushURL();
 }
@@ -481,6 +578,7 @@ function toggleAcked(btn) {
 function toggleOwned(btn) {
   onlyOwned = !onlyOwned;
   btn.classList.toggle('outline');
+  currentPage = 1;
   filterRows();
   pushURL();
 }
@@ -488,6 +586,7 @@ function toggleOwned(btn) {
 function toggleOpen(btn) {
   onlyOpen = !onlyOpen;
   btn.classList.toggle('outline');
+  currentPage = 1;
   if (!onlyOpen && !closedLoaded) {
     loadClosedReports(function() { filterRows(); pushURL(); });
   } else {
@@ -499,6 +598,7 @@ function toggleOpen(btn) {
 var _filterTimer;
 function onSearchInput() {
   clearTimeout(_filterTimer);
+  currentPage = 1;
   _filterTimer = setTimeout(function() { filterRows(); replaceURL(); }, 120);
 }
 
@@ -539,6 +639,8 @@ function sortTable(colIdx, key) {
   sortState = {};
   sortState[key] = dir;
   doSort(colIdx, key, dir);
+  currentPage = 1;
+  filterRows();
   pushURL();
 }
 
@@ -580,6 +682,8 @@ function restoreFromURL() {
       doSort(Array.from(th.parentNode.children).indexOf(th), key, dir);
     }
   }
+
+  currentPage = params.has('page') ? parseInt(params.get('page'), 10) || 1 : 1;
 
   if (!onlyOpen && !closedLoaded) {
     loadClosedReports(function() { filterRows(); });
