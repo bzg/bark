@@ -2,7 +2,7 @@
 
 [[bark-logo.jpg]]
 
-BARK is an email-driven report tracker - see the [[docs/bark-manual.org#rationale][rationale]].
+BARK is an email-driven report tracker - see the [[docs/bark-manual.org#principles][principles]].
 
 BARK monitors a single IMAP mailbox, classifies incoming emails into
 sources by header matching, detects report types from subject tags,
