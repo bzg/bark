@@ -197,6 +197,7 @@
           (:report/patch-source report)   (assoc :patch-source (mapv name (sort (:report/patch-source report))))
           arch                            (assoc :archived-at arch)
           (:report/deadline report)       (assoc :deadline (format-date-iso (:report/deadline report)))
+          (:report/expiry report)         (assoc :expiry (format-date-iso (:report/expiry report)))
           (:report/close-reason report)  (assoc :close-reason (name (:report/close-reason report)))
           (:report/superseded-by report) (assoc :superseded-by
                                                 {:message-id (:report/message-id (:report/superseded-by report))
@@ -377,7 +378,8 @@
                  (str "[" (:type m) "] flags:" flags " replies:" replies
                       (when-let [v (:version m)]  (str " version:" v))
                       (when-let [t (:topic m)]    (str " topic:" t))
-                      (when-let [d (:deadline m)] (str " deadline:" d))))]
+                      (when-let [d (:deadline m)] (str " deadline:" d))
+                      (when-let [d (:expiry m)]   (str " expiry:" d))))]
     (str "    <item>\n"
          "      <title>" title "</title>\n"
          (when (seq link)
@@ -462,6 +464,7 @@
                          (when-let [u (:urgent m)]     (str ":URGENT: " u))
                          (when-let [i (:important m)]  (str ":IMPORTANT: " i))
                          (when-let [d (:deadline m)]     (str ":DEADLINE: " d))
+                         (when-let [d (:expiry m)]      (str ":EXPIRY: " d))
                          (when-let [s (:series m)]
                            (str ":SERIES: " (:received s) "/" (:expected s)
                                 (when (:closed s) " closed")))])]

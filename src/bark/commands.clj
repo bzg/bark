@@ -53,9 +53,13 @@
    {:id :unimportant :kind :directive :action :unset :attr :report/important :scope :maintainer :syntax "Unimportant"}
    ;; Deadline / topic
    {:id :deadline    :kind :directive :action :set-deadline   :attr :report/deadline :scope :maintainer
-    :syntax "Deadline" :param :date :report-types #{:bug :patch :request}}
+    :syntax "Deadline" :param :date-or-duration :report-types #{:bug :patch :request}}
    {:id :undeadline  :kind :directive :action :unset-deadline :attr :report/deadline :scope :maintainer
     :syntax "Undeadline" :report-types #{:bug :patch :request}}
+   {:id :expiry      :kind :directive :action :set-expiry   :attr :report/expiry :scope :maintainer
+    :syntax "Expiry" :param :date-or-duration :report-types #{:bug :patch :request}}
+   {:id :unexpiry    :kind :directive :action :unset-expiry :attr :report/expiry :scope :maintainer
+    :syntax "Unexpiry" :report-types #{:bug :patch :request}}
    {:id :topic       :kind :directive :action :set-topic :attr :report/topic :scope :maintainer
     :syntax "Topic" :param :word}
    ;; Supersede
@@ -98,6 +102,7 @@
      (case param
        :email-address (str "^" qs ":\\s+(\\S+@\\S+)" trailing-punct "?\\s*$")
        :date          (str "^" qs ":\\s+(\\d{4}-\\d{2}-\\d{2})" trailing-punct "?\\s*$")
+       :date-or-duration (str "^" qs ":\\s+(\\d{4}-\\d{2}-\\d{2}|\\d+[dwmy](?:\\s+\\d+[dwmy])*)" trailing-punct "?\\s*$")
        :word          (str "^" qs ":\\s+([a-zA-Z0-9_-]+)" trailing-punct "?\\s*$")
        :message-id    (str "^" qs ":\\s+<?([^<>\\s]+@[^<>\\s]+)>?" trailing-punct "?\\s*$")
        (str "^" qs trailing-punct "?\\s*$")))))
@@ -132,8 +137,22 @@
 
 (defn- parse-date-iso [s]
   (try
-    (Date/from (.toInstant (.atStartOfDay (LocalDate/parse s) ZoneOffset/UTC)))
+    (-> (LocalDate/parse s) (.atStartOfDay ZoneOffset/UTC) .toInstant Date/from)
     (catch Exception _ nil)))
+
+(defn- parse-date-or-duration
+  "Parse a YYYY-MM-DD date string or a duration like '2d', '3w', '1m 2w'.
+  Durations are resolved to an absolute date relative to `as-of` (a
+  java.util.Date, typically the email's date-sent).  Falls back to today
+  when `as-of` is nil."
+  [s as-of]
+  (if (re-matches #"\d{4}-\d{2}-\d{2}" s)
+    (parse-date-iso s)
+    (when-let [days (common/parse-delay s)]
+      (let [base (if as-of
+                   (-> as-of ^Date .toInstant (LocalDate/ofInstant ZoneOffset/UTC))
+                   (LocalDate/now ZoneOffset/UTC))]
+        (-> base (.plusDays days) (.atStartOfDay ZoneOffset/UTC) .toInstant Date/from)))))
 
 (defn- match-triggers [triggers body-text]
   (into {} (keep (fn [[k p]] (when (re-find p body-text) [(keyword "report" (name k)) true]))) triggers))
@@ -161,8 +180,9 @@
       (when (seq result) result))))
 
 (defn detect-directives
-  ([report-type body-text] (detect-directives report-type body-text nil))
-  ([report-type body-text overrides]
+  ([report-type body-text] (detect-directives report-type body-text nil nil))
+  ([report-type body-text overrides] (detect-directives report-type body-text overrides nil))
+  ([report-type body-text overrides email-date]
    (when body-text
      (let [lines (str/split-lines body-text)]
        (->> lines
@@ -176,9 +196,12 @@
                                                :set            (when-let [addr (nth m 1 nil)]
                                                                  {:action :set :attr attr :email-address addr})
                                                :unset          {:action :unset :attr attr}
-                                               :set-deadline   (when-let [d (parse-date-iso (nth m 1))]
+                                               :set-deadline   (when-let [d (parse-date-or-duration (nth m 1) email-date)]
                                                                  {:action :set-deadline :date d})
                                                :unset-deadline {:action :unset-deadline}
+                                               :set-expiry     (when-let [d (parse-date-or-duration (nth m 1) email-date)]
+                                                                 {:action :set-expiry :date d})
+                                               :unset-expiry   {:action :unset-expiry}
                                                :set-topic      (when-let [t (nth m 1 nil)]
                                                                  {:action :set-topic :topic t})
                                                :set-superseded   (when-let [mid (nth m 1 nil)]
@@ -199,6 +222,8 @@
               :unset (-> acc (update :set dissoc attr) (update :unset conj attr))
               :set-deadline   (-> acc (assoc :deadline date) (dissoc :undeadline?))
               :unset-deadline (-> acc (dissoc :deadline) (assoc :undeadline? true))
+              :set-expiry     (-> acc (assoc :expiry date) (dissoc :unexpiry?))
+              :unset-expiry   (-> acc (dissoc :expiry) (assoc :unexpiry? true))
               :set-topic      (assoc acc :topic topic)
               :set-superseded   (-> acc (assoc :superseded-by target-message-id) (dissoc :unsuperseded?))
               :unset-superseded (-> acc (dissoc :superseded-by) (assoc :unsuperseded? true))))
@@ -307,11 +332,11 @@
                           directives)]
     (when (seq permitted)
       (let [db      (d/db conn)
-            {:keys [set unset deadline undeadline? topic superseded-by unsuperseded?]}
+            {:keys [set unset deadline undeadline? expiry unexpiry? topic superseded-by unsuperseded?]}
             (resolve-commands permitted)
             report-mid (d/q '[:find ?mid . :in $ ?r :where [?r :report/message-id ?mid]] db report-eid)
             current    (d/pull db
-                               (into state-attrs [:report/deadline :report/close-reason
+                               (into state-attrs [:report/deadline :report/expiry :report/close-reason
                                                   :report/superseded-by
                                                   :report/closed-proxy :report/acked-proxy
                                                   :report/owned-proxy :report/urgent-proxy
@@ -334,6 +359,10 @@
                          (conj [:db/add report-eid :report/deadline deadline]))
                        (cond-> (and undeadline? (:report/deadline current))
                          (conj [:db/retract report-eid :report/deadline (:report/deadline current)]))
+                       (cond-> expiry
+                         (conj [:db/add report-eid :report/expiry expiry]))
+                       (cond-> (and unexpiry? (:report/expiry current))
+                         (conj [:db/retract report-eid :report/expiry (:report/expiry current)]))
                        (cond-> topic
                          (conj [:db/add report-eid :report/topic topic]))
                        ;; Supersede: set ref, close with reason, link related
@@ -363,6 +392,8 @@
                                            (map #(str "un-" (name %)) unset)
                                            (when deadline [(str "deadline " deadline)])
                                            (when undeadline? ["undeadline"])
+                                           (when expiry [(str "expiry " expiry)])
+                                           (when unexpiry? ["unexpiry"])
                                            (when topic [(str "topic:" topic)])
                                            (when target-eid [(str "superseded-by:" superseded-by)])
                                            (when (and unsuperseded? (:report/superseded-by current))
@@ -427,7 +458,7 @@
           is-maint?   (roles/maintainer? roles from-addr (:email/date-sent email))
           trig-result (-> (detect-triggers report-type body-text src-cmds)
                           (filter-triggers-by-scope overrides is-maint?))
-          directives  (detect-directives report-type body-text overrides)
+          directives  (detect-directives report-type body-text overrides (:email/date-sent email))
           closed?     (some? (:report/closed (d/pull db [:report/closed] report-eid)))]
 
       (if closed?

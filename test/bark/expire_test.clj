@@ -16,6 +16,11 @@
   [n]
   (Date. (- (.getTime (Date.)) (* n 86400000))))
 
+(defn- days-from-now
+  "Return a Date n days in the future."
+  [n]
+  (Date. (+ (.getTime (Date.)) (* n 86400000))))
+
 (defn- setup-db! []
   (let [db-path (str "/tmp/bark-expire-test-" (System/currentTimeMillis))
         conn    (d/get-conn db-path common/bark-schema)]
@@ -302,6 +307,29 @@
           _   (insert-report! conn {:mid "<nocfg@test>" :type :bug :email-eid eid})]
       (expire/expire-reports! conn source-map)
       (is (not (report-closed? conn "<nocfg@test>")))
+      (teardown! ctx))))
+
+(deftest explicit-expiry-date-test
+  (testing "Report with explicit :report/expiry in the past expires regardless of rules"
+    (let [{:keys [conn] :as ctx} (setup-db!)
+          ;; No expiry rules configured for this source
+          source-map {"test-src" {}}
+          eid (insert-email! conn {:mid "<explicit-yes@test>" :date-sent (days-ago 5)})
+          rid (insert-report! conn {:mid "<explicit-yes@test>" :type :bug :email-eid eid})
+          _   (d/transact! conn [[:db/add rid :report/expiry (days-ago 1)]])]
+      (expire/expire-reports! conn source-map)
+      (is (report-closed? conn "<explicit-yes@test>"))
+      (teardown! ctx)))
+
+  (testing "Report with explicit :report/expiry in the future does NOT expire"
+    (let [{:keys [conn] :as ctx} (setup-db!)
+          source-map {"test-src" {:expiry {:bug {:delay "1d"}}}}
+          eid (insert-email! conn {:mid "<explicit-no@test>" :date-sent (days-ago 10)})
+          rid (insert-report! conn {:mid "<explicit-no@test>" :type :bug :email-eid eid})
+          ;; Explicit expiry in the future overrides the global rule that would expire it
+          _   (d/transact! conn [[:db/add rid :report/expiry (days-from-now 30)]])]
+      (expire/expire-reports! conn source-map)
+      (is (not (report-closed? conn "<explicit-no@test>")))
       (teardown! ctx))))
 
 (deftest already-closed-not-expired-test
