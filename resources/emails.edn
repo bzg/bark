@@ -1170,7 +1170,7 @@
   :email/ingested-at #inst "2026-01-26T14:00:00"
   :email/in-reply-to "<81@test.org>"
   :email/references "<81@test.org>"
-  :email/body-text  "Unacked\n"}
+  :email/body-text  "Not acked\n"}
 
  ;; =========================================================================
  ;; 86 — [BUG] base report for last-one-wins test
@@ -1198,7 +1198,7 @@
   :email/ingested-at #inst "2026-01-27T11:00:00"
   :email/in-reply-to "<86@test.org>"
   :email/references "<86@test.org>"
-  :email/body-text  "Acked-by: someone@test.org\nUnacked\n"}
+  :email/body-text  "Acked-by: someone@test.org\nNot acked\n"}
 
  ;; =========================================================================
  ;; 88 — [BUG] base report for Closed-by + Important-by test
@@ -1255,7 +1255,7 @@
   :email/references "<90@test.org>"
   :email/body-text  "Confirmed.\nOwned-by: fixer@test.org\n"}
 
- ;; 92 — Maintainer reply: trigger (Fixed.) + conflicting directive (Unclosed)
+ ;; 92 — Maintainer reply: trigger (Fixed.) + conflicting directive (Not closed)
  ;; Directive wins because directives are applied after triggers.
  {:email/imap-uid    92
   :email/message-id  "<92@test.org>"
@@ -1266,7 +1266,7 @@
   :email/ingested-at #inst "2026-01-29T12:00:00"
   :email/in-reply-to "<90@test.org>"
   :email/references "<90@test.org>"
-  :email/body-text  "Fixed.\nUnclosed\n"}
+  :email/body-text  "Fixed.\nNot closed\n"}
 
  ;; 93 — Bug report (base for deadline + directive test)
  {:email/imap-uid    93
@@ -1325,7 +1325,7 @@
   :email/ingested-at #inst "2026-01-30T13:00:00"
   :email/in-reply-to "<93@test.org>"
   :email/references "<93@test.org>"
-  :email/body-text  "Undeadline\n"}
+  :email/body-text  "No deadline\n"}
 
  ;; 98 — Bug report (base for standalone deadline test)
  {:email/imap-uid    98
@@ -1486,7 +1486,7 @@
   :email/ingested-at #inst "2026-02-21T12:00:00"
   :email/in-reply-to "<108@test.org>"
   :email/references  "<108@test.org>"
-  :email/body-text  "Actually this is a different issue.\nUnsuperseded\n"}
+  :email/body-text  "Actually this is a different issue.\nNot superseded\n"}
 
  ;; =========================================================================
  ;; 111 — User tries to supersede (should be denied — maintainer only)
@@ -1532,4 +1532,45 @@
   :email/in-reply-to "<30@test.org>"
   :email/references  "<30@test.org>"
   :email/body-text  "Handled.\n"}
+
+ ;; =========================================================================
+ ;; 114 — Bug report (will be superseded then reopened via "Not closed")
+ ;; =========================================================================
+ {:email/imap-uid    114
+  :email/source      "direct"
+  :email/message-id  "<114@test.org>"
+  :email/subject     "[BUG] Encoding edge case"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-02-22T14:00:00"
+  :email/ingested-at #inst "2026-02-22T14:00:00"
+  :email/body-text  "Encoding fails on certain inputs.\n"}
+
+ ;; =========================================================================
+ ;; 115 — Admin supersedes 114 by 106
+ ;; =========================================================================
+ {:email/imap-uid    115
+  :email/source      "direct"
+  :email/message-id  "<115@test.org>"
+  :email/subject     "Re: [BUG] Encoding edge case"
+  :email/from-address "admin@test.org"
+  :email/date-sent  #inst "2026-02-22T15:00:00"
+  :email/ingested-at #inst "2026-02-22T15:00:00"
+  :email/in-reply-to "<114@test.org>"
+  :email/references  "<114@test.org>"
+  :email/body-text  "Duplicate of the broader bug.\nSuperseded-by: <106@test.org>\n"}
+
+ ;; =========================================================================
+ ;; 116 — Admin reopens superseded report 114 via "Not closed"
+ ;;       Should clear closed, close-reason, superseded-by, AND related link.
+ ;; =========================================================================
+ {:email/imap-uid    116
+  :email/source      "direct"
+  :email/message-id  "<116@test.org>"
+  :email/subject     "Re: [BUG] Encoding edge case"
+  :email/from-address "admin@test.org"
+  :email/date-sent  #inst "2026-02-22T16:00:00"
+  :email/ingested-at #inst "2026-02-22T16:00:00"
+  :email/in-reply-to "<114@test.org>"
+  :email/references  "<114@test.org>"
+  :email/body-text  "Actually this is a separate issue.\nNot closed\n"}
 ]

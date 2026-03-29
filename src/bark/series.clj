@@ -57,8 +57,18 @@
   (d/transact! conn [{:db/id series-eid :series/closed email-eid}]))
 
 (defn add-patch-to-series! [conn series-eid report-eid]
-  (d/transact! conn [[:db/add series-eid :series/patches report-eid]
-                     {:db/id report-eid :report/series series-eid}]))
+  (let [existing (d/q '[:find [?r ...]
+                         :in $ ?s ?self
+                         :where [?s :series/patches ?r]
+                         [(not= ?r ?self)]]
+                       (d/db conn) series-eid report-eid)
+        related-tx (into [] (mapcat (fn [rid]
+                                      [[:db/add report-eid :report/related rid]
+                                       [:db/add rid :report/related report-eid]]))
+                         existing)]
+    (d/transact! conn (into [[:db/add series-eid :series/patches report-eid]
+                             {:db/id report-eid :report/series series-eid}]
+                            related-tx))))
 
 (defn set-cover-letter! [conn series-eid email-eid]
   (d/transact! conn [{:db/id series-eid :series/cover-letter email-eid}]))

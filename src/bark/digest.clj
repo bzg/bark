@@ -107,16 +107,25 @@
 (defn- report-exists? [db message-id]
   (some? (d/q '[:find ?r . :in $ ?mid :where [?r :report/message-id ?mid]] db message-id)))
 
-(defn- create-report! [conn email-eid message-id report-info]
+(defn- create-report! [conn email-eid message-id report-info email-date]
   (d/transact! conn
                [(into {:report/type (:type report-info) :report/email email-eid
-                       :report/message-id message-id :report/digested-at (Date.)}
+                       :report/message-id message-id :report/digested-at (Date.)
+                       :report/last-activity (or email-date (Date.))}
                       (remove (comp nil? val))
                       {:report/version (:version report-info) :report/topic (:topic report-info)
                        :report/patch-seq (:patch-seq report-info) :report/patch-source (:patch-source report-info)})]))
 
-(defn- add-descendant! [conn report-eid email-eid]
-  (d/transact! conn [[:db/add report-eid :report/descendants email-eid]]))
+(defn- add-descendant! [conn report-eid email-eid email-date]
+  (let [tx [[:db/add report-eid :report/descendants email-eid]]
+        tx (if email-date
+             (let [current (:report/last-activity
+                            (d/pull (d/db conn) [:report/last-activity] report-eid))]
+               (if (or (nil? current) (.after ^Date email-date ^Date current))
+                 (conj tx [:db/add report-eid :report/last-activity email-date])
+                 tx))
+             tx)]
+    (d/transact! conn tx)))
 
 (defn- link-related-reports! [conn new-report-eid parent-report-eids]
   (when (seq parent-report-eids)
@@ -323,7 +332,7 @@
                   new-report?   (and permitted? (not (report-exists? (d/db conn) message-id)))
                   report-eid    (when new-report?
                                   (log/info (str "[" (name (:type report-info)) "]") (:email/subject email))
-                                  (create-report! conn eid message-id report-info)
+                                  (create-report! conn eid message-id report-info (:email/date-sent email))
                                   (ensure-participant! conn source-name from-addr
                                                        (:email/from-name email) (:email/date-sent email)
                                                        :contributor? (= :patch (:type report-info)))
@@ -343,7 +352,7 @@
                 (when (seq parent-eids)
                   (when (common/sent-via-source-channel? delivery source-cfg)
                     (doseq [rid parent-eids]
-                      (add-descendant! conn rid eid)))
+                      (add-descendant! conn rid eid (:email/date-sent email))))
                   (let [any-cmd? (volatile! false)]
                     (doseq [rid nearest-eids]
                       (when-let [rtype (d/q '[:find ?t . :in $ ?r :where [?r :report/type ?t]]

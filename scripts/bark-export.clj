@@ -88,11 +88,19 @@
 ;; Formatting helpers
 ;; ---------------------------------------------------------------------------
 
-(def ^:private flag-defs
-  [[:report/acked "A"] [:report/owned "O"] [:report/closed "C"]])
+(defn- close-flag [report]
+  (if (:report/closed report)
+    (case (:report/close-reason report)
+      :canceled   "C"
+      :expired    "E"
+      :superseded "S"
+      "R")
+    "-"))
 
 (defn- flags-str [report]
-  (apply str (map (fn [[k c]] (if (get report k) c \-)) flag-defs)))
+  (str (if (:report/acked report) "A" "-")
+       (if (:report/owned report) "O" "-")
+       (close-flag report)))
 
 ;; format-date and format-date-iso are defined in bark-common.clj
 
@@ -197,6 +205,7 @@
           (:report/patch-source report)   (assoc :patch-source (mapv name (sort (:report/patch-source report))))
           arch                            (assoc :archived-at arch)
           (:report/deadline report)       (assoc :deadline (format-date-iso (:report/deadline report)))
+          (:report/last-activity report) (assoc :last-activity (format-date-iso (:report/last-activity report)))
           (:report/expiry report)         (assoc :expiry (format-date-iso (:report/expiry report)))
           (:report/close-reason report)  (assoc :close-reason (name (:report/close-reason report)))
           (:report/superseded-by report) (assoc :superseded-by

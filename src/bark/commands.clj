@@ -45,28 +45,30 @@
     :syntax "Important-by" :param :email-address}
    ;; Unset directives
    {:id :unacked     :kind :directive :action :unset :attr :report/acked    :scope :maintainer
-    :syntax "Unacked" :report-types #{:bug :patch :request}}
+    :syntax "Not acked" :report-types #{:bug :patch :request}}
    {:id :unowned     :kind :directive :action :unset :attr :report/owned    :scope :maintainer
-    :syntax "Unowned" :report-types #{:bug :patch :request}}
-   {:id :unclosed    :kind :directive :action :unset :attr :report/closed   :scope :maintainer :syntax "Unclosed"}
-   {:id :unurgent    :kind :directive :action :unset :attr :report/urgent   :scope :maintainer :syntax "Unurgent"}
-   {:id :unimportant :kind :directive :action :unset :attr :report/important :scope :maintainer :syntax "Unimportant"}
+    :syntax "Not owned" :report-types #{:bug :patch :request}}
+   {:id :unclosed    :kind :directive :action :unset :attr :report/closed   :scope :maintainer :syntax "Not closed"}
+   {:id :unurgent    :kind :directive :action :unset :attr :report/urgent   :scope :maintainer :syntax "Not urgent"}
+   {:id :unimportant :kind :directive :action :unset :attr :report/important :scope :maintainer :syntax "Not important"}
    ;; Deadline / topic
    {:id :deadline    :kind :directive :action :set-deadline   :attr :report/deadline :scope :maintainer
     :syntax "Deadline" :param :date-or-duration :report-types #{:bug :patch :request}}
    {:id :undeadline  :kind :directive :action :unset-deadline :attr :report/deadline :scope :maintainer
-    :syntax "Undeadline" :report-types #{:bug :patch :request}}
+    :syntax "No deadline" :report-types #{:bug :patch :request}}
    {:id :expiry      :kind :directive :action :set-expiry   :attr :report/expiry :scope :maintainer
     :syntax "Expiry" :param :date-or-duration :report-types #{:bug :patch :request}}
    {:id :unexpiry    :kind :directive :action :unset-expiry :attr :report/expiry :scope :maintainer
-    :syntax "Unexpiry" :report-types #{:bug :patch :request}}
+    :syntax "No expiry" :report-types #{:bug :patch :request}}
    {:id :topic       :kind :directive :action :set-topic :attr :report/topic :scope :maintainer
     :syntax "Topic" :param :word}
+   {:id :untopic     :kind :directive :action :unset-topic :attr :report/topic :scope :maintainer
+    :syntax "No topic"}
    ;; Supersede
    {:id :superseded-by  :kind :directive :action :set-superseded :attr :report/superseded-by :scope :maintainer
     :syntax "Superseded-by" :param :message-id}
    {:id :unsuperseded   :kind :directive :action :unset-superseded :attr :report/superseded-by :scope :maintainer
-    :syntax "Unsuperseded"}])
+    :syntax "Not superseded"}])
 
 ;; Derived indexes
 (def trigger-commands  (filterv #(= :trigger  (:kind %)) commands))
@@ -122,6 +124,19 @@
 
 (def ^:private compiled-directives
   (mapv (fn [cmd] [cmd (directive-pattern cmd)]) directive-commands))
+
+(defn compile-directive-aliases
+  "Compile a map of {\"OldSyntax\" \"New syntax\"} into additional [cmd pattern]
+  pairs that route alias patterns to the same commands as the canonical syntax."
+  [aliases-map]
+  (when (seq aliases-map)
+    (let [syntax->cmd (into {} (map (fn [[cmd _]] [(:syntax cmd) cmd])) compiled-directives)]
+      (vec (keep (fn [[old-syntax new-syntax]]
+                   (if-let [cmd (syntax->cmd new-syntax)]
+                     [cmd (directive-pattern (assoc cmd :syntax old-syntax))]
+                     (log/warn "Command alias target not found:" (pr-str new-syntax)
+                               "for alias" (pr-str old-syntax))))
+                 aliases-map)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Detection (pure)
@@ -180,11 +195,15 @@
       (when (seq result) result))))
 
 (defn detect-directives
-  ([report-type body-text] (detect-directives report-type body-text nil nil))
-  ([report-type body-text overrides] (detect-directives report-type body-text overrides nil))
-  ([report-type body-text overrides email-date]
+  ([report-type body-text] (detect-directives report-type body-text nil nil nil))
+  ([report-type body-text overrides] (detect-directives report-type body-text overrides nil nil))
+  ([report-type body-text overrides email-date] (detect-directives report-type body-text overrides email-date nil))
+  ([report-type body-text overrides email-date aliases]
    (when body-text
-     (let [lines (str/split-lines body-text)]
+     (let [lines (str/split-lines body-text)
+           all-directives (if (seq aliases)
+                            (into compiled-directives aliases)
+                            compiled-directives)]
        (->> lines
             (keep (fn [line]
                     (some (fn [[{:keys [id action attr _param scope report-types]} pattern]]
@@ -202,6 +221,7 @@
                                                :set-expiry     (when-let [d (parse-date-or-duration (nth m 1) email-date)]
                                                                  {:action :set-expiry :date d})
                                                :unset-expiry   {:action :unset-expiry}
+                                               :unset-topic    {:action :unset-topic}
                                                :set-topic      (when-let [t (nth m 1 nil)]
                                                                  {:action :set-topic :topic t})
                                                :set-superseded   (when-let [mid (nth m 1 nil)]
@@ -209,7 +229,7 @@
                                                                     :target-message-id (str "<" mid ">")})
                                                :unset-superseded {:action :unset-superseded})]
                                     (when base (assoc base :scope sc)))))))
-                          compiled-directives)))
+                          all-directives)))
             vec)))))
 
 (defn resolve-commands
@@ -225,6 +245,7 @@
               :set-expiry     (-> acc (assoc :expiry date) (dissoc :unexpiry?))
               :unset-expiry   (-> acc (dissoc :expiry) (assoc :unexpiry? true))
               :set-topic      (assoc acc :topic topic)
+              :unset-topic    (-> acc (dissoc :topic) (assoc :untopic? true))
               :set-superseded   (-> acc (assoc :superseded-by target-message-id) (dissoc :unsuperseded?))
               :unset-superseded (-> acc (dissoc :superseded-by) (assoc :unsuperseded? true))))
           {:set {} :unset #{}}
@@ -332,11 +353,13 @@
                           directives)]
     (when (seq permitted)
       (let [db      (d/db conn)
-            {:keys [set unset deadline undeadline? expiry unexpiry? topic superseded-by unsuperseded?]}
+            {:keys [set unset deadline undeadline? expiry unexpiry?
+                    topic untopic? superseded-by unsuperseded?]}
             (resolve-commands permitted)
             report-mid (d/q '[:find ?mid . :in $ ?r :where [?r :report/message-id ?mid]] db report-eid)
             current    (d/pull db
-                               (into state-attrs [:report/deadline :report/expiry :report/close-reason
+                               (into state-attrs [:report/deadline :report/expiry
+                                                  :report/close-reason :report/topic
                                                   :report/superseded-by
                                                   :report/closed-proxy :report/acked-proxy
                                                   :report/owned-proxy :report/urgent-proxy
@@ -365,6 +388,8 @@
                          (conj [:db/retract report-eid :report/expiry (:report/expiry current)]))
                        (cond-> topic
                          (conj [:db/add report-eid :report/topic topic]))
+                       (cond-> (and untopic? (:report/topic current))
+                         (conj [:db/retract report-eid :report/topic (:report/topic current)]))
                        ;; Supersede: set ref, close with reason, link related
                        (cond-> target-eid
                          (into [[:db/add report-eid :report/superseded-by target-eid]
@@ -391,20 +416,21 @@
                     (str/join ", " (concat (map (fn [[attr addr]] (str (name attr) " -> " addr)) set)
                                            (map #(str "un-" (name %)) unset)
                                            (when deadline [(str "deadline " deadline)])
-                                           (when undeadline? ["undeadline"])
+                                           (when undeadline? ["no deadline"])
                                            (when expiry [(str "expiry " expiry)])
-                                           (when unexpiry? ["unexpiry"])
+                                           (when unexpiry? ["no expiry"])
                                            (when topic [(str "topic:" topic)])
+                                           (when untopic? ["no topic"])
                                            (when target-eid [(str "superseded-by:" superseded-by)])
                                            (when (and unsuperseded? (:report/superseded-by current))
-                                             ["unsuperseded"])))
+                                             ["not superseded"])))
                     (str "(proxy by " from-addr ")")))
         ;; Warn if message-id didn't resolve
         (when (and superseded-by (nil? target-eid))
           (log/warn "Superseded-by: unknown message-id" superseded-by))))))
 
 (defn- try-unclosed!
-  "If a closed report has an Unclosed or Unsuperseded directive, retract the closure."
+  "If a closed report has a Not closed or Not superseded directive, retract the closure."
   [conn report-eid directives is-maintainer? from-addr]
   (let [permitted (filter (fn [{:keys [action scope]}]
                             (and (#{:unset :unset-superseded} action)
@@ -413,19 +439,25 @@
         {:keys [unset unsuperseded?]} (resolve-commands permitted)]
     (when (or (contains? unset :report/closed) unsuperseded?)
       (let [current  (d/pull (d/db conn) [:report/closed :report/closed-proxy :report/close-reason
-                                          :report/superseded-by] report-eid)
+                                          :report/superseded-by :report/related] report-eid)
+            superseded-ref (:report/superseded-by current)
+            clear-supersede? (or unsuperseded? (and (contains? unset :report/closed) superseded-ref))
             all-tx   (-> []
                          (into (build-unset-tx report-eid current #{:report/closed}))
                          (cond-> (:report/close-reason current)
                            (conj [:db/retract report-eid :report/close-reason (:report/close-reason current)]))
-                         (cond-> (and unsuperseded? (:report/superseded-by current))
-                           (conj [:db/retract report-eid :report/superseded-by
-                                  (ref-eid (:report/superseded-by current))])))]
+                         (cond-> (and clear-supersede? superseded-ref)
+                           (into (let [target-eid (ref-eid superseded-ref)]
+                                   [[:db/retract report-eid :report/superseded-by target-eid]
+                                    [:db/retract report-eid :report/related target-eid]
+                                    [:db/retract target-eid :report/related report-eid]]))))]
         (when (seq all-tx)
           (d/transact! conn all-tx)
+          (when (and clear-supersede? superseded-ref)
+            (tracking/bump-report-updated! conn (ref-eid superseded-ref)))
           (tracking/bump-report-updated! conn report-eid)
           (log/info (str "Commands: "
-                         (if unsuperseded? "unsuperseded" "un-closed")
+                         (if unsuperseded? "not superseded" "not closed")
                          " (proxy by " from-addr ")")))))))
 
 (defn- filter-triggers-by-scope [trig-result overrides is-maintainer?]
@@ -458,7 +490,8 @@
           is-maint?   (roles/maintainer? roles from-addr (:email/date-sent email))
           trig-result (-> (detect-triggers report-type body-text src-cmds)
                           (filter-triggers-by-scope overrides is-maint?))
-          directives  (detect-directives report-type body-text overrides (:email/date-sent email))
+          aliases     (compile-directive-aliases (:command-aliases source-cfg))
+          directives  (detect-directives report-type body-text overrides (:email/date-sent email) aliases)
           closed?     (some? (:report/closed (d/pull db [:report/closed] report-eid)))]
 
       (if closed?
