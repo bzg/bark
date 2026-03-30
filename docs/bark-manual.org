@@ -552,8 +552,16 @@ from all exports.  Accepts an ISO date (=2024-01-01=) or a duration
 (=1y=, =6m=, =90d=).  For instance, =bb export --drop-closed 1y=
 drops all reports closed more than one year ago.
 
-Both options can be set permanently in =config.edn= as =:page-size=
-and =:drop-closed=; the CLI flags override the config values.
+Use =--topics-filter <topics>= to export only reports matching given
+topics (comma-separated, case-insensitive).  For instance,
+=bb export --topics-filter event= exports only reports with topic
+"event".  Use =bb export --topics-filter "event,security"= for
+multiple topics.  The filter can also be set per source in =config.edn=
+(see below); the CLI flag overrides all config values.
+
+These options can be set permanently in =config.edn= as =:page-size=,
+=:drop-closed=, and =:topics-filter= (globally or per source); the CLI
+flags override the config values.
 
 ** Vote transparency
 
