@@ -67,6 +67,8 @@
  :report/deadline              {:db/valueType :db.type/instant}
  :report/expiry               {:db/valueType :db.type/instant}
  :report/last-activity        {:db/valueType :db.type/instant}
+ :report/has-ics              {:db/valueType :db.type/boolean}
+ :report/has-text-attachments {:db/valueType :db.type/boolean}
  :report/digested-at     {:db/valueType :db.type/instant}
  :report/updated-at     {:db/valueType :db.type/instant}
 
