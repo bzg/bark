@@ -274,6 +274,11 @@ SMTP fields:
 Use =bb test-smtp --dry-run= to validate the configuration without
 sending, or =bb test-smtp= to send a test email to the global admin.
 
+** Support the Clojure(script) ecosystem
+
+If you like Clojure(script), please consider supporting maintainers by
+donating to [[https://clojuriststogether.org][clojuriststogether.org]].
+
 ** License
 
 Copyright © 2026 Bastien Guerry
