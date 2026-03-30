@@ -113,6 +113,29 @@
                 (.before closed-at cutoff-date))))
           reports))
 
+(defn- resolve-topics-filter
+  "Parse a topics filter value into a set of lower-cased topic strings.
+  Accepts a comma-separated string (CLI) or a vector (config.edn).
+  Returns nil when no filter is active."
+  [v]
+  (when v
+    (let [topics (if (string? v)
+                   (map str/trim (str/split v #","))
+                   (map str v))]
+      (when (seq topics)
+        (set (map str/lower-case topics))))))
+
+(defn- filter-by-topics
+  "Keep only reports whose :report/topic matches one of the given topics (case-insensitive).
+  Returns all reports when `topics` is nil."
+  [reports topics]
+  (if topics
+    (filter (fn [r]
+              (when-let [t (:report/topic r)]
+                (topics (str/lower-case t))))
+            reports)
+    reports))
+
 ;; ---------------------------------------------------------------------------
 ;; DB queries (all-reports and report-pull-pattern loaded from bark-common.clj)
 ;; ---------------------------------------------------------------------------
@@ -803,6 +826,13 @@
   [source-name source-map]
   (get-in source-map [source-name :export-reports]))
 
+(defn- resolve-source-topics-filter
+  "Return the topics filter for a source: CLI override > per-source > global.
+  Returns a set of lower-cased topic strings, or nil (meaning no filter)."
+  [source-name source-map cli-topics-filter]
+  (or cli-topics-filter
+      (resolve-topics-filter (get-in source-map [source-name :topics-filter]))))
+
 (defn- dump-per-type!
   "Export per-type JSON, Org, and RSS files for all report types present.
   When `changed-types` is non-nil, only re-export files for those types."
@@ -1044,7 +1074,8 @@
 
 (def formats #{"json" "rss" "org" "html" "all" "stats" "patches" "text" "events" "root"})
 
-(let [{:keys [format source-name min-priority min-status force-all? theme page-size drop-closed]
+(let [{:keys [format source-name min-priority min-status force-all? theme page-size drop-closed
+              topics-filter]
        :or {format "all"}}
       (parse-cli-args *command-line-args*)
       db-path (or (System/getenv "BARK_DB") "data/bark-db")
@@ -1118,14 +1149,18 @@
                                               [?e :email/message-id ?emid]]
                                             db)))
                     effective-ps    (or page-size (:page-size config))
+                    cli-tf          (resolve-topics-filter topics-filter)
                     drop-cutoff     (resolve-drop-closed-date
                                      (or drop-closed (:drop-closed config)))
+                    _               (when cli-tf
+                                      (log/info "CLI topics filter:" (str/join ", " cli-tf)))
                     _               (when drop-cutoff
                                       (log/info "Dropping reports closed before" drop-cutoff))
                     cli-extra       (let [drop (disj (hash-set format "-n" source-name
                                                                "--force" "--theme" theme
                                                                "--page-size" (some-> page-size str)
-                                                               "--drop-closed" drop-closed) nil)]
+                                                               "--drop-closed" drop-closed
+                                                               "--topics-filter" topics-filter) nil)]
                                       (cond-> (vec (remove drop (rest *command-line-args*)))
                                         effective-theme (into ["--theme" effective-theme])
                                         effective-ps    (into ["--page-size" (str effective-ps)])))]
@@ -1136,6 +1171,10 @@
                         er       (resolve-export-reports src-name source-map)
                         reports  (if er (filter #(contains? er (:report/type %)) reports) reports)
                         reports  (if drop-cutoff (drop-old-closed reports drop-cutoff) reports)
+                        src-tf   (resolve-source-topics-filter src-name source-map cli-tf)
+                        _        (when src-tf
+                                   (log/info (str "[" src-name "]") "topics filter:" (str/join ", " src-tf)))
+                        reports  (filter-by-topics reports src-tf)
                         base-dir (str "public/" (slugify src-name))
                         ;; Per-type granularity: only re-export per-type files
                         ;; for types that actually changed in this source.

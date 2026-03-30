@@ -465,7 +465,8 @@
         global-ef       (:export-formats config)
         global-er       (:export-reports config)
         global-expiry   (:expiry config)
-        global-rt       (:report-types config)]
+        global-rt       (:report-types config)
+        global-tf       (:topics-filter config)]
     (into {}
           (keep (fn [src]
                  (let [stype (source-type src)]
@@ -486,7 +487,8 @@
                                               (set (map keyword er)))
                             :report-types (when-let [rt (or (:report-types src) global-rt)]
                                             (set (map keyword rt)))
-                            :expiry (or (:expiry src) global-expiry)})]))))
+                            :expiry (or (:expiry src) global-expiry)
+                            :topics-filter (or (:topics-filter src) global-tf)})]))))
           (:sources config))))
 
 ;; ---------------------------------------------------------------------------
@@ -582,7 +584,8 @@
 (defn parse-cli-args
   "Parse common CLI flags into a map.
   Recognises: -o/--output, -n/--source, -p/--min-priority, -s/--min-status,
-  --json, --dir, --force, --only-open, --theme, --page-size, --drop-closed.
+  --json, --dir, --force, --only-open, --theme, --page-size, --drop-closed,
+  --topics-filter.
   Any leading non-flag token is captured as :format.
   Warns when a valued flag is missing its argument or followed by another flag."
   [args]
@@ -625,6 +628,10 @@
                                         :missing        opts)
       (#{"--drop-closed"} a)           (case (check-flag-value a v)
                                         :ok             (recur (assoc opts :drop-closed v) r)
+                                        :flag-as-value  (recur opts more)
+                                        :missing        opts)
+      (#{"--topics-filter"} a)         (case (check-flag-value a v)
+                                        :ok             (recur (assoc opts :topics-filter v) r)
                                         :flag-as-value  (recur opts more)
                                         :missing        opts)
       (not (:format opts))            (recur (assoc opts :format a) more)

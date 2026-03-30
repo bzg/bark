@@ -260,6 +260,19 @@
 ;; ics-file?
 ;; ---------------------------------------------------------------------------
 
+;; ---------------------------------------------------------------------------
+;; parse-cli-args — --topics-filter
+;; ---------------------------------------------------------------------------
+
+(deftest parse-cli-args-topics-filter
+  (is (= "event,security"
+         (:topics-filter (common/parse-cli-args ["--topics-filter" "event,security"]))))
+  (is (nil? (:topics-filter (common/parse-cli-args ["--force"])))))
+
+;; ---------------------------------------------------------------------------
+;; ics-file?
+;; ---------------------------------------------------------------------------
+
 (deftest ics-file-test
   (is (true?  (common/ics-file? "event.ics")))
   (is (true?  (common/ics-file? "Meeting.ICS")))

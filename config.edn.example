@@ -221,6 +221,18 @@
  ;; CLI override: bb export --drop-closed 1y
  ;; :drop-closed "1y"
 
+ ;; Filter exports by topic(s) (optional).
+ ;; Only reports matching one of the given topics are exported.
+ ;; Accepts a vector of strings (case-insensitive).
+ ;; Can be set globally here or per source (per source overrides global).
+ ;; CLI override: bb export --topics-filter "event,security" (overrides all)
+ ;; :topics-filter ["event" "security"]
+ ;;
+ ;; Per-source example:
+ ;; {:name "community"
+ ;;  :list "community.example.org"
+ ;;  :topics-filter ["event" "meetup"]}
+
  ;; Global export reports (optional) — restricts which report types are
  ;; included in all exports (JSON, RSS, Org, HTML, stats, patches).
  ;; When set per source, it overrides the global value.
