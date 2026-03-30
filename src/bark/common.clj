@@ -21,7 +21,7 @@
 
 (def bark-format
   "BARK export format version. Bump when the JSON/Org export shape changes."
-  "0.4.0")
+  "0.5.0")
 
 (def bark-schema
   (edn/read-string (slurp (io/resource "bark-schema.edn"))))
@@ -74,6 +74,19 @@
   [att]
   (boolean (when-let [ct (:attachment/content-type att)]
              (text-content-types (-> ct str/lower-case (str/split #";") first str/trim)))))
+
+(defn has-ics-attachment?
+  "True if any attachment has a .ics filename."
+  [attachments]
+  (boolean (some #(ics-file? (:attachment/filename %)) attachments)))
+
+(defn has-inline-ics?
+  "True if body text contains inline ICS/VCALENDAR content."
+  [body-text]
+  (boolean
+   (when body-text
+     (and (str/includes? body-text "BEGIN:VCALENDAR")
+          (str/includes? body-text "BEGIN:VEVENT")))))
 
 (defn email-body-text
   "Return the plain-text body of an email, preferring :email/body-text
@@ -527,6 +540,7 @@
     {:report/important-proxy [:email/from-address]}
     :report/close-reason
     {:report/superseded-by [:report/message-id {:report/email [:email/subject]}]}
+    :report/has-ics :report/has-text-attachments
     :report/deadline :report/expiry
     :report/last-activity :report/descendants :report/digested-at :report/updated-at
     {:report/related [:report/type :report/message-id
@@ -538,7 +552,13 @@
                       :patch/author :patch/subject :patch/date]}
     {:report/email [:email/subject :email/from-address :email/from-name
                     :email/date-sent :email/source :email/imap-uid
-                    :email/headers-edn :email/body-text
+                    :email/headers-edn]}])
+
+;; Pull pattern for attachment-heavy operations (event/text export).
+;; Used by bb scripts to fetch attachment data only for reports that need it.
+(def attachment-pull-pattern
+  '[:db/id :report/type :report/message-id
+    {:report/email [:email/body-text
                     {:email/attachments [:attachment/filename :attachment/content-type
                                          :attachment/size :attachment/data]}]}])
 

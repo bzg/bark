@@ -52,9 +52,9 @@
 ;; Forward-declared for clj-kondo (provided at runtime by load-file below).
 (declare load-datalevin-pod! get-header slugify mid-hash email-body-text
          ensure-set format-date format-date-iso report-priority report-status
-         report-descendant-count all-reports report-pull-pattern
+         report-descendant-count all-reports report-pull-pattern attachment-pull-pattern
          parse-cli-args load-config build-source-map bark-schema bark-format
-         get-last-modified changed-source-types-since
+         fetch-attachment-data get-last-modified changed-source-types-since
          set-theme! resolve-css-theme votes-by-report vote-counts
          html-head footer-css bark-footer wrap-js spit-html theme-toggle-js bark-repo-url
          ics-file? text-attachment?)
@@ -229,9 +229,14 @@
               m))
           m from-address-fields))
 
-(defn report->map [report source-map maintainers-map report-votes]
+(defn report->map [report source-map maintainers-map report-votes db]
   (let [email       (:report/email report)
         source-name (:email/source email)
+        ;; Lazy-fetch attachment data only when needed (announcements for
+        ;; ICS events, or any report for text attachments).
+        att-data    (delay (when db
+                     (fetch-attachment-data db (:report/message-id report))))
+        att-email   (delay (:report/email @att-data))
         from        (or (:email/from-address email) "")
         raw-arch    (archived-at email)
         mid         (some-> (:report/message-id report)
@@ -308,27 +313,22 @@
                              (:patch/date p)    (assoc :date    (:patch/date p))))
                          (:report/patches report))))
           ;; ICS event files from announcement attachments
-          (let [ics-atts (when (= :announcement (:report/type report))
-                           (seq (filter #(ics-file? (:attachment/filename %))
-                                        (:email/attachments email))))]
-            (when ics-atts true))
+          (and (= :announcement (:report/type report))
+               (:report/has-ics report))
           (assoc :events
                  (let [h (mid-hash (:report/message-id report))]
                    (mapv (fn [att]
                            {:file (str h "/" (.getName (clojure.java.io/file (:attachment/filename att))))})
                          (filter #(ics-file? (:attachment/filename %))
-                                 (:email/attachments email)))))
+                                 (:email/attachments @att-email)))))
           ;; Text attachments (text/plain, text/x-log)
-          (seq (filter #(and (text-attachment? %)
-                             (:attachment/data %))
-                       (:email/attachments email)))
+          (:report/has-text-attachments report)
           (assoc :texts
                  (let [h (mid-hash (:report/message-id report))]
                    (mapv (fn [att]
                            {:file (str h "/" (.getName (clojure.java.io/file (:attachment/filename att))))})
-                         (filter #(and (text-attachment? %)
-                                       (:attachment/data %))
-                                 (:email/attachments email)))))))))
+                         (filter #(text-attachment? %)
+                                 (:email/attachments @att-email))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Vote context (set once per export run)
@@ -338,11 +338,17 @@
   "Votes indexed by report eid. Set at the start of each export run."
   (atom {}))
 
+(def ^:private db-atom
+  "Current Datalevin db value. Set at the start of each export run.
+  Used by report->map for lazy attachment fetches."
+  (atom nil))
+
 (defn- map-reports
   "Map reports through report->map, looking up votes from all-votes-atom."
   [reports source-map maintainers-map]
-  (let [av @all-votes-atom]
-    (mapv #(report->map % source-map maintainers-map (get av (:db/id %)))
+  (let [av @all-votes-atom
+        db @db-atom]
+    (mapv #(report->map % source-map maintainers-map (get av (:db/id %)) db)
           reports)))
 
 ;; ---------------------------------------------------------------------------
@@ -638,11 +644,12 @@
 (defn dump-text!
   "Export text attachments (text/plain, text/x-log) to text/<mid-hash>/."
   [reports text-dir]
-  (let [total (reduce (fn [n report]
-                        (let [email (:report/email report)
+  (let [db    @db-atom
+        total (reduce (fn [n report]
+                        (let [att-data (fetch-attachment-data db (:report/message-id report))
                               txt-atts (filter #(and (text-attachment? %)
                                                      (:attachment/data %))
-                                               (:email/attachments email))]
+                                               (:email/attachments (:report/email att-data)))]
                           (if (seq txt-atts)
                             (let [h   (mid-hash (:report/message-id report))
                                   dir (io/file text-dir h)]
@@ -653,7 +660,7 @@
                               (+ n (count txt-atts)))
                             n)))
                       0
-                      reports)]
+                      (filter :report/has-text-attachments reports))]
     (when (pos? total)
       (log/info "Wrote" total "text file(s)"))))
 
@@ -662,27 +669,25 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- has-ics-content?
-  "True if an announcement report has ICS content (attached or inline)."
+  "True if an announcement report has ICS content (from digest flags)."
   [report]
-  (let [email (:report/email report)
-        atts  (:email/attachments email)]
-    (or (some #(ics-file? (:attachment/filename %)) atts)
-        (let [body (or (:email/body-text email) "")]
-          (and (re-find #"BEGIN:VCALENDAR" body)
-               (re-find #"BEGIN:VEVENT" body))))))
+  (:report/has-ics report))
 
 (defn- extract-vevents
-  "Extract VEVENT blocks from ICS text."
+  "Extract VEVENT blocks from ICS text.
+  Uses a reluctant quantifier bounded by END:VEVENT to avoid
+  catastrophic backtracking on malformed input."
   [text]
-  (when text
-    (re-seq #"(?s)BEGIN:VEVENT.*?END:VEVENT\r?\n?" text)))
+  (when (and text (str/includes? text "BEGIN:VEVENT"))
+    (re-seq #"(?s)BEGIN:VEVENT(?:(?!BEGIN:VEVENT).)*?END:VEVENT\r?\n?" text)))
 
 (defn dump-events!
   "Export individual .ics files to events/<mid-hash>/ for announcements with ICS."
   [reports events-dir]
-  (let [total (reduce (fn [n report]
-                        (let [email (:report/email report)
-                              atts  (:email/attachments email)
+  (let [db    @db-atom
+        total (reduce (fn [n report]
+                        (let [att-data (fetch-attachment-data db (:report/message-id report))
+                              atts  (:email/attachments (:report/email att-data))
                               ics-atts (filter #(and (ics-file? (:attachment/filename %))
                                                      (:attachment/data %))
                                                atts)]
@@ -735,16 +740,18 @@
 (defn- collect-vevents
   "Extract all VEVENT blocks from a seq of reports with ICS content."
   [reports]
-  (mapcat (fn [report]
-            (let [email (:report/email report)
-                  atts  (:email/attachments email)
-                  att-vevents (->> atts
-                                   (filter #(and (ics-file? (:attachment/filename %))
-                                                 (:attachment/data %)))
-                                   (mapcat #(extract-vevents (:attachment/data %))))
-                  body-vevents (extract-vevents (:email/body-text email))]
-              (concat att-vevents body-vevents)))
-          reports))
+  (let [db @db-atom]
+    (mapcat (fn [report]
+              (let [att-report (fetch-attachment-data db (:report/message-id report))
+                    email (:report/email att-report)
+                    atts  (:email/attachments email)
+                    att-vevents (->> atts
+                                     (filter #(and (ics-file? (:attachment/filename %))
+                                                   (:attachment/data %)))
+                                     (mapcat #(extract-vevents (:attachment/data %))))
+                    body-vevents (extract-vevents (:email/body-text email))]
+                (concat att-vevents body-vevents)))
+            reports)))
 
 (defn- spit-ics!
   "Write a VCALENDAR file wrapping the given VEVENT blocks."
@@ -1138,6 +1145,7 @@
             (when (and (not= format "root") (seq export-names))
               (let [maintainers-map (if config (build-maintainers db source-map) {})
                     all-reps        (all-reports-by-date db)
+                    _               (reset! db-atom db)
                     _               (reset! all-votes-atom
                                       (votes-by-report
                                        (d/q '[:find ?r ?val ?voter ?emid

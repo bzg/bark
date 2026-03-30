@@ -15,7 +15,7 @@
                             parse-maintainer-since-strings admin-or-maintainer?
                             load-config build-source-map
                             report-priority report-status report-descendant-count
-                            report-pull-pattern parse-cli-args
+                            report-pull-pattern attachment-pull-pattern parse-cli-args
                             votes-by-report vote-counts
                             ics-file? text-attachment?])
 
@@ -50,6 +50,13 @@
                  :where ['?r :report/type '_])
            db)
        (map first)))
+
+(defn fetch-attachment-data
+  "Fetch attachment data for a single report by message-id.
+  Returns the attachment-pull-pattern projection, or nil."
+  [db message-id]
+  (when message-id
+    (dpull db attachment-pull-pattern [:report/message-id message-id])))
 
 (defn get-roles
   "Fetch roles for a source. Returns a map or {}."

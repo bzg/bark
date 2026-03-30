@@ -107,9 +107,10 @@
                             (let [filename (or (:filename att) "unnamed")
                                   is-patch (boolean (re-find #"(?i)\.(patch|diff)$" filename))
                                   is-ics   (boolean (re-find #"(?i)\.ics$" filename))
-                                  is-text  (common/text-attachment?
+                                  is-text  (and (not is-patch) (not is-ics)
+                                                   (common/text-attachment?
                                                      {:attachment/content-type
-                                                      (:content-type att)})
+                                                      (:content-type att)}))
                                   data     (:data att)
                                   raw-text (when (and (or is-patch is-ics is-text) data)
                                               (cond
