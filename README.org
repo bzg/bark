@@ -1,4 +1,4 @@
-* BARK! Another Report Keeper
+#+title: BARK! Another Report Keeper
 
 [[bark-logo.jpg]]
 
@@ -14,11 +14,11 @@ BARK reports can be read with other tools:
 - Via GNU Emacs [[https://gnus.org][Gnus]]: [[https://codeberg.org/bzg/gnus-bone][gnus-bone]]
 - Via GNU Emacs [[https://notmuchmail.org/notmuch-emacs/][notmuch]]: [[https://codeberg.org/bzg/notmuch-bone][notmuch-bone]]
 
-** BARK manual
+* BARK manual
 
 For a more extensive documentation, please read the [[docs/bark-manual.org][BARK manual]].
 
-** How it works
+* How it works
 
 - *JVM daemon* (=clojure -M:run=) --- Connects to IMAP, stores emails,
   digests them into reports, applies commands and roles, periodically
@@ -28,13 +28,13 @@ For a more extensive documentation, please read the [[docs/bark-manual.org][BARK
 - *bb notify* --- Sends notification emails to admin/maintainers.
   Read-only (no database writes).
 
-** Dependencies
+* Dependencies
 
 - [[https://babashka.org/][Babashka]] (bb) for export, notify, and utility scripts
 - [[https://github.com/datalevin/datalevin][Datalevin]] (pod for bb scripts, library for JVM)
 - Java 17+ (for the daemon)
 
-** Quick start
+* Quick start
 
 #+begin_src sh
 # 1. Copy and edit config
@@ -78,7 +78,7 @@ bb test-smtp --dry-run
 clj -M:test
 #+end_src
 
-** Architecture
+* Architecture
 
 All source code lives under =src/bark/=:
 
@@ -109,7 +109,7 @@ Read-only bb scripts live under =scripts/=:
 | =bark-html.clj=       | HTML template helpers                   |
 | =validate-config.clj= | Config validation                       |
 
-** bb tasks
+* bb tasks
 
 #+begin_example
 bb export [json|rss|org|html|stats|patches|text|events|all]
@@ -123,7 +123,7 @@ bb test-smtp [--to addr] [--dry-run]      Test SMTP configuration
 bb clean                                  Remove all files in public/
 #+end_example
 
-*** Theme (=--theme= / =:theme=)
+** Theme (=--theme= / =:theme=)
 
 The =--theme= flag (or =:theme= in =config.edn=) controls the CSS
 theme for HTML exports.  The value is resolved in order:
@@ -143,11 +143,11 @@ bb export html --theme themes/custom.css                    # relative path (inl
 bb export html --theme none                                 # no theme
 #+end_src
 
-** Config
+* Configuration
 
 See =config.edn.example=. The configuration has three main sections:
 
-*** IMAP connection (=:imap=)
+** IMAP connection (=:imap=)
 
 Single IMAP connection shared by all sources.
 
@@ -159,7 +159,7 @@ Single IMAP connection shared by all sources.
 | =:oauth2-token= | ​*        | OAuth2 token (* or =:password=)      |
 | =:folder=       | yes      | IMAP folder (usually ="INBOX"=)      |
 
-*** Ingest settings (=:ingest=)
+** Ingest settings (=:ingest=)
 
 | Field                  | Default   | Description                                                  |
 |------------------------+-----------+--------------------------------------------------------------|
@@ -167,7 +167,7 @@ Single IMAP connection shared by all sources.
 | =:max-size=              | none      | Skip emails larger than N bytes (e.g. =1048576=)               |
 | =:max-attachment-size=   | =1048576=   | Max text data extracted from attachments (.patch, .ics, etc) |
 
-*** Sources (=:sources=)
+** Sources (=:sources=)
 
 Each source classifies incoming emails by delivery type.  Sources are
 checked in order; the first match wins.  Each source must have exactly
@@ -202,7 +202,7 @@ target source with either a =X-Bark-Source: source-name= header or a
 =[bark:source-name]= prefix in the subject.  Non-maintainer direct
 emails to =:list= or =:alias= sources are ignored.
 
-*** Example config
+** Example config
 
 #+begin_src clojure
 {:admin "admin@example.com"
@@ -226,7 +226,7 @@ emails to =:list= or =:alias= sources are ignored.
                         :from "bark@example.com"}}}
 #+end_src
 
-*** Report labels (=:labels=)
+** Report labels (=:labels=)
 
 Controls which subject labels are recognised per report type. 
 
@@ -257,7 +257,7 @@ Per-source (inside a source map):
  :labels {:announcement ["ANN" "NEWS"]}}
 #+end_src
 
-*** Notifications (=:notifications=)
+** Notifications (=:notifications=)
 
 Optional. When absent or ={:enabled false}=, =bb notify= exits
 immediately.
@@ -281,12 +281,19 @@ SMTP fields:
 Use =bb test-smtp --dry-run= to validate the configuration without
 sending, or =bb test-smtp= to send a test email to the global admin.
 
-** Support the Clojure(script) ecosystem
+* Contributing
+
+- Send a [[mailto:~bzg/barkyard@lists.sr.ht?subject=\[BUG\] bark: <SHORT EXPLICIT BUG DESCRIPTION>][bug report]]
+- Send a [[mailto:~bzg/barkyard@lists.sr.ht?subject=\[PATCH\] bark: <COMMIT SUMMARY>][patch]] (please use =git format-patch=)
+- Send a [[mailto:~bzg/barkyard@lists.sr.ht?subject=\[FR\] bark: <FEATURE REQUEST>][feature request]]
+- Share any [[mailto:~bzg/barkyard@lists.sr.ht?subject=bark: <ANYTHING>][other question or idea]]
+
+* Support the Clojure(script) ecosystem
 
 If you like Clojure(script), please consider supporting maintainers by
 donating to [[https://clojuriststogether.org][clojuriststogether.org]].
 
-** License
+* License
 
 Copyright © 2026 Bastien Guerry
 
