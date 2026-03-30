@@ -5,6 +5,8 @@
 (ns bark.commands
   "Unified command detection, resolution, and application."
   (:require [clojure.string :as str]
+            [clojure.java.io :as io]
+            [clojure.edn :as edn]
             [datalevin.core :as d]
             [taoensso.timbre :as log]
             [bark.common :as common]
@@ -232,6 +234,42 @@
                           all-directives)))
             vec)))))
 
+;; ---------------------------------------------------------------------------
+;; Command failure recording (file-based)
+;; ---------------------------------------------------------------------------
+
+(def ^:private failures-file "public/.failures.edn")
+(def ^:private max-failure-age-ms (* 365 24 60 60 1000))
+
+(defn- load-failures []
+  (let [f (io/file failures-file)]
+    (if (.exists f)
+      (try (edn/read-string (slurp f)) (catch Exception _ []))
+      [])))
+
+(defn- save-failures! [failures]
+  (io/make-parents failures-file)
+  (spit failures-file (pr-str failures)))
+
+(defn record-failure!
+  "Append a command failure to the failures file for later notification.
+  Prunes entries older than 1 year."
+  [{:keys [source from-addr email-date reason command report-mid]}]
+  (let [now-ms   (System/currentTimeMillis)
+        cutoff   (Date. (- now-ms max-failure-age-ms))
+        existing (load-failures)
+        pruned   (filterv (fn [{:keys [date]}]
+                            (and date (.after ^Date date cutoff)))
+                          existing)
+        entry    {:source     source
+                  :from       (str/lower-case from-addr)
+                  :date       (or email-date (Date.))
+                  :reason     reason
+                  :command    command
+                  :report-mid (or report-mid "")}]
+    (save-failures! (conj pruned entry))
+    (log/info "Command failure:" reason command "from" from-addr)))
+
 (defn resolve-commands
   "Fold a seq of parsed directives into a summary map.
   NOT for trigger results (which map attrs to `true`, not addresses)."
@@ -347,7 +385,8 @@
                                    close-reason (conj (str "close-reason:" (name close-reason)))))
                   (str "(by " email-mid ")"))))))
 
-(defn apply-directives! [conn report-eid directives email-eid from-addr is-maintainer?]
+(defn apply-directives! [conn report-eid directives email-eid from-addr is-maintainer?
+                         failure-ctx]
   (let [permitted (filter (fn [{:keys [scope]}]
                             (or (= :user scope) (and (= :maintainer scope) is-maintainer?)))
                           directives)]
@@ -425,9 +464,14 @@
                                            (when (and unsuperseded? (:report/superseded-by current))
                                              ["not superseded"])))
                     (str "(proxy by " from-addr ")")))
-        ;; Warn if message-id didn't resolve
+        ;; Record unknown superseded-by target
         (when (and superseded-by (nil? target-eid))
-          (log/warn "Superseded-by: unknown message-id" superseded-by))))))
+          (log/warn "Superseded-by: unknown message-id" superseded-by)
+          (when failure-ctx
+            (record-failure! (assoc failure-ctx
+                                    :reason :unknown-target
+                                    :command (str "Superseded-by: " superseded-by)
+                                    :report-mid report-mid))))))))
 
 (defn- try-unclosed!
   "If a closed report has a Not closed or Not superseded directive, retract the closure."
@@ -492,7 +536,12 @@
                           (filter-triggers-by-scope overrides is-maint?))
           aliases     (compile-directive-aliases (:command-aliases source-cfg))
           directives  (detect-directives report-type body-text overrides (:email/date-sent email) aliases)
-          closed?     (some? (:report/closed (d/pull db [:report/closed] report-eid)))]
+          closed?     (some? (:report/closed (d/pull db [:report/closed] report-eid)))
+          fail-ctx    (when (and from-addr src-name)
+                        {:source     src-name
+                         :from-addr  from-addr
+                         :email-date (:email/date-sent email)
+                         :email-mid  (:email/message-id email)})]
 
       (if closed?
         (do (try-unclosed! conn report-eid directives is-maint? from-addr)
@@ -501,6 +550,6 @@
                        (apply-vote! conn report-eid from-addr body-text email delivery source-cfg)
                        (some? (detect-vote body-text)))]
           (apply-triggers! conn report-eid trig-result eid (:email/message-id email))
-          (apply-directives! conn report-eid directives eid from-addr is-maint?)
+          (apply-directives! conn report-eid directives eid from-addr is-maint? fail-ctx)
           (boolean (or (seq trig-result) (seq directives) voted?)))))
     false))

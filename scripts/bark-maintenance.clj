@@ -13,6 +13,7 @@
 ;;   bb maintenance --delete         — actually delete orphan emails
 ;;   bb maintenance -n my-source     — scope to a single source
 ;;   bb maintenance --verbose        — list individual orphan message-ids
+;;   bb maintenance --failures       — list recent command failures
 ;;
 ;; Config (config.edn):
 ;;   :maintenance {:orphan-delay "90d"}   ;; only delete orphans older than this
@@ -26,7 +27,7 @@
 
 ;; Forward-declared for clj-kondo (provided at runtime by load-file below).
 (declare load-datalevin-pod! parse-delay days-between ensure-set
-         load-config build-source-map bark-schema get-roles)
+         load-config build-source-map bark-schema get-roles format-date)
 
 (load-file "scripts/bark-common.clj")
 
@@ -37,12 +38,13 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- parse-args [args]
-  (loop [opts {:delete? false :verbose? false}
+  (loop [opts {:delete? false :verbose? false :failures? false}
          [a & [v & r :as more]] args]
     (cond
       (nil? a)               opts
       (= a "--delete")       (recur (assoc opts :delete? true) more)
       (= a "--verbose")      (recur (assoc opts :verbose? true) more)
+      (= a "--failures")     (recur (assoc opts :failures? true) more)
       (#{"-n" "--source"} a) (if v (recur (assoc opts :source-name v) r) opts)
       :else                  (recur opts more))))
 
@@ -120,12 +122,40 @@
                  {:eid eid :source src :from from :date date :mid mid})))))
 
 ;; ---------------------------------------------------------------------------
+;; Command failures
+;; ---------------------------------------------------------------------------
+
+(def ^:private reason-labels
+  {:unknown-target "unknown target"})
+
+(defn- show-failures
+  "Display command failures from the failures file, optionally filtered by source."
+  [source-name]
+  (let [f    (io/file "public/.failures.edn")
+        all  (if (.exists f)
+               (try (edn/read-string (slurp f)) (catch Exception _ []))
+               [])
+        failures (->> all
+                      (filter #(or (nil? source-name) (= source-name (:source %))))
+                      (sort-by :date #(compare %2 %1)))]
+    (if (empty? failures)
+      (log/info "No command failures found.")
+      (do
+        (log/info (count failures) "command failure(s)")
+        (doseq [{:keys [from source date reason command]} failures]
+          (println (str "  " (format-date date)
+                        " | " source
+                        " | " from
+                        " | " command
+                        " — " (get reason-labels reason (name reason)))))))))
+
+;; ---------------------------------------------------------------------------
 ;; Main
 ;; ---------------------------------------------------------------------------
 
 (load-datalevin-pod!)
 
-(let [{:keys [delete? verbose? source-name] :as opts}
+(let [{:keys [delete? verbose? failures? source-name] :as opts}
       (parse-args *command-line-args*)
       db-path (or (System/getenv "BARK_DB") "data/bark-db")
       config  (load-config)
@@ -140,27 +170,29 @@
       ;; Open with WAL for potential writes
       conn    (d/get-conn db-path bark-schema {})]
   (try
-    (let [db      (d/db conn)
-          orphans (find-orphans db config source-map opts)]
-      (if (empty? orphans)
-        (log/info "No orphan emails found.")
-        (let [by-source (group-by :source orphans)]
-          (log/info "Found" (count orphans) "orphan email(s)")
-          (doseq [[src os] (sort-by key by-source)]
-            (log/info (str "  [" src "] " (count os) " orphan(s)")))
-          (when verbose?
-            (doseq [{:keys [source mid from date]} (sort-by :date orphans)]
-              (println (str "  " source " | " mid " | " from " | " date))))
-          (if delete?
-            (do
-              (log/info "Deleting" (count orphans) "orphan email(s)…")
-              (let [tx-data (mapv (fn [{:keys [eid]}]
-                                   [:db/retractEntity eid])
-                                 orphans)]
-                (d/transact! conn tx-data)
-                (log/info "Done. Deleted" (count orphans) "email(s).")))
-            (do
-              (log/info "Dry run — no changes made. Pass --delete to remove.")
-              (log/info "Tip: use --verbose to list individual orphan message-ids."))))))
+    (let [db (d/db conn)]
+      (if failures?
+        (show-failures source-name)
+        (let [orphans (find-orphans db config source-map opts)]
+          (if (empty? orphans)
+            (log/info "No orphan emails found.")
+            (let [by-source (group-by :source orphans)]
+              (log/info "Found" (count orphans) "orphan email(s)")
+              (doseq [[src os] (sort-by key by-source)]
+                (log/info (str "  [" src "] " (count os) " orphan(s)")))
+              (when verbose?
+                (doseq [{:keys [source mid from date]} (sort-by :date orphans)]
+                  (println (str "  " source " | " mid " | " from " | " date))))
+              (if delete?
+                (do
+                  (log/info "Deleting" (count orphans) "orphan email(s)…")
+                  (let [tx-data (mapv (fn [{:keys [eid]}]
+                                       [:db/retractEntity eid])
+                                     orphans)]
+                    (d/transact! conn tx-data)
+                    (log/info "Done. Deleted" (count orphans) "email(s).")))
+                (do
+                  (log/info "Dry run — no changes made. Pass --delete to remove.")
+                  (log/info "Tip: use --verbose to list individual orphan message-ids."))))))))
     (finally
       (d/close conn))))
