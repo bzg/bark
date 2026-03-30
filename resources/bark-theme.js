@@ -4,18 +4,19 @@
 
 (function() {
   var html = document.documentElement;
-  if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-    html.setAttribute('data-theme', 'dark');
-    document.addEventListener('DOMContentLoaded', function() {
-      var icon = document.getElementById('theme-icon');
-      if (icon) icon.textContent = '☀️';
-    });
-  }
+  var saved = localStorage.getItem('bark-theme');
+  var theme = saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  html.setAttribute('data-theme', theme);
+  document.addEventListener('DOMContentLoaded', function() {
+    var icon = document.getElementById('theme-icon');
+    if (icon) icon.textContent = theme === 'dark' ? '☀️' : '🌙';
+  });
 })();
 
 function toggleTheme() {
   var html = document.documentElement;
   var next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
   html.setAttribute('data-theme', next);
+  localStorage.setItem('bark-theme', next);
   document.getElementById('theme-icon').textContent = next === 'dark' ? '☀️' : '🌙';
 }
