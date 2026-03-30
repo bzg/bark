@@ -16,7 +16,8 @@
                             load-config build-source-map
                             report-priority report-status report-descendant-count
                             report-pull-pattern parse-cli-args
-                            votes-by-report vote-counts])
+                            votes-by-report vote-counts
+                            ics-file? text-attachment?])
 
 (require '[taoensso.timbre :as log])
 

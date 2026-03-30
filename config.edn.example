@@ -88,6 +88,7 @@
  ;; :max-size skips emails larger than N bytes (optional, no limit by default).
  :ingest {:initial-fetch 50
           ;; :max-size 1048576
+          ;; :max-attachment-size 1048576  ;; max text data extracted from attachments (default: 1 MB)
           }
 
  ;; ---- Customization -------------------------------------------------------

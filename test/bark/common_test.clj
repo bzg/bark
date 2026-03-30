@@ -255,3 +255,15 @@
   (testing "unknown source-type: always false"
     (is (false? (common/sent-via-source-channel? :direct {})))
     (is (false? (common/sent-via-source-channel? :list {})))))
+
+;; ---------------------------------------------------------------------------
+;; ics-file?
+;; ---------------------------------------------------------------------------
+
+(deftest ics-file-test
+  (is (true?  (common/ics-file? "event.ics")))
+  (is (true?  (common/ics-file? "Meeting.ICS")))
+  (is (true?  (common/ics-file? "path/to/file.ics")))
+  (is (false? (common/ics-file? "readme.txt")))
+  (is (false? (common/ics-file? "ics-like.doc")))
+  (is (false? (common/ics-file? nil))))

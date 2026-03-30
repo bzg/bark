@@ -133,19 +133,21 @@
   Returns true on success, false on skip or failure.
   When an email was previously stored but not fully digested (e.g. crash
   between store and digest), re-runs process-email! which is idempotent."
-  [db-conn source-map sources msg {:keys [max-size]}]
+  [db-conn source-map sources msg {:keys [max-size max-attachment-size]}]
   (let [size (:size msg -1)]
     (if (and max-size (pos? size) (> size max-size))
       (do (log/warn "Skipping oversized email UID:" (:uid msg)
                     "size:" size (str "bytes (max: " max-size ")"))
           false)
       (if-let [src-name (digest/pre-classify-source (d/db db-conn) source-map sources msg)]
-        (let [mid (:message-id msg)]
+        (let [mid (:message-id msg)
+              store-opts (cond-> {}
+                           max-attachment-size (assoc :max-attachment-size max-attachment-size))]
           (if (nil? mid)
             (do (log/warn "No Message-ID for UID:" (:uid msg) "— skipping")
                 false)
             (let [lookup [:email/message-id mid]]
-              (if (ingest/store-email! db-conn msg)
+              (if (ingest/store-email! db-conn msg store-opts)
                 ;; Freshly stored — stamp source and digest.
                 (do (d/transact! db-conn [{:db/id lookup :email/source src-name}])
                     (try-digest! db-conn source-map sources
@@ -265,7 +267,7 @@
   [imap-cfg db-conn ingest-cfg config-path]
   (let [folder      (or (:folder imap-cfg) "INBOX")
         fetch-opts  (parse-initial-fetch (or (:initial-fetch ingest-cfg) 50))
-        ingest-opts (select-keys ingest-cfg [:max-size])]
+        ingest-opts (select-keys ingest-cfg [:max-size :max-attachment-size])]
     (loop [backoff-ms 1000]
       (when-not (shutting-down?)
         (let [config     (or (common/load-config config-path) {})

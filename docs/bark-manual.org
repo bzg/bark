@@ -155,6 +155,24 @@ In addition to bugs, patches, and requests, maintainers can make
 general announcements, share a release, or announce an upcoming change
 in a future release.
 
+** Events (ICS calendar support)
+
+When an announcement (=[ANN]=) contains an attached =.ics= file or
+inline =VCALENDAR= content in the email body, BARK stores the ICS data
+alongside the report.  During export, these announcements are collected
+into dedicated event feeds:
+
+- Individual =.ics= files are written to =events/<mid-hash>/=.
+- Combined ICS calendar files:
+  - =events/announcements.ics= --- all announcements with events.
+  - =events/announcements-open.ics= --- open only.
+  - =events/announcements-closed.ics= --- closed only.
+- =events.json=, =events.org=, =events.xml= list open announcements
+  with ICS content; =events-closed.*= list closed ones.
+
+Use =[ANN event]= to set the topic to "event" for easier filtering,
+but any announcement with ICS content is included regardless of topic.
+
 ** Undoing updates
 
 Maintainers can also "undo" an update:
@@ -494,6 +512,17 @@ Running =bb export all= generates, for each source:
 - =votes.json= --- per-report vote details (see below).
 - Per-type feeds: =bugs.json=, =patches.xml=, etc.
 - =patches/= --- a directory with attached and inline patch files.
+- =text/= --- a directory with =text/plain= and =text/x-log= attachments
+  (e.g. backtraces, log files).  Saved under =text/<mid-hash>/=.
+- =events/= --- a directory with =.ics= calendar files extracted from
+  announcements.  Each report's =.ics= attachments are saved under
+  =events/<mid-hash>/=.  A combined =events/events.ics= aggregates all
+  =VEVENT= blocks from open announcements into a single subscribable
+  calendar feeds.
+- =events.json=, =events.org=, =events.xml= --- open announcements that
+  carry an =.ics= attachment or inline =VCALENDAR= content.
+- =events-closed.json=, =events-closed.org=, =events-closed.xml= ---
+  closed announcements with =.ics= content.
 
 RSS feeds contain up to 50 items, most recent first.
 
@@ -507,6 +536,8 @@ You can also export a single format:
 : bb export org
 : bb export html
 : bb export stats
+: bb export text
+: bb export events
 
 Use =-n <source>= to restrict to one source, =-p <N>= to filter by minimum
 priority, and =-s <N>= to filter by minimum status.
@@ -774,6 +805,12 @@ if a report has an explicit expiry date, only that date is checked.
   ="1y"=), or an ISO date (="2025-01-15"=).  Default: =50=.  CLI override:
   =clj -M:run -- --initial-fetch 4d=.
 - =:max-size= — skip emails larger than N bytes.  No limit by default.
+
+Text content of =.patch=, =.diff=, =.ics=, =text/plain= and =text/x-log=
+attachments is extracted and stored in the database.  Attachments larger
+than 1 MB (1,048,576 characters) are skipped with a warning — only
+metadata (filename, size, content-type) is kept.  Override the limit
+with =:max-attachment-size= in the =:ingest= config section.
 
 ** Maintenance
 
