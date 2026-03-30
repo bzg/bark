@@ -837,7 +837,7 @@ All tasks are run via [[https://babashka.org/][Babashka]]:
 Export accepts flags: =-n <source>= (restrict to one source), =-p <N>=
 (minimum priority), =-s <N>= (minimum status).
 
-* Appendix: workflow examples
+* Appendix 1: workflow examples
 
 ** Patch review cycle
 
@@ -962,3 +962,6 @@ sets a far-future expiry to protect it:
 By marking the bug as owned, it no longer matches =:max-status 0= and
 won't be expired by the rule.  =No expiry.= clears any per-report expiry
 date that may have been set previously.
+* Appendix 2: credits
+
+Many thanks to [[https://liberapay.com/yantar92/][Ihor Radchenko]] for his early feedback on the design.
