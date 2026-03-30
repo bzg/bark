@@ -63,6 +63,36 @@
 ;; Notification queries
 ;; ---------------------------------------------------------------------------
 
+(defn- load-failures
+  "Read the failures file, returning a vector of failure maps."
+  []
+  (let [f (io/file "public/.failures.edn")]
+    (if (.exists f)
+      (try (edn/read-string (slurp f)) (catch Exception _ []))
+      [])))
+
+(defn- failures-for-subscriber
+  "Return failures for `email-addr` on `source` since `since-date`."
+  [all-failures email-addr source since-date]
+  (let [addr (str/lower-case email-addr)]
+    (->> all-failures
+         (filter (fn [{:keys [from] src :source date :date}]
+                   (and (= addr from)
+                        (= source src)
+                        (or (nil? since-date)
+                            (and date (.after ^java.util.Date date since-date)))))))))
+
+(defn- report-subject-by-mid
+  "Look up the report's email subject from its message-id."
+  [db mid]
+  (when (and mid (not (str/blank? mid)))
+    (d/q '[:find ?subj .
+           :in $ ?mid
+           :where [?r :report/message-id ?mid]
+                  [?r :report/email ?e]
+                  [?e :email/subject ?subj]]
+         db mid)))
+
 (defn all-notify-prefs [db]
   (->> (d/q '[:find (pull ?e [:notify/key :notify/source :notify/email
                               :notify/enabled :notify/interval-days
@@ -107,6 +137,22 @@
 (defn- unowned? [report]
   (nil? (:report/owned report)))
 
+(def ^:private reason-labels
+  {:unknown-target "unknown target"})
+
+(defn- format-failure-line
+  "Format a single command failure as a text line.
+  `subjects` is a pre-loaded {message-id -> subject} map."
+  [subjects failure]
+  (let [date    (format-date (:cmd-failure/date failure))
+        reason  (get reason-labels (:cmd-failure/reason failure)
+                     (some-> (:cmd-failure/reason failure) name))
+        command (:cmd-failure/command failure)
+        mid     (:cmd-failure/report-mid failure)
+        subject (or (get subjects mid) mid)]
+    (str "  [" date "] " command " — " reason "\n"
+         "    on: " subject)))
+
 (defn- format-report-line
   "Format a single report as a text line."
   [report]
@@ -136,8 +182,9 @@
          "\n")))
 
 (defn build-email-body
-  "Build the notification email body for a given subscriber."
-  [reports notify]
+  "Build the notification email body for a given subscriber.
+  `failures` is a seq of cmd-failure entities to include."
+  [db reports notify failures]
   (let [email      (:notify/email notify)
         source     (:notify/source notify)
         min-pri    (:notify/min-priority notify 0)
@@ -197,9 +244,24 @@
                     owned-rest)
         sec-unack  (section
                     (str "== Unacked & unowned bugs/patches/requests (" source ") ==")
-                    unacked)]
-    (if (or sec-dl sec-owned sec-unack)
-      (str (or sec-dl "")
+                    unacked)
+        fail-subjects (when (seq failures)
+                       (->> failures
+                            (map :cmd-failure/report-mid)
+                            distinct
+                            (reduce (fn [m mid]
+                                      (if-let [s (report-subject-by-mid db mid)]
+                                        (assoc m mid s) m))
+                                    {})))
+        sec-fail   (when (seq failures)
+                     (str "== Failed commands (your emails, " source ") ==\n"
+                          (str/join "\n\n"
+                                   (map #(format-failure-line fail-subjects %) failures))
+                          "\n"))]
+    (if (or sec-dl sec-owned sec-unack sec-fail)
+      (str (or sec-fail "")
+           (when (and sec-fail (or sec-dl sec-owned sec-unack)) "\n")
+           (or sec-dl "")
            (when (and sec-dl (or sec-owned sec-unack)) "\n")
            (or sec-owned "")
            (when (and sec-owned sec-unack) "\n")
@@ -262,6 +324,7 @@
               now      (java.util.Date.)
               src-map  (build-source-map config)
               reports  (all-reports db)
+              all-failures (load-failures)
               prefs    (all-notify-prefs db)
               last-sent-map (load-last-sent)
               _        (do (log/debug (count prefs) "notify pref(s) found")
@@ -296,8 +359,11 @@
           (if (empty? due)
             (log/info "No notifications due.")
             (doseq [notify due]
-              (let [addr (:notify/email notify)
-                    body (build-email-body reports notify)]
+              (let [addr     (:notify/email notify)
+                    since-ms (get last-sent-map (:notify/key notify))
+                    since    (when since-ms (java.util.Date. (long since-ms)))
+                    failures (failures-for-subscriber all-failures addr (:notify/source notify) since)
+                    body     (build-email-body db reports notify failures)]
                 (if body
                   (do (log/info (if dry-run? "[dry-run]" "")
                                 "Notifying" addr (str "(source: " (:notify/source notify) ")"))
