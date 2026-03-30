@@ -2,15 +2,17 @@
 #+subtitle: User and admin manual
 #+options: toc:1
 
-* BARK! Another Report Keeper
+* EmBARK
 
 BARK monitors a mailbox and converts incoming emails into reports.
+
 Subsequent emails in the same thread can update the status of that
 report using predefined commands. Admins and maintainers can also
 update reports by writing directly to the monitored inbox, manage
 roles, and receive periodic digest emails.
 
-BARK can export reports as a HTML website and as json, rss and org.
+BARK expose reports as a HTML website and export data to various
+formats.
 
 * Example
 
