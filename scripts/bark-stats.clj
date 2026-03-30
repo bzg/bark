@@ -272,24 +272,17 @@
                :count   (count rs)}))
        (sort-by :count >) (take n)))
 
-(def closable-types
-  "Report types where open/closed status is meaningful."
-  #{:bug :patch :request})
-
 (defn open-closed-ratio [reports]
-  (let [closable (filter #(closable-types (:report/type %)) reports)
-        open     (count (remove :report/closed closable))
-        closed   (count (filter :report/closed closable))]
+  (let [open     (count (remove :report/closed reports))
+        closed   (count (filter :report/closed reports))]
     {:open open :closed closed
      :ratio (when (pos? (+ open closed))
               (round2 (/ open (double (+ open closed)))))}))
 
 (defn closed-cancel-breakdown
-  "Among closed closable reports, count canceled, expired, and resolved per type."
+  "Among closed reports, count canceled, expired, and resolved per type."
   [reports]
-  (let [closed (->> reports
-                    (filter #(closable-types (:report/type %)))
-                    (filter :report/closed))]
+  (let [closed (filter :report/closed reports)]
     (->> closed
          (group-by #(some-> (:report/type %) name))
          (into {}
@@ -318,7 +311,7 @@
   ([reports db] (compute-stats reports db nil))
   ([reports db source-name]
    (let [last-year     (filter #(within-last-year? (report-date %)) reports)
-         closable-yr   (filter #(closable-types (:report/type %)) last-year)
+         open-yr       (remove :report/closed last-year)
          total-emails  (when db (total-emails db))
          contributors  (when db (cond->> (all-contributors db)
                                   source-name (filter #(= source-name (second %)))))
@@ -344,7 +337,7 @@
         :reports-by-month  (reports-by-month reports)
         :time-to-close     (time-to-close-stats reports)
         :open-closed-ratio (open-closed-ratio reports)
-        :open-last-year    (count (remove :report/closed closable-yr))
+        :open-last-year    (count open-yr)
         :total-last-year   (count last-year)
         :top-openers       (top-openers reports 10)
         :vote-leaders      (vote-leaders reports all-votes 10)
