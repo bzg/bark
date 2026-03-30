@@ -386,7 +386,7 @@ function buildRowElement(r) {
   var supersededBy = r['superseded-by'] || null;
 
   var isoDate = parseIsoDate(dateRaw);
-  var closed_b = flags.length >= 3 && flags[2] === 'C';
+  var closed_b = flags.length >= 3 && flags[2] !== '-';
   var author = fromName || from;
   var flagA = acked ? 'A' : '-', flagO = owned ? 'O' : '-';
   var flagC = closeReason === 'canceled' ? 'C' : closeReason === 'expired' ? 'E' : closeReason === 'superseded' ? 'S' : closed_b ? 'R' : '-';
