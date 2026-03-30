@@ -111,6 +111,28 @@
 (defn has-patch-attachment? [attachments]
   (some (fn [att] (common/patch-file? (:attachment/filename att))) attachments))
 
+;; ICS / calendar detection
+
+(defn has-ics-attachment?
+  "True if any attachment has a .ics filename."
+  [attachments]
+  (boolean (some (fn [att] (common/ics-file? (:attachment/filename att))) attachments)))
+
+(def inline-ics-indicators
+  [#"(?m)^BEGIN:VCALENDAR" #"(?m)^BEGIN:VEVENT"])
+
+(defn has-inline-ics?
+  "True if body text contains inline ICS/VCALENDAR content."
+  [body-text]
+  (when body-text
+    (every? #(re-find % body-text) inline-ics-indicators)))
+
+(defn has-ics?
+  "True if an email has ICS content (attached or inline)."
+  [email]
+  (or (has-ics-attachment? (:email/attachments email))
+      (has-inline-ics? (common/email-body-text email))))
+
 (def inline-patch-indicators
   [#"(?m)^diff --git " #"(?m)^--- a/" #"(?m)^\+\+\+ b/"
    #"(?m)^@@ [-+]\d+" #"(?m)^index [0-9a-f]+\.\.[0-9a-f]+"])

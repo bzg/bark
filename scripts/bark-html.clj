@@ -191,7 +191,9 @@
    " — "
    [:a {:href "reports/all.json"} "JSON"]
    " — "
-   [:a {:href "reports/all.org"} "Org"]])
+   [:a {:href "reports/all.org"} "Org"]
+   " — "
+   [:a {:href "events/announcements.ics"} "iCal"]])
 
 ;; ---------------------------------------------------------------------------
 ;; Org-mode inline link conversion (shared by bark-docs, bark-stats)

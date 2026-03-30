@@ -11,6 +11,15 @@
 ;;   public/<source-name>/reports/all.org
 ;;   public/<source-name>/reports/bugs.json  (etc.)
 ;;   public/<source-name>/reports/stats.json
+;;   public/<source-name>/events/<mid-hash>/<file>.ics
+;;   public/<source-name>/events/announcements.ics
+;;   public/<source-name>/events/announcements-open.ics
+;;   public/<source-name>/events/announcements-closed.ics
+;;   public/<source-name>/reports/events.json
+;;   public/<source-name>/reports/events.org
+;;   public/<source-name>/reports/events-closed.json
+;;   public/<source-name>/reports/events-closed.org
+;;   public/<source-name>/text/<mid-hash>/<file>
 ;;   public/<source-name>/patches/<mid-hash>/<file>
 ;;
 ;; Usage:
@@ -21,6 +30,8 @@
 ;;   bb export html          — generate index.html for each source
 ;;   bb export stats         — generate stats.json for each source
 ;;   bb export patches       — export patch files for each source
+;;   bb export events        — export ICS event files and events.ics for each source
+;;   bb export text          — export text/plain and text/x-log attachments
 ;;   bb export root          — regenerate public/index.html (source listing)
 ;;   bb export all           — all formats (still incremental)
 ;;   bb export --force       — force full export, ignore timestamps
@@ -45,7 +56,8 @@
          parse-cli-args load-config build-source-map bark-schema bark-format
          get-last-modified changed-source-types-since
          set-theme! resolve-css-theme votes-by-report vote-counts
-         html-head footer-css bark-footer wrap-js spit-html theme-toggle-js bark-repo-url)
+         html-head footer-css bark-footer wrap-js spit-html theme-toggle-js bark-repo-url
+         ics-file? text-attachment?)
 
 (load-file "scripts/bark-common.clj")
 (load-file "scripts/bark-html.clj")
@@ -271,7 +283,29 @@
                              (:patch/author p)  (assoc :author  (:patch/author p))
                              (:patch/subject p) (assoc :subject (:patch/subject p))
                              (:patch/date p)    (assoc :date    (:patch/date p))))
-                         (:report/patches report))))))))
+                         (:report/patches report))))
+          ;; ICS event files from announcement attachments
+          (let [ics-atts (when (= :announcement (:report/type report))
+                           (seq (filter #(ics-file? (:attachment/filename %))
+                                        (:email/attachments email))))]
+            (when ics-atts true))
+          (assoc :events
+                 (let [h (mid-hash (:report/message-id report))]
+                   (mapv (fn [att]
+                           {:file (str h "/" (.getName (clojure.java.io/file (:attachment/filename att))))})
+                         (filter #(ics-file? (:attachment/filename %))
+                                 (:email/attachments email)))))
+          ;; Text attachments (text/plain, text/x-log)
+          (seq (filter #(and (text-attachment? %)
+                             (:attachment/data %))
+                       (:email/attachments email)))
+          (assoc :texts
+                 (let [h (mid-hash (:report/message-id report))]
+                   (mapv (fn [att]
+                           {:file (str h "/" (.getName (clojure.java.io/file (:attachment/filename att))))})
+                         (filter #(and (text-attachment? %)
+                                       (:attachment/data %))
+                                 (:email/attachments email)))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Vote context (set once per export run)
@@ -578,6 +612,146 @@
     (when (pos? total)
       (log/info "Wrote" total "patch file(s)"))))
 
+(defn dump-text!
+  "Export text attachments (text/plain, text/x-log) to text/<mid-hash>/."
+  [reports text-dir]
+  (let [total (reduce (fn [n report]
+                        (let [email (:report/email report)
+                              txt-atts (filter #(and (text-attachment? %)
+                                                     (:attachment/data %))
+                                               (:email/attachments email))]
+                          (if (seq txt-atts)
+                            (let [h   (mid-hash (:report/message-id report))
+                                  dir (io/file text-dir h)]
+                              (.mkdirs dir)
+                              (doseq [att txt-atts]
+                                (spit (io/file dir (.getName (io/file (:attachment/filename att))))
+                                      (:attachment/data att)))
+                              (+ n (count txt-atts)))
+                            n)))
+                      0
+                      reports)]
+    (when (pos? total)
+      (log/info "Wrote" total "text file(s)"))))
+
+;; ---------------------------------------------------------------------------
+;; Event (ICS) export
+;; ---------------------------------------------------------------------------
+
+(defn- has-ics-content?
+  "True if an announcement report has ICS content (attached or inline)."
+  [report]
+  (let [email (:report/email report)
+        atts  (:email/attachments email)]
+    (or (some #(ics-file? (:attachment/filename %)) atts)
+        (let [body (or (:email/body-text email) "")]
+          (and (re-find #"BEGIN:VCALENDAR" body)
+               (re-find #"BEGIN:VEVENT" body))))))
+
+(defn- extract-vevents
+  "Extract VEVENT blocks from ICS text."
+  [text]
+  (when text
+    (re-seq #"(?s)BEGIN:VEVENT.*?END:VEVENT\r?\n?" text)))
+
+(defn dump-events!
+  "Export individual .ics files to events/<mid-hash>/ for announcements with ICS."
+  [reports events-dir]
+  (let [total (reduce (fn [n report]
+                        (let [email (:report/email report)
+                              atts  (:email/attachments email)
+                              ics-atts (filter #(and (ics-file? (:attachment/filename %))
+                                                     (:attachment/data %))
+                                               atts)]
+                          (if (seq ics-atts)
+                            (let [h   (mid-hash (:report/message-id report))
+                                  dir (io/file events-dir h)]
+                              (.mkdirs dir)
+                              (doseq [att ics-atts]
+                                (spit (io/file dir (.getName (io/file (:attachment/filename att))))
+                                      (:attachment/data att)))
+                              (+ n (count ics-atts)))
+                            n)))
+                      0
+                      (filter #(and (= :announcement (:report/type %))
+                                    (has-ics-content? %))
+                              reports))]
+    (when (pos? total)
+      (log/info "Wrote" total "ICS event file(s)"))))
+
+(defn dump-events-filtered!
+  "Export events.json/org (open) and events-closed.json/org (closed)
+  for announcements that have ICS content."
+  [reports reports-dir source-name source-map maintainers-map fmts]
+  (let [events      (filter #(and (= :announcement (:report/type %))
+                                  (has-ics-content? %))
+                            reports)
+        open-events  (vec (open-reports events))
+        closed-events (vec (filter :report/closed events))]
+    (when (seq open-events)
+      (when (fmts "json")
+        (dump-json! open-events reports-dir source-name source-map maintainers-map
+                    "events.json"))
+      (when (fmts "org")
+        (dump-org! open-events reports-dir source-name source-map maintainers-map
+                   "events.org" "events"))
+      (when (fmts "rss")
+        (dump-rss! open-events reports-dir source-name source-map maintainers-map
+                   "events.xml" "events")))
+    (when (seq closed-events)
+      (when (fmts "json")
+        (dump-json! closed-events reports-dir source-name source-map maintainers-map
+                    "events-closed.json"))
+      (when (fmts "org")
+        (dump-org! closed-events reports-dir source-name source-map maintainers-map
+                   "events-closed.org" "events (closed)"))
+      (when (fmts "rss")
+        (dump-rss! closed-events reports-dir source-name source-map maintainers-map
+                   "events-closed.xml" "events (closed)")))))
+
+(defn- collect-vevents
+  "Extract all VEVENT blocks from a seq of reports with ICS content."
+  [reports]
+  (mapcat (fn [report]
+            (let [email (:report/email report)
+                  atts  (:email/attachments email)
+                  att-vevents (->> atts
+                                   (filter #(and (ics-file? (:attachment/filename %))
+                                                 (:attachment/data %)))
+                                   (mapcat #(extract-vevents (:attachment/data %))))
+                  body-vevents (extract-vevents (:email/body-text email))]
+              (concat att-vevents body-vevents)))
+          reports))
+
+(defn- spit-ics!
+  "Write a VCALENDAR file wrapping the given VEVENT blocks."
+  [filename source-name cal-name vevents]
+  (when (seq vevents)
+    (let [ics-content (str "BEGIN:VCALENDAR\r\n"
+                           "VERSION:2.0\r\n"
+                           "PRODID:-//BARK//Event Export//EN\r\n"
+                           "X-WR-CALNAME:" source-name " " cal-name "\r\n"
+                           (str/join "" vevents)
+                           "END:VCALENDAR\r\n")]
+      (spit filename ics-content)
+      (log/info "Wrote" (count vevents) "VEVENT(s) to" filename))))
+
+(defn dump-events-ics!
+  "Export combined ICS files for announcements with VEVENT content:
+   announcements.ics (all), -open.ics, -closed.ics."
+  [reports events-dir source-name]
+  (let [all-events    (filter #(and (= :announcement (:report/type %))
+                                    (has-ics-content? %))
+                              reports)
+        open-events   (remove :report/closed all-events)
+        closed-events (filter :report/closed all-events)]
+    (spit-ics! (str events-dir "/announcements.ics")
+               source-name "events" (collect-vevents all-events))
+    (spit-ics! (str events-dir "/announcements-open.ics")
+               source-name "events (open)" (collect-vevents open-events))
+    (spit-ics! (str events-dir "/announcements-closed.ics")
+               source-name "events (closed)" (collect-vevents closed-events))))
+
 (defn dump-html!
   "Generate index.html for a single source.
   Uses all-open.json so only open reports are server-rendered;
@@ -814,7 +988,9 @@
    & {:keys [changed-types]}]
   (let [reports-dir (str base-dir "/reports")
         patches-dir (str base-dir "/patches")
-        _           (doseq [d [reports-dir patches-dir]]
+        events-dir  (str base-dir "/events")
+        text-dir    (str base-dir "/text")
+        _           (doseq [d [reports-dir patches-dir events-dir text-dir]]
                       (.mkdirs (io/file d)))
         ef          (resolve-export-formats source-name source-map)
         do-format
@@ -830,6 +1006,10 @@
                           (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"org"})
                           (dump-open-closed! reports reports-dir source-name source-map maintainers-map #{"org"}))
             "patches" (dump-patches! reports patches-dir)
+            "text"    (dump-text! reports text-dir)
+            "events"  (do (dump-events! reports events-dir)
+                          (dump-events-filtered! reports reports-dir source-name source-map maintainers-map ef)
+                          (dump-events-ics! reports events-dir source-name))
             "html"    (do (dump-json! reports reports-dir source-name source-map maintainers-map)
                           (dump-votes! reports reports-dir)
                           (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"json"})
@@ -848,6 +1028,10 @@
           (dump-open-closed! reports reports-dir source-name source-map maintainers-map ef
                              :changed-types changed-types)
           (dump-patches! reports patches-dir)
+          (dump-text! reports text-dir)
+          (dump-events! reports events-dir)
+          (dump-events-filtered! reports reports-dir source-name source-map maintainers-map ef)
+          (dump-events-ics! reports events-dir source-name)
           (dump-docs! base-dir source-name cli-extra)
           (dump-html! base-dir reports-dir cli-extra)
           (dump-stats! base-dir reports-dir source-name "json" cli-extra)
@@ -858,7 +1042,7 @@
 ;; Main
 ;; ---------------------------------------------------------------------------
 
-(def formats #{"json" "rss" "org" "html" "all" "stats" "patches" "root"})
+(def formats #{"json" "rss" "org" "html" "all" "stats" "patches" "text" "events" "root"})
 
 (let [{:keys [format source-name min-priority min-status force-all? theme page-size drop-closed]
        :or {format "all"}}
@@ -868,7 +1052,7 @@
   (try
     (when-not (formats format)
       (log/error "Unknown format:" format)
-      (log/error "Formats: json rss org html stats patches root all")
+      (log/error "Formats: json rss org html stats patches text events root all")
       (System/exit 1))
     (when (and min-priority (not (#{1 2 3} min-priority)))
       (log/error "Invalid --min-priority:" min-priority "(must be 1, 2, or 3)")

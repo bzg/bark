@@ -40,6 +40,16 @@
   (d/transact! conn [{:watermark/id "default" :watermark/imap-uid imap-uid}]))
 
 ;; ---------------------------------------------------------------------------
+;; Constants
+;; ---------------------------------------------------------------------------
+
+(def default-max-attachment-size
+  "Default maximum size (in characters) for extracted attachment text data
+  (.patch, .diff, .ics, text/plain, text/x-log). Attachments exceeding
+  this limit are stored without their text content. 1 MB."
+  (* 1024 1024))
+
+;; ---------------------------------------------------------------------------
 ;; Helpers
 ;; ---------------------------------------------------------------------------
 
@@ -76,9 +86,13 @@
 
 (defn email->txdata
   "Convert a fetch-imap message map to Datalevin transaction data.
-  No source is stamped here — that is resolved at digest time from headers."
-  [msg]
-  (let [imap-uid    (:uid msg)
+  No source is stamped here — that is resolved at digest time from headers.
+  `opts` may contain :max-attachment-size to override the default (1 MB)."
+  ([msg] (email->txdata msg {}))
+  ([msg opts]
+  (let [max-att-size (or (:max-attachment-size opts)
+                         default-max-attachment-size)
+        imap-uid    (:uid msg)
         body        (:body msg)
         text        (:text body)
         html-body   (:html body)
@@ -92,12 +106,23 @@
         attachments (mapv (fn [att]
                             (let [filename (or (:filename att) "unnamed")
                                   is-patch (boolean (re-find #"(?i)\.(patch|diff)$" filename))
+                                  is-ics   (boolean (re-find #"(?i)\.ics$" filename))
+                                  is-text  (common/text-attachment?
+                                                     {:attachment/content-type
+                                                      (:content-type att)})
                                   data     (:data att)
-                                  text-data (when (and is-patch data)
+                                  raw-text (when (and (or is-patch is-ics is-text) data)
                                               (cond
                                                 (string? data) data
                                                 (bytes? data)  (String. ^bytes data "UTF-8")
-                                                :else          nil))]
+                                                :else          nil))
+                                  too-large? (and raw-text
+                                                  (> (count raw-text) max-att-size))
+                                  text-data (when (and raw-text (not too-large?)) raw-text)]
+                              (when too-large?
+                                (log/warn "Attachment" filename "exceeds"
+                                          (str (quot max-att-size 1024) "KB")
+                                          "limit (" (count raw-text) "chars) — content not stored"))
                               (cond-> {:attachment/filename     filename
                                        :attachment/content-type (:content-type att)
                                        :attachment/size         (or (:size att)
@@ -124,7 +149,7 @@
       (seq attachments)    (assoc :email/attachments attachments)
       in-reply-to          (assoc :email/in-reply-to in-reply-to)
       references           (assoc :email/references references)
-      headers-edn          (assoc :email/headers-edn headers-edn))))
+      headers-edn          (assoc :email/headers-edn headers-edn)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Store
@@ -138,8 +163,10 @@
 (defn store-email!
   "Store a single parsed email in Datalevin.
   Skips if Message-ID is nil or already exists.
-  Returns true if the email was stored, false/nil otherwise."
-  [conn msg]
+  Returns true if the email was stored, false/nil otherwise.
+  `opts` may contain :max-attachment-size to override the default (1 MB)."
+  ([conn msg] (store-email! conn msg {}))
+  ([conn msg opts]
   (let [message-id (:message-id msg)
         imap-uid   (:uid msg)]
     (cond
@@ -155,7 +182,7 @@
           false)
 
       :else
-      (let [txdata (email->txdata msg)]
+      (let [txdata (email->txdata msg opts)]
         (try
           (d/transact! conn [txdata])
           (log/info "Stored email UID:" imap-uid
@@ -168,5 +195,5 @@
                                   (catch Exception _ false))]
               (if now-exists?
                 (do (log/debug "Duplicate Message-ID (race):" message-id) false)
-                (throw e)))))))))
+                (throw e))))))))))
 

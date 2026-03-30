@@ -58,6 +58,23 @@
   [filename]
   (boolean (and filename (re-find patch-filename-re filename))))
 
+(def ics-filename-re #"(?i)\.ics$")
+
+(defn ics-file?
+  "True if filename looks like an ICS calendar file."
+  [filename]
+  (boolean (and filename (re-find ics-filename-re filename))))
+
+(def text-content-types
+  "Content types whose attachment data is stored as text."
+  #{"text/plain" "text/x-log"})
+
+(defn text-attachment?
+  "True if an attachment has a text/plain or text/x-log content type."
+  [att]
+  (boolean (when-let [ct (:attachment/content-type att)]
+             (text-content-types (-> ct str/lower-case (str/split #";") first str/trim)))))
+
 (defn email-body-text
   "Return the plain-text body of an email, preferring :email/body-text
   over :email/body-text-from-html."
@@ -519,7 +536,9 @@
                       :patch/author :patch/subject :patch/date]}
     {:report/email [:email/subject :email/from-address :email/from-name
                     :email/date-sent :email/source :email/imap-uid
-                    :email/headers-edn]}])
+                    :email/headers-edn :email/body-text
+                    {:email/attachments [:attachment/filename :attachment/content-type
+                                         :attachment/size :attachment/data]}]}])
 
 ;; ---------------------------------------------------------------------------
 ;; Vote helpers (pure — no datalevin dependency)

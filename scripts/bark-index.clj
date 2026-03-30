@@ -104,7 +104,29 @@
                    (str "patches/" (str/replace f #"/[^/]+$" "/"))))
           label (if (= 1 n) "1 patch file" (str n " patch files"))]
       [:a {:href href :title label :aria-label label
-           :style "font-size:0.75rem"} "📎 "])))
+           :style "font-size:0.75rem"} "🩹 "])))
+
+(defn- event-link [events]
+  (when (seq events)
+    (let [n    (count events)
+          href (if (= 1 n)
+                 (str "events/" (get (first events) "file"))
+                 (let [f (get (first events) "file")]
+                   (str "events/" (str/replace f #"/[^/]+$" "/"))))
+          label (if (= 1 n) "1 event file" (str n " event files"))]
+      [:a {:href href :title label :aria-label label
+           :style "font-size:0.75rem"} "📅 "])))
+
+(defn- text-link [texts]
+  (when (seq texts)
+    (let [n    (count texts)
+          href (if (= 1 n)
+                 (str "text/" (get (first texts) "file"))
+                 (let [f (get (first texts) "file")]
+                   (str "text/" (str/replace f #"/[^/]+$" "/"))))
+          label (if (= 1 n) "1 text file" (str n " text files"))]
+      [:a {:href href :title label :aria-label label
+           :style "font-size:0.75rem"} "📄 "])))
 
 (defn- vote-badge
   "Render a small vote badge with score/total and colored background."
@@ -121,7 +143,7 @@
 
 (defn- report-row [{:strs [type subject from from-name date date-raw flags priority
                            replies _archived-at message-id related role source
-                           acked owned closed urgent important patches votes
+                           acked owned closed urgent important patches events texts votes
                            deadline topic close-reason expired-date expiry
                            _superseded-by]
                     :as report}
@@ -174,7 +196,7 @@
      [:td {:data-value (or deadline "") :class "due-cell"} ""]
      [:td {:data-value (str flags-score) :title flags-title
            :style "text-align:center; font-family:monospace; font-size:0.8rem; letter-spacing:0.1em"} flags-str]
-     [:td (patch-link patches) (related-link related)
+     [:td (patch-link patches) (event-link events) (text-link texts) (related-link related)
       (vote-badge votes)
       (subject-el report closed? source-type)]
      [:td.secondary {:title from} (if (#{"maintainer" "admin"} role) [:strong author] author)]
