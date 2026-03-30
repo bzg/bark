@@ -202,12 +202,12 @@
   .filters { display: flex; gap: 0.4rem; flex-wrap: wrap; }
   .filters button { padding: 0.3rem 0.7rem; font-size: 0.8rem; }
   .filters button.outline { opacity: 0.5; }
-  .filters.status-filters button.open-btn          { background: var(--bark-btn-open, #27ae60); border-color: var(--bark-btn-open, #27ae60); color: var(--bark-btn-open-text, #fff); }
-  .filters.status-filters button.open-btn.outline   { background: none; color: var(--bark-btn-open, #27ae60); opacity: 0.5; }
-  .filters.status-filters button.acked-btn         { background: var(--bark-btn-acked, #b8860b); border-color: var(--bark-btn-acked, #b8860b); color: var(--bark-btn-acked-text, #fff); }
-  .filters.status-filters button.acked-btn.outline  { background: none; color: var(--bark-btn-acked, #b8860b); opacity: 0.5; }
-  .filters.status-filters button.owned-btn         { background: var(--bark-btn-owned, #1a5a8a); border-color: var(--bark-btn-owned, #1a5a8a); color: var(--bark-btn-owned-text, #fff); }
-  .filters.status-filters button.owned-btn.outline  { background: none; color: var(--bark-btn-owned, #1a5a8a); opacity: 0.5; }
+  .filters.status-filters button.open-btn          { background: var(--bark-btn-open, var(--pico-secondary-background)); border-color: var(--bark-btn-open, var(--pico-secondary-border)); color: var(--bark-btn-open-text, var(--pico-secondary-inverse)); }
+  .filters.status-filters button.open-btn.outline   { background: none; color: var(--bark-btn-open, var(--pico-secondary-background)); opacity: 0.5; }
+  .filters.status-filters button.acked-btn         { background: var(--bark-btn-acked, var(--pico-primary-background)); border-color: var(--bark-btn-acked, var(--pico-primary-border)); color: var(--bark-btn-acked-text, var(--pico-primary-inverse)); }
+  .filters.status-filters button.acked-btn.outline  { background: none; color: var(--bark-btn-acked, var(--pico-primary-background)); opacity: 0.5; }
+  .filters.status-filters button.owned-btn         { background: var(--bark-btn-owned, var(--pico-contrast-background)); border-color: var(--bark-btn-owned, var(--pico-contrast-border)); color: var(--bark-btn-owned-text, var(--pico-contrast-inverse)); }
+  .filters.status-filters button.owned-btn.outline  { background: none; color: var(--bark-btn-owned, var(--pico-contrast-background)); opacity: 0.5; }
   input[type=search] { max-width: 25vw; min-width: 200px; margin-bottom: 0; }
   th[data-sort] { cursor: pointer; user-select: none; white-space: nowrap; }
   th[data-sort]:hover { text-decoration: underline; }
