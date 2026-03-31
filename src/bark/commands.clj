@@ -155,7 +155,9 @@
 (defn- parse-date-iso [s]
   (try
     (-> (LocalDate/parse s) (.atStartOfDay ZoneOffset/UTC) .toInstant Date/from)
-    (catch Exception _ nil)))
+    (catch Exception _
+      (log/warn "Invalid ISO date in directive:" s)
+      nil)))
 
 (defn- parse-date-or-duration
   "Parse a YYYY-MM-DD date string or a duration like '2d', '3w', '1m 2w'.
@@ -165,11 +167,13 @@
   [s as-of]
   (if (re-matches #"\d{4}-\d{2}-\d{2}" s)
     (parse-date-iso s)
-    (when-let [days (common/parse-delay s)]
+    (if-let [days (common/parse-delay s)]
       (let [base (if as-of
                    (-> as-of ^Date .toInstant (LocalDate/ofInstant ZoneOffset/UTC))
                    (LocalDate/now ZoneOffset/UTC))]
-        (-> base (.plusDays days) (.atStartOfDay ZoneOffset/UTC) .toInstant Date/from)))))
+        (-> base (.plusDays days) (.atStartOfDay ZoneOffset/UTC) .toInstant Date/from))
+      (do (log/warn "Unparseable date/duration in directive:" s)
+          nil))))
 
 (defn- match-triggers [triggers body-text]
   (into {} (keep (fn [[k p]] (when (re-find p body-text) [(keyword "report" (name k)) true]))) triggers))
