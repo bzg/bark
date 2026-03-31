@@ -519,13 +519,10 @@
     {:report/acked [:email/from-address]}
     {:report/owned [:email/from-address]}
     {:report/closed [:email/from-address :email/date-sent]}
-    {:report/acked-proxy [:email/from-address]}
-    {:report/owned-proxy [:email/from-address]}
-    {:report/closed-proxy [:email/from-address]}
     {:report/urgent [:email/from-address]}
     {:report/important [:email/from-address]}
-    {:report/urgent-proxy [:email/from-address]}
-    {:report/important-proxy [:email/from-address]}
+    :report/acked-address :report/owned-address :report/closed-address
+    :report/urgent-address :report/important-address
     :report/close-reason
     {:report/superseded-by [:report/message-id {:report/email [:email/subject]}]}
     :report/has-ics :report/has-text-attachments
