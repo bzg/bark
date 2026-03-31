@@ -86,12 +86,12 @@
   (spit last-export-file (str (.getTime ts))))
 
 ;; ---------------------------------------------------------------------------
-;; --drop-closed: resolve a date or duration to a cutoff java.util.Date.
+;; --closed-retention: resolve a date or duration to a cutoff java.util.Date.
 ;; Reports closed before that date are excluded from export.
 ;; ---------------------------------------------------------------------------
 
-(defn- resolve-drop-closed-date
-  "Turn a --drop-closed value (ISO date string or duration like \"1y\", \"6m\")
+(defn- resolve-closed-retention-date
+  "Turn a --closed-retention value (ISO date or duration like \"1y\", \"6m\")
   into a java.util.Date cutoff.  Returns nil on invalid input."
   [v]
   (when v
@@ -1115,7 +1115,7 @@
 
 (def formats #{"json" "rss" "org" "html" "all" "stats" "patches" "text" "events" "root"})
 
-(let [{:keys [format source-name min-priority min-status force-all? theme page-size drop-closed
+(let [{:keys [format source-name min-priority min-status force-all? theme page-size closed-retention
               topics-filter]
        :or {format "all"}}
       (parse-cli-args *command-line-args*)
@@ -1192,8 +1192,8 @@
                                                 db)))
                         effective-ps    (or page-size (:page-size config))
                         cli-tf          (resolve-topics-filter topics-filter)
-                        drop-cutoff     (resolve-drop-closed-date
-                                         (or drop-closed (:drop-closed config)))
+                        drop-cutoff     (resolve-closed-retention-date
+                                         (or closed-retention (:closed-retention config)))
                         _               (when cli-tf
                                           (log/info "CLI topics filter:" (str/join ", " cli-tf)))
                         _               (when drop-cutoff
@@ -1201,7 +1201,7 @@
                         cli-extra       (let [drop (disj (hash-set format "-n" source-name
                                                                    "--force" "--theme" theme
                                                                    "--page-size" (some-> page-size str)
-                                                                   "--drop-closed" drop-closed
+                                                                   "--closed-retention" closed-retention
                                                                    "--topics-filter" topics-filter) nil)]
                                           (cond-> (vec (remove drop (rest *command-line-args*)))
                                             effective-theme (into ["--theme" effective-theme])

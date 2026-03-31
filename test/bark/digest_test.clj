@@ -564,7 +564,7 @@
                  (commands/detect-directives :bug "Expiry: 2026-09-01\n")))
           (is (= [{:action :unset-expiry :scope :maintainer}]
                  (commands/detect-directives :bug "No expiry\n")))
-          ;; "Expiry: deadline" is no longer a valid command (use :after :deadline in config)
+          ;; "Expiry: deadline" is no longer a valid command (use :inactive-after :deadline in config)
           (is (= [] (commands/detect-directives :bug "Expiry: deadline\n")))
           ;; Deadline with duration (relative to email date)
           (let [email-date (parse-date-iso "2026-01-10")

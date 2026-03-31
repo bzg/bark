@@ -17,12 +17,22 @@
 
 (defn- parse-expiry-rule
   "Normalize an expiry rule map.
-  Expects a map with :after (integer, duration string, or :deadline)."
+  Expects a map with :inactive-after (integer, duration string, ISO date, or :deadline)."
   [v]
   (when (map? v)
-    (let [after (:after v)]
-      (if (= :deadline after)
+    (let [after (:inactive-after v)]
+      (cond
+        (= :deadline after)
         (assoc v :expires-on-deadline true)
+
+        (string? after)
+        (if (re-matches #"\d{4}-\d{2}-\d{2}" after)
+          (when-let [d (common/parse-iso-date after)]
+            (assoc v :expires-on-date d))
+          (when-let [d (common/parse-delay after)]
+            (assoc v :delay-days d)))
+
+        :else
         (when-let [d (common/parse-delay after)]
           (assoc v :delay-days d))))))
 
@@ -44,13 +54,17 @@
   "Check whether a report matches all expiry rule conditions.
   Returns true if the report should be expired."
   [rule report-data now]
-  (let [{:keys [delay-days expires-on-deadline max-status max-priority]} rule
+  (let [{:keys [delay-days expires-on-deadline expires-on-date max-status max-priority]} rule
         last-activity (:report/last-activity report-data)]
     (and
-     ;; Age check: either deadline-based or delay from last activity
-     (if expires-on-deadline
+     ;; Age check: deadline-based, fixed date, or delay from last activity
+     (cond
+       expires-on-deadline
        (when-let [deadline (:report/deadline report-data)]
          (.before ^Date deadline now))
+       expires-on-date
+       (.before ^Date expires-on-date now)
+       :else
        (and delay-days last-activity
             (> (common/days-between last-activity now) delay-days)))
      ;; Status ceiling (activity score: acked=1 + owned=2, range 0–3)

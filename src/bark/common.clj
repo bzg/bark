@@ -157,7 +157,7 @@
               0 valid-parts))))
 
 (defn parse-delay
-  "Parse an :after value into a number of days.
+  "Parse a duration value into a number of days.
   Accepts an integer (days) or a duration string (\"30d\", \"6w\", \"3m\").
   Note: \"0d\" returns 0, meaning 'expire immediately'."
   [v]
@@ -165,6 +165,13 @@
     (integer? v) v
     (string? v)  (parse-duration-str v)
     :else        nil))
+
+(defn parse-iso-date
+  "Parse an ISO date string (\"2024-01-01\") into a java.util.Date, or nil."
+  [^String s]
+  (when s
+    (try (.parse (java.text.SimpleDateFormat. "yyyy-MM-dd") s)
+         (catch Exception _ nil))))
 
 ;; ---------------------------------------------------------------------------
 ;; Header utilities
@@ -585,7 +592,7 @@
 (defn parse-cli-args
   "Parse common CLI flags into a map.
   Recognises: -o/--output, -n/--source, -p/--min-priority, -s/--min-status,
-  --json, --dir, --force, --only-open, --theme, --page-size, --drop-closed,
+  --json, --dir, --force, --only-open, --theme, --page-size, --closed-retention,
   --topics-filter.
   Any leading non-flag token is captured as :format.
   Warns when a valued flag is missing its argument or followed by another flag."
@@ -627,8 +634,8 @@
                                         :ok             (recur (assoc opts :page-size (parse-long v)) r)
                                         :flag-as-value  (recur opts more)
                                         :missing        opts)
-      (#{"--drop-closed"} a)           (case (check-flag-value a v)
-                                        :ok             (recur (assoc opts :drop-closed v) r)
+      (#{"--closed-retention"} a)           (case (check-flag-value a v)
+                                        :ok             (recur (assoc opts :closed-retention v) r)
                                         :flag-as-value  (recur opts more)
                                         :missing        opts)
       (#{"--topics-filter"} a)         (case (check-flag-value a v)
