@@ -12,7 +12,8 @@
             [bark.commands :as commands]
             [bark.common :as common]
             [bark.digest :as digest]
-            [bark.roles :as roles])
+            [bark.roles :as roles]
+            [bark.test-helpers :as th])
   (:import [java.text SimpleDateFormat]
            [java.util TimeZone]))
 
@@ -120,12 +121,7 @@
         (d/transact! conn [email])))
     {:conn conn :db-path db-path}))
 
-(defn- teardown! [{:keys [conn db-path]}]
-  (d/close conn)
-  (let [dir (io/file db-path)]
-    (when (.exists dir)
-      (doseq [f (reverse (file-seq dir))]
-        (.delete f)))))
+(def ^:private teardown! th/teardown!)
 
 (defn- process-all-emails!
   "Fetch all emails sorted by ingested-at, process each via digest/process-email!."
@@ -250,8 +246,8 @@
                    (set (map :voter votes))))
             (is (= 3 (count (:report/descendants r))))))
 
-        ;; --- TODO 15 request lifecycle ---
-        (testing "TODO 15 request lifecycle"
+        ;; --- Email 15 request lifecycle ---
+        (testing "Email 15 request lifecycle"
           (let [r (get-report db "<15@test.org>")]
             (is (= :request (:report/type r)))
             (is (some? (:report/closed r)))

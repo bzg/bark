@@ -4,7 +4,8 @@
             [datalevin.core :as d]
             [clojure.java.io :as io]
             [bark.common :as common]
-            [bark.expire :as expire])
+            [bark.expire :as expire]
+            [bark.test-helpers :as th])
   (:import [java.util Date]))
 
 ;; ---------------------------------------------------------------------------
@@ -26,12 +27,7 @@
         conn    (d/get-conn db-path common/bark-schema)]
     {:conn conn :db-path db-path}))
 
-(defn- teardown! [{:keys [conn db-path]}]
-  (d/close conn)
-  (let [dir (io/file db-path)]
-    (when (.exists dir)
-      (doseq [f (reverse (file-seq dir))]
-        (.delete f)))))
+(def ^:private teardown! th/teardown!)
 
 (defn- insert-email!
   "Insert a test email and return its eid."
