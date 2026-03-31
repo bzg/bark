@@ -8,6 +8,10 @@ roles, and receive periodic digest emails.
 
 For admin and maintainers, see the full [[https://codeberg.org/bzg/bark/src/branch/main/docs/bark-manual.org][BARK manual]].
 
+To explore BARK reports from your terminal, use [[https://codeberg.org/bzg/bone][BONE]].
+
+You can also highlight BARK with [[codeberg.org/bzg/gnus-bone][gnus-bone.el]] and [[https://codeberg.org/bzg/notmuch-bone][notmuch-bone.el]].
+
 ** Subject labels
 
 Subject labels create reports, optionally with a topic/version:
@@ -22,9 +26,11 @@ Subject labels create reports, optionally with a topic/version:
 | release      | =[REL <topic> <version>]= =[RELEASE <topic> <version>]= |
 | change       | =[CHG <topic> <version>]= =[CHANGE <topic> <version>]=  |
 
-All =<…>= parts are optional and positional.  For release and change,
-a single value is interpreted as =<version>=: =[REL 2.0]= sets
-version to "2.0".  Use both for topic and version: =[REL parser 2.0]=.
+All =<…>= parts are optional and positional.
+
+For release and change, a single value is interpreted as =<version>=:
+=[REL 2.0]= sets version to "2.0". Use both for topic and version: =[REL
+parser 2.0]=.
 
 Topics can also be set using a colon-delimited prefix in the subject
 after the label: =[BUG] parser: crash on empty input= sets the topic to
@@ -33,8 +39,10 @@ after the label: =[BUG] parser: crash on empty input= sets the topic to
 ** Status & priority commands
 
 Replies to reports can update them by using command keywords such as
-=Resolved.=, etc. Command keywords should be placed at the beginning of
-the line and followed by a punctuation mark (=.= =,= =;= =:= =?= =!=).
+=Resolved.=, etc. 
+
+Command keywords should be placed at the beginning of the line and
+followed by a punctuation mark (=.= =,= =;= =:= =?= =!=).
 
 All status/priority command keywords work on all report types:
 
@@ -83,7 +91,10 @@ Important.
 | match1 \vert match2             |           | Reports matching "match1" or "match2"                 |
 | from:* acked:* …            | =f:*= =a:*= … | Wildcard for from/acked/owned/closed/urgent/important |
 
-Durations: =Nd= (days), =Nw= (weeks), =Nm= (months).  For =date:= they
-look backward from today; for =deadline:= and =expired:= they look
-forward.  Combine filters freely: =D:2m o:user@email.com= finds
-reports due within 2 months owned by user@email.com.
+Durations: =Nd= (days), =Nw= (weeks), =Nm= (months).  
+
+For =date:= they look backward from today; for =deadline:= and =expired:=
+they look forward.
+
+Combine filters freely: =D:2m o:user@email.com= finds reports due within
+2 months owned by user@email.com.
