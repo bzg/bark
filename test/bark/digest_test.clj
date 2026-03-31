@@ -194,11 +194,10 @@
 
         ;; --- Roles ---
         (testing "Roles (final state)"
-          (let [r (d/pull db '[:roles/admin :roles/maintainers :roles/ignored]
+          (let [r (d/pull db '[:roles/admin :roles/maintainers]
                           [:roles/source "direct"])]
             (is (= "admin@test.org" (:roles/admin r)))
-            (is (contains? (set (:roles/maintainers r)) "maint@test.org"))
-            (is (not (contains? (set (:roles/ignored r)) "spam@test.org")))))
+            (is (contains? (set (:roles/maintainers r)) "maint@test.org"))))
 
         ;; --- Bug 02 lifecycle ---
         (testing "Bug 02 lifecycle"
@@ -286,9 +285,9 @@
             (is (some #(= "<20@test.org>" (:report/message-id %))
                       (:report/related chg)))))
 
-        ;; --- Email 21 ignored ---
-        (testing "Email 21 ignored user"
-          (is (not (report-exists? db "<21@test.org>"))))
+        ;; --- Email 21 (Ignore mechanism removed — report is now created) ---
+        (testing "Email 21 spam user creates report (no Ignore)"
+          (is (report-exists? db "<21@test.org>")))
 
         ;; --- Bug 23 important ---
         (testing "Bug 23 important flag"
@@ -317,27 +316,27 @@
             (is (= "refactor" (:report/topic r)))
             (is (= "2/3" (:report/patch-seq r)))))
 
-        ;; --- Email 29 role control via mailing list ---
+        ;; --- Email 29 role control via mailing list (now allowed) ---
         (testing "Email 29 role control via mailing list"
           (let [r (d/pull db '[:roles/maintainers] [:roles/source "direct"])]
-            (is (not (contains? (set (:roles/maintainers r)) "evil@hacker.org")))))
+            (is (contains? (set (:roles/maintainers r)) "evil@hacker.org"))))
 
         ;; --- Email 30 bug via list ---
         (testing "Email 30 bug via list"
           (is (= :bug (:report/type (get-report db "<30@test.org>")))))
 
-        ;; --- Emails 112-113: descendant channel gating ---
-        (testing "Descendant channel gating on public-list source"
+        ;; --- Emails 112-113: channel gating ---
+        (testing "Channel gating on public-list source"
           (let [r (get-report db "<30@test.org>")]
             ;; Only the public reply (112) is a descendant;
-            ;; the private reply (113) is excluded.
+            ;; the private reply (113) is excluded entirely.
             (is (= 1 (count (:report/descendants r))))
             (is (= "<112@test.org>"
                     (:email/message-id (first (:report/descendants r)))))
-            ;; But commands from the private reply still apply:
-            ;; 112 → acked (Confirmed.), 113 → owned (Handled.)
+            ;; Only public commands apply: 112 → acked (Confirmed.)
+            ;; Private commands (113 → Handled.) are now blocked.
             (is (some? (:report/acked r)))
-            (is (some? (:report/owned r)))))
+            (is (nil? (:report/owned r)))))
 
         ;; --- Email 31 bypassing list ---
         (testing "Email 31 bypassing list"
@@ -347,9 +346,9 @@
         (testing "Email 32 wrong List-Post"
           (is (not (report-exists? db "<32@test.org>"))))
 
-        ;; --- Email 33 admin bypass ---
-        (testing "Email 33 admin bypass"
-          (is (= :bug (:report/type (get-report db "<33@test.org>")))))
+        ;; --- Email 33 admin direct (no bark-source fallback) ---
+        (testing "Email 33 admin direct — no report without list delivery"
+          (is (not (report-exists? db "<33@test.org>"))))
 
         ;; --- Series v1 ---
         (testing "Series v1 emails 34-37"
@@ -399,10 +398,7 @@
           (let [r (d/pull db '[:roles/maintainers] [:roles/source "direct"])]
             (is (not (contains? (set (:roles/maintainers r)) "maint2@test.org")))))
 
-        ;; --- Email 44 unignore ---
-        (testing "Email 44 unignore"
-          (let [r (d/pull db '[:roles/ignored] [:roles/source "direct"])]
-            (is (not (contains? (set (:roles/ignored r)) "spam@test.org")))))
+        ;; --- Email 44 unignore (Ignore mechanism removed) ---
 
         ;; --- Email 45 maintainer adds peer ---
         (testing "Email 45 maintainer adds peer"
@@ -440,12 +436,13 @@
             (is (nil? (:report/owned r)))
             (is (some? (:report/urgent r)))))
 
-        ;; --- Emails 56-57 notify prefs ---
-        (testing "Emails 56-57 notify prefs"
+        ;; --- Emails 56-57-74 notify prefs (final state after email 74) ---
+        (testing "Emails 56-57-74 notify prefs"
           (let [pref (d/pull db '[:notify/enabled :notify/interval-days :notify/min-priority]
                              [:notify/key "direct:maint@test.org"])]
             (is (:notify/enabled pref))
-            (is (= 7 (:notify/interval-days pref)))
+            ;; Email 57 sets d:7, but email 74 (now allowed via list) overrides to d:1
+            (is (= 1 (:notify/interval-days pref)))
             (is (= 2 (:notify/min-priority pref)))))
 
         ;; --- Email 58 notify from regular user ---
@@ -453,11 +450,11 @@
           (is (nil? (d/q '[:find ?e . :in $ ?k :where [?e :notify/key ?k]]
                          db "direct:user@test.org"))))
 
-        ;; --- Email 74 notify via mailing list ---
+        ;; --- Email 74 notify via mailing list (now allowed) ---
         (testing "Email 74 notify via mailing list"
           (let [pref (d/pull db '[:notify/interval-days]
                              [:notify/key "direct:maint@test.org"])]
-            (is (= 7 (:notify/interval-days pref)))))
+            (is (= 1 (:notify/interval-days pref)))))
 
         ;; --- Email 59 case insensitive [bug] ---
         (testing "Email 59 case insensitive [bug]"
@@ -497,10 +494,7 @@
             (is (= :bug (:report/type r)))
             (is (some? (:report/acked r)))))
 
-        ;; --- Email 67 maintainer ignores address ---
-        (testing "Email 67 maintainer ignores address"
-          (let [r (d/pull db '[:roles/ignored] [:roles/source "direct"])]
-            (is (contains? (set (:roles/ignored r)) "nuisance@test.org"))))
+        ;; --- Email 67 Ignore mechanism removed ---
 
         ;; --- Emails 68-69 series without cover letter ---
         (testing "Emails 68-69 series without cover letter"
@@ -677,15 +671,9 @@
         (testing "Bug 98 standalone deadline"
           (is (some? (:report/deadline (get-report db "<98@test.org>")))))
 
-        ;; --- Email 100 [source-name] prefix ---
-        (testing "Email 100 [source-name] subject prefix"
-          (let [r   (get-report db "<100@test.org>")
-                eid (d/q '[:find ?e . :in $ ?mid :where [?e :email/message-id ?mid]]
-                         db "<100@test.org>")
-                src (when eid (:email/source (d/pull db '[:email/source] eid)))]
-            (is (some? r))
-            (is (= :bug (:report/type r)))
-            (is (= "public-list" src))))
+        ;; --- Email 100 [source-name] prefix (bark-source fallback removed) ---
+        (testing "Email 100 — no bark-source fallback"
+          (is (not (report-exists? db "<100@test.org>"))))
 
         ;; --- CHG 102+103 / REL 104 ---
         (testing "CHG 102+103 / REL 104 release closes multiple changes"

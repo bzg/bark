@@ -188,31 +188,32 @@
   (when (and text (re-find format-patch-start text))
     (let [lines (str/split-lines text)
           header-lines (rest lines)
-          headers (loop [hs {} [line & more] header-lines]
+          headers (loop [hs {} last-k nil [line & more] header-lines]
                     (cond
                       (nil? line)          hs
                       (str/blank? line)    hs
                       (re-matches #"^\s+.*" line)
-                      (let [last-k (:_last-key hs)]
-                        (recur (if last-k (update hs last-k str " " (str/trim line)) hs) more))
+                      (recur (if last-k (update hs last-k str " " (str/trim line)) hs)
+                             last-k more)
                       :else
                       (let [[_ k v] (re-find #"^([^:]+):\s*(.*)" line)]
                         (if k
                           (let [lk (str/lower-case k)]
-                            (recur (-> hs (assoc lk (str/trim v)) (assoc :_last-key lk)) more))
-                          (recur hs more)))))]
+                            (recur (assoc hs lk (str/trim v)) lk more))
+                          (recur hs last-k more)))))]
       (cond-> {}
         (get headers "from")    (assoc :author  (get headers "from"))
         (get headers "subject") (assoc :subject (get headers "subject"))
         (get headers "date")    (assoc :date    (get headers "date"))))))
 
+(def ^:private inline-patch-start-patterns
+  [#"^From [0-9a-f]{40} " #"^diff --git " #"^--- a/"])
+
 (defn extract-inline-patch [body-text]
   (when body-text
     (let [lines (str/split-lines body-text)
           start (some (fn [[i line]]
-                        (when (or (re-find #"^From [0-9a-f]{40} " line)
-                                  (re-find #"^diff --git " line)
-                                  (re-find #"^--- a/" line))
+                        (when (some #(re-find % line) inline-patch-start-patterns)
                           i))
                       (map-indexed vector lines))]
       (when start

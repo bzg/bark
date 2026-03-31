@@ -95,11 +95,13 @@
   (or (:email/body-text email) (:email/body-text-from-html email)))
 
 (defn ensure-set
-  "Coerce a Datalevin cardinality/many value to a set."
+  "Coerce a Datalevin cardinality/many value to a set.
+  A single string is wrapped in a set (not split into characters)."
   [v]
-  (cond (nil? v)  #{}
-        (coll? v) (set v)
-        :else     #{v}))
+  (cond (nil? v)    #{}
+        (string? v) #{v}
+        (coll? v)   (set v)
+        :else       #{v}))
 
 ;; ---------------------------------------------------------------------------
 ;; Date formatting
@@ -309,32 +311,13 @@
                                 (:to source))
     false))
 
-(def ^:private source-prefix-pattern
-  #"(?i)^\[([^\]]+)\]")
-
-(defn extract-bark-source
-  "Extract source name from [<source-name>] subject prefix or X-Bark-Source header."
-  [headers-edn subject]
-  (or (get-header headers-edn "X-Bark-Source")
-      (when subject (second (re-find source-prefix-pattern subject)))))
-
 (defn classify-source
   "Return the :name of the first matching source, or nil.
-  Uses classify-delivery + match-source? for normal matching, then falls back
-  to [<source-name>] / X-Bark-Source for maintainer direct emails."
-  [headers-edn subject sources]
-  (or
-   ;; 1. Normal header-based match
-   (some (fn [source]
-           (when (match-source? headers-edn source) (:name source)))
-         sources)
-   ;; 2. Bark-source fallback (validated by caller for maintainer status)
-   (let [bark-src (extract-bark-source headers-edn subject)]
-     (when bark-src
-       (let [lc (str/lower-case bark-src)]
-         (some (fn [source]
-                 (when (= (str/lower-case (:name source)) lc) (:name source)))
-               sources))))))
+  Uses header-based matching only (List-Id, X-Original-To, Delivered-To)."
+  [headers-edn sources]
+  (some (fn [source]
+          (when (match-source? headers-edn source) (:name source)))
+        sources))
 
 ;; ---------------------------------------------------------------------------
 ;; Label / command defaults and merge logic
@@ -453,8 +436,6 @@
 (defn admin-or-maintainer? [roles addr]
   (or (admin? roles addr) (maintainer? roles addr)))
 
-(defn ignored? [roles addr]
-  (and addr (has-role? roles :roles/ignored addr)))
 
 ;; ---------------------------------------------------------------------------
 ;; Config and source-map

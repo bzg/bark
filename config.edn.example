@@ -68,14 +68,6 @@
             :to                 "inbox@example.com"}
            ]
 
- ;; Direct emails from maintainers:
- ;; When a maintainer sends directly to the BARK inbox (bypassing the
- ;; list or alias), they must signal the target source with either:
- ;;   - An X-Bark-Source: source-name header, or
- ;;   - A [source-name] prefix in the subject.
- ;; The source-name must match a source's :name exactly (case-insensitive).
- ;; Non-maintainer direct emails to :list or :alias sources are ignored.
-
  ;; ---- Ingestion -----------------------------------------------------------
 
  ;; :initial-fetch controls how many emails to fetch on first run
@@ -260,7 +252,7 @@
  ;; ---- Notifications -------------------------------------------------------
 
  ;; Notification settings (optional — notifications disabled if absent)
- :notifications {:enabled true
+ :notifications {:enabled false
                  :smtp {:host     "smtp.example.com"
                         :port     587
                         :tls      true

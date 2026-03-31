@@ -103,37 +103,25 @@
     (is (= "my-list"
            (common/classify-source
             (make-headers "List-Id" "<bugs.example.org>")
-            "[BUG] something" test-sources))))
+            test-sources))))
 
   (testing "alias match via X-Original-To"
     (is (= "my-alias"
            (common/classify-source
             (make-headers "X-Original-To" "sec@example.com"
                           "To" "other@example.com")
-            "test" test-sources))))
+            test-sources))))
 
   (testing "mailbox match via Delivered-To"
     (is (= "my-box"
            (common/classify-source
             (make-headers "Delivered-To" "inbox@example.com")
-            "hello" test-sources))))
+            test-sources))))
 
   (testing "no match → nil"
     (is (nil? (common/classify-source
                (make-headers "To" "unknown@example.com")
-               "hello" test-sources))))
-
-  (testing "bark-source fallback in subject prefix"
-    (is (= "my-list"
-           (common/classify-source
-            (make-headers "To" "unknown@example.com")
-            "[my-list] some subject" test-sources))))
-
-  (testing "bark-source fallback is case-insensitive"
-    (is (= "my-list"
-           (common/classify-source
-            (make-headers "To" "unknown@example.com")
-            "[MY-LIST] some subject" test-sources)))))
+               test-sources)))))
 
 ;; ---------------------------------------------------------------------------
 ;; source-type

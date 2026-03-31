@@ -252,17 +252,6 @@ To undo:
 This retracts the supersede reference, reopens the report, and clears
 the close-reason. The related link is kept.
 
-** Updating offlist
-
-Maintainers can write directly to the watched inbox to update a report
-without notifying the list. To route the email to the correct source,
-add either a =X-Bark-Source: source-name= header or a =[source-name]=
-prefix to the subject.
-
-For example, the maintainer can clean up old issues by marking them as
-=Canceled= in the body of a reply sent to the monitored inbox (with the
-appropriate source signal), rather than to the entire list.
-
 ** Acting as an update proxy
 
 Maintainers can also write directly to the BARK inbox to act as
@@ -288,10 +277,14 @@ Roles and permissions are set by writing to the BARK inbox:
 
 #+begin_example
 Add maintainer: dev@example.com        (admin or maintainer)
-Ignore: spammer@example.com            (admin or maintainer)
 Remove maintainer: dev@example.com     (admin only)
-Unignore: user@example.com             (admin only)
 #+end_example
+
+All state-changing actions (commands, role controls) must be sent
+through the source's public channel (mailing list, alias). This
+ensures that anyone running BARK on the same source sees the same
+state.  Notification preferences are personal and can be sent
+privately.
 
 * Report types
 
@@ -488,16 +481,15 @@ in turn take precedence over the built-in defaults.
 
 ** All controls
 
-/Controls/ are always sent privately to the monitored inbox by
-maintainers or the admin.
+/Controls/ manage roles and notification preferences.
+Role controls must be sent via the source's public channel.
+Notification controls can be sent privately.
 
-| ID     | Syntax / Words                     | Permission | Report types |
-|--------+------------------------------------+------------+--------------|
-| notify | =Notify: on= / =off= / =d:7 p:2 s:4 ...= | maintainer | n/a          |
-| role   | =Add maintainer: addr@host=          | maintainer | n/a          |
-| role   | =Ignore: addr@host=                  | maintainer | n/a          |
-| role   | =Remove maintainer: addr@host=       | admin      | n/a          |
-| role   | =Unignore: addr@host=                | admin      | n/a          |
+| ID     | Syntax / Words                     | Permission | Channel  |
+|--------+------------------------------------+------------+----------|
+| notify | =Notify: on= / =off= / =d:7 p:2 s:4 ...= | maintainer | any      |
+| role   | =Add maintainer: addr@host=          | maintainer | public   |
+| role   | =Remove maintainer: addr@host=       | admin      | public   |
 
 * Exploring reports
 
@@ -708,19 +700,6 @@ matched:
   where all emails are delivered directly.
 
 Emails that don't match any source are not stored.
-
-*** Direct emails from maintainers
-
-When a maintainer sends directly to the BARK inbox (bypassing the
-list or alias), they must signal the target source via one of:
-
-- A =X-Bark-Source: source-name= header.
-- A =[source-name]= prefix in the subject (the prefix is stripped
-  before processing).
-
-The source name must match a source's =:name= exactly
-(case-insensitive).  Non-maintainer direct emails to =:list= or
-=:alias= sources are silently ignored.
 
 ** Source options
 
@@ -935,18 +914,15 @@ The v2 series is now closed (resolved).
 ** Maintainer triage
 
 A bug comes in with no response for a while.  The maintainer triages
-offlist by sending directly to the BARK inbox:
+by replying to the list:
 
 : From: eve@project.org
-: To: bark-inbox@project.org
+: To: bugs-list@project.org
 : Subject: Re: [BUG] Crash on startup
-: X-Bark-Source: my-project
 :
 : Confirmed.
 : Owned.
 : Urgent.
-
-The bug is now acked, owned, and urgent — without notifying the list.
 
 Later, the fix lands:
 
@@ -958,31 +934,15 @@ Later, the fix lands:
 
 ** Role management
 
-The admin adds a new maintainer:
+The admin adds a new maintainer (via the list):
 
 : From: admin@project.org
-: To: bark-inbox@project.org
-: X-Bark-Source: my-project
+: To: bugs-list@project.org
+: Subject: Role update
 :
 : Add maintainer: newdev@project.org
 
-A maintainer flags a spammer:
-
-: From: eve@project.org
-: To: bark-inbox@project.org
-: X-Bark-Source: my-project
-:
-: Ignore: spammer@example.com
-
-Later, the admin reverses the decision:
-
-: From: admin@project.org
-: To: bark-inbox@project.org
-: X-Bark-Source: my-project
-:
-: Unignore: spammer@example.com
-
-Only the admin can =Remove maintainer:= and =Unignore:=.
+Only the admin can =Remove maintainer:=.
 
 ** Automatic expiry and override
 
