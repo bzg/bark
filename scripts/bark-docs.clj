@@ -13,6 +13,7 @@
 
 (require '[clojure.java.io :as io]
          '[clojure.string :as str]
+         '[clojure.pprint :as pp]
          '[hiccup2.core :as h]
          '[taoensso.timbre :as log])
 
@@ -300,7 +301,7 @@
   .meta { font-size: 0.78rem; color: var(--pico-muted-color); margin-bottom: 2rem; }
 " footer-css))
 
-(defn docs-page [body-html]
+(defn docs-page [body-html {:keys [ical]}]
   (let [title        "BARK — Docs"
         generated-at (str (java.util.Date.))]
     (str
@@ -328,7 +329,7 @@
          [:p.meta (str "Generated " generated-at)]
          (h/raw body-html)
          [:script (h/raw (wrap-js theme-toggle-js))]]
-        (bark-footer)]]))))
+        (bark-footer {:ical ical})]]))))
 
 ;; ---------------------------------------------------------------------------
 ;; Filter feed links in "Getting the data" table
@@ -425,7 +426,7 @@
   with since-dates when available. Only current maintainers are shown.
   Maintainers sharing the same display name (or participant name) are
   deduplicated, keeping the earliest since-date."
-  [db source-name _source-cfg]
+  [db source-name source-cfg]
   (when source-name
     (let [dp          (resolve 'pod.huahaiy.datalevin/pull)
           roles       (dp db '[:roles/admin :roles/maintainers :roles/maintainer-since]
@@ -457,9 +458,17 @@
                                   escaped)))
                             deduped)]
       (when (seq entries)
-        (str "<h2 id=\"maintainers\">Maintainers</h2>\n<ul>\n"
-             (str/join "\n" (map #(str "<li>" % "</li>") entries))
-             "\n</ul>")))))
+        (let [maint-cfg (:maintainers source-cfg)
+              config-snippet (when (seq maint-cfg)
+                               (str "\n<p>If you run BARK, add this to your <code>config.edn</code>"
+                                    " to declare maintainers correctly:</p>\n"
+                                    "<pre><code>"
+                                    (html-escape (str/trim (with-out-str (pp/pprint {:maintainers maint-cfg}))))
+                                    "</code></pre>"))]
+          (str "<h2 id=\"maintainers\">Maintainers</h2>\n<ul>\n"
+               (str/join "\n" (map #(str "<li>" % "</li>") entries))
+               "\n</ul>"
+               config-snippet))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Main
@@ -490,7 +499,8 @@
                       (filter-feed-links effective-dir))
       body-html   (cond-> (org->html org-text)
                     maint-html (str "\n" maint-html))
-      html        (docs-page body-html)]
+      has-ical?   (.exists (io/file effective-dir "events" "announcements.ics"))
+      html        (docs-page body-html {:ical has-ical?})]
   ((resolve 'pod.huahaiy.datalevin/close) conn)
   (.mkdirs (.getParentFile (io/file out-file)))
   (spit-html out-file html)

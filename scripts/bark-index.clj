@@ -151,6 +151,12 @@
   (let [label    (get type-labels type type)
         closed?  (and flags (>= (count flags) 3) (= (nth flags 2 \-) \C))
         iso-date (or (parse-to-iso-date (or date-raw date "")) "")
+        author-display (if (seq from-name)
+                         (let [parts (str/split (str/trim from-name) #"\s+")]
+                           (if (>= (count parts) 2)
+                             (str (first parts) " " (subs (second parts) 0 (min 2 (count (second parts)))) ".")
+                             from-name))
+                         (first (str/split (or from "") #"@")))
         author   (or (when (seq from-name) from-name) from)
         flag-a   (if (seq acked) "A" "-")
         flag-o   (if (seq owned) "O" "-")
@@ -187,23 +193,40 @@
           :data-deadline    (or deadline "")
           :data-expired     (or expired-date "")
           :data-topic       (str/lower-case (or topic ""))
-          :data-search      (str/lower-case (str subject " " from " " author " " iso-date " " topic))}
-     [:td [:mark {:data-type type :style "cursor:pointer"
-                  :onclick (str "isolateType('" type "')")}
-           label]]
+          :data-search      (str/lower-case (str subject " " from " " author " " owned " " iso-date " " topic))}
+     [:td {:title "Filter by type"}
+      [:mark {:data-type type :style "cursor:pointer"
+              :onclick (str "isolateType('" type "')")}
+       label]]
      [:td {:data-value (str (or priority 0)) :style "text-align:center"}
       (case (str (or priority 0)) "3" "A" "2" "B" "1" "C" " ")]
-     [:td {:data-value (or deadline "") :class "due-cell"} ""]
+     [:td {:data-value (or deadline "") :class "due-cell" :title "Filter"} ""]
      [:td {:data-value (str flags-score) :title flags-title
            :style "text-align:center; font-family:monospace; font-size:0.8rem; letter-spacing:0.1em"} flags-str]
      [:td (patch-link patches) (event-link events) (text-link texts) (related-link related)
       (vote-badge votes)
       (subject-el report closed? source-type)]
-     [:td.secondary {:title from} (if (#{"maintainer" "admin"} role) [:strong author] author)]
-     [:td {:data-value iso-date}
-      (if expiry
-        [:small {:title (str "Expires on " expiry)} [:em (or iso-date date "")]]
-        [:small (or iso-date date "")])]
+     [:td.secondary
+      [:a {:href "javascript:void(0)" :title from
+           :onclick (str "setSearch('f:" from "')")}
+       (if (#{"maintainer" "admin"} role) [:strong author-display] author-display)]]
+     [:td.secondary {:data-value (or owned "") :title (or owned "")}
+      (when (seq owned)
+        (let [local (first (str/split owned #"@"))]
+          [:a {:href "javascript:void(0)"
+               :title owned
+               :onclick (str "setSearch('o:" owned "')")}
+           local]))]
+     [:td {:data-value iso-date :title "Filter"}
+      (when (seq iso-date)
+        (if expiry
+          [:small {:title (str "Expires on " expiry)}
+           [:em [:a {:href "javascript:void(0)"
+                     :onclick (str "setSearch('d:" iso-date "..')")}
+                 iso-date]]]
+          [:small [:a {:href "javascript:void(0)"
+                       :onclick (str "setSearch('d:" iso-date "..')")}
+                  iso-date]]))]
      [:td {:style "text-align:center"} (or replies 0)]]))
 
 ;; ---------------------------------------------------------------------------
@@ -263,11 +286,14 @@
     td:nth-child(2), th:nth-child(2) { display: none; } /* Priority */
     td:nth-child(5) { min-width: auto; }
   }
+  @media (max-width: 780px) {
+    td:nth-child(9), th:nth-child(9) { display: none; } /* Replies */
+  }
   @media (max-width: 740px) {
-    td:nth-child(8), th:nth-child(8) { display: none; } /* Replies */
+    td:nth-child(8), th:nth-child(8) { display: none; } /* Date */
   }
   @media (max-width: 680px) {
-    td:nth-child(7), th:nth-child(7) { display: none; } /* Date */
+    td:nth-child(7), th:nth-child(7) { display: none; } /* Owner */
   }
   @media (max-width: 540px) {
     td:nth-child(6), th:nth-child(6) { display: none; } /* Author */
@@ -311,6 +337,9 @@
         open-count   (get envelope "open-count" (count reports))
         closed-count (get envelope "closed-count" 0)
         has-rss?     (.exists (clojure.java.io/file reports-dir "all.xml"))
+        ;; ICS lives one level up from reports-dir, in events/
+        base-dir     (.getParent (clojure.java.io/file reports-dir))
+        has-ical?    (and base-dir (.exists (clojure.java.io/file base-dir "events" "announcements.ics")))
         generated-at (str (java.util.Date.))
         rss-href     "reports/all.xml"
         cols         [[:th {:data-sort "type"     :onclick "sortTable(0,'type')"}     "Type"]
@@ -319,8 +348,9 @@
                       [:th {:data-sort "flags"    :onclick "sortTable(3,'flags')"}    "Flags"]
                       [:th {:data-sort "subject"  :onclick "sortTable(4,'subject')"}  "Subject"]
                       [:th {:data-sort "from"     :onclick "sortTable(5,'from')"}     "Author"]
-                      [:th {:data-sort "date"     :onclick "sortTable(6,'date')"}     "Date"]
-                      [:th {:data-sort "replies"  :onclick "sortTable(7,'replies')"}  "↩"]]]
+                      [:th {:data-sort "owner"    :onclick "sortTable(6,'owner')"}    "Owner"]
+                      [:th {:data-sort "date"     :onclick "sortTable(7,'date')"}     "Date"]
+                      [:th {:data-sort "replies"  :onclick "sortTable(8,'replies')"}  "↩"]]]
     (str
      "<!DOCTYPE html>\n"
      (h/html
@@ -376,7 +406,7 @@
               (report-row r source-type))]]]
          [:div#pagination]
          [:script (h/raw (page-js types-json total open-count closed-count source-type page-size))]]
-        (bark-footer)]]))))
+        (bark-footer {:ical has-ical?})]]))))
 
 ;; ---------------------------------------------------------------------------
 ;; Main

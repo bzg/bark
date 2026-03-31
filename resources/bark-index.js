@@ -354,6 +354,17 @@ function goToPage(p) {
 
 /* ── Lazy-load closed reports ──────────────────────────────── */
 
+function abbreviateName(name) {
+  var parts = name.trim().split(/\s+/);
+  if (parts.length < 2) return name;
+  return parts[0] + ' ' + parts[1].substring(0, 2) + '.';
+}
+
+function emailLocalPart(addr) {
+  var at = addr.indexOf('@');
+  return at > 0 ? addr.substring(0, at) : addr;
+}
+
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
@@ -387,7 +398,7 @@ function buildRowElement(r) {
 
   var isoDate = parseIsoDate(dateRaw);
   var closed_b = flags.length >= 3 && flags[2] !== '-';
-  var author = fromName || from;
+  var author = fromName ? abbreviateName(fromName) : emailLocalPart(from);
   var flagA = acked ? 'A' : '-', flagO = owned ? 'O' : '-';
   var flagC = closeReason === 'canceled' ? 'C' : closeReason === 'expired' ? 'E' : closeReason === 'superseded' ? 'S' : closed_b ? 'R' : '-';
   var flagsStr = flagA + flagO + flagC;
@@ -426,7 +437,13 @@ function buildRowElement(r) {
 
   var priLabel = priority === 3 ? 'A' : priority === 2 ? 'B' : priority === 1 ? 'C' : ' ';
   var isMaint = role === 'maintainer' || role === 'admin';
-  var authorHtml = isMaint ? '<strong>' + escHtml(author) + '</strong>' : escHtml(author);
+  var authorInner = isMaint ? '<strong>' + escHtml(author) + '</strong>' : escHtml(author);
+  var authorHtml = '<a href="javascript:void(0)" onclick="setSearch(\'f:' + escAttr(from) + '\')" title="' + escAttr(from) + '">' + authorInner + '</a>';
+
+  var ownerAddr = owned || '';
+  var ownerHtml = ownerAddr
+    ? '<a href="javascript:void(0)" onclick="setSearch(\'o:' + escAttr(ownerAddr) + '\')" title="' + escAttr(ownerAddr) + '">' + escHtml(emailLocalPart(ownerAddr)) + '</a>'
+    : '';
 
   var tr = document.createElement('tr');
   tr.dataset.type = type;
@@ -445,16 +462,17 @@ function buildRowElement(r) {
   tr.dataset.deadline = deadline;
   tr.dataset.expired = expiredDate;
   tr.dataset.topic = (topic || '').toLowerCase();
-  tr.dataset.search = (subject + ' ' + from + ' ' + author + ' ' + isoDate + ' ' + topic).toLowerCase();
+  tr.dataset.search = (subject + ' ' + from + ' ' + author + ' ' + ownerAddr + ' ' + isoDate + ' ' + topic).toLowerCase();
 
   tr.innerHTML =
-    '<td><mark data-type="' + escAttr(type) + '" style="cursor:pointer" onclick="isolateType(\'' + escAttr(type) + '\')">' + escHtml(label) + '</mark></td>' +
+    '<td title="Filter by type"><mark data-type="' + escAttr(type) + '" style="cursor:pointer" onclick="isolateType(\'' + escAttr(type) + '\')">' + escHtml(label) + '</mark></td>' +
     '<td data-value="' + priority + '" style="text-align:center">' + priLabel + '</td>' +
-    '<td data-value="' + escAttr(deadline) + '" class="due-cell"></td>' +
+    '<td data-value="' + escAttr(deadline) + '" class="due-cell" title="Filter"></td>' +
     '<td data-value="' + flagsScore + '" title="' + escAttr(flagsStr) + '" style="text-align:center;font-family:monospace;font-size:0.8rem;letter-spacing:0.1em">' + flagsStr + '</td>' +
     '<td>' + patchHtml + relatedHtml + subjectHtml + '</td>' +
-    '<td class="secondary" title="' + escAttr(from) + '">' + authorHtml + '</td>' +
-    '<td data-value="' + escAttr(isoDate) + '"><small>' + escHtml(isoDate || '') + '</small></td>' +
+    '<td class="secondary">' + authorHtml + '</td>' +
+    '<td class="secondary" data-value="' + escAttr(ownerAddr) + '" title="' + escAttr(ownerAddr) + '">' + ownerHtml + '</td>' +
+    '<td data-value="' + escAttr(isoDate) + '" title="Filter"><small>' + (isoDate ? '<a href="javascript:void(0)" onclick="setSearch(\'d:' + escAttr(isoDate) + '..\')">' + escHtml(isoDate) + '</a>' : '') + '</small></td>' +
     '<td style="text-align:center">' + replies + '</td>';
 
   return tr;
@@ -473,8 +491,8 @@ function computeDueCells(container) {
     var deadlineMs = new Date(+parts[0], +parts[1]-1, +parts[2]).getTime();
     var days = Math.round((deadlineMs - todayMs) / msPerDay);
     td.setAttribute('data-value', String(days));
-    td.textContent = days < 0 ? Math.abs(days) + 'd. ago' : 'In ' + days + ' d.';
-    td.title = dl;
+    var label = days < 0 ? Math.abs(days) + 'd. ago' : 'In ' + days + ' d.';
+    td.innerHTML = '<a href="javascript:void(0)" onclick="setSearch(\'D:' + dl + '\')" title="' + dl + '">' + label + '</a>';
     td.style.textAlign = 'center';
     if (days < 0) td.style.color = 'var(--pico-del-color, #c0392b)';
     else if (days <= 3) td.style.color = 'var(--pico-ins-color, #b8860b)';
@@ -694,6 +712,15 @@ function restoreFromURL() {
 
 restoreFromURL();
 window.addEventListener('popstate', function() { restoreFromURL(); });
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    var tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+    e.preventDefault();
+    getSearchInput().focus();
+  }
+});
 
 /* Compute "Due" column for server-rendered rows */
 computeDueCells(document);

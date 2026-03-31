@@ -85,5 +85,5 @@ Important.
 
 Durations: =Nd= (days), =Nw= (weeks), =Nm= (months).  For =date:= they
 look backward from today; for =deadline:= and =expired:= they look
-forward.  Combine filters freely: =D:2m e:10d= finds reports due
-within 2 months that also expire within 10 days.
+forward.  Combine filters freely: =D:2m o:user@email.com= finds
+reports due within 2 months owned by user@email.com.

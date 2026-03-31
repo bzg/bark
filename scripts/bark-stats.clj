@@ -479,22 +479,45 @@
                             body))
              "</tbody></table>")))))
 
+(defn- strip-dead-data-links
+  "Remove individual org links [[target][label]] whose file does not exist.
+  Cleans up leftover separators (', ')."
+  [line out-dir]
+  (let [replaced (str/replace
+                  line
+                  #"\[\[([^\]]+)\]\[([^\]]+)\]\]"
+                  (fn [[whole target _label]]
+                    (if (.exists (io/file out-dir target))
+                      whole
+                      "")))
+        ;; Clean up separators left by removed links
+        cleaned (-> replaced
+                    (str/replace #",\s*,+" ",")
+                    (str/replace #"\|\s*," "| ")
+                    (str/replace #",\s*\|" " |")
+                    ;; Clean cells that only have commas/spaces left
+                    (str/replace #"\|\s*,\s*\|" "| |")
+                    (str/replace #"\|\s+,\s*$" "| "))]
+    cleaned))
+
 (defn render-data-section
   "Render resources/data.org as an HTML section, filtering dead links."
   [out-dir]
   (let [org-text (slurp "resources/data.org")
         lines    (str/split-lines org-text)
         tlines   (filterv #(str/starts-with? (str/trim %) "|") lines)
-        ;; Filter out rows whose link targets don't exist
         filtered (if out-dir
-                   (filterv (fn [line]
-                              (if (re-find #"\[\[" line)
-                                (let [targets (re-seq #"\[\[([^\]]+)\]\[" line)]
-                                  (some (fn [[_ target]]
-                                          (.exists (io/file out-dir target)))
-                                        targets))
-                                true))
-                            tlines)
+                   (let [processed (mapv (fn [line]
+                                           {:orig line
+                                            :had-links (boolean (re-find #"\[\[" line))
+                                            :result (if (re-find #"\[\[" line)
+                                                      (strip-dead-data-links line out-dir)
+                                                      line)})
+                                         tlines)]
+                     (->> processed
+                          (remove (fn [{:keys [had-links result]}]
+                                    (and had-links (not (re-find #"\[\[" result)))))
+                          (mapv :result)))
                    tlines)]
     (when (seq filtered)
       (str "<h3>Available data</h3>\n"
@@ -612,7 +635,7 @@
 
      "<script>\n" kpi-loader-js "\n</script>\n"
      "</main>\n"
-     (h/html (bark-footer))
+     (h/html (bark-footer {:ical (.exists (io/file out-dir "events" "announcements.ics"))}))
      "</body>\n</html>\n")))
 
 ;; ---------------------------------------------------------------------------
