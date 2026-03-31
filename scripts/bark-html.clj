@@ -180,20 +180,22 @@
 (def footer-css
   "footer.bark-footer { font-size:0.78rem; color:var(--pico-muted-color); text-align:center; padding:2rem 0 1rem; }")
 
-(defn bark-footer []
-  [:footer.bark-footer
-   [:a {:href bark-repo-url} "BARK"]
-   " is "
-   [:a {:href "https://www.gnu.org/philosophy/free-sw.html"}
-    "Free Software"]
-   " — "
-   [:a {:href "reports/all.xml"} "RSS"]
-   " — "
-   [:a {:href "reports/all.json"} "JSON"]
-   " — "
-   [:a {:href "reports/all.org"} "Org"]
-   " — "
-   [:a {:href "events/announcements.ics"} "iCal"]])
+(defn bark-footer
+  ([] (bark-footer {}))
+  ([{:keys [ical] :or {ical true}}]
+   [:footer.bark-footer
+    [:a {:href bark-repo-url} "BARK"]
+    " is "
+    [:a {:href "https://www.gnu.org/philosophy/free-sw.html"}
+     "Free Software"]
+    " — "
+    [:a {:href "reports/all.xml"} "RSS"]
+    " — "
+    [:a {:href "reports/all.json"} "JSON"]
+    " — "
+    [:a {:href "reports/all.org"} "Org"]
+    (when ical
+      (list " — " [:a {:href "events/announcements.ics"} "iCal"]))]))
 
 ;; ---------------------------------------------------------------------------
 ;; Org-mode inline link conversion (shared by bark-docs, bark-stats)

@@ -464,7 +464,8 @@
                     (seq extra-meta) (merge extra-meta))
          filename (str out-dir "/" basename)]
      (spit filename (json/generate-string envelope {:pretty true}))
-     (log/info "Wrote" (count data) "reports to" filename))))
+     (when (seq data)
+       (log/info "Wrote" (count data) "reports to" filename)))))
 
 (defn- parse-date-tostring
   "Parse a java.util.Date#toString value into a java.util.Date.
@@ -545,17 +546,18 @@
          items    (str/join "\n" (map report->rss-item data))
          list-url (get-in source-map [source-name :list-archive] "")
          filename (str out-dir "/" basename)]
-     (spit filename
-           (str "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                "<rss version=\"2.0\">\n"
-                "  <channel>\n"
-                "    <title>BARK " source-name " " feed-label "</title>\n"
-                "    <link>" list-url "</link>\n"
-                "    <description>Reports from the Bug And Report Keeper</description>\n"
-                items "\n"
-                "  </channel>\n"
-                "</rss>\n"))
-     (log/info "Wrote" (count data) "reports to" filename))))
+     (when (seq data)
+       (spit filename
+             (str "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                  "<rss version=\"2.0\">\n"
+                  "  <channel>\n"
+                  "    <title>BARK " source-name " " feed-label "</title>\n"
+                  "    <link>" list-url "</link>\n"
+                  "    <description>Reports from the Bug And Report Keeper</description>\n"
+                  items "\n"
+                  "  </channel>\n"
+                  "</rss>\n"))
+       (log/info "Wrote" (count data) "reports to" filename)))))
 
 (defn- format-org-inactive-ts
   "Parse a java.util.Date#toString and return an Org inactive timestamp
@@ -628,13 +630,14 @@
    (dump-org! reports out-dir source-name source-map maintainers-map "all.org" "reports"))
   ([reports out-dir source-name source-map maintainers-map basename title-label]
    (let [data     (map-reports reports source-map maintainers-map)
-         entries  (str/join "\n" (map report->org-entry data))
          filename (str out-dir "/" basename)]
-     (spit filename
-           (str "#+TITLE: BARK " source-name " " title-label "\n"
-                "#+DATE: " (java.time.LocalDate/now) "\n\n"
-                entries))
-     (log/info "Wrote" (count data) "reports to" filename))))
+     (when (seq data)
+       (let [entries  (str/join "\n" (map report->org-entry data))]
+         (spit filename
+               (str "#+TITLE: BARK " source-name " " title-label "\n"
+                    "#+DATE: " (java.time.LocalDate/now) "\n\n"
+                    entries))
+         (log/info "Wrote" (count data) "reports to" filename))))))
 
 (defn dump-votes!
   "Export votes.json for a single source.
@@ -680,6 +683,21 @@
     (when (pos? total)
       (log/info "Wrote" total "patch file(s)"))))
 
+;; ---------------------------------------------------------------------------
+;; Attachment batch fetch (shared by text and event exports)
+;; ---------------------------------------------------------------------------
+
+(defn- batch-fetch-attachments
+  "Fetch attachment data for a seq of reports. Returns {message-id -> att-email}."
+  [reports]
+  (let [db (ctx-db)]
+    (into {}
+          (keep (fn [report]
+                  (let [mid (:report/message-id report)]
+                    (when-let [att (fetch-attachment-data db mid)]
+                      [mid (:report/email att)]))))
+          reports)))
+
 (defn dump-text!
   "Export text attachments (text/plain, text/x-log) to text/<mid-hash>/."
   [reports text-dir]
@@ -711,17 +729,6 @@
   "True if an announcement report has ICS content (from digest flags)."
   [report]
   (:report/has-ics report))
-
-(defn- batch-fetch-attachments
-  "Fetch attachment data for a seq of reports. Returns {message-id -> att-email}."
-  [reports]
-  (let [db (ctx-db)]
-    (into {}
-          (keep (fn [report]
-                  (let [mid (:report/message-id report)]
-                    (when-let [att (fetch-attachment-data db mid)]
-                      [mid (:report/email att)]))))
-          reports)))
 
 (defn- extract-vevents
   "Extract VEVENT blocks from ICS text.

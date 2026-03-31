@@ -101,8 +101,9 @@
                                       :participant/since  (or date-sent (Date.))}
                                contributor? (assoc :participant/contributor-since
                                                    (or date-sent (Date.))))])
-          (log/info "New participant:" from-addr "on" source-name
-                    (when contributor? "(contributor)")))))))
+          (if contributor?
+            (log/info "New participant:" from-addr "on" source-name "(contributor)")
+            (log/info "New participant:" from-addr "on" source-name)))))))
 
 (defn- report-exists? [db message-id]
   (some? (d/q '[:find ?r . :in $ ?mid :where [?r :report/message-id ?mid]] db message-id)))
