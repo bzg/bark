@@ -196,11 +196,9 @@ one of the three type keys:
 | =:topics-filter=         | no       | Only export reports with matching topics, e.g. =["event"]=              |
 | =:expiry=                | no       | Auto-close delays in days per type                                   |
 
-*Direct emails from maintainers:* when a maintainer sends directly to
-the BARK inbox (bypassing the list or alias), they must signal the
-target source with either a =X-Bark-Source: source-name= header or a
-=[bark:source-name]= prefix in the subject.  Non-maintainer direct
-emails to =:list= or =:alias= sources are ignored.
+All state-changing actions (commands, role controls) must be sent
+through the source's public channel to ensure reproducibility — anyone
+running BARK on the same source sees the same state.
 
 ** Example config
 

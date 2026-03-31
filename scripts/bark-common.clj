@@ -61,7 +61,7 @@
 (defn get-roles
   "Fetch roles for a source. Returns a map or {}."
   [db source-name]
-  (or (dpull db '[:roles/admin :roles/maintainers :roles/maintainer-since :roles/ignored]
+  (or (dpull db '[:roles/admin :roles/maintainers :roles/maintainer-since]
              [:roles/source source-name])
       {}))
 

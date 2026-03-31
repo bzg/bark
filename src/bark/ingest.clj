@@ -62,10 +62,13 @@
 
 (defn strip-tags
   "Extract visible text from HTML using Jsoup.
-  Returns plain text, or nil if input is nil."
+  Returns plain text, or nil if input is nil or parsing fails."
   [^String html]
   (when html
-    (.text (Jsoup/parse html))))
+    (try (.text (Jsoup/parse html))
+         (catch Exception e
+           (log/warn "Failed to parse HTML:" (.getMessage e))
+           nil))))
 
 (defn- parse-message-ids
   "Parse a References header value into a single space-separated string
@@ -102,7 +105,9 @@
         headers-edn (when (seq headers) (pr-str headers))
         in-reply-to (common/extract-in-reply-to headers)
         references  (when-let [v (get headers "References")]
-                      (parse-message-ids (if (vector? v) (str/join " " v) v)))
+                      (parse-message-ids (if (vector? v)
+                                           (str/join " " (keep identity v))
+                                           v)))
         attachments (mapv (fn [att]
                             (let [filename (or (:filename att) "unnamed")
                                   is-patch (boolean (re-find #"(?i)\.(patch|diff)$" filename))
@@ -115,7 +120,9 @@
                                   raw-text (when (and (or is-patch is-ics is-text) data)
                                               (cond
                                                 (string? data) data
-                                                (bytes? data)  (String. ^bytes data "UTF-8")
+                                                (bytes? data)  (try (String. ^bytes data "UTF-8")
+                                                    (catch Exception _
+                                                      (String. ^bytes data "ISO-8859-1")))
                                                 :else          nil))
                                   too-large? (and raw-text
                                                   (> (count raw-text) max-att-size))
@@ -131,7 +138,9 @@
                                 text-data (assoc :attachment/data text-data))))
                           (remove nil? (:attachments body)))]
     (cond-> {:email/message-id   (:message-id msg)
-             :email/subject      (or (:subject msg) "(no subject)")
+             :email/subject      (let [s (or (:subject msg) "")]
+                                    (str/replace (if (str/blank? s) "(no subject)" s)
+                                                 #"[\r\n]+" " "))
              :email/content-type (:content-type msg)
              :email/ingested-at  (Date.)}
 

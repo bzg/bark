@@ -229,27 +229,76 @@
               m))
           m from-address-fields))
 
+(defn- archive-url
+  "Compute the archive URL for a report, or nil."
+  [report email source-map]
+  (let [source-name (:email/source email)
+        src-type    (get-in source-map [source-name :source-type])]
+    (when-not (#{:alias :mailbox} src-type)
+      (let [raw  (archived-at email)
+            mid  (some-> (:report/message-id report) (str/replace #"^<|>$" ""))
+            fmt  (get-in source-map [source-name :archive-format-string])]
+        (if (and fmt mid) (str/replace fmt "%s" mid) raw)))))
+
+(defn- report-vote-fields
+  "Build vote-related fields from vote data."
+  [report-votes]
+  (when (seq report-votes)
+    (let [votes  (votes-str report-votes)
+          counts (vote-counts report-votes)]
+      (cond-> {}
+        votes                    (assoc :votes votes)
+        (pos? (:up counts 0))   (assoc :votes-up (:up counts))
+        (pos? (:down counts 0)) (assoc :votes-down (:down counts))
+        (pos? (:null counts 0)) (assoc :votes-null (:null counts))))))
+
+(defn- report-series-fields [series]
+  (when series
+    (let [patches (:series/patches series)]
+      {:received (count patches)
+       :expected (:series/expected series)
+       :complete (= (count patches) (:series/expected series))
+       :closed   (some? (:series/closed series))})))
+
+(defn- report-patch-fields [report]
+  (when (seq (:report/patches report))
+    (let [h (mid-hash (:report/message-id report))]
+      (mapv (fn [p]
+              (cond-> {:file   (str h "/" (:patch/filename p))
+                       :source (name (:patch/source p))}
+                (:patch/author p)  (assoc :author  (:patch/author p))
+                (:patch/subject p) (assoc :subject (:patch/subject p))
+                (:patch/date p)    (assoc :date    (:patch/date p))))
+            (:report/patches report)))))
+
+(defn- report-attachment-files
+  "Build :events and :texts fields from lazy-fetched attachment data."
+  [report att-email]
+  (let [h (mid-hash (:report/message-id report))]
+    (cond-> {}
+      (and (= :announcement (:report/type report))
+           (:report/has-ics report))
+      (assoc :events
+             (mapv (fn [att]
+                     {:file (str h "/" (.getName (clojure.java.io/file (:attachment/filename att))))})
+                   (filter #(ics-file? (:attachment/filename %))
+                           (:email/attachments @att-email))))
+      (:report/has-text-attachments report)
+      (assoc :texts
+             (mapv (fn [att]
+                     {:file (str h "/" (.getName (clojure.java.io/file (:attachment/filename att))))})
+                   (filter #(text-attachment? %)
+                           (:email/attachments @att-email)))))))
+
 (defn report->map [report source-map maintainers-map report-votes db]
   (let [email       (:report/email report)
         source-name (:email/source email)
-        ;; Lazy-fetch attachment data only when needed (announcements for
-        ;; ICS events, or any report for text attachments).
         att-data    (delay (when db
                      (fetch-attachment-data db (:report/message-id report))))
         att-email   (delay (:report/email @att-data))
         from        (or (:email/from-address email) "")
-        raw-arch    (archived-at email)
-        mid         (some-> (:report/message-id report)
-                            (str/replace #"^<|>$" ""))
-        fmt-str     (get-in source-map [source-name :archive-format-string])
-        arch        (if (and fmt-str mid)
-                      (str/replace fmt-str "%s" mid)
-                      raw-arch)
+        arch        (archive-url report email source-map)
         src-type    (get-in source-map [source-name :source-type])
-        arch        (when-not (#{:alias :mailbox} src-type) arch)
-        votes       (votes-str report-votes)
-        counts      (when (seq report-votes) (vote-counts report-votes))
-        series      (:report/series report)
         related     (:report/related report)
         role        (sender-role from source-name source-map maintainers-map)]
     (-> {:type     (name (:report/type report))
@@ -272,82 +321,53 @@
           (:report/patch-source report)   (assoc :patch-source (mapv name (sort (:report/patch-source report))))
           arch                            (assoc :archived-at arch)
           (:report/deadline report)       (assoc :deadline (format-date-iso (:report/deadline report)))
-          (:report/last-activity report) (assoc :last-activity (format-date-iso (:report/last-activity report)))
+          (:report/last-activity report)  (assoc :last-activity (format-date-iso (:report/last-activity report)))
           (:report/expiry report)         (assoc :expiry (format-date-iso (:report/expiry report)))
-          (:report/close-reason report)  (assoc :close-reason (name (:report/close-reason report)))
-          (:report/superseded-by report) (assoc :superseded-by
-                                                {:message-id (:report/message-id (:report/superseded-by report))
-                                                 :subject (get-in report [:report/superseded-by :report/email :email/subject])})
+          (:report/close-reason report)   (assoc :close-reason (name (:report/close-reason report)))
+          (:report/superseded-by report)  (assoc :superseded-by
+                                                 {:message-id (:report/message-id (:report/superseded-by report))
+                                                  :subject (get-in report [:report/superseded-by :report/email :email/subject])})
           (and (= :expired (:report/close-reason report))
                (:email/date-sent (:report/closed report)))
-          (assoc :expired-date (format-date-iso (:email/date-sent (:report/closed report))))
-          votes                           (assoc :votes votes)
-          (pos? (:up counts 0))           (assoc :votes-up (:up counts))
-          (pos? (:down counts 0))         (assoc :votes-down (:down counts))
-          (pos? (:null counts 0))         (assoc :votes-null (:null counts))
-          series
-          (assoc :series
-                 (let [patches (:series/patches series)]
-                   {:received (count patches)
-                    :expected (:series/expected series)
-                    :complete (= (count patches)
-                                 (:series/expected series))
-                    :closed   (some? (:series/closed series))}))
+          (assoc :expired-date (format-date-iso (:email/date-sent (:report/closed report)))))
+        (merge (report-vote-fields report-votes))
+        (cond->
+          (:report/series report) (assoc :series (report-series-fields (:report/series report)))
           (seq related)
           (assoc :related
                  (mapv (fn [r]
-                         (let [arch (when-not (#{:alias :mailbox} src-type)
-                                      (archived-at (:report/email r)))]
-                           (cond-> {:type       (name (:report/type r))
+                         (let [a (when-not (#{:alias :mailbox} src-type)
+                                   (archived-at (:report/email r)))]
+                           (cond-> {:type (name (:report/type r))
                                     :message-id (:report/message-id r)}
-                             arch (assoc :archived-at arch))))
-                       related))
-          (seq (:report/patches report))
-          (assoc :patches
-                 (let [h (mid-hash (:report/message-id report))]
-                   (mapv (fn [p]
-                           (cond-> {:file   (str h "/" (:patch/filename p))
-                                    :source (name (:patch/source p))}
-                             (:patch/author p)  (assoc :author  (:patch/author p))
-                             (:patch/subject p) (assoc :subject (:patch/subject p))
-                             (:patch/date p)    (assoc :date    (:patch/date p))))
-                         (:report/patches report))))
-          ;; ICS event files from announcement attachments
-          (and (= :announcement (:report/type report))
-               (:report/has-ics report))
-          (assoc :events
-                 (let [h (mid-hash (:report/message-id report))]
-                   (mapv (fn [att]
-                           {:file (str h "/" (.getName (clojure.java.io/file (:attachment/filename att))))})
-                         (filter #(ics-file? (:attachment/filename %))
-                                 (:email/attachments @att-email)))))
-          ;; Text attachments (text/plain, text/x-log)
-          (:report/has-text-attachments report)
-          (assoc :texts
-                 (let [h (mid-hash (:report/message-id report))]
-                   (mapv (fn [att]
-                           {:file (str h "/" (.getName (clojure.java.io/file (:attachment/filename att))))})
-                         (filter #(text-attachment? %)
-                                 (:email/attachments @att-email))))))))
+                             a (assoc :archived-at a))))
+                       related)))
+        (cond->
+          (seq (:report/patches report)) (assoc :patches (report-patch-fields report)))
+        (merge (report-attachment-files report att-email)))))
 
 ;; ---------------------------------------------------------------------------
-;; Vote context (set once per export run)
+;; Export context — set once at the start of each export run via
+;; init-export-context!.  Used by map-reports, dump-events!, dump-text!,
+;; and collect-vevents to access the DB and votes without threading
+;; parameters through every dump-* function.
 ;; ---------------------------------------------------------------------------
 
-(def ^:private all-votes-atom
-  "Votes indexed by report eid. Set at the start of each export run."
-  (atom {}))
+(def ^:private export-ctx
+  "Export context: {:db <datalevin-db> :votes {eid -> [vote-maps]}}"
+  (atom {:db nil :votes {}}))
 
-(def ^:private db-atom
-  "Current Datalevin db value. Set at the start of each export run.
-  Used by report->map for lazy attachment fetches."
-  (atom nil))
+(defn- init-export-context! [db votes]
+  (reset! export-ctx {:db db :votes votes}))
+
+(defn- ctx-db [] (:db @export-ctx))
+(defn- ctx-votes [] (:votes @export-ctx))
 
 (defn- map-reports
-  "Map reports through report->map, looking up votes from all-votes-atom."
+  "Map reports through report->map, looking up votes from export context."
   [reports source-map maintainers-map]
-  (let [av @all-votes-atom
-        db @db-atom]
+  (let [av (ctx-votes)
+        db (ctx-db)]
     (mapv #(report->map % source-map maintainers-map (get av (:db/id %)) db)
           reports)))
 
@@ -431,18 +451,24 @@
      (spit filename (json/generate-string envelope {:pretty true}))
      (log/info "Wrote" (count data) "reports to" filename))))
 
-(defn- rfc822-date
-  "RFC 822 date from a java.util.Date#toString string.
-  java.util.Date#toString always produces 'EEE MMM dd HH:mm:ss zzz yyyy'
-  in English, but we guard against nil and unexpected formats."
+(defn- parse-date-tostring
+  "Parse a java.util.Date#toString value into a java.util.Date.
+  Returns nil on invalid input."
   [date-str]
   (when (and date-str (not (str/blank? (str date-str))))
     (try
-      (let [in-fmt  (doto (java.text.SimpleDateFormat. "EEE MMM dd HH:mm:ss zzz yyyy"
-                                                       java.util.Locale/ENGLISH)
-                      (.setLenient true))
-            d       (.parse in-fmt (str date-str))
-            out-fmt (doto (java.text.SimpleDateFormat. "EEE, dd MMM yyyy HH:mm:ss Z"
+      (let [fmt (doto (java.text.SimpleDateFormat. "EEE MMM dd HH:mm:ss zzz yyyy"
+                                                    java.util.Locale/ENGLISH)
+                  (.setLenient true))]
+        (.parse fmt (str date-str)))
+      (catch Exception _ nil))))
+
+(defn- rfc822-date
+  "RFC 822 date from a java.util.Date#toString string."
+  [date-str]
+  (when-let [d (parse-date-tostring date-str)]
+    (try
+      (let [out-fmt (doto (java.text.SimpleDateFormat. "EEE, dd MMM yyyy HH:mm:ss Z"
                                                        java.util.Locale/ENGLISH)
                       (.setTimeZone (java.util.TimeZone/getTimeZone "UTC")))]
         (.format out-fmt d))
@@ -520,16 +546,14 @@
   "Parse a java.util.Date#toString and return an Org inactive timestamp
   like [2026-03-12 Thu 20:05]."
   [date-raw]
-  (try
-    (let [in-fmt  (doto (java.text.SimpleDateFormat. "EEE MMM dd HH:mm:ss zzz yyyy"
-                                                     java.util.Locale/ENGLISH)
-                    (.setLenient true))
-          d       (.parse in-fmt (str date-raw))
-          out-fmt (doto (java.text.SimpleDateFormat. "yyyy-MM-dd EEE HH:mm"
-                                                     java.util.Locale/ENGLISH)
-                    (.setTimeZone (java.util.TimeZone/getTimeZone "UTC")))]
-      (str "[" (.format out-fmt d) "]"))
-    (catch Exception _ (str date-raw))))
+  (if-let [d (parse-date-tostring date-raw)]
+    (try
+      (let [out-fmt (doto (java.text.SimpleDateFormat. "yyyy-MM-dd EEE HH:mm"
+                                                       java.util.Locale/ENGLISH)
+                      (.setTimeZone (java.util.TimeZone/getTimeZone "UTC")))]
+        (str "[" (.format out-fmt d) "]"))
+      (catch Exception _ (str date-raw)))
+    (str date-raw)))
 
 (defn- strip-angle-brackets [s]
   (when s (str/replace s #"^<|>$" "")))
@@ -601,7 +625,7 @@
   "Export votes.json for a single source.
   Format: {\"<mid>\": {\"+1\": [{voter, message-id}], \"-1\": [...], \"0\": [...]}}"
   [reports out-dir]
-  (let [av       @all-votes-atom
+  (let [av       (ctx-votes)
         entries  (reduce
                   (fn [acc report]
                     (let [mid   (:report/message-id report)
@@ -644,12 +668,12 @@
 (defn dump-text!
   "Export text attachments (text/plain, text/x-log) to text/<mid-hash>/."
   [reports text-dir]
-  (let [db    @db-atom
+  (let [txt-reports (filter :report/has-text-attachments reports)
+        att-cache   (batch-fetch-attachments txt-reports)
         total (reduce (fn [n report]
-                        (let [att-data (fetch-attachment-data db (:report/message-id report))
-                              txt-atts (filter #(and (text-attachment? %)
+                        (let [txt-atts (filter #(and (text-attachment? %)
                                                      (:attachment/data %))
-                                               (:email/attachments (:report/email att-data)))]
+                                               (:email/attachments (get att-cache (:report/message-id report))))]
                           (if (seq txt-atts)
                             (let [h   (mid-hash (:report/message-id report))
                                   dir (io/file text-dir h)]
@@ -660,7 +684,7 @@
                               (+ n (count txt-atts)))
                             n)))
                       0
-                      (filter :report/has-text-attachments reports))]
+                      txt-reports)]
     (when (pos? total)
       (log/info "Wrote" total "text file(s)"))))
 
@@ -673,6 +697,17 @@
   [report]
   (:report/has-ics report))
 
+(defn- batch-fetch-attachments
+  "Fetch attachment data for a seq of reports. Returns {message-id -> att-email}."
+  [reports]
+  (let [db (ctx-db)]
+    (into {}
+          (keep (fn [report]
+                  (let [mid (:report/message-id report)]
+                    (when-let [att (fetch-attachment-data db mid)]
+                      [mid (:report/email att)]))))
+          reports)))
+
 (defn- extract-vevents
   "Extract VEVENT blocks from ICS text.
   Uses a reluctant quantifier bounded by END:VEVENT to avoid
@@ -684,10 +719,12 @@
 (defn dump-events!
   "Export individual .ics files to events/<mid-hash>/ for announcements with ICS."
   [reports events-dir]
-  (let [db    @db-atom
+  (let [ics-reports (filter #(and (= :announcement (:report/type %))
+                                  (has-ics-content? %))
+                            reports)
+        att-cache   (batch-fetch-attachments ics-reports)
         total (reduce (fn [n report]
-                        (let [att-data (fetch-attachment-data db (:report/message-id report))
-                              atts  (:email/attachments (:report/email att-data))
+                        (let [atts  (:email/attachments (get att-cache (:report/message-id report)))
                               ics-atts (filter #(and (ics-file? (:attachment/filename %))
                                                      (:attachment/data %))
                                                atts)]
@@ -701,9 +738,7 @@
                               (+ n (count ics-atts)))
                             n)))
                       0
-                      (filter #(and (= :announcement (:report/type %))
-                                    (has-ics-content? %))
-                              reports))]
+                      ics-reports)]
     (when (pos? total)
       (log/info "Wrote" total "ICS event file(s)"))))
 
@@ -740,10 +775,9 @@
 (defn- collect-vevents
   "Extract all VEVENT blocks from a seq of reports with ICS content."
   [reports]
-  (let [db @db-atom]
+  (let [att-cache (batch-fetch-attachments reports)]
     (mapcat (fn [report]
-              (let [att-report (fetch-attachment-data db (:report/message-id report))
-                    email (:report/email att-report)
+              (let [email (:report/email (get att-cache (:report/message-id report)))
                     atts  (:email/attachments email)
                     att-vevents (->> atts
                                      (filter #(and (ics-file? (:attachment/filename %))
@@ -1141,65 +1175,66 @@
           ;; Only load all reports and votes when there is actual work to do.
           ;; Track whether any source was actually exported so we can skip
           ;; the root index when nothing changed.
-          (let [any-exported? (volatile! false)]
-            (when (and (not= format "root") (seq export-names))
-              (let [maintainers-map (if config (build-maintainers db source-map) {})
-                    all-reps        (all-reports-by-date db)
-                    _               (reset! db-atom db)
-                    _               (reset! all-votes-atom
-                                      (votes-by-report
-                                       (d/q '[:find ?r ?val ?voter ?emid
-                                              :where
-                                              [?v :vote/report ?r]
-                                              [?v :vote/value  ?val]
-                                              [?v :vote/voter  ?voter]
-                                              [?v :vote/email  ?e]
-                                              [?e :email/message-id ?emid]]
-                                            db)))
-                    effective-ps    (or page-size (:page-size config))
-                    cli-tf          (resolve-topics-filter topics-filter)
-                    drop-cutoff     (resolve-drop-closed-date
-                                     (or drop-closed (:drop-closed config)))
-                    _               (when cli-tf
-                                      (log/info "CLI topics filter:" (str/join ", " cli-tf)))
-                    _               (when drop-cutoff
-                                      (log/info "Dropping reports closed before" drop-cutoff))
-                    cli-extra       (let [drop (disj (hash-set format "-n" source-name
-                                                               "--force" "--theme" theme
-                                                               "--page-size" (some-> page-size str)
-                                                               "--drop-closed" drop-closed
-                                                               "--topics-filter" topics-filter) nil)]
-                                      (cond-> (vec (remove drop (rest *command-line-args*)))
-                                        effective-theme (into ["--theme" effective-theme])
-                                        effective-ps    (into ["--page-size" (str effective-ps)])))]
-                (doseq [src-name export-names]
-                  (let [reports  (filter-reports all-reps {:source       src-name
-                                                           :min-priority min-priority
-                                                           :min-status   min-status})
-                        er       (resolve-export-reports src-name source-map)
-                        reports  (if er (filter #(contains? er (:report/type %)) reports) reports)
-                        reports  (if drop-cutoff (drop-old-closed reports drop-cutoff) reports)
-                        src-tf   (resolve-source-topics-filter src-name source-map cli-tf)
-                        _        (when src-tf
-                                   (log/info (str "[" src-name "]") "topics filter:" (str/join ", " src-tf)))
-                        reports  (filter-by-topics reports src-tf)
-                        base-dir (str "public/" (slugify src-name))
-                        ;; Per-type granularity: only re-export per-type files
-                        ;; for types that actually changed in this source.
-                        src-changed (when (seq changed-st) (get changed-st src-name))]
-                    (if (empty? reports)
-                      (log/info "No reports for source" (str "'" src-name "'") ", skipping.")
-                      (do (vreset! any-exported? true)
-                          (log/info (str "[" src-name "] " (count reports) " report(s)"
-                                         " (" (count (open-reports reports)) " open)"
-                                         (if incremental? " (incremental)" "")))
-                          (export-source! format reports base-dir src-name
-                                          source-map maintainers-map cli-extra
-                                          :changed-types src-changed)))))))
+          (let [any-exported?
+                (if (and (not= format "root") (seq export-names))
+                  (let [maintainers-map (if config (build-maintainers db source-map) {})
+                        all-reps        (all-reports-by-date db)
+                        _               (init-export-context!
+                                          db
+                                          (votes-by-report
+                                           (d/q '[:find ?r ?val ?voter ?emid
+                                                  :where
+                                                  [?v :vote/report ?r]
+                                                  [?v :vote/value  ?val]
+                                                  [?v :vote/voter  ?voter]
+                                                  [?v :vote/email  ?e]
+                                                  [?e :email/message-id ?emid]]
+                                                db)))
+                        effective-ps    (or page-size (:page-size config))
+                        cli-tf          (resolve-topics-filter topics-filter)
+                        drop-cutoff     (resolve-drop-closed-date
+                                         (or drop-closed (:drop-closed config)))
+                        _               (when cli-tf
+                                          (log/info "CLI topics filter:" (str/join ", " cli-tf)))
+                        _               (when drop-cutoff
+                                          (log/info "Dropping reports closed before" drop-cutoff))
+                        cli-extra       (let [drop (disj (hash-set format "-n" source-name
+                                                                   "--force" "--theme" theme
+                                                                   "--page-size" (some-> page-size str)
+                                                                   "--drop-closed" drop-closed
+                                                                   "--topics-filter" topics-filter) nil)]
+                                          (cond-> (vec (remove drop (rest *command-line-args*)))
+                                            effective-theme (into ["--theme" effective-theme])
+                                            effective-ps    (into ["--page-size" (str effective-ps)])))]
+                    (reduce (fn [exported? src-name]
+                              (let [reports  (filter-reports all-reps {:source       src-name
+                                                                       :min-priority min-priority
+                                                                       :min-status   min-status})
+                                    er       (resolve-export-reports src-name source-map)
+                                    reports  (if er (filter #(contains? er (:report/type %)) reports) reports)
+                                    reports  (if drop-cutoff (drop-old-closed reports drop-cutoff) reports)
+                                    src-tf   (resolve-source-topics-filter src-name source-map cli-tf)
+                                    _        (when src-tf
+                                               (log/info (str "[" src-name "]") "topics filter:" (str/join ", " src-tf)))
+                                    reports  (filter-by-topics reports src-tf)
+                                    base-dir (str "public/" (slugify src-name))
+                                    src-changed (when (seq changed-st) (get changed-st src-name))]
+                                (if (empty? reports)
+                                  (do (log/info "No reports for source" (str "'" src-name "'") ", skipping.")
+                                      exported?)
+                                  (do (log/info (str "[" src-name "] " (count reports) " report(s)"
+                                                     " (" (count (open-reports reports)) " open)"
+                                                     (if incremental? " (incremental)" "")))
+                                      (export-source! format reports base-dir src-name
+                                                      source-map maintainers-map cli-extra
+                                                      :changed-types src-changed)
+                                      true))))
+                            false export-names))
+                  false)]
             ;; Only regenerate root index when at least one source was exported,
             ;; or when explicitly requested via "bb export root".
             (when (and (#{"all" "root"} format)
-                       (or (= format "root") @any-exported?))
+                       (or (= format "root") any-exported?))
               (dump-root-index! source-names source-map)))
           (save-last-export! (java.util.Date.)))))
     (finally

@@ -27,16 +27,13 @@
 (def admin-or-maintainer?
   "True if addr is admin or maintainer. Canonical entry point."
   common/admin-or-maintainer?)
-(def ignored?
-  "True if addr is on the ignored list. Canonical entry point."
-  common/ignored?)
 
 ;; ---------------------------------------------------------------------------
 ;; Role DB operations
 ;; ---------------------------------------------------------------------------
 
 (defn get-roles [db source-name]
-  (or (d/pull db '[:roles/admin :roles/maintainers :roles/maintainer-since :roles/ignored]
+  (or (d/pull db '[:roles/admin :roles/maintainers :roles/maintainer-since]
               [:roles/source source-name])
       {}))
 
@@ -105,7 +102,7 @@
 ;; ---------------------------------------------------------------------------
 
 (def role-control-pattern
-  #"(?m)^(Add maintainer|Remove maintainer|Ignore|Unignore):\s+(.+)$")
+  #"(?m)^(Add maintainer|Remove maintainer):\s+(.+)$")
 
 (defn- parse-addresses [s]
   (when s (remove str/blank? (str/split (str/trim s) #"\s+"))))
@@ -137,11 +134,9 @@
   {"Remove maintainer" {:requires :admin :attr :roles/maintainers :action :remove
                         :post-fn (fn [conn src addrs _date]
                                    (set-maintainer-since! conn src addrs nil))}
-   "Unignore"          {:requires :admin :attr :roles/ignored     :action :remove}
    "Add maintainer"    {:requires :maint :attr :roles/maintainers :action :add
                         :post-fn (fn [conn src addrs date]
-                                   (set-maintainer-since! conn src addrs date))}
-   "Ignore"            {:requires :maint :attr :roles/ignored     :action :add}})
+                                   (set-maintainer-since! conn src addrs date))}})
 
 (defn apply-role-controls! [conn roles source-name from-addr body-text email-date]
   (let [controls (parse-role-controls body-text)
