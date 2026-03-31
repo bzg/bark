@@ -134,6 +134,7 @@
                                              db-snap rid)
                              synth-eid  (find-or-create-expiry-email! conn src report-mid now)]
                          (d/transact! conn [[:db/add rid :report/closed synth-eid]
+                                            [:db/add rid :report/closed-address "bark-system"]
                                             [:db/add rid :report/close-reason :expired]])
                          (tracking/bump-report-updated! conn rid)
                          (log/info "Expired" (name rtype) "report:" report-mid)

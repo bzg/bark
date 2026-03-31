@@ -34,11 +34,9 @@
             {:report/superseded-by [:report/message-id {:report/email [:email/subject]}]}
             :report/urgent :report/important
             :report/deadline :report/expiry
-            {:report/acked-proxy [:email/from-address]}
-            {:report/owned-proxy [:email/from-address]}
-            {:report/closed-proxy [:email/from-address]}
-            {:report/urgent-proxy [:email/from-address]}
-            {:report/important-proxy [:email/from-address]}
+            :report/acked-address :report/owned-address
+            :report/closed-address :report/urgent-address
+            :report/important-address
             {:report/descendants [:email/message-id]}
             {:report/related [:report/type :report/message-id]}
             {:report/series [:series/id :series/expected :series/closed
@@ -618,11 +616,11 @@
         (testing "Bug 81 Acked-by directive"
           (let [r (get-report db "<81@test.org>")]
             (is (nil? (:report/acked r)))
-            (is (nil? (:report/acked-proxy r)))
+            (is (nil? (:report/acked-address r)))
             (is (some? (:report/owned r)))
             (is (some? (:report/urgent r)))
-            (is (= "maint@test.org" (get-in r [:report/owned-proxy :email/from-address])))
-            (is (= "maint@test.org" (get-in r [:report/urgent-proxy :email/from-address])))))
+            (is (= "fixer@test.org" (:report/owned-address r)))
+            (is (= "fixer@test.org" (:report/urgent-address r)))))
 
         ;; --- Bug 81 user directive denied ---
         (testing "Bug 81 user directive denied"
@@ -638,15 +636,15 @@
             (is (some? (:report/closed r)))
             (is (= :resolved (:report/close-reason r)))
             (is (some? (:report/important r)))
-            (is (= "admin@test.org" (get-in r [:report/closed-proxy :email/from-address])))
-            (is (= "admin@test.org" (get-in r [:report/important-proxy :email/from-address])))))
+            (is (= "closer@test.org" (:report/closed-address r)))
+            (is (= "closer@test.org" (:report/important-address r)))))
 
         ;; --- Bug 90 trigger + directive ---
         (testing "Bug 90 Confirmed trigger + Owned-by directive"
           (let [r (get-report db "<90@test.org>")]
             (is (some? (:report/acked r)))
             (is (some? (:report/owned r)))
-            (is (= "maint@test.org" (get-in r [:report/owned-proxy :email/from-address])))))
+            (is (= "fixer@test.org" (:report/owned-address r)))))
 
         ;; --- Bug 90 Fixed + Unclosed ---
         (testing "Bug 90 Fixed + Unclosed (directive wins)"
@@ -657,7 +655,7 @@
           (let [r (get-report db "<93@test.org>")]
             (is (some? (:report/acked r)))
             (is (some? (:report/urgent r)))
-            (is (= "admin@test.org" (get-in r [:report/urgent-proxy :email/from-address])))))
+            (is (= "user@test.org" (:report/urgent-address r)))))
 
         ;; --- Bug 90 Topic directive ---
         (testing "Bug 90 Topic directive"

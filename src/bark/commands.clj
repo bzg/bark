@@ -34,7 +34,7 @@
    {:id :closed   :kind :trigger  :action :set   :attr :report/closed   :scope :user  :words :closed}
    {:id :urgent   :kind :trigger  :action :set   :attr :report/urgent   :scope :user  :words :urgent}
    {:id :important :kind :trigger :action :set   :attr :report/important :scope :user :words :important}
-   ;; Proxy directives
+   ;; -by directives (maintainer sets attribute on behalf of someone else)
    {:id :acked-by     :kind :directive :action :set   :attr :report/acked    :scope :maintainer
     :syntax "Acked-by" :param :email-address :report-types #{:bug :patch :request}}
    {:id :owned-by     :kind :directive :action :set   :attr :report/owned    :scope :maintainer
@@ -84,12 +84,12 @@
 (def state-attrs
   [:report/acked :report/owned :report/closed :report/urgent :report/important])
 
-(def proxy-attrs
-  {:report/acked     :report/acked-proxy
-   :report/owned     :report/owned-proxy
-   :report/closed    :report/closed-proxy
-   :report/urgent    :report/urgent-proxy
-   :report/important :report/important-proxy})
+(def address-attrs
+  {:report/acked     :report/acked-address
+   :report/owned     :report/owned-address
+   :report/closed    :report/closed-address
+   :report/urgent    :report/urgent-address
+   :report/important :report/important-address})
 
 ;; ---------------------------------------------------------------------------
 ;; Pattern compilation
@@ -310,20 +310,6 @@
 
 (defn- ref-eid [v] (if (map? v) (:db/id v) v))
 
-(defn find-or-create-synthetic-email! [conn addr report-message-id attr-name]
-  (let [synthetic-mid (str "<bark-synthetic-" (name attr-name) "-"
-                           addr "-" report-message-id ">")
-        existing      (d/q '[:find ?e . :in $ ?mid :where [?e :email/message-id ?mid]]
-                           (d/db conn) synthetic-mid)]
-    (or existing
-        (let [tempid -1
-              tx     (d/transact! conn [{:db/id          tempid
-                                         :email/message-id   synthetic-mid
-                                         :email/from-address addr
-                                         :email/date-sent    (Date.)
-                                         :email/subject      (str "Synthetic: " (name attr-name)
-                                                                   " for " report-message-id)}])]
-          (get (:tempids tx) tempid)))))
 
 (defn- apply-vote! [conn report-eid from-addr body-text email delivery source-cfg]
   (when-let [vote (detect-vote body-text)]
@@ -346,36 +332,37 @@
           (log/info "Vote" (case vote :up "+1" :down "-1" "0") "by" from-addr))))))
 
 (defn- build-unset-tx
-  "Build retraction datoms for unsetting attributes and their proxies."
+  "Build retraction datoms for unsetting attributes and their address attrs."
   [report-eid current attrs]
   (into []
         (mapcat (fn [attr]
-                  (let [cur       (get current attr)
-                        proxy-cur (get current (proxy-attrs attr))]
+                  (let [cur      (get current attr)
+                        addr-cur (get current (address-attrs attr))]
                     (cond-> []
-                      cur       (conj [:db/retract report-eid attr (ref-eid cur)])
-                      proxy-cur (conj [:db/retract report-eid (proxy-attrs attr) (ref-eid proxy-cur)])))))
+                      cur      (conj [:db/retract report-eid attr (ref-eid cur)])
+                      addr-cur (conj [:db/retract report-eid (address-attrs attr) addr-cur])))))
         attrs))
 
 (defn- build-directive-set-tx
-  "Build assertion datoms for setting attributes via proxy directives.
-  Creates synthetic emails and sets both the attribute and its -proxy counterpart."
-  [conn report-eid report-mid email-eid set-map]
+  "Build assertion datoms for setting attributes via -by directives.
+  Points the attr to the real email and stores the designated address."
+  [report-eid email-eid set-map]
   (into []
         (mapcat (fn [[attr addr]]
-                  (let [target-eid (find-or-create-synthetic-email! conn addr report-mid attr)]
-                    [[:db/add report-eid attr target-eid]
-                     [:db/add report-eid (proxy-attrs attr) email-eid]])))
+                  [[:db/add report-eid attr email-eid]
+                   [:db/add report-eid (address-attrs attr) addr]]))
         set-map))
 
-(defn apply-triggers! [conn report-eid trig-result email-eid email-mid]
+(defn apply-triggers! [conn report-eid trig-result email-eid email-mid from-addr]
   (when trig-result
     (let [close-reason (:report/close-reason trig-result)
           ref-result   (dissoc trig-result :report/close-reason)
           current      (d/pull (d/db conn) state-attrs report-eid)
           new-sets     (into {} (remove (fn [[k _]] (get current k))) ref-result)
           all-tx       (cond-> (when (seq new-sets)
-                                 [(into {:db/id report-eid} (map (fn [[k _]] [k email-eid])) new-sets)])
+                                 (into [(into {:db/id report-eid} (map (fn [[k _]] [k email-eid])) new-sets)]
+                                       (map (fn [[k _]] [:db/add report-eid (address-attrs k) from-addr]))
+                                       new-sets))
                          (and close-reason (:report/closed new-sets))
                          (conj [:db/add report-eid :report/close-reason close-reason]))]
       (when (seq all-tx)
@@ -400,9 +387,9 @@
                                (into state-attrs [:report/deadline :report/expiry
                                                   :report/close-reason :report/topic
                                                   :report/superseded-by
-                                                  :report/closed-proxy :report/acked-proxy
-                                                  :report/owned-proxy :report/urgent-proxy
-                                                  :report/important-proxy])
+                                                  :report/closed-address :report/acked-address
+                                                  :report/owned-address :report/urgent-address
+                                                  :report/important-address])
                                report-eid)
             ;; Resolve superseded-by message-id to a report entity
             target-eid (when superseded-by
@@ -410,7 +397,7 @@
                                 :where [?r :report/message-id ?mid]]
                               db superseded-by))
             all-tx (-> []
-                       (into (build-directive-set-tx conn report-eid report-mid email-eid set))
+                       (into (build-directive-set-tx report-eid email-eid set))
                        (cond-> (and (contains? set :report/closed)
                                     (not (:report/close-reason current)))
                          (conj [:db/add report-eid :report/close-reason :resolved]))
@@ -433,6 +420,7 @@
                        (cond-> target-eid
                          (into [[:db/add report-eid :report/superseded-by target-eid]
                                 [:db/add report-eid :report/closed email-eid]
+                                [:db/add report-eid :report/closed-address from-addr]
                                 [:db/add report-eid :report/close-reason :superseded]
                                 [:db/add report-eid :report/related target-eid]
                                 [:db/add target-eid :report/related report-eid]]))
@@ -443,6 +431,9 @@
                                  (:report/closed current)
                                  (conj [:db/retract report-eid :report/closed
                                         (ref-eid (:report/closed current))])
+                                 (:report/closed-address current)
+                                 (conj [:db/retract report-eid :report/closed-address
+                                        (:report/closed-address current)])
                                  (:report/close-reason current)
                                  (conj [:db/retract report-eid :report/close-reason
                                         (:report/close-reason current)])))))]
@@ -482,7 +473,7 @@
                           directives)
         {:keys [unset unsuperseded?]} (resolve-commands permitted)]
     (when (or (contains? unset :report/closed) unsuperseded?)
-      (let [current  (d/pull (d/db conn) [:report/closed :report/closed-proxy :report/close-reason
+      (let [current  (d/pull (d/db conn) [:report/closed :report/closed-address :report/close-reason
                                           :report/superseded-by :report/related] report-eid)
             superseded-ref (:report/superseded-by current)
             clear-supersede? (or unsuperseded? (and (contains? unset :report/closed) superseded-ref))
@@ -549,7 +540,7 @@
         (let [voted? (when (and (= :request report-type) from-addr)
                        (apply-vote! conn report-eid from-addr body-text email delivery source-cfg)
                        (some? (detect-vote body-text)))]
-          (apply-triggers! conn report-eid trig-result eid (:email/message-id email))
+          (apply-triggers! conn report-eid trig-result eid (:email/message-id email) from-addr)
           (apply-directives! conn report-eid directives eid from-addr is-maint? fail-ctx)
           (boolean (or (seq trig-result) (seq directives) voted?)))))
     false))

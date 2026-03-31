@@ -212,22 +212,37 @@
         (contains? (get maintainers-map source-name #{}) from-lc)    "maintainer"
         :else                                                        nil))))
 
-(def ^:private from-address-fields
-  "Report attrs whose :email/from-address should be extracted into the output map."
-  [[:report/acked :acked] [:report/owned :owned] [:report/closed :closed]
-   [:report/urgent :urgent] [:report/important :important]
-   [:report/acked-proxy :acked-proxy] [:report/owned-proxy :owned-proxy]
-   [:report/closed-proxy :closed-proxy] [:report/urgent-proxy :urgent-proxy]
-   [:report/important-proxy :important-proxy]])
+(def ^:private address-fields
+  "Report address attrs to extract into the output map."
+  [[:report/acked-address :acked] [:report/owned-address :owned]
+   [:report/closed-address :closed] [:report/urgent-address :urgent]
+   [:report/important-address :important]])
+
+(def ^:private proxy-address-pairs
+  "Triplets [ref-attr address-key proxy-key] for extracting maintainer from-address.
+  The proxy key is only emitted when it differs from the address key (i.e. a -by directive)."
+  [[:report/acked :acked :acked-proxy] [:report/owned :owned :owned-proxy]
+   [:report/closed :closed :closed-proxy] [:report/urgent :urgent :urgent-proxy]
+   [:report/important :important :important-proxy]])
 
 (defn- assoc-from-addresses
-  "Extract :email/from-address from report attrs defined in from-address-fields."
+  "Extract addresses from report: direct string attrs and from-address of ref attrs.
+  Omits -proxy keys when their value equals the corresponding address key."
   [m report]
-  (reduce (fn [m [rk mk]]
-            (if-let [v (get report rk)]
-              (assoc m mk (:email/from-address v))
-              m))
-          m from-address-fields))
+  (as-> m m
+    (reduce (fn [m [rk mk]]
+              (if-let [v (get report rk)]
+                (assoc m mk v)
+                m))
+            m address-fields)
+    (reduce (fn [m [rk mk proxy-mk]]
+              (if-let [v (get report rk)]
+                (let [addr (:email/from-address v)]
+                  (if (= addr (get m mk))
+                    m
+                    (assoc m proxy-mk addr)))
+                m))
+            m proxy-address-pairs)))
 
 (defn- archive-url
   "Compute the archive URL for a report, or nil."

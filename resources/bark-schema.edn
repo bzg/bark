@@ -57,12 +57,13 @@
  :report/closed          {:db/valueType :db.type/ref}
  :report/urgent          {:db/valueType :db.type/ref}
  :report/important       {:db/valueType :db.type/ref}
- ;; Proxy refs: point to the maintainer email that set the attribute on behalf of someone else
- :report/acked-proxy     {:db/valueType :db.type/ref}
- :report/owned-proxy     {:db/valueType :db.type/ref}
- :report/closed-proxy    {:db/valueType :db.type/ref}
- :report/urgent-proxy    {:db/valueType :db.type/ref}
- :report/important-proxy {:db/valueType :db.type/ref}
+ ;; Address of the person designated by the command (same as email's from-address
+ ;; for direct triggers, may differ for -by directives)
+ :report/acked-address     {:db/valueType :db.type/string}
+ :report/owned-address     {:db/valueType :db.type/string}
+ :report/closed-address    {:db/valueType :db.type/string}
+ :report/urgent-address    {:db/valueType :db.type/string}
+ :report/important-address {:db/valueType :db.type/string}
  ;; Why the report was closed: :resolved, :cancelled, :expired, or :superseded
  :report/close-reason    {:db/valueType :db.type/keyword}
  :report/superseded-by   {:db/valueType :db.type/ref}

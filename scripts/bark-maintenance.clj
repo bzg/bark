@@ -55,7 +55,7 @@
 (defn- report-referenced-eids
   "All email entity IDs reachable from any report via any ref attribute.
   This covers :report/email, :report/descendants, :report/acked,
-  :report/closed, all proxy attrs, :report/related, etc.
+  :report/closed, :report/related, etc.
   If it's an email entity pointed to by a report, it's protected."
   [db]
   (set (dq '[:find [?e ...]

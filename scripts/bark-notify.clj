@@ -128,7 +128,7 @@
   (nil? (:report/closed report)))
 
 (defn- owned-by? [report email]
-  (when-let [owner (get-in report [:report/owned :email/from-address])]
+  (when-let [owner (:report/owned-address report)]
     (= (str/lower-case owner) (str/lower-case email))))
 
 (defn- unacked? [report]
