@@ -16,7 +16,7 @@
 ;;   bb maintenance --failures       — list recent command failures
 ;;
 ;; Config (config.edn):
-;;   :maintenance {:orphan-delay "90d"}   ;; only delete orphans older than this
+;;   :maintenance {:orphan-retention "90d"}   ;; only delete orphans older than this
 ;;
 ;; Environment:
 ;;   BARK_DB — path to db (default: ./data/bark-db)
@@ -101,15 +101,21 @@
   [db config source-map {:keys [source-name]}]
   (let [protected   (report-referenced-eids db)
         maintainers (maintainer-addresses db config source-map)
-        delay-days  (or (some-> (get-in config [:maintenance :orphan-delay])
-                                parse-delay)
-                        90)
+        retention   (get-in config [:maintenance :orphan-retention])
+        cutoff-date (if-let [v (when (string? retention) retention)]
+                      (if (re-matches #"\d{4}-\d{2}-\d{2}" v)
+                        (try (.parse (java.text.SimpleDateFormat. "yyyy-MM-dd") v)
+                             (catch Exception _ (java.util.Date. (- (System/currentTimeMillis) (* 90 24 60 60 1000)))))
+                        (let [days (or (parse-delay v) 90)]
+                          (java.util.Date. (- (System/currentTimeMillis) (* days 24 60 60 1000)))))
+                      ;; Default: 90 days
+                      (java.util.Date. (- (System/currentTimeMillis) (* 90 24 60 60 1000))))
         now         (java.util.Date.)
         emails      (all-emails db)]
     (log/info "Total emails in DB:" (count emails))
     (log/info "Protected by reports:" (count protected))
     (log/info "Maintainer/admin addresses:" (count maintainers))
-    (log/info "Orphan delay:" delay-days "days")
+    (log/info "Orphan retention cutoff:" cutoff-date)
     (->> emails
          (remove (fn [[eid _ _ _ _]] (contains? protected eid)))
          (remove (fn [[_ _ from _ _]]
@@ -117,7 +123,7 @@
          (filter (fn [[_ src _ _ _]]
                    (if source-name (= src source-name) true)))
          (filter (fn [[_ _ _ date _]]
-                   (and date (> (days-between date now) delay-days))))
+                   (and date (.before ^java.util.Date date cutoff-date))))
          (mapv (fn [[eid src from date mid]]
                  {:eid eid :source src :from from :date date :mid mid})))))
 

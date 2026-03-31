@@ -91,7 +91,7 @@
 (deftest delay-basic-test
   (testing "Report older than delay is expired"
     (let [{:keys [conn] :as ctx} (setup-db!)
-          source-map {"test-src" {:expiry {:bug {:after "10d"}}}}
+          source-map {"test-src" {:expiry {:bug {:inactive-after"10d"}}}}
           eid (insert-email! conn {:mid "<old@test>" :date-sent (days-ago 15)})
           _   (insert-report! conn {:mid "<old@test>" :type :bug :email-eid eid})]
       (expire/expire-reports! conn source-map)
@@ -100,7 +100,7 @@
 
   (testing "Report younger than delay is NOT expired"
     (let [{:keys [conn] :as ctx} (setup-db!)
-          source-map {"test-src" {:expiry {:bug {:after "10d"}}}}
+          source-map {"test-src" {:expiry {:bug {:inactive-after"10d"}}}}
           eid (insert-email! conn {:mid "<young@test>" :date-sent (days-ago 5)})
           _   (insert-report! conn {:mid "<young@test>" :type :bug :email-eid eid})]
       (expire/expire-reports! conn source-map)
@@ -109,7 +109,7 @@
 
   (testing "Delay computed from last descendant, not founding email"
     (let [{:keys [conn] :as ctx} (setup-db!)
-          source-map {"test-src" {:expiry {:bug {:after "10d"}}}}
+          source-map {"test-src" {:expiry {:bug {:inactive-after"10d"}}}}
           eid (insert-email! conn {:mid "<old-thread@test>" :date-sent (days-ago 30)})
           rid (insert-report! conn {:mid "<old-thread@test>" :type :bug :email-eid eid})
           ;; Recent reply resets the clock
@@ -124,7 +124,7 @@
 (deftest delay-integer-in-map-test
   (testing "Integer :delay value inside a rule map"
     (let [{:keys [conn] :as ctx} (setup-db!)
-          source-map {"test-src" {:expiry {:announcement {:after 10}}}}
+          source-map {"test-src" {:expiry {:announcement {:inactive-after 10}}}}
           eid (insert-email! conn {:mid "<intdelay@test>" :date-sent (days-ago 15)})
           _   (insert-report! conn {:mid "<intdelay@test>" :type :announcement :email-eid eid})]
       (expire/expire-reports! conn source-map)
@@ -134,7 +134,7 @@
 (deftest delay-duration-formats-test
   (testing "Weeks duration"
     (let [{:keys [conn] :as ctx} (setup-db!)
-          source-map {"test-src" {:expiry {:release {:after "2w"}}}}
+          source-map {"test-src" {:expiry {:release {:inactive-after"2w"}}}}
           eid (insert-email! conn {:mid "<weeks@test>" :date-sent (days-ago 20)})
           _   (insert-report! conn {:mid "<weeks@test>" :type :release :email-eid eid})]
       (expire/expire-reports! conn source-map)
@@ -143,7 +143,7 @@
 
   (testing "Months duration"
     (let [{:keys [conn] :as ctx} (setup-db!)
-          source-map {"test-src" {:expiry {:change {:after "1m"}}}}
+          source-map {"test-src" {:expiry {:change {:inactive-after"1m"}}}}
           ;; 1m = 30 days, report is 35 days old
           eid (insert-email! conn {:mid "<months@test>" :date-sent (days-ago 35)})
           _   (insert-report! conn {:mid "<months@test>" :type :change :email-eid eid})]
@@ -154,7 +154,7 @@
 (deftest max-status-test
   (testing "Unacked unowned report (score=0) expires when max-status=0"
     (let [{:keys [conn] :as ctx} (setup-db!)
-          source-map {"test-src" {:expiry {:bug {:after "5d" :max-status 0}}}}
+          source-map {"test-src" {:expiry {:bug {:inactive-after"5d" :max-status 0}}}}
           eid (insert-email! conn {:mid "<s0-yes@test>" :date-sent (days-ago 10)})
           _   (insert-report! conn {:mid "<s0-yes@test>" :type :bug :email-eid eid})]
       (expire/expire-reports! conn source-map)
@@ -163,7 +163,7 @@
 
   (testing "Acked report (score=1) does NOT expire when max-status=0"
     (let [{:keys [conn] :as ctx} (setup-db!)
-          source-map {"test-src" {:expiry {:bug {:after "5d" :max-status 0}}}}
+          source-map {"test-src" {:expiry {:bug {:inactive-after"5d" :max-status 0}}}}
           eid (insert-email! conn {:mid "<s1-no@test>" :date-sent (days-ago 10)})
           rid (insert-report! conn {:mid "<s1-no@test>" :type :bug :email-eid eid})
           ack-eid (insert-email! conn {:mid "<ack@test>" :from "maint@test.org"})
@@ -174,7 +174,7 @@
 
   (testing "Owned report (score=2) does NOT expire when max-status=1"
     (let [{:keys [conn] :as ctx} (setup-db!)
-          source-map {"test-src" {:expiry {:bug {:after "5d" :max-status 1}}}}
+          source-map {"test-src" {:expiry {:bug {:inactive-after"5d" :max-status 1}}}}
           eid (insert-email! conn {:mid "<s2-no@test>" :date-sent (days-ago 10)})
           rid (insert-report! conn {:mid "<s2-no@test>" :type :bug :email-eid eid})
           own-eid (insert-email! conn {:mid "<own@test>" :from "maint@test.org"})
@@ -185,7 +185,7 @@
 
   (testing "Acked report (score=1) expires when max-status=1"
     (let [{:keys [conn] :as ctx} (setup-db!)
-          source-map {"test-src" {:expiry {:bug {:after "5d" :max-status 1}}}}
+          source-map {"test-src" {:expiry {:bug {:inactive-after"5d" :max-status 1}}}}
           eid (insert-email! conn {:mid "<s1-yes@test>" :date-sent (days-ago 10)})
           rid (insert-report! conn {:mid "<s1-yes@test>" :type :bug :email-eid eid})
           ack-eid (insert-email! conn {:mid "<ack2@test>" :from "maint@test.org"})
@@ -197,7 +197,7 @@
 (deftest max-priority-test
   (testing "Non-urgent non-important report (priority=0) expires when max-priority >= 0"
     (let [{:keys [conn] :as ctx} (setup-db!)
-          source-map {"test-src" {:expiry {:bug {:after "5d" :max-priority 0}}}}
+          source-map {"test-src" {:expiry {:bug {:inactive-after"5d" :max-priority 0}}}}
           eid (insert-email! conn {:mid "<p0@test>" :date-sent (days-ago 10)})
           _   (insert-report! conn {:mid "<p0@test>" :type :bug :email-eid eid})]
       (expire/expire-reports! conn source-map)
@@ -206,7 +206,7 @@
 
   (testing "Urgent report (priority=2) does NOT expire when max-priority=0"
     (let [{:keys [conn] :as ctx} (setup-db!)
-          source-map {"test-src" {:expiry {:bug {:after "5d" :max-priority 0}}}}
+          source-map {"test-src" {:expiry {:bug {:inactive-after"5d" :max-priority 0}}}}
           eid (insert-email! conn {:mid "<p2@test>" :date-sent (days-ago 10)})
           rid (insert-report! conn {:mid "<p2@test>" :type :bug :email-eid eid})
           urg-eid (insert-email! conn {:mid "<urg@test>" :from "maint@test.org"})
@@ -216,9 +216,9 @@
       (teardown! ctx))))
 
 (deftest after-deadline-test
-  (testing "Report with :after :deadline expires when deadline is past"
+  (testing "Report with :inactive-after :deadline expires when deadline is past"
     (let [{:keys [conn] :as ctx} (setup-db!)
-          source-map {"test-src" {:expiry {:bug {:after :deadline}}}}
+          source-map {"test-src" {:expiry {:bug {:inactive-after :deadline}}}}
           eid (insert-email! conn {:mid "<dl-past@test>" :date-sent (days-ago 10)})
           rid (insert-report! conn {:mid "<dl-past@test>" :type :bug :email-eid eid})
           _   (d/transact! conn [[:db/add rid :report/deadline (days-ago 2)]])]
@@ -226,9 +226,9 @@
       (is (report-closed? conn "<dl-past@test>"))
       (teardown! ctx)))
 
-  (testing "Report with :after :deadline does NOT expire when deadline is future"
+  (testing "Report with :inactive-after :deadline does NOT expire when deadline is future"
     (let [{:keys [conn] :as ctx} (setup-db!)
-          source-map {"test-src" {:expiry {:bug {:after :deadline}}}}
+          source-map {"test-src" {:expiry {:bug {:inactive-after :deadline}}}}
           eid (insert-email! conn {:mid "<dl-future@test>" :date-sent (days-ago 10)})
           rid (insert-report! conn {:mid "<dl-future@test>" :type :bug :email-eid eid})
           _   (d/transact! conn [[:db/add rid :report/deadline (days-from-now 5)]])]
@@ -236,9 +236,9 @@
       (is (not (report-closed? conn "<dl-future@test>")))
       (teardown! ctx)))
 
-  (testing "Report with :after :deadline but no deadline is NOT expired"
+  (testing "Report with :inactive-after :deadline but no deadline is NOT expired"
     (let [{:keys [conn] :as ctx} (setup-db!)
-          source-map {"test-src" {:expiry {:bug {:after :deadline}}}}
+          source-map {"test-src" {:expiry {:bug {:inactive-after :deadline}}}}
           eid (insert-email! conn {:mid "<dl-none@test>" :date-sent (days-ago 100)})
           _   (insert-report! conn {:mid "<dl-none@test>" :type :bug :email-eid eid})]
       (expire/expire-reports! conn source-map)
@@ -248,7 +248,7 @@
 (deftest combined-rules-test
   (testing "All conditions met — expires"
     (let [{:keys [conn] :as ctx} (setup-db!)
-          source-map {"test-src" {:expiry {:bug {:after "5d"
+          source-map {"test-src" {:expiry {:bug {:inactive-after"5d"
                                                  :max-status 0
                                                  :max-priority 0}}}}
           eid (insert-email! conn {:mid "<combo-yes@test>" :date-sent (days-ago 10)
@@ -264,7 +264,7 @@
 
   (testing "One condition fails (priority too high) — does NOT expire"
     (let [{:keys [conn] :as ctx} (setup-db!)
-          source-map {"test-src" {:expiry {:bug {:after "5d"
+          source-map {"test-src" {:expiry {:bug {:inactive-after"5d"
                                                  :max-status 0
                                                  :max-priority 0}}}}
           eid (insert-email! conn {:mid "<combo-no@test>" :date-sent (days-ago 10)
@@ -282,7 +282,7 @@
 
   (testing "One condition fails (acked, score=1 > max-status=0) — does NOT expire"
     (let [{:keys [conn] :as ctx} (setup-db!)
-          source-map {"test-src" {:expiry {:bug {:after "5d"
+          source-map {"test-src" {:expiry {:bug {:inactive-after"5d"
                                                  :max-status 0
                                                  :max-priority 0}}}}
           eid (insert-email! conn {:mid "<combo-ack@test>" :date-sent (days-ago 10)
@@ -301,7 +301,7 @@
 (deftest no-expiry-rule-test
   (testing "Report type with no expiry rule is never expired"
     (let [{:keys [conn] :as ctx} (setup-db!)
-          source-map {"test-src" {:expiry {:announcement {:after "5d"}}}}
+          source-map {"test-src" {:expiry {:announcement {:inactive-after"5d"}}}}
           eid (insert-email! conn {:mid "<norule@test>" :date-sent (days-ago 100)})
           _   (insert-report! conn {:mid "<norule@test>" :type :bug :email-eid eid})]
       (expire/expire-reports! conn source-map)
@@ -331,7 +331,7 @@
 
   (testing "Report with explicit :report/expiry in the future does NOT expire"
     (let [{:keys [conn] :as ctx} (setup-db!)
-          source-map {"test-src" {:expiry {:bug {:after "1d"}}}}
+          source-map {"test-src" {:expiry {:bug {:inactive-after"1d"}}}}
           eid (insert-email! conn {:mid "<explicit-no@test>" :date-sent (days-ago 10)})
           rid (insert-report! conn {:mid "<explicit-no@test>" :type :bug :email-eid eid})
           ;; Explicit expiry in the future overrides the global rule that would expire it
@@ -343,7 +343,7 @@
 (deftest already-closed-not-expired-test
   (testing "Already closed report is not expired again"
     (let [{:keys [conn] :as ctx} (setup-db!)
-          source-map {"test-src" {:expiry {:bug {:after "5d"}}}}
+          source-map {"test-src" {:expiry {:bug {:inactive-after"5d"}}}}
           eid (insert-email! conn {:mid "<closed@test>" :date-sent (days-ago 10)})
           rid (insert-report! conn {:mid "<closed@test>" :type :bug :email-eid eid})
           close-eid (insert-email! conn {:mid "<close-ev@test>" :from "maint@test.org"})

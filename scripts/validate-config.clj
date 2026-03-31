@@ -185,15 +185,16 @@
 (s/def :bark/report-types ::report-types)
 
 ;; Expiry rules (optional)
-;; Each report type maps to a rule map with :after and optional conditions.
-(s/def :expiry/after (s/or :deadline #{:deadline}
-                           :string (s/and ::non-blank-string #(re-seq #"\d+\s*[ydwm]" %))
-                           :int pos-int?))
+;; Each report type maps to a rule map with :inactive-after and optional conditions.
+(s/def :expiry/inactive-after (s/or :deadline #{:deadline}
+                                    :date (s/and ::non-blank-string #(re-matches #"\d{4}-\d{2}-\d{2}" %))
+                                    :string (s/and ::non-blank-string #(re-seq #"\d+\s*[ydwm]" %))
+                                    :int pos-int?))
 (s/def :expiry/max-status (s/and int? #(<= 0 % 3)))
 (s/def :expiry/max-priority (s/and int? #(<= 0 % 3)))
 
 (s/def ::expiry-rule
-  (s/keys :req-un [:expiry/after]
+  (s/keys :req-un [:expiry/inactive-after]
           :opt-un [:expiry/max-status :expiry/max-priority]))
 
 (s/def ::expiry
@@ -217,8 +218,9 @@
                                       :logging/backlog :logging/email]))
 
 ;; Maintenance
-(s/def :maintenance/orphan-delay (s/or :str ::non-blank-string :int pos-int?))
-(s/def :bark/maintenance (s/keys :opt-un [:maintenance/orphan-delay]))
+(s/def :maintenance/orphan-retention (s/or :date (s/and ::non-blank-string #(re-matches #"\d{4}-\d{2}-\d{2}" %))
+                                          :str (s/and ::non-blank-string #(re-seq #"\d+\s*[ydwm]" %))))
+(s/def :bark/maintenance (s/keys :opt-un [:maintenance/orphan-retention]))
 
 ;; Top-level config
 (s/def ::config

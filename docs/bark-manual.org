@@ -217,7 +217,7 @@ Like =Deadline:=, the value can be an ISO date or a duration.  The
 expiry date appears in JSON exports (=:expiry=), Org output (=:EXPIRY:=
 property), and the HTML index (as a tooltip on the date column).
 
-To automatically expire reports at their deadline, use =:after :deadline=
+To automatically expire reports at their deadline, use =:inactive-after :deadline=
 in the source-level expiry rules (see [[*Report expiry][Report expiry]]).
 
 To remove a per-report expiry:
@@ -541,10 +541,10 @@ Use =--page-size <N>= to paginate the HTML report table (e.g.
 still exported, but only one page of rows is rendered at a time,
 improving browser responsiveness on large trackers.
 
-Use =--drop-closed <date-or-duration>= to exclude old closed reports
+Use =--closed-retention <date-or-duration>= to exclude old closed reports
 from all exports.  Accepts an ISO date (=2024-01-01=) or a duration
-(=1y=, =6m=, =90d=).  For instance, =bb export --drop-closed 1y=
-drops all reports closed more than one year ago.
+(=1y=, =6m=, =90d=).  For instance, =bb export --closed-retention 1y=
+keeps only reports closed within the last year.
 
 Use =--topics-filter <topics>= to export only reports matching given
 topics (comma-separated, case-insensitive).  For instance,
@@ -554,7 +554,7 @@ multiple topics.  The filter can also be set per source in =config.edn=
 (see below); the CLI flag overrides all config values.
 
 These options can be set permanently in =config.edn= as =:page-size=,
-=:drop-closed=, and =:topics-filter= (globally or per source); the CLI
+=:closed-retention=, and =:topics-filter= (globally or per source); the CLI
 flags override the config values.
 
 ** Vote transparency
@@ -735,24 +735,27 @@ match configured rules.  The close reason is set to "expired".
 
 Each entry under =:expiry= maps a report type keyword to a rule map:
 
-| Rule key      | Type             | Description                                                     |
-|---------------+------------------+-----------------------------------------------------------------|
-| =:after=        | string/=:deadline= | Duration before expiry (e.g. ="30d"=, ="6w"=, ="3m"=, ="1y"=), or =:deadline= |
-| =:max-status=   | integer          | Don't expire if activity score > this value (0--3)              |
-| =:max-priority= | integer          | Don't expire if priority > this value (0--3)                    |
+| Rule key          | Type                       | Description                                                     |
+|-------------------+----------------------------+-----------------------------------------------------------------|
+| =:inactive-after= | string/date/=:deadline= | Duration ("30d"), ISO date ("2026-06-01"), or =:deadline=       |
+| =:max-status=      | integer                    | Don't expire if activity score > this value (0--3)              |
+| =:max-priority=    | integer                    | Don't expire if priority > this value (0--3)                    |
 
 All rules are conjunctive: a report is only expired when *all*
-conditions are met.  Only =:after= is required; the others are
+conditions are met.  Only =:inactive-after= is required; the others are
 optional filters.
 
-When =:after= is a duration, it is measured from the date of the *last
-email in the thread* (the most recent descendant, or the founding email
-if there are no replies).  This means any reply — from any participant —
-resets the expiry clock.
+When =:inactive-after= is a duration, it is measured from the date of the
+*last email in the thread* (the most recent descendant, or the founding
+email if there are no replies).  This means any reply — from any
+participant — resets the expiry clock.
 
-When =:after= is =:deadline=, the report expires when its deadline date
-is in the past (reports without a deadline are never expired by this
-rule).
+When =:inactive-after= is an ISO date, the report expires after that
+fixed date regardless of activity.
+
+When =:inactive-after= is =:deadline=, the report expires when its
+deadline date is in the past (reports without a deadline are never
+expired by this rule).
 
 The =:max-status= value uses an activity score that only counts acked
 and owned (since expiry candidates are always open reports):
@@ -765,13 +768,13 @@ and owned (since expiry candidates are always open reports):
 |     3 | acked + owned    |
 
 #+begin_src edn
-:expiry {:announcement {:after "30d"}
-         :release      {:after "6w"}
-         :change       {:after "3m"}
-         :bug          {:after "1000d"
+:expiry {:announcement {:inactive-after "30d"}
+         :release      {:inactive-after "6w"}
+         :change       {:inactive-after "3m"}
+         :bug          {:inactive-after "1000d"
                         :max-status 0      ;; only open, unacked, unowned
                         :max-priority 0}   ;; only non-urgent, non-important
-         :request      {:after "1000d"
+         :request      {:inactive-after "1000d"
                         :max-status 0}}
 #+end_src
 
@@ -804,13 +807,13 @@ with =:max-attachment-size= in the =:ingest= config section.
 ** Maintenance
 
 #+begin_src edn
-:maintenance {:orphan-delay "90d"}
+:maintenance {:orphan-retention "90d"}
 #+end_src
 
-- =:orphan-delay= — delete orphan emails (not referenced by any report,
-  not from a maintainer or admin) older than this duration.  Accepts a
-  duration string or an integer (days).  Default: =90= days.  Run with
-  =bb maintenance= (daemon must be stopped).
+- =:orphan-retention= — keep orphan emails (not referenced by any report,
+  not from a maintainer or admin) for this long, then delete.  Accepts a
+  duration string ("90d") or an ISO date ("2025-01-01").  Default: =90=
+  days.  Run with =bb maintenance= (daemon must be stopped).
 
 ** Notifications (SMTP)
 
@@ -853,7 +856,7 @@ All tasks are run via [[https://babashka.org/][Babashka]]:
 | =bb export org=              | Export Org feeds only                                   |
 | =bb export stats=            | Export stats pages only                                 |
 | =bb export --page-size 100=  | Paginate HTML table (100 reports/page)                  |
-| =bb export --drop-closed 1y= | Exclude reports closed more than 1 year ago             |
+| =bb export --closed-retention 1y= | Keep only reports closed within the last year      |
 | =bb notify=                  | Send notification emails                                |
 | =bb notify --dry-run=        | Preview notifications without sending                   |
 | =bb clean=                   | Remove all generated files (=public/=, =classes/=, =docs/=)   |
@@ -949,7 +952,7 @@ Only the admin can =Remove maintainer:=.
 With this config:
 
 #+begin_src edn
-:expiry {:bug {:after "90d" :max-status 0}}
+:expiry {:bug {:inactive-after "90d" :max-status 0}}
 #+end_src
 
 A bug whose last email is 91 days ago, still unacked and unowned, is

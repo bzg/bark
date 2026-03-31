@@ -150,25 +150,27 @@
  ;; When set per source, it overrides the global value.
  ;;
  ;; Each entry maps a report type to a rule map:
- ;;   :after         — duration string ("30d", "6w", "3m", "1y"), or :deadline [required]
- ;;                    Duration is measured from the last email in the thread.
- ;;                    :deadline means "expire when the report's deadline is past".
- ;;   :max-status    — don't expire if activity score > this (0=none, 1=acked,
- ;;                    2=owned, 3=acked+owned) [optional]
- ;;   :max-priority  — don't expire if priority > this (0-3) [optional]
+ ;;   :inactive-after — duration ("30d", "6w", "3m", "1y"), ISO date ("2026-06-01"),
+ ;;                     or :deadline [required]
+ ;;                     Duration is measured from the last email in the thread.
+ ;;                     ISO date means "expire after that fixed date".
+ ;;                     :deadline means "expire when the report's deadline is past".
+ ;;   :max-status     — don't expire if activity score > this (0=none, 1=acked,
+ ;;                     2=owned, 3=acked+owned) [optional]
+ ;;   :max-priority   — don't expire if priority > this (0-3) [optional]
  ;;
  ;; All conditions are conjunctive (all must be true to expire).
  ;; Maintainers can also set a per-report expiry date via the
  ;; "Expiry: <date-or-duration>" directive, which overrides these rules.
  ;;
  ;; Example:
- ;; :expiry {:announcement {:after "30d"}
- ;;          :release      {:after "6w"}
- ;;          :change       {:after "3m"}
- ;;          :bug          {:after "1000d"
+ ;; :expiry {:announcement {:inactive-after "30d"}
+ ;;          :release      {:inactive-after "6w"}
+ ;;          :change       {:inactive-after "3m"}
+ ;;          :bug          {:inactive-after "1000d"
  ;;                         :max-status 0       ;; only open, unacked, unowned
  ;;                         :max-priority 0}    ;; only non-urgent, non-important
- ;;          :request      {:after "1000d"
+ ;;          :request      {:inactive-after "1000d"
  ;;                         :max-status 0}}
  ;;
  ;; Command aliases (optional) — maps old command syntax to the current form.
@@ -185,12 +187,12 @@
 
  ;; Maintenance (optional) — settings for `bb maintenance`.
  ;; Run only when the JVM daemon is stopped.
- ;;   :orphan-delay — delete orphan emails older than this duration.
- ;;                   An orphan is an email not referenced by any report
- ;;                   and not sent by a maintainer or admin.
- ;;                   Accepts a duration string ("30d", "6w", "3m", "1y")
- ;;                   or an integer (days). Default: 90 days.
- ;; :maintenance {:orphan-delay "90d"}
+ ;;   :orphan-retention — keep orphan emails for this long, then delete.
+ ;;                       An orphan is an email not referenced by any report
+ ;;                       and not sent by a maintainer or admin.
+ ;;                       Accepts a duration ("30d", "6w", "3m", "1y")
+ ;;                       or an ISO date ("2025-01-01"). Default: 90 days.
+ ;; :maintenance {:orphan-retention "90d"}
 
  ;; ---- Exports -------------------------------------------------------------
 
@@ -207,11 +209,11 @@
  ;; CLI override: bb export --page-size 100
  ;; :page-size 100
 
- ;; Drop old closed reports from exports (optional).
+ ;; Retention of closed reports in exports (optional).
  ;; Accepts a duration ("1y", "6m", "90d") or an ISO date ("2024-01-01").
  ;; Reports closed before the resolved date are excluded from all exports.
- ;; CLI override: bb export --drop-closed 1y
- ;; :drop-closed "1y"
+ ;; CLI override: bb export --closed-retention 1y
+ ;; :closed-retention "1y"
 
  ;; Filter exports by topic(s) (optional).
  ;; Only reports matching one of the given topics are exported.
