@@ -1,8 +1,8 @@
 #+title: BARK! Another Report Keeper
 
-[[bark-logo.jpg]]
-
 [[https://img.shields.io/badge/versioning-intver.org-blue.svg?style=for-the-badge]]
+
+[[bark-logo.jpg]]
 
 BARK is an email-driven report tracker - see the [[docs/bark-manual.org#principles][principles]].
 
@@ -302,9 +302,9 @@ You can also [[mailto:bzg@bzg.fr][send me an email]] and support my work on [[ht
 
 This project uses [[https://intver.org][Intentional Versioning]], here are the three audiences:
 
-- x: administrators who deploy, configure, and operate BARK instances
-- y: consumers of exported JSON/RSS/Org formats
-- z: contributors to the codebase
+- =x= : administrators who deploy, configure, and operate BARK instances
+- =y= : consumers of the exported JSON/RSS/Org formats
+- =z= : contributors to the codebase
 
 * Support the Clojure(script) ecosystem
 
