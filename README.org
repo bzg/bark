@@ -2,7 +2,7 @@
 
 [[bark-logo.jpg]]
 
-[[https://img.shields.io/badge/versioning-intver.org-blue.svg]]
+[[https://img.shields.io/badge/versioning-intver.org-blue.svg?style=for-the-badge]]
 
 BARK is an email-driven report tracker - see the [[docs/bark-manual.org#principles][principles]].
 
