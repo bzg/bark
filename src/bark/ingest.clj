@@ -23,13 +23,11 @@
 
 (defn- message-id-exists? [conn message-id]
   (when message-id
-    (some? (d/q '[:find ?e . :in $ ?mid :where [?e :email/message-id ?mid]]
-                (d/db conn) message-id))))
+    (some? (d/entid (d/db conn) [:email/message-id message-id]))))
 
 (defn- imap-uid-exists? [conn imap-uid]
   (when imap-uid
-    (some? (d/q '[:find ?e . :in $ ?uid :where [?e :email/imap-uid ?uid]]
-                (d/db conn) imap-uid))))
+    (some? (d/entid (d/db conn) [:email/imap-uid imap-uid]))))
 
 (defn max-imap-uid [conn]
   (or (d/q '[:find ?uid . :where [?e :watermark/id "default"] [?e :watermark/imap-uid ?uid]]
