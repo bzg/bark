@@ -401,7 +401,12 @@
                        related)))
         (cond->
           (seq (:report/patches report)) (assoc :patches (report-patch-fields report)))
-        (merge (report-attachment-files report att-email)))))
+        (merge (report-attachment-files report att-email))
+        ;; Ensure closed is truthy when close-reason is set (auto-superseded
+        ;; reports may lack :report/closed-address, leaving :closed unset).
+        (as-> m (if (and (:close-reason m) (not (:closed m)))
+                  (assoc m :closed "auto")
+                  m)))))
 
 (defn- map-reports
   "Map reports through report->map, looking up votes from export context."
