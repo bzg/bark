@@ -1573,4 +1573,75 @@
   :email/in-reply-to "<114@test.org>"
   :email/references  "<114@test.org>"
   :email/body-text  "Actually this is a separate issue.\nNot closed\n"}
+
+ ;; =========================================================================
+ ;; 117 — Patch (no version): first submission
+ ;; =========================================================================
+ {:email/imap-uid    117
+  :email/source      "public-list"
+  :email/message-id  "<117@test.org>"
+  :email/subject     "[PATCH] A new feature"
+  :email/from-address "dev@test.org"
+  :email/date-sent  #inst "2026-03-01T10:00:00"
+  :email/ingested-at #inst "2026-03-01T10:00:00"
+  :email/headers-edn "{\"list-id\" \"list.test.org\"}"
+  :email/body-text  "First version of the patch.\n\ndiff --git a/feature.el b/feature.el\n--- a/feature.el\n+++ b/feature.el\n@@ -1,3 +1,3 @@\n-old\n+new\n"}
+
+ ;; =========================================================================
+ ;; 118 — Reply with updated patch, same subject: should supersede 117
+ ;; =========================================================================
+ {:email/imap-uid    118
+  :email/source      "public-list"
+  :email/message-id  "<118@test.org>"
+  :email/subject     "Re: [PATCH] A new feature"
+  :email/from-address "dev@test.org"
+  :email/date-sent  #inst "2026-03-01T11:00:00"
+  :email/ingested-at #inst "2026-03-01T11:00:00"
+  :email/in-reply-to "<117@test.org>"
+  :email/references  "<117@test.org>"
+  :email/headers-edn "{\"list-id\" \"list.test.org\"}"
+  :email/body-text  "Updated version of the patch.\n\ndiff --git a/feature.el b/feature.el\n--- a/feature.el\n+++ b/feature.el\n@@ -1,3 +1,3 @@\n-old\n+newer\n"}
+
+ ;; =========================================================================
+ ;; 119 — Third reply with yet another patch: should supersede 118 (and 117)
+ ;; =========================================================================
+ {:email/imap-uid    119
+  :email/source      "public-list"
+  :email/message-id  "<119@test.org>"
+  :email/subject     "Re: [PATCH] A new feature"
+  :email/from-address "dev@test.org"
+  :email/date-sent  #inst "2026-03-01T12:00:00"
+  :email/ingested-at #inst "2026-03-01T12:00:00"
+  :email/in-reply-to "<118@test.org>"
+  :email/references  "<117@test.org> <118@test.org>"
+  :email/headers-edn "{\"list-id\" \"list.test.org\"}"
+  :email/body-text  "Third version.\n\ndiff --git a/feature.el b/feature.el\n--- a/feature.el\n+++ b/feature.el\n@@ -1,3 +1,3 @@\n-old\n+newest\n"}
+
+ ;; =========================================================================
+ ;; 120 — Inline diff (no [PATCH] tag): first submission
+ ;; =========================================================================
+ {:email/imap-uid    120
+  :email/source      "public-list"
+  :email/message-id  "<120@test.org>"
+  :email/subject     "Improve error handling"
+  :email/from-address "dev@test.org"
+  :email/date-sent  #inst "2026-03-02T10:00:00"
+  :email/ingested-at #inst "2026-03-02T10:00:00"
+  :email/headers-edn "{\"list-id\" \"list.test.org\"}"
+  :email/body-text  "Here is my proposed change.\n\ndiff --git a/errors.el b/errors.el\nindex abc..def 100644\n--- a/errors.el\n+++ b/errors.el\n@@ -1,3 +1,3 @@\n-old\n+new\n"}
+
+ ;; =========================================================================
+ ;; 121 — Reply with updated diff, same subject: should supersede 120
+ ;; =========================================================================
+ {:email/imap-uid    121
+  :email/source      "public-list"
+  :email/message-id  "<121@test.org>"
+  :email/subject     "Re: Improve error handling"
+  :email/from-address "dev@test.org"
+  :email/date-sent  #inst "2026-03-02T11:00:00"
+  :email/ingested-at #inst "2026-03-02T11:00:00"
+  :email/in-reply-to "<120@test.org>"
+  :email/references  "<120@test.org>"
+  :email/headers-edn "{\"list-id\" \"list.test.org\"}"
+  :email/body-text  "Updated diff based on review.\n\ndiff --git a/errors.el b/errors.el\nindex abc..def 100644\n--- a/errors.el\n+++ b/errors.el\n@@ -1,3 +1,3 @@\n-old\n+better\n"}
 ]
