@@ -803,6 +803,42 @@
         (testing "Participant on public-list source is separate from direct"
           ;; <30@test.org> is a bug on public-list by user@test.org
           (let [p (get-participant db "public-list" "user@test.org")]
-            (is (some? p) "user@test.org should also be a participant on public-list"))))
+            (is (some? p) "user@test.org should also be a participant on public-list")))
+
+        ;; --- Emails 117-119: Same-subject patch supersession ---
+        (testing "Patch 117 superseded by same-subject reply 118"
+          (let [r117 (get-report db "<117@test.org>")]
+            (is (= :patch (:report/type r117)))
+            (is (some? (:report/closed r117)) "first patch should be closed")
+            (is (= :superseded (:report/close-reason r117)))
+            (is (= "<118@test.org>"
+                    (get-in r117 [:report/superseded-by :report/message-id])))))
+
+        (testing "Patch 118 superseded by same-subject reply 119"
+          (let [r118 (get-report db "<118@test.org>")]
+            (is (= :patch (:report/type r118)))
+            (is (some? (:report/closed r118)) "second patch should be closed")
+            (is (= :superseded (:report/close-reason r118)))
+            (is (= "<119@test.org>"
+                    (get-in r118 [:report/superseded-by :report/message-id])))))
+
+        (testing "Patch 119 is open (latest in chain)"
+          (let [r119 (get-report db "<119@test.org>")]
+            (is (= :patch (:report/type r119)))
+            (is (nil? (:report/closed r119)) "latest patch should remain open")))
+
+        ;; --- Emails 120-121: Inline diff supersession (no [PATCH] tag) ---
+        (testing "Inline diff 120 superseded by same-subject reply 121"
+          (let [r120 (get-report db "<120@test.org>")]
+            (is (= :patch (:report/type r120)))
+            (is (some? (:report/closed r120)) "first diff should be closed")
+            (is (= :superseded (:report/close-reason r120)))
+            (is (= "<121@test.org>"
+                    (get-in r120 [:report/superseded-by :report/message-id])))))
+
+        (testing "Inline diff 121 is open (latest)"
+          (let [r121 (get-report db "<121@test.org>")]
+            (is (= :patch (:report/type r121)))
+            (is (nil? (:report/closed r121)) "latest diff should remain open"))))
       (finally
         (teardown! ctx)))))

@@ -209,6 +209,39 @@
                         (str "(" (:report/message-id r) ")")
                         (str "(superseded by " new-version ")")))))))))
 
+(defn- normalize-subject
+  "Strip Re:/Fwd: prefixes and bracketed tags to get the base subject."
+  [subject]
+  (when subject
+    (-> subject
+        (str/replace #"(?i)^(\s*(Re|Fwd)\s*:\s*)+" "")
+        (str/replace #"\[[^\]]*\]\s*" "")
+        str/trim
+        str/lower-case)))
+
+(defn- close-superseded-thread-patches!
+  "When a new patch report is created in a thread, close open ancestor patch
+  reports that share the same base subject (ignoring Re:/[TAG] prefixes).
+  This handles re-sent patches/diffs without explicit version numbers."
+  [conn report-eid email-eid email nearest-report-eids]
+  (let [new-subj (normalize-subject (:email/subject email))
+        db       (d/db conn)]
+    (when (and new-subj (seq nearest-report-eids))
+      (doseq [rid nearest-report-eids]
+        (when (not= rid report-eid)
+          (let [r (d/pull db [:report/type :report/closed :report/message-id
+                              {:report/email [:email/subject]}] rid)]
+            (when (and (= :patch (:report/type r))
+                       (not (:report/closed r))
+                       (= new-subj (normalize-subject (get-in r [:report/email :email/subject]))))
+              (d/transact! conn [{:db/id rid
+                                  :report/closed email-eid
+                                  :report/close-reason :superseded
+                                  :report/superseded-by report-eid}])
+              (tracking/bump-report-updated! conn rid)
+              (log/info "Auto-closed patch" (:report/message-id r)
+                        "(superseded by same-subject thread patch)"))))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Source resolution
 ;; ---------------------------------------------------------------------------
@@ -353,6 +386,8 @@
                       (close-changes-for-release! conn (:version report-info) eid report-eid))
                     (when (and (= :patch rtype) (:version report-info) (seq nearest-eids))
                       (close-patch-previous-version! conn report-eid report-info eid nearest-eids))
+                    (when (and (= :patch rtype) (seq nearest-eids))
+                      (close-superseded-thread-patches! conn report-eid eid email nearest-eids))
                     (when (and (= :patch rtype) (:patch-seq report-info))
                       (series/manage-series! conn report-eid eid report-info from-addr parent-eids))
                     (when (= :patch rtype)
