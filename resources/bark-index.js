@@ -2,13 +2,9 @@
 // Copyright (c) 2026 Bastien Guerry <bzg@gnu.org>
 // SPDX-License-Identifier: MPL-2.0
 //
-// Expects a global `barkConfig` object with:
-//   .types          — array of report type strings
-//   .total          — total report count (open + closed)
-//   .openCount      — open report count
-//   .closedCount    — closed report count
-//   .closedJsonUrl  — URL of all-closed.json (lazy-loaded)
-//   .pageSize       — reports per page (0 = no pagination)
+// Expects global objects:
+//   barkConfig — .types, .total, .openCount, .closedCount, .closedJsonUrl, .pageSize, .sourceType
+//   barkData   — array of report objects (open reports, embedded in page)
 
 var allTypes = barkConfig.types;
 var activeTypes = {};
@@ -21,15 +17,25 @@ var onlyAwaiting = false;
 var closedLoaded = false;
 var closedLoading = false;
 
-var pageSize    = barkConfig.pageSize || 0; // 0 = show all (no pagination)
+var pageSize    = barkConfig.pageSize !== undefined ? barkConfig.pageSize : 50;
 var currentPage = 1;
+
+// Pre-compute today's timestamp for due-date calculations
+var _today = new Date();
+_today.setHours(0,0,0,0);
+var _todayMs = _today.getTime();
+
+// ── Data model ──────────────────────────────────────────────
+// All data lives in JS arrays; DOM is only used for rendering the current page.
+var _allReports = [];       // prepared report objects
+var _filteredReports = [];  // filtered + sorted subset
 
 function getSearchInput() { return document.getElementById('si'); }
 
 function setSearch(val) {
   getSearchInput().value = val;
   currentPage = 1;
-  filterRows();
+  filterReports();
   pushURL();
 }
 
@@ -92,15 +98,12 @@ function parseFutureDateRange(val) {
   var hasDots = val.indexOf('..') !== -1;
   var parts = val.split('..');
   if (!hasDots && isDuration(parts[0])) {
-    // D:2m → from today to today + duration
     return { from: localDate(new Date()), to: resolveFutureDate(parts[0]) };
   }
   if (!hasDots) {
-    // D:2026-09-01 → exact date match
     var exact = resolveFutureDate(parts[0]);
     return { from: exact, to: exact };
   }
-  // D:2026-01-01..2026-06-30 or D:2026-01-01..
   return {
     from: resolveFutureDate(parts[0] || ''),
     to:   resolveFutureDate(parts[1] || '') || localDate(new Date())
@@ -143,7 +146,6 @@ function parseClause(q) {
   var parts = q.trim().split(/\s+/).filter(Boolean);
   for (var i = 0; i < parts.length; i++) {
     var p  = parts[i];
-    // D: (uppercase) is deadline shortcut — check before lowercasing
     if (p.indexOf('D:') === 0) {
       var dr = parseFutureDateRange(p.substring(2));
       result.deadlineFrom = dr.from;
@@ -181,182 +183,12 @@ function parseClause(q) {
       result.text += (result.text ? ' ' : '') + p;
     }
   }
+  // Pre-lowercase text for matching (avoids repeated toLowerCase in tight loop)
+  if (result.text) result.text = result.text.toLowerCase();
   return result;
 }
 
-function matchClause(tr, q) {
-  var d = tr.dataset;
-  if (!activeTypes[d.type]) return false;
-  if (onlyOpen && d.closed === 'true') return false;
-  if (onlyAcked  && d.acked  === '') return false;
-  if (onlyOwned  && d.owned  === '') return false;
-  if (onlyAwaiting && d.awaiting !== 'true') return false;
-  for (var j = 0; j < fieldMap.length; j++) {
-    var f = fieldMap[j];
-    if (q[f.key].length > 0) {
-      var val = (d[f.dataAttr] || '').toLowerCase();
-      if (!matchField(val, q[f.key])) return false;
-    }
-  }
-  if (q.minPriority !== null) {
-    if (parseInt(d.priority || '0', 10) < q.minPriority) return false;
-  }
-  if (q.dateFrom && d.date < q.dateFrom) return false;
-  if (q.dateTo   && d.date > q.dateTo)   return false;
-  if (q.deadlineFrom || q.deadlineTo) {
-    if (!d.deadline) return false;
-    if (q.deadlineFrom && d.deadline < q.deadlineFrom) return false;
-    if (q.deadlineTo   && d.deadline > q.deadlineTo)   return false;
-  }
-  if (q.expiredFrom || q.expiredTo) {
-    if (!d.expired) return false;
-    if (q.expiredFrom && d.expired < q.expiredFrom) return false;
-    if (q.expiredTo   && d.expired > q.expiredTo)   return false;
-  }
-  if (q.text && d.search.indexOf(q.text.toLowerCase()) === -1) return false;
-  return true;
-}
-
-function matchRow(tr, clauses) {
-  return clauses.some(function(c) { return matchClause(tr, c); });
-}
-
-/* ── Display ───────────────────────────────────────────────── */
-
-/* Post-restripe hooks — called after stripe classes change */
-var _restripeHooks = [];
-var _cachedRows = null;
-
-function getCachedRows() {
-  if (!_cachedRows) _cachedRows = Array.from(document.querySelectorAll('tbody tr'));
-  return _cachedRows;
-}
-
-function invalidateRowCache() { _cachedRows = null; }
-
-function restripe() {
-  var rows = getCachedRows();
-  var i = 0;
-  for (var k = 0; k < rows.length; k++) {
-    var tr = rows[k];
-    if (!tr.classList.contains('hidden')) {
-      tr.classList.toggle('stripe', i++ % 2 === 1);
-    } else {
-      tr.classList.remove('stripe');
-    }
-  }
-  _restripeHooks.forEach(function(fn) { fn(); });
-}
-
-// _visibleRows holds the filtered (and sorted) rows for pagination.
-var _visibleRows = [];
-
-function filterRows() {
-  var raw = getSearchInput().value;
-  var clauses = raw.split(/\s*\|\s*/).map(parseClause);
-  var rows = getCachedRows();
-  _visibleRows = [];
-  for (var k = 0; k < rows.length; k++) {
-    var tr = rows[k];
-    if (matchRow(tr, clauses)) {
-      _visibleRows.push(tr);
-    }
-  }
-  paginate();
-}
-
-function paginate() {
-  var rows = getCachedRows();
-  var total = _visibleRows.length;
-  var visibleSet;
-
-  if (pageSize > 0 && total > pageSize) {
-    var totalPages = Math.ceil(total / pageSize);
-    if (currentPage > totalPages) currentPage = totalPages;
-    if (currentPage < 1) currentPage = 1;
-    var start = (currentPage - 1) * pageSize;
-    var end = Math.min(start + pageSize, total);
-    visibleSet = new Set(_visibleRows.slice(start, end));
-    renderPagination(currentPage, totalPages, total);
-  } else {
-    visibleSet = new Set(_visibleRows);
-    renderPagination(0, 0, total);
-  }
-
-  var i = 0;
-  for (var k = 0; k < rows.length; k++) {
-    var tr = rows[k];
-    var show = visibleSet.has(tr);
-    tr.classList.toggle('hidden', !show);
-    if (show) {
-      tr.classList.toggle('stripe', i++ % 2 === 1);
-    } else {
-      tr.classList.remove('stripe');
-    }
-  }
-  document.getElementById('status').textContent =
-    total + '/' + barkConfig.total + ' reports';
-  _restripeHooks.forEach(function(fn) { fn(); });
-}
-
-function renderPagination(page, totalPages, totalVisible) {
-  var el = document.getElementById('pagination');
-  if (!el) return;
-  if (totalPages <= 1) { el.innerHTML = ''; return; }
-
-  var html = '<nav aria-label="Pagination" style="display:flex;align-items:center;' +
-    'justify-content:center;gap:0.3rem;margin-top:0.8rem;font-size:0.85rem">';
-  html += '<button ' + (page <= 1 ? 'disabled ' : '') +
-    'onclick="goToPage(' + (page - 1) + ')" ' +
-    'style="padding:0.2rem 0.5rem;margin:0">&lsaquo;</button>';
-
-  // Show at most 7 page buttons with ellipsis
-  var pages = compactPageRange(page, totalPages, 7);
-  for (var i = 0; i < pages.length; i++) {
-    var p = pages[i];
-    if (p === '...') {
-      html += '<span style="padding:0 0.2rem">\u2026</span>';
-    } else {
-      html += '<button onclick="goToPage(' + p + ')" ' +
-        (p === page ? 'class="outline" aria-current="page" ' : '') +
-        'style="padding:0.2rem 0.5rem;margin:0;' +
-        (p === page ? 'font-weight:700;border-width:2px' : '') + '">' + p + '</button>';
-    }
-  }
-
-  html += '<button ' + (page >= totalPages ? 'disabled ' : '') +
-    'onclick="goToPage(' + (page + 1) + ')" ' +
-    'style="padding:0.2rem 0.5rem;margin:0">&rsaquo;</button>';
-  html += '</nav>';
-  el.innerHTML = html;
-}
-
-function compactPageRange(current, total, maxButtons) {
-  if (total <= maxButtons) {
-    var r = [];
-    for (var i = 1; i <= total; i++) r.push(i);
-    return r;
-  }
-  var pages = [1];
-  var left = Math.max(2, current - 1);
-  var right = Math.min(total - 1, current + 1);
-  if (left > 2) pages.push('...');
-  for (var i = left; i <= right; i++) pages.push(i);
-  if (right < total - 1) pages.push('...');
-  pages.push(total);
-  return pages;
-}
-
-function goToPage(p) {
-  currentPage = p;
-  paginate();
-  pushURL();
-  // Scroll to top of table
-  var tbl = document.querySelector('figure');
-  if (tbl) tbl.scrollIntoView({behavior: 'smooth', block: 'start'});
-}
-
-/* ── Lazy-load closed reports ──────────────────────────────── */
+/* ── Report preparation ──────────────────────────────────────── */
 
 function abbreviateName(name) {
   var parts = name.trim().split(/\s+/);
@@ -388,32 +220,193 @@ function parseIsoDate(dateRaw) {
 
 var _typeLabels = {bug:'bug',announcement:'ann',request:'req',patch:'patch',release:'rel',change:'chg'};
 
-function buildRowElement(r) {
-  var type = r.type || '', subject = r.subject || '', from = r.from || '';
-  var fromName = r['from-name'] || '', dateRaw = r['date-raw'] || r.date || '';
-  var flags = r.flags || '---', priority = r.priority || 0, replies = r.replies || 0;
-  var archivedAt = r['archived-at'] || '', messageId = r['message-id'] || '';
-  var acked = r.acked || '', owned = r.owned || '', closed = r.closed || '';
-  var urgent = r.urgent || '', important = r.important || '';
-  var deadline = r.deadline || '', topic = r.topic || '';
-  var closeReason = r['close-reason'] || '', role = r.role || '';
+function prepareReport(r) {
+  var type = r.type || '';
+  var subject = r.subject || '';
+  var from = r.from || '';
+  var fromName = r['from-name'] || '';
+  var dateRaw = r['date-raw'] || r.date || '';
+  var flags = r.flags || '---';
+  var priority = r.priority || 0;
+  var acked = r.acked || '';
+  var owned = r.owned || '';
+  var closed = r.closed || '';
+  var urgent = r.urgent || '';
+  var important = r.important || '';
+  var deadline = r.deadline || '';
+  var topic = r.topic || '';
+  var closeReason = r['close-reason'] || '';
   var expiredDate = r['expired-date'] || '';
-  var supersededBy = r['superseded-by'] || null;
-  var awaitingFlag = r.awaiting || false;
+  var awaiting = r.awaiting || false;
   var lastActivity = r['last-activity'] || '';
+  var messageId = r['message-id'] || '';
+  var source = r.source || '';
+  var replies = r.replies || 0;
 
   var isoDate = parseIsoDate(dateRaw);
-  var closed_b = flags.length >= 3 && flags[2] !== '-';
+  var closedBool = flags.length >= 3 && flags[2] !== '-';
   var author = fromName ? abbreviateName(fromName) : emailLocalPart(from);
+  var flagsScore = (acked ? 1 : 0) + (owned ? 2 : 0) + (closedBool ? 0 : 4);
+
+  var dueDays = null;
+  if (deadline) {
+    var parts = deadline.split('-');
+    if (parts.length === 3) {
+      var deadlineMs = new Date(+parts[0], +parts[1]-1, +parts[2]).getTime();
+      dueDays = Math.round((deadlineMs - _todayMs) / 86400000);
+    }
+  }
+
+  return {
+    raw: r,
+    // Filter/sort index (lowercase for string comparisons)
+    type: type,
+    closed: closedBool,
+    mid: messageId,
+    from: from.toLowerCase(),
+    subject: subject.toLowerCase(),
+    date: isoDate,
+    source: source,
+    acked: acked.toLowerCase(),
+    owned: owned.toLowerCase(),
+    closedby: closed.toLowerCase(),
+    urgent: urgent.toLowerCase(),
+    important: important.toLowerCase(),
+    priority: priority,
+    deadline: deadline,
+    expired: expiredDate,
+    topic: (topic || '').toLowerCase(),
+    awaiting: !!awaiting,
+    lastActivity: lastActivity,
+    search: (subject + ' ' + from + ' ' + author + ' ' + owned + ' ' + isoDate + ' ' + topic).toLowerCase(),
+    // Render helpers (pre-computed once)
+    isoDate: isoDate,
+    author: author,
+    flagsScore: flagsScore,
+    dueDays: dueDays,
+    replies: replies
+  };
+}
+
+/* ── Matching (operates on prepared report objects, not DOM) ── */
+
+function matchReport(rpt, q) {
+  if (!activeTypes[rpt.type]) return false;
+  if (onlyOpen && rpt.closed) return false;
+  if (onlyAcked  && rpt.acked === '') return false;
+  if (onlyOwned  && rpt.owned === '') return false;
+  if (onlyAwaiting && !rpt.awaiting) return false;
+  for (var j = 0; j < fieldMap.length; j++) {
+    var f = fieldMap[j];
+    if (q[f.key].length > 0) {
+      var val = rpt[f.dataAttr] || '';
+      if (!matchField(val, q[f.key])) return false;
+    }
+  }
+  if (q.minPriority !== null && rpt.priority < q.minPriority) return false;
+  if (q.dateFrom && rpt.date < q.dateFrom) return false;
+  if (q.dateTo   && rpt.date > q.dateTo)   return false;
+  if (q.deadlineFrom || q.deadlineTo) {
+    if (!rpt.deadline) return false;
+    if (q.deadlineFrom && rpt.deadline < q.deadlineFrom) return false;
+    if (q.deadlineTo   && rpt.deadline > q.deadlineTo)   return false;
+  }
+  if (q.expiredFrom || q.expiredTo) {
+    if (!rpt.expired) return false;
+    if (q.expiredFrom && rpt.expired < q.expiredFrom) return false;
+    if (q.expiredTo   && rpt.expired > q.expiredTo)   return false;
+  }
+  if (q.text && rpt.search.indexOf(q.text) === -1) return false;
+  return true;
+}
+
+function matchReportAny(rpt, clauses) {
+  return clauses.some(function(c) { return matchReport(rpt, c); });
+}
+
+/* ── Filtering & Sorting (in-memory, no DOM access) ──────────── */
+
+function filterReports() {
+  console.time('bark:filter');
+  var raw = getSearchInput().value;
+  var clauses = raw.split(/\s*\|\s*/).map(parseClause);
+  _filteredReports = [];
+  for (var i = 0; i < _allReports.length; i++) {
+    if (matchReportAny(_allReports[i], clauses)) {
+      _filteredReports.push(_allReports[i]);
+    }
+  }
+  // Re-apply current sort if active
+  var sortKeys = Object.keys(sortState);
+  if (sortKeys.length > 0) {
+    sortReports(sortKeys[0], sortState[sortKeys[0]]);
+  }
+  console.timeEnd('bark:filter');
+  console.time('bark:render');
+  renderPage();
+  console.timeEnd('bark:render');
+}
+
+function getSortValue(rpt, key) {
+  switch(key) {
+    case 'type':     return _typeLabels[rpt.type] || rpt.type;
+    case 'priority': return rpt.priority;
+    case 'due':      return rpt.dueDays !== null ? rpt.dueDays : 99999;
+    case 'flags':    return rpt.flagsScore;
+    case 'subject':  return rpt.lastActivity || '';
+    case 'from':     return rpt.from;
+    case 'owner':    return rpt.owned;
+    case 'date':     return rpt.date;
+    case 'replies':  return rpt.replies;
+    default:         return '';
+  }
+}
+
+function sortReports(key, dir) {
+  _filteredReports.sort(function(a, b) {
+    var av = getSortValue(a, key);
+    var bv = getSortValue(b, key);
+    if (typeof av === 'number' && typeof bv === 'number') {
+      return dir === 'asc' ? av - bv : bv - av;
+    }
+    av = String(av); bv = String(bv);
+    if (av === '' && bv !== '') return 1;
+    if (av !== '' && bv === '') return -1;
+    return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+  });
+}
+
+/* ── Rendering (builds only the current page's DOM nodes) ────── */
+
+function buildRowElement(rpt) {
+  var r = rpt.raw;
+  var type = rpt.type;
+  var subject = r.subject || '';
+  var from = r.from || '';
+  var priority = rpt.priority;
+  var acked = r.acked || '';
+  var owned = r.owned || '';
+  var closeReason = r['close-reason'] || '';
+  var role = r.role || '';
+  var archivedAt = r['archived-at'] || '';
+  var supersededBy = r['superseded-by'] || null;
+  var awaitingFlag = rpt.awaiting;
+  var expiry = r.expiry || '';
+  var isoDate = rpt.isoDate;
+  var author = rpt.author;
+
+  var closedBool = rpt.closed;
   var flagA = acked ? 'A' : '-', flagO = owned ? 'O' : '-';
-  var flagC = closeReason === 'canceled' ? 'C' : closeReason === 'expired' ? 'E' : closeReason === 'superseded' ? 'S' : closed_b ? 'R' : '-';
+  var flagC = closeReason === 'canceled' ? 'C' : closeReason === 'expired' ? 'E' : closeReason === 'superseded' ? 'S' : closedBool ? 'R' : '-';
   var flagsStr = flagA + flagO + flagC;
-  var flagsScore = (acked ? 1 : 0) + (owned ? 2 : 0) + (closed_b ? 0 : 4);
+  var flagsTitle = [flagA === 'A' ? 'Acked' : '', flagO === 'O' ? 'Owned' : '',
+                    flagC === 'C' ? 'Canceled' : flagC === 'E' ? 'Expired' : flagC === 'S' ? 'Superseded' : flagC === 'R' ? 'Resolved' : '']
+                   .filter(Boolean).join(', ');
   var label = _typeLabels[type] || type;
 
   var subjectHtml = (closeReason === 'canceled' || closeReason === 'superseded')
                   ? '<em><s>' + escHtml(subject) + '</s></em>'
-                  : closed_b ? '<em>' + escHtml(subject) + '</em>' : escHtml(subject);
+                  : closedBool ? '<em>' + escHtml(subject) + '</em>' : escHtml(subject);
   var _srcType = barkConfig.sourceType || '';
   if (archivedAt && _srcType !== 'alias' && _srcType !== 'mailbox') {
     var titleAttr = supersededBy ? ' title="Superseded by: ' + escAttr(supersededBy.subject || 'another report') + '"' : '';
@@ -470,6 +463,18 @@ function buildRowElement(r) {
     votesHtml = '<span class="vote-badge ' + vcls + '">' + escHtml(r.votes) + '</span>';
   }
 
+  // Due cell (pre-computed, no post-render DOM walk needed)
+  var dueHtml = '';
+  var dueStyle = '';
+  if (rpt.dueDays !== null) {
+    var dl = rpt.deadline;
+    var days = rpt.dueDays;
+    var dueLabel = days < 0 ? Math.abs(days) + 'd. ago' : 'In ' + days + ' d.';
+    if (days < 0) dueStyle = 'color:var(--pico-del-color, #c0392b);';
+    else if (days <= 3) dueStyle = 'color:var(--pico-ins-color, #b8860b);';
+    dueHtml = '<a href="javascript:void(0)" onclick="setSearch(\'D:' + dl + '\')" title="' + dl + '">' + dueLabel + '</a>';
+  }
+
   var priLabel = priority === 3 ? 'A' : priority === 2 ? 'B' : priority === 1 ? 'C' : ' ';
   var isMaint = role === 'maintainer' || role === 'admin';
   var authorInner = isMaint ? '<strong>' + escHtml(author) + '</strong>' : escHtml(author);
@@ -480,86 +485,146 @@ function buildRowElement(r) {
     ? '<a href="javascript:void(0)" onclick="setSearch(\'o:' + escAttr(ownerAddr) + '\')" title="' + escAttr(ownerAddr) + '">' + escHtml(emailLocalPart(ownerAddr)) + '</a>'
     : '';
 
-  var tr = document.createElement('tr');
-  tr.dataset.type = type;
-  tr.dataset.closed = String(closed_b);
-  tr.dataset.mid = messageId;
-  tr.dataset.from = from.toLowerCase();
-  tr.dataset.subject = subject.toLowerCase();
-  tr.dataset.date = isoDate;
-  tr.dataset.source = r.source || '';
-  tr.dataset.acked = acked.toLowerCase();
-  tr.dataset.owned = owned.toLowerCase();
-  tr.dataset.closedby = closed.toLowerCase();
-  tr.dataset.urgent = urgent.toLowerCase();
-  tr.dataset.important = important.toLowerCase();
-  tr.dataset.priority = String(priority);
-  tr.dataset.deadline = deadline;
-  tr.dataset.expired = expiredDate;
-  tr.dataset.topic = (topic || '').toLowerCase();
-  tr.dataset.awaiting = String(!!awaitingFlag);
-  tr.dataset.lastActivity = lastActivity;
-  tr.dataset.search = (subject + ' ' + from + ' ' + author + ' ' + ownerAddr + ' ' + isoDate + ' ' + topic).toLowerCase();
+  // Date cell with expiry handling
+  var dateHtml = '';
+  if (isoDate) {
+    var dateLink = '<a href="javascript:void(0)" onclick="setSearch(\'d:' + escAttr(isoDate) + '..\')">' + escHtml(isoDate) + '</a>';
+    if (expiry) {
+      dateHtml = '<small title="Expires on ' + escAttr(expiry) + '"><em>' + dateLink + '</em></small>';
+    } else {
+      dateHtml = '<small>' + dateLink + '</small>';
+    }
+  }
 
+  var tr = document.createElement('tr');
   tr.innerHTML =
     '<td title="Filter by type"><mark data-type="' + escAttr(type) + '" style="cursor:pointer" onclick="isolateType(\'' + escAttr(type) + '\')">' + escHtml(label) + '</mark></td>' +
-    '<td data-value="' + priority + '" style="text-align:center">' + priLabel + '</td>' +
-    '<td data-value="' + escAttr(deadline) + '" class="due-cell" title="Filter"></td>' +
-    '<td data-value="' + flagsScore + '" title="' + escAttr(flagsStr) + '" style="text-align:center;font-family:monospace;font-size:0.8rem;letter-spacing:0.1em">' + flagsStr + '</td>' +
+    '<td style="text-align:center">' + priLabel + '</td>' +
+    '<td style="text-align:center;' + dueStyle + '">' + dueHtml + '</td>' +
+    '<td title="' + escAttr(flagsTitle) + '" style="text-align:center;font-family:monospace;font-size:0.8rem;letter-spacing:0.1em">' + flagsStr + '</td>' +
     '<td>' + patchHtml + eventsHtml + textsHtml + relatedHtml + votesHtml + (awaitingFlag ? '<span title="Awaiting reply" style="font-size:0.75rem">\u231A </span>' : '') + subjectHtml + '</td>' +
     '<td class="secondary">' + authorHtml + '</td>' +
-    '<td class="secondary" data-value="' + escAttr(ownerAddr) + '" title="' + escAttr(ownerAddr) + '">' + ownerHtml + '</td>' +
-    '<td data-value="' + escAttr(isoDate) + '" title="Filter"><small>' + (isoDate ? '<a href="javascript:void(0)" onclick="setSearch(\'d:' + escAttr(isoDate) + '..\')">' + escHtml(isoDate) + '</a>' : '') + '</small></td>' +
-    '<td style="text-align:center">' + replies + '</td>';
+    '<td class="secondary" title="' + escAttr(ownerAddr) + '">' + ownerHtml + '</td>' +
+    '<td title="Filter">' + dateHtml + '</td>' +
+    '<td style="text-align:center">' + rpt.replies + '</td>';
 
   return tr;
 }
 
-function computeDueCells(container) {
-  var today = new Date();
-  today.setHours(0,0,0,0);
-  var todayMs = today.getTime();
-  var msPerDay = 86400000;
-  container.querySelectorAll('.due-cell').forEach(function(td) {
-    var dl = td.getAttribute('data-value');
-    if (!dl) return;
-    var parts = dl.split('-');
-    if (parts.length !== 3) return;
-    var deadlineMs = new Date(+parts[0], +parts[1]-1, +parts[2]).getTime();
-    var days = Math.round((deadlineMs - todayMs) / msPerDay);
-    td.setAttribute('data-value', String(days));
-    var label = days < 0 ? Math.abs(days) + 'd. ago' : 'In ' + days + ' d.';
-    td.innerHTML = '<a href="javascript:void(0)" onclick="setSearch(\'D:' + dl + '\')" title="' + dl + '">' + label + '</a>';
-    td.style.textAlign = 'center';
-    if (days < 0) td.style.color = 'var(--pico-del-color, #c0392b)';
-    else if (days <= 3) td.style.color = 'var(--pico-ins-color, #b8860b)';
-  });
+function renderPage() {
+  var total = _filteredReports.length;
+  var start, end;
+
+  if (pageSize > 0 && total > pageSize) {
+    var totalPages = Math.ceil(total / pageSize);
+    if (currentPage > totalPages) currentPage = totalPages;
+    if (currentPage < 1) currentPage = 1;
+    start = (currentPage - 1) * pageSize;
+    end = Math.min(start + pageSize, total);
+    renderPagination(currentPage, totalPages, total);
+  } else {
+    start = 0;
+    end = total;
+    renderPagination(0, 0, total);
+  }
+
+  var tbody = document.querySelector('tbody');
+  var fragment = document.createDocumentFragment();
+  for (var i = start; i < end; i++) {
+    var tr = buildRowElement(_filteredReports[i]);
+    tr.classList.toggle('stripe', (i - start) % 2 === 1);
+    fragment.appendChild(tr);
+  }
+  tbody.innerHTML = '';
+  tbody.appendChild(fragment);
+
+  document.getElementById('status').textContent =
+    total + '/' + barkConfig.total + ' reports';
+
+  // Setup subject toggles for rendered rows only (not all 2000+)
+  _setupToggles(tbody);
+  requestAnimationFrame(_showTogglesIfNeeded);
 }
+
+/* ── Pagination ──────────────────────────────────────────────── */
+
+function renderPagination(page, totalPages, totalVisible) {
+  var el = document.getElementById('pagination');
+  if (!el) return;
+  if (totalPages <= 1) { el.innerHTML = ''; return; }
+
+  var html = '<nav aria-label="Pagination" style="display:flex;align-items:center;' +
+    'justify-content:center;gap:0.3rem;margin-top:0.8rem;font-size:0.85rem">';
+  html += '<button ' + (page <= 1 ? 'disabled ' : '') +
+    'onclick="goToPage(' + (page - 1) + ')" ' +
+    'style="padding:0.2rem 0.5rem;margin:0">&lsaquo;</button>';
+
+  var pages = compactPageRange(page, totalPages, 7);
+  for (var i = 0; i < pages.length; i++) {
+    var p = pages[i];
+    if (p === '...') {
+      html += '<span style="padding:0 0.2rem">\u2026</span>';
+    } else {
+      html += '<button onclick="goToPage(' + p + ')" ' +
+        (p === page ? 'class="outline" aria-current="page" ' : '') +
+        'style="padding:0.2rem 0.5rem;margin:0;' +
+        (p === page ? 'font-weight:700;border-width:2px' : '') + '">' + p + '</button>';
+    }
+  }
+
+  html += '<button ' + (page >= totalPages ? 'disabled ' : '') +
+    'onclick="goToPage(' + (page + 1) + ')" ' +
+    'style="padding:0.2rem 0.5rem;margin:0">&rsaquo;</button>';
+  html += '</nav>';
+  el.innerHTML = html;
+}
+
+function compactPageRange(current, total, maxButtons) {
+  if (total <= maxButtons) {
+    var r = [];
+    for (var i = 1; i <= total; i++) r.push(i);
+    return r;
+  }
+  var pages = [1];
+  var left = Math.max(2, current - 1);
+  var right = Math.min(total - 1, current + 1);
+  if (left > 2) pages.push('...');
+  for (var i = left; i <= right; i++) pages.push(i);
+  if (right < total - 1) pages.push('...');
+  pages.push(total);
+  return pages;
+}
+
+function goToPage(p) {
+  currentPage = p;
+  renderPage();
+  pushURL();
+  var tbl = document.querySelector('figure');
+  if (tbl) tbl.scrollIntoView({behavior: 'smooth', block: 'start'});
+}
+
+/* ── Lazy-load closed reports ────────────────────────────────── */
 
 function loadClosedReports(callback) {
   if (closedLoaded) { if (callback) callback(); return; }
   if (closedLoading) return;
   closedLoading = true;
-  document.getElementById('status').textContent = 'Loading closed reports…';
+  document.getElementById('status').textContent = 'Loading closed reports\u2026';
   fetch(barkConfig.closedJsonUrl)
     .then(function(resp) { return resp.json(); })
     .then(function(data) {
-      if (closedLoaded) return; // guard against double resolution
+      if (closedLoaded) return;
       var reports = data.reports || [];
-      var tbody = document.querySelector('tbody');
-      var fragment = document.createDocumentFragment();
-      reports.forEach(function(r) { fragment.appendChild(buildRowElement(r)); });
-      tbody.appendChild(fragment);
-      computeDueCells(tbody);
-      reports.forEach(function(r) {
-        if (r.type && allTypes.indexOf(r.type) === -1) {
-          allTypes.push(r.type);
-          activeTypes[r.type] = true;
+      for (var i = 0; i < reports.length; i++) {
+        var rpt = prepareReport(reports[i]);
+        _allReports.push(rpt);
+        if (rpt.type && allTypes.indexOf(rpt.type) === -1) {
+          allTypes.push(rpt.type);
+          activeTypes[rpt.type] = true;
         }
-      });
+      }
       closedLoaded = true;
       closedLoading = false;
-      invalidateRowCache();
       updateStatusButtons();
       if (callback) callback();
     })
@@ -570,7 +635,7 @@ function loadClosedReports(callback) {
     });
 }
 
-/* ── URL ↔ state ───────────────────────────────────────────── */
+/* ── URL ↔ state ─────────────────────────────────────────────── */
 
 function buildURL() {
   var params = new URLSearchParams();
@@ -595,13 +660,13 @@ function buildURL() {
 function pushURL()    { history.pushState(null, '', buildURL()); }
 function replaceURL() { history.replaceState(null, '', buildURL()); }
 
-/* ── Button handlers ───────────────────────────────────────── */
+/* ── Button handlers ─────────────────────────────────────────── */
 
 function toggleType(type, btn) {
   activeTypes[type] = !activeTypes[type];
   btn.classList.toggle('outline');
   currentPage = 1;
-  filterRows();
+  filterReports();
   pushURL();
 }
 
@@ -620,7 +685,7 @@ function isolateType(type) {
   }
   syncToolbarButtons();
   currentPage = 1;
-  filterRows();
+  filterReports();
   pushURL();
 }
 
@@ -628,7 +693,7 @@ function toggleAcked(btn) {
   onlyAcked = !onlyAcked;
   btn.classList.toggle('outline');
   currentPage = 1;
-  filterRows();
+  filterReports();
   pushURL();
 }
 
@@ -636,7 +701,7 @@ function toggleOwned(btn) {
   onlyOwned = !onlyOwned;
   btn.classList.toggle('outline');
   currentPage = 1;
-  filterRows();
+  filterReports();
   pushURL();
 }
 
@@ -644,7 +709,7 @@ function toggleAwaiting(btn) {
   onlyAwaiting = !onlyAwaiting;
   btn.classList.toggle('outline');
   currentPage = 1;
-  filterRows();
+  filterReports();
   pushURL();
 }
 
@@ -653,9 +718,9 @@ function toggleOpen(btn) {
   btn.classList.toggle('outline');
   currentPage = 1;
   if (!onlyOpen && !closedLoaded) {
-    loadClosedReports(function() { filterRows(); pushURL(); });
+    loadClosedReports(function() { filterReports(); pushURL(); });
   } else {
-    filterRows();
+    filterReports();
     pushURL();
   }
 }
@@ -664,58 +729,44 @@ var _filterTimer;
 function onSearchInput() {
   clearTimeout(_filterTimer);
   currentPage = 1;
-  _filterTimer = setTimeout(function() { filterRows(); replaceURL(); }, 120);
+  _filterTimer = setTimeout(function() { filterReports(); replaceURL(); }, 120);
 }
 
-/* ── Sort ──────────────────────────────────────────────────── */
+/* ── Sort ────────────────────────────────────────────────────── */
 
 var sortState = {};
-
-function doSort(colIdx, key, dir) {
-  var tbody = document.querySelector('tbody');
-  var parent = tbody.parentNode;
-  var rows  = Array.from(tbody.querySelectorAll('tr'));
-  document.querySelectorAll('th[data-sort]').forEach(function(th) {
-    th.classList.remove('asc', 'desc');
-  });
-  document.querySelector('th[data-sort="' + key + '"]').classList.add(dir);
-  var isDate = /^\d{4}-\d{2}-\d{2}$/;
-  rows.sort(function(a, b) {
-    var ac = a.children[colIdx], bc = b.children[colIdx];
-    var av, bv;
-    if (key === 'subject') {
-      av = a.dataset.lastActivity || '';
-      bv = b.dataset.lastActivity || '';
-    } else {
-      av = (ac.getAttribute('data-value') || ac.textContent).trim().toLowerCase();
-      bv = (bc.getAttribute('data-value') || bc.textContent).trim().toLowerCase();
-    }
-    if (isDate.test(av) && isDate.test(bv))
-      return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
-    var an = parseFloat(av), bn = parseFloat(bv);
-    var aNaN = isNaN(an) || av === '', bNaN = isNaN(bn) || bv === '';
-    if (aNaN !== bNaN) return aNaN ? 1 : -1;
-    if (!aNaN && !bNaN) return dir === 'asc' ? an - bn : bn - an;
-    return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
-  });
-  parent.removeChild(tbody);
-  for (var k = 0; k < rows.length; k++) tbody.appendChild(rows[k]);
-  parent.appendChild(tbody);
-  invalidateRowCache();
-  restripe();
-}
 
 function sortTable(colIdx, key) {
   var dir = sortState[key] === 'asc' ? 'desc' : 'asc';
   sortState = {};
   sortState[key] = dir;
-  doSort(colIdx, key, dir);
+  document.querySelectorAll('th[data-sort]').forEach(function(th) {
+    th.classList.remove('asc', 'desc');
+  });
+  document.querySelector('th[data-sort="' + key + '"]').classList.add(dir);
+  sortReports(key, dir);
   currentPage = 1;
-  filterRows();
+  renderPage();
   pushURL();
 }
 
-/* ── Restore from URL ──────────────────────────────────────── */
+/* ── Status buttons ──────────────────────────────────────────── */
+
+function updateStatusButtons() {
+  var hasAcked = false, hasOwned = false, hasAwaiting = false;
+  for (var i = 0; i < _allReports.length; i++) {
+    var rpt = _allReports[i];
+    if (!hasAcked   && rpt.acked   !== '') hasAcked = true;
+    if (!hasOwned   && rpt.owned   !== '') hasOwned = true;
+    if (!hasAwaiting && rpt.awaiting) hasAwaiting = true;
+    if (hasAcked && hasOwned && hasAwaiting) break;
+  }
+  document.getElementById('btn-acked').style.display   = hasAcked   ? '' : 'none';
+  document.getElementById('btn-owned').style.display    = hasOwned   ? '' : 'none';
+  document.getElementById('btn-awaiting').style.display = hasAwaiting ? '' : 'none';
+}
+
+/* ── Restore from URL ────────────────────────────────────────── */
 
 function restoreFromURL() {
   var params = new URLSearchParams(location.search);
@@ -753,53 +804,21 @@ function restoreFromURL() {
     var th  = document.querySelector('th[data-sort="' + key + '"]');
     if (th && (dir === 'asc' || dir === 'desc')) {
       sortState[key] = dir;
-      doSort(Array.from(th.parentNode.children).indexOf(th), key, dir);
+      th.classList.add(dir);
     }
   }
 
   currentPage = params.has('page') ? parseInt(params.get('page'), 10) || 1 : 1;
 
   if (!onlyOpen && !closedLoaded) {
-    loadClosedReports(function() { filterRows(); });
+    loadClosedReports(function() { filterReports(); });
   } else {
-    filterRows();
+    filterReports();
   }
 }
 
-/* ── Conditionally hide status buttons with no matching reports ── */
-
-function updateStatusButtons() {
-  var rows = getCachedRows();
-  var hasAcked = false, hasOwned = false, hasAwaiting = false;
-  for (var i = 0; i < rows.length; i++) {
-    var d = rows[i].dataset;
-    if (!hasAcked   && d.acked   !== '') hasAcked = true;
-    if (!hasOwned   && d.owned   !== '') hasOwned = true;
-    if (!hasAwaiting && d.awaiting === 'true') hasAwaiting = true;
-    if (hasAcked && hasOwned && hasAwaiting) break;
-  }
-  document.getElementById('btn-acked').style.display   = hasAcked   ? '' : 'none';
-  document.getElementById('btn-owned').style.display    = hasOwned   ? '' : 'none';
-  document.getElementById('btn-awaiting').style.display = hasAwaiting ? '' : 'none';
-}
-
-restoreFromURL();
-updateStatusButtons();
-window.addEventListener('popstate', function() { restoreFromURL(); });
-
-document.addEventListener('keydown', function(e) {
-  if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey) {
-    var tag = (e.target.tagName || '').toLowerCase();
-    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
-    e.preventDefault();
-    getSearchInput().focus();
-  }
-});
-
-/* Compute "Due" column for server-rendered rows */
-computeDueCells(document);
-
-/* ── Subject fold/unfold ───────────────────────────────────── */
+/* ── Subject fold/unfold ─────────────────────────────────────── */
+var _setupToggles, _showTogglesIfNeeded;
 (function() {
   var style = document.createElement('style');
   style.textContent =
@@ -811,7 +830,7 @@ computeDueCells(document);
     '  background-color: inherit; }';
   document.head.appendChild(style);
 
-  function setupToggles(container) {
+  _setupToggles = function(container) {
     container.querySelectorAll('td:nth-child(5)').forEach(function(td) {
       if (td.querySelector('.unfold') || td.classList.contains('expanded')) return;
       var toggle = document.createElement('span');
@@ -830,52 +849,57 @@ computeDueCells(document);
       };
       td.appendChild(toggle);
     });
-  }
+  };
 
-  function showTogglesIfNeeded() {
+  _showTogglesIfNeeded = function() {
     var toggles = document.querySelectorAll('td:nth-child(5) .unfold');
-    // Pass 1: collect visible candidates, hide hidden rows immediately
+    // Only processes rendered rows (current page), not all 2000+
     var items = [];
     for (var i = 0; i < toggles.length; i++) {
       var toggle = toggles[i];
       var td = toggle.parentElement;
-      if (td.closest('tr').classList.contains('hidden')) {
-        toggle.style.display = 'none';
-      } else if (td.textContent.length < 75) {
-        // Short subjects never overflow 740px — skip geometry check
+      if (td.textContent.length < 75) {
         toggle.style.display = 'none';
       } else {
         items.push({toggle: toggle, td: td});
       }
     }
-    // Pass 2: batch geometry reads (single reflow)
+    // Batch geometry reads (single reflow)
     var truncated = new Array(items.length);
     for (var i = 0; i < items.length; i++) {
       truncated[i] = items[i].td.scrollWidth > items[i].td.clientWidth + 1;
     }
-    // Pass 3: batch writes
+    // Batch writes
     for (var i = 0; i < items.length; i++) {
       items[i].toggle.style.display = truncated[i] ? '' : 'none';
     }
-  }
+  };
 
-  setupToggles(document);
-  requestAnimationFrame(showTogglesIfNeeded);
-  window.addEventListener('resize', showTogglesIfNeeded);
-  _restripeHooks.push(function() {
-    // Double-rAF: let the browser paint visibility changes first,
-    // then measure geometry on already-laid-out rows
-    requestAnimationFrame(function() {
-      requestAnimationFrame(showTogglesIfNeeded);
-    });
+  window.addEventListener('resize', function() {
+    requestAnimationFrame(_showTogglesIfNeeded);
   });
-
-  var tbody = document.querySelector('tbody');
-  if (window.MutationObserver) {
-    new MutationObserver(function() {
-      setupToggles(tbody);
-      requestAnimationFrame(showTogglesIfNeeded);
-    }).observe(tbody, { childList: true });
-  }
 })();
 
+/* ── Initialize ──────────────────────────────────────────────── */
+
+// Prepare all embedded report data into indexed objects
+console.time('bark:prepare');
+for (var _i = 0; _i < barkData.length; _i++) {
+  _allReports.push(prepareReport(barkData[_i]));
+}
+console.timeEnd('bark:prepare');
+
+console.time('bark:initial-render');
+restoreFromURL();
+console.timeEnd('bark:initial-render');
+updateStatusButtons();
+window.addEventListener('popstate', function() { restoreFromURL(); });
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    var tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+    e.preventDefault();
+    getSearchInput().focus();
+  }
+});
