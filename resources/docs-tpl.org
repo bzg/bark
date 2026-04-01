@@ -8,7 +8,7 @@ roles, and receive periodic digest emails.
 
 For admin and maintainers, see the full [[https://codeberg.org/bzg/bark/src/branch/main/docs/bark-manual.org][BARK manual]].
 
-To explore BARK reports from your terminal, use [[https://codeberg.org/bzg/bone][BONE]].
+To explore BARK reports from your terminal, use [[https://codeberg.org/bzg/bone][bone]].
 
 You can also highlight BARK with [[codeberg.org/bzg/gnus-bone][gnus-bone.el]] and [[https://codeberg.org/bzg/notmuch-bone][notmuch-bone.el]].
 
