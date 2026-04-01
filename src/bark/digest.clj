@@ -177,18 +177,19 @@
 (defn- parse-version-number [v]
   (when v (when-let [[_ n] (re-find #"^v(\d+)$" v)] (parse-long n))))
 
-(defn- close-patch-previous-version! [conn report-info email-eid nearest-report-eids]
+(defn- close-patch-previous-version! [conn report-eid report-info email-eid nearest-report-eids]
   (let [new-version (:version report-info)
         new-topic   (:topic report-info)
         n           (parse-version-number new-version)]
-    (when (and n (> n 1))
-      (let [prev-version (str "v" (dec n))
-            db           (d/db conn)]
+    (when (and n (>= n 1))
+      (let [versions-to-close (cond-> #{new-version}
+                                (> n 1) (conj (str "v" (dec n))))
+            db (d/db conn)]
         (doseq [rid nearest-report-eids]
           (let [r (d/pull db [:report/type :report/version :report/topic :report/closed
                               :report/message-id] rid)]
             (when (and (= :patch (:report/type r))
-                       (= prev-version (:report/version r))
+                       (contains? versions-to-close (:report/version r))
                        (not (:report/closed r))
                        (or (and (nil? new-topic) (nil? (:report/topic r)))
                            (and new-topic
@@ -196,9 +197,10 @@
                                    (str/lower-case (or (:report/topic r) ""))))))
               (d/transact! conn [{:db/id rid
                                   :report/closed email-eid
-                                  :report/close-reason :superseded}])
+                                  :report/close-reason :superseded
+                                  :report/superseded-by report-eid}])
               (tracking/bump-report-updated! conn rid)
-              (log/info "Auto-closed [PATCH" prev-version
+              (log/info "Auto-closed [PATCH" (:report/version r)
                         (or (:report/topic r) "") "]"
                         (str "(" (:report/message-id r) ")")
                         (str "(superseded by " new-version ")")))))))))
@@ -346,7 +348,7 @@
                     (when (and (= :release rtype) (:version report-info))
                       (close-changes-for-release! conn (:version report-info) eid report-eid))
                     (when (and (= :patch rtype) (:version report-info) (seq nearest-eids))
-                      (close-patch-previous-version! conn report-info eid nearest-eids))
+                      (close-patch-previous-version! conn report-eid report-info eid nearest-eids))
                     (when (and (= :patch rtype) (:patch-seq report-info))
                       (series/manage-series! conn report-eid eid report-info from-addr parent-eids))
                     (when (= :patch rtype)

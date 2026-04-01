@@ -6,6 +6,7 @@
   "Patch series management."
   (:require [clojure.string :as str]
             [datalevin.core :as d]
+            [bark.tracking :as tracking]
             [taoensso.timbre :as log]))
 
 (defn parse-seq
@@ -55,6 +56,21 @@
 
 (defn close-series! [conn series-eid email-eid]
   (d/transact! conn [{:db/id series-eid :series/closed email-eid}]))
+
+(defn- supersede-series-reports!
+  "Close all open reports in a superseded series with reason :superseded."
+  [conn series-eid email-eid]
+  (let [db (d/db conn)
+        report-eids (d/q '[:find [?r ...]
+                           :in $ ?s
+                           :where [?s :series/patches ?r]
+                           (not [?r :report/closed _])]
+                         db series-eid)]
+    (doseq [rid report-eids]
+      (d/transact! conn [{:db/id rid
+                          :report/closed email-eid
+                          :report/close-reason :superseded}])
+      (tracking/bump-report-updated! conn rid))))
 
 (defn add-patch-to-series! [conn series-eid report-eid]
   (let [existing (d/q '[:find [?r ...]
@@ -112,6 +128,8 @@
       (when (and restart? ancestor?)
         (doseq [sid existing-series]
           (close-series! conn sid email-eid)
+          (when (:version report-info)
+            (supersede-series-reports! conn sid email-eid))
           (log/info "Auto-closed series"
                     (pr-str (:series/id (d/pull (d/db conn) [:series/id] sid)))
                     "(superseded)")))
@@ -121,6 +139,9 @@
                                        (pr-str (series-id topic from-addr m))
                                        "(expecting" m "patches)")
                              sid))]
+        (when (and restart? ancestor? (:version report-info))
+          (doseq [sid existing-series]
+            (d/transact! conn [{:db/id sid :series/superseded-by series-eid}])))
         (if (zero? n)
           (set-cover-letter! conn series-eid email-eid)
           (add-patch-to-series! conn series-eid report-eid))))))
