@@ -114,6 +114,7 @@
  :series/patches         {:db/valueType   :db.type/ref
                           :db/cardinality :db.cardinality/many}
  :series/closed          {:db/valueType :db.type/ref}
+ :series/superseded-by   {:db/valueType :db.type/ref}
 
  ;; --- Participants (anyone who creates a report or applies a command) ---
  :participant/key               {:db/valueType :db.type/string
