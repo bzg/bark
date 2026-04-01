@@ -64,6 +64,7 @@ bb export text     # text attachments (text/plain, text/x-log)
 bb export events   # ICS event files and calendar feeds
 bb export all --force  # ignore timestamps, full export
 bb export all --topics-filter "event"  # only reports with topic "event"
+bb export root         # regenerate top-level index.html only
 
 # 4. Send notification emails
 bb notify              # send due notifications
@@ -74,7 +75,11 @@ bb notify --debug      # verbose filtering diagnostics
 # 5. Test SMTP configuration
 bb test-smtp --dry-run
 
-# 6. Run tests
+# 6. Maintenance (purge orphan emails)
+bb maintenance --verbose  # show orphans
+bb maintenance --delete   # actually purge
+
+# 7. Run tests
 clj -M:test
 #+end_src
 
@@ -112,12 +117,14 @@ Read-only bb scripts live under =scripts/=:
 * bb tasks
 
 #+begin_example
-bb export [json|rss|org|html|stats|patches|text|events|all]
+bb export [json|rss|org|html|stats|patches|text|events|root|all]
        [-n source] [-p 1|2|3] [-s 1-7]   Filter by source, priority, status
        [--force]                          Ignore timestamps, full export
+       [--only-open]                      Also export -open files (all-open.json, etc.)
        [--theme THEME]                    Override CSS theme (see below)
        [--topics-filter TOPICS]           Only export matching topics (comma-separated)
 bb notify [--dry-run] [--force] [--debug] Send notification emails
+bb maintenance [--delete] [--verbose] [-n source]  Purge orphan emails
 bb test-config [path]                     Validate config.edn
 bb test-smtp [--to addr] [--dry-run]      Test SMTP configuration
 bb clean                                  Remove all files in public/
@@ -195,6 +202,7 @@ one of the three type keys:
 | =:export-reports=        | no       | Restrict exported types, e.g. =#{:bug :patch :request}=                |
 | =:topics-filter=         | no       | Only export reports with matching topics, e.g. =["event"]=              |
 | =:expiry=                | no       | Auto-close delays in days per type                                   |
+| =:awaiting-delay=        | no       | Duration before "awaiting reply" flag, e.g. ="14d"= (default: 14 days) |
 
 All state-changing actions (commands, role controls) must be sent
 through the source's public channel to ensure reproducibility — anyone

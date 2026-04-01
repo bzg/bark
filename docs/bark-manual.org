@@ -252,6 +252,28 @@ To undo:
 This retracts the supersede reference, reopens the report, and clears
 the close-reason. The related link is kept.
 
+*** Automatic supersession of patches and diffs
+
+When a patch or inline diff creates a new report in a thread where an
+earlier open patch report exists with the same base subject (ignoring
+=Re:=, =Fwd:= prefixes and =[TAG]= brackets), the new report automatically
+supersedes the previous one.  This covers re-sent patches without
+explicit version numbers.
+
+For example, in this thread:
+
+#+begin_example
+[PATCH] A new feature        ← patch report (1)
+  Re: [PATCH] A new feature  ← patch report (2), supersedes (1)
+    Re: [PATCH] A new feature  ← patch report (3), supersedes (2)
+#+end_example
+
+Only the most recent patch (3) remains open.  The same applies to
+emails containing an inline diff without a =[PATCH]= tag.
+
+Note: patches with explicit version numbers (=[PATCH v2]=) are handled
+by a separate mechanism that matches on version and topic.
+
 ** Acting as an update proxy
 
 Maintainers can also write directly to the BARK inbox to act as
@@ -521,7 +543,7 @@ Running =bb export all= generates, for each source:
 RSS feeds contain up to 50 items, most recent first.
 
 Export is incremental: only sources modified since the last export are
-re-generated. Use =bb export all --all= to force a full re-export.
+re-generated. Use =bb export all --force= to force a full re-export.
 
 You can also export a single format:
 
@@ -621,7 +643,7 @@ unacked & unowned bugs/patches/requests by anyone.
 
 ** (Un)subscribing
 
-Admins and maintainers are subscribed by default when =bb digest= runs
+Admins and maintainers are subscribed by default when the daemon runs
 for the first time. To unsubscribe, send an email to the BARK inbox
 with this body:
 
@@ -703,25 +725,24 @@ Emails that don't match any source are not stored.
 
 ** Source options
 
-| Key                    | Description                                                                |
-|------------------------+----------------------------------------------------------------------------|
-| =:name=                  | Source identifier (required)                                               |
-| =:list= / =:alias= / =:to=   | Exactly one (determines source type and header to match)                   |
-| =:admin=                 | Admin email for this source (required)                                     |
-| =:list-archive=          | URL of the list archive (shown in HTML reports)                            |
-| =:archive-format-string= | URL template for message-ids (=%s= is replaced), used when the               |
-|                        | =Archived-At= header is absent                                               |
-| =:base-url=              | Base URL where this source's public directory is served                    |
-| =:labels=                | Per-source label overrides (see [[#customising-subject-labels]])               |
-| =:commands=              | Per-source command overrides (see [[#customising-command-keywords]])           |
-| =:maintainers=           | Initial maintainers, e.g. =[{:email "dev@example.org" :since "2025-01-01"}]= |
-| =:report-types=          | Restrict detected types, e.g. =#{:bug :patch}=                               |
-| =:export-formats=        | Output formats, e.g. =["json" "rss"]=  (default: =["json" "org" "rss"]=)       |
-| =:export-reports=        | Restrict exported types, e.g. =#{:bug :patch :request}=                      |
-| =:expiry=                | Auto-close rules per report type (see below)                               |
-| =:notifications=         | #ERROR                                                                     |
-|                        |                                                                            |
-#+TBLFM: $2={:enable false}= to silence notifications for this source (default: =true=)
+| Key                    | Description                                                                  |
+|------------------------+------------------------------------------------------------------------------|
+| =:name=                  | Source identifier (required)                                                 |
+| =:list= / =:alias= / =:to=   | Exactly one (determines source type and header to match)                     |
+| =:admin=                 | Admin email for this source (required)                                       |
+| =:list-archive=          | URL of the list archive (shown in HTML reports)                              |
+| =:archive-format-string= | URL template for message-ids (=%s= is replaced), used when the                 |
+|                        | =Archived-At= header is absent                                                 |
+| =:base-url=              | Base URL where this source's public directory is served                      |
+| =:labels=                | Per-source label overrides (see [[#customising-subject-labels]])                 |
+| =:commands=              | Per-source command overrides (see [[#customising-command-keywords]])             |
+| =:maintainers=           | Initial maintainers, e.g. =[{:email "dev@example.org" :since "2025-01-01"}]=   |
+| =:report-types=          | Restrict detected types, e.g. =#{:bug :patch}=                                 |
+| =:export-formats=        | Output formats, e.g. =["json" "rss"]=  (default: =["json" "org" "rss"]=)         |
+| =:export-reports=        | Restrict exported types, e.g. =#{:bug :patch :request}=                        |
+| =:expiry=                | Auto-close rules per report type (see below)                                 |
+| =:notifications=         | ={:enabled false}= to silence notifications for this source (default: enabled) |
+| =:awaiting-delay=        | Duration before flagging "awaiting reply", e.g. ="14d"= (default: 14 days)     |
 
 The =:since= date on a maintainer entry restricts their privileges to
 emails dated on or after that date.  Omit =:since= for immediate
@@ -735,11 +756,11 @@ match configured rules.  The close reason is set to "expired".
 
 Each entry under =:expiry= maps a report type keyword to a rule map:
 
-| Rule key          | Type                       | Description                                                     |
-|-------------------+----------------------------+-----------------------------------------------------------------|
-| =:inactive-after= | string/date/=:deadline= | Duration ("30d"), ISO date ("2026-06-01"), or =:deadline=       |
-| =:max-status=      | integer                    | Don't expire if activity score > this value (0--3)              |
-| =:max-priority=    | integer                    | Don't expire if priority > this value (0--3)                    |
+| Rule key        | Type                    | Description                                             |
+|-----------------+-------------------------+---------------------------------------------------------|
+| =:inactive-after= | string/date/=:deadline= | Duration ("30d"), ISO date ("2026-06-01"), or =:deadline= |
+| =:max-status=     | integer                 | Don't expire if activity score > this value (0--3)      |
+| =:max-priority=   | integer                 | Don't expire if priority > this value (0--3)            |
 
 All rules are conjunctive: a report is only expired when *all*
 conditions are met.  Only =:inactive-after= is required; the others are
@@ -845,23 +866,24 @@ configured.
 
 All tasks are run via [[https://babashka.org/][Babashka]]:
 
-| Task                       | Description                                             |
-|----------------------------+---------------------------------------------------------|
-| =bb digest=                  | Ingest new emails and create/update reports             |
-| =bb digest --all=            | Re-process all emails from scratch                      |
-| =bb export all=              | Export all formats for all sources                      |
-| =bb export html=             | Export HTML pages only                                  |
-| =bb export json=             | Export JSON feeds only                                  |
-| =bb export rss=              | Export RSS feeds only                                   |
-| =bb export org=              | Export Org feeds only                                   |
-| =bb export stats=            | Export stats pages only                                 |
-| =bb export --page-size 100=  | Paginate HTML table (100 reports/page)                  |
-| =bb export --closed-retention 1y= | Keep only reports closed within the last year      |
-| =bb notify=                  | Send notification emails                                |
-| =bb notify --dry-run=        | Preview notifications without sending                   |
-| =bb clean=                   | Remove all generated files (=public/=, =classes/=, =docs/=)   |
-| =bb test-config=             | Validate =config.edn=                                     |
-| =bb test-smtp=               | Test SMTP configuration (=--to addr=, =--dry-run=)          |
+| Task                            | Description                                           |
+|---------------------------------+-------------------------------------------------------|
+| =bb export all=                   | Export all formats for all sources                    |
+| =bb export html=                  | Export HTML pages only                                |
+| =bb export json=                  | Export JSON feeds only                                |
+| =bb export rss=                   | Export RSS feeds only                                 |
+| =bb export org=                   | Export Org feeds only                                 |
+| =bb export stats=                 | Export stats pages only                               |
+| =bb export --page-size 100=       | Paginate HTML table (100 reports/page)                |
+| =bb export --closed-retention 1y= | Keep only reports closed within the last year         |
+| =bb export --only-open=           | Also export =-open= files (all-open.json, etc.)         |
+| =bb export root=                  | Regenerate top-level =index.html= only                  |
+| =bb notify=                       | Send notification emails                              |
+| =bb notify --dry-run=             | Preview notifications without sending                 |
+| =bb maintenance=                  | Show orphan emails (add =--delete= to purge)            |
+| =bb clean=                        | Remove all generated files (=public/=, =classes/=, =docs/=) |
+| =bb test-config=                  | Validate =config.edn=                                   |
+| =bb test-smtp=                    | Test SMTP configuration (=--to addr=, =--dry-run=)        |
 
 Export accepts flags: =-n <source>= (restrict to one source), =-p <N>=
 (minimum priority), =-s <N>= (minimum status).
@@ -972,6 +994,7 @@ sets a far-future expiry to protect it:
 By marking the bug as owned, it no longer matches =:max-status 0= and
 won't be expired by the rule.  =No expiry.= clears any per-report expiry
 date that may have been set previously.
+
 * Appendix 2: credits
 
 Many thanks to [[https://liberapay.com/yantar92/][Ihor Radchenko]] for his early feedback on the design.
