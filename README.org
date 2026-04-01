@@ -1,6 +1,6 @@
 #+title: BARK! Another Report Keeper
 
-[[https://img.shields.io/badge/versioning-intver.org-blue.svg?style=for-the-badge]]
+[[https://intver.org/][https://img.shields.io/badge/versioning-intver.org-blue.svg?style=for-the-badge]]
 
 [[bark-logo.jpg]]
 
