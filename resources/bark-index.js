@@ -410,7 +410,7 @@ function buildRowElement(rpt) {
   var _srcType = barkConfig.sourceType || '';
   if (archivedAt && _srcType !== 'alias' && _srcType !== 'mailbox') {
     var titleAttr = supersededBy ? ' title="Superseded by: ' + escAttr(supersededBy.subject || 'another report') + '"' : '';
-    subjectHtml = '<a href="' + escAttr(archivedAt) + '"' + titleAttr + '>' + subjectHtml + '</a>';
+    subjectHtml = '<a href="' + escAttr(archivedAt) + '"' + titleAttr + ' target="_blank">' + subjectHtml + '</a>';
   }
 
   var patchHtml = '';
