@@ -2,6 +2,8 @@
 
 [[bark-logo.jpg]]
 
+[[https://img.shields.io/badge/versioning-intver.org-blue.svg]]
+
 BARK is an email-driven report tracker - see the [[docs/bark-manual.org#principles][principles]].
 
 BARK monitors a single IMAP mailbox, classifies incoming emails into
@@ -234,7 +236,7 @@ running BARK on the same source sees the same state.
 
 ** Report labels (=:labels=)
 
-Controls which subject labels are recognised per report type. 
+Controls which subject labels are recognised per report type.
 
 Can be set globally at the top level or per source (per-source takes
 precedence). Only the types you specify are overridden; others keep
@@ -295,6 +297,14 @@ sending, or =bb test-smtp= to send a test email to the global admin.
 - Share any [[mailto:~bzg/barkyard@lists.sr.ht][other question or idea]]
 
 You can also [[mailto:bzg@bzg.fr][send me an email]] and support my work on [[https://liberapay.com/bzg/][liberapay]].
+
+* Intentional Versioning
+
+This project uses [[https://intver.org][Intentional Versioning]], here are the three audiences:
+
+- x: administrators who deploy, configure, and operate BARK instances
+- y: consumers of exported JSON/RSS/Org formats
+- z: contributors to the codebase
 
 * Support the Clojure(script) ecosystem
 
