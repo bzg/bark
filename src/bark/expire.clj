@@ -84,9 +84,7 @@
   re-runs within the same reduce are idempotent (they see earlier inserts)."
   [conn src report-mid now]
   (let [synth-mid (str "<bark-expired-" report-mid ">")]
-    (or (d/q '[:find ?e . :in $ ?mid
-               :where [?e :email/message-id ?mid]]
-             (d/db conn) synth-mid)
+    (or (d/entid (d/db conn) [:email/message-id synth-mid])
         (let [tempid -1
               tx (d/transact!
                   conn [{:db/id          tempid
@@ -129,9 +127,7 @@
                              (when-let [rule (parse-expiry-rule rule-raw)]
                                (rule-matches? rule report-data now))))]
                      (if should-expire?
-                       (let [report-mid (d/q '[:find ?mid . :in $ ?r
-                                               :where [?r :report/message-id ?mid]]
-                                             db-snap rid)
+                       (let [report-mid (:report/message-id (d/entity db-snap rid))
                              synth-eid  (find-or-create-expiry-email! conn src report-mid now)]
                          (d/transact! conn [[:db/add rid :report/closed synth-eid]
                                             [:db/add rid :report/closed-address "bark-system"]

@@ -319,14 +319,12 @@
   (when-let [vote (detect-vote body-text)]
     (if-not (common/sent-via-source-channel? delivery source-cfg)
       (log/info "Vote ignored (private email on public source)" from-addr)
-      (let [report-mid (d/q '[:find ?mid . :in $ ?r :where [?r :report/message-id ?mid]]
-                            (d/db conn) report-eid)
+      (let [report-mid (:report/message-id (d/entity (d/db conn) report-eid))
             vote-key   (str report-mid ":" from-addr)]
         ;; :vote/key has :db.unique/identity — if this voter already voted,
         ;; the upsert overwrites silently (first vote wins in practice,
         ;; since we only transact when key is new).
-        (when-not (d/q '[:find ?v . :in $ ?k :where [?v :vote/key ?k]]
-                       (d/db conn) vote-key)
+        (when-not (d/entid (d/db conn) [:vote/key vote-key])
           (d/transact! conn [{:vote/key    vote-key
                               :vote/report report-eid
                               :vote/email  (:db/id email)
@@ -386,7 +384,7 @@
             {:keys [set unset deadline undeadline? expiry unexpiry?
                     topic untopic? superseded-by unsuperseded?]}
             (resolve-commands permitted)
-            report-mid (d/q '[:find ?mid . :in $ ?r :where [?r :report/message-id ?mid]] db report-eid)
+            report-mid (:report/message-id (d/entity db report-eid))
             current    (d/pull db
                                (into state-attrs [:report/deadline :report/expiry
                                                   :report/close-reason :report/topic
@@ -397,9 +395,7 @@
                                report-eid)
             ;; Resolve superseded-by message-id to a report entity
             target-eid (when superseded-by
-                         (d/q '[:find ?r . :in $ ?mid
-                                :where [?r :report/message-id ?mid]]
-                              db superseded-by))
+                         (d/entid db [:report/message-id superseded-by]))
             all-tx (-> []
                        (into (build-directive-set-tx report-eid email-eid set))
                        (cond-> (and (contains? set :report/closed)

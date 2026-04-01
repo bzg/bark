@@ -83,7 +83,7 @@
   (when (and source-name from-addr)
     (let [k  (str (common/slugify source-name) ":" (str/lower-case from-addr))
           db (d/db conn)
-          e  (d/q '[:find ?e . :in $ ?k :where [?e :participant/key ?k]] db k)]
+          e  (d/entid db [:participant/key k])]
       (if e
         ;; Already a participant — stamp contributor-since if needed
         (when (and contributor?
@@ -106,7 +106,7 @@
             (log/info "New participant:" from-addr "on" source-name)))))))
 
 (defn- report-exists? [db message-id]
-  (some? (d/q '[:find ?r . :in $ ?mid :where [?r :report/message-id ?mid]] db message-id)))
+  (some? (d/entid db [:report/message-id message-id])))
 
 (defn- create-report!
   "Create a new report entity. Returns the entity id of the new report."
@@ -125,8 +125,7 @@
                          :report/version (:version report-info) :report/topic (:topic report-info)
                          :report/patch-seq (:patch-seq report-info) :report/patch-source (:patch-source report-info)
                          :report/has-ics (boolean has-ics) :report/has-text-attachments has-text})])
-    (d/q '[:find ?r . :in $ ?mid :where [?r :report/message-id ?mid]]
-         (d/db conn) message-id)))
+    (d/entid (d/db conn) [:report/message-id message-id])))
 
 (defn- add-descendant! [conn report-eid email-eid email-date from-address]
   (let [tx [[:db/add report-eid :report/descendants email-eid]]

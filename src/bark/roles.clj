@@ -38,10 +38,7 @@
       {}))
 
 (defn- roles-eid [conn source-name]
-  (d/q '[:find ?e .
-         :in $ ?src
-         :where [?e :roles/source ?src]]
-       (d/db conn) source-name))
+  (d/entid (d/db conn) [:roles/source source-name]))
 
 (defn ensure-source-roles! [conn config]
   (let [default-admin (:admin config)]
@@ -187,8 +184,7 @@
         emails (distinct (remove nil? (cons admin maints)))]
     (doseq [email emails]
       (let [k (notify-key source-name email)]
-        (when-not (d/q '[:find ?e . :in $ ?k :where [?e :notify/key ?k]]
-                       (d/db conn) k)
+        (when-not (d/entid (d/db conn) [:notify/key k])
           (d/transact! conn [{:notify/key          k
                               :notify/source       source-name
                               :notify/email        (str/lower-case email)

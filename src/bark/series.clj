@@ -51,8 +51,7 @@
                         :series/topic    (or topic "")
                         :series/sender   sender
                         :series/expected total}])
-    (d/q '[:find ?s . :in $ ?sid :where [?s :series/id ?sid]]
-         (d/db conn) sid)))
+    (d/entid (d/db conn) [:series/id sid])))
 
 (defn close-series! [conn series-eid email-eid]
   (d/transact! conn [{:db/id series-eid :series/closed email-eid}]))
