@@ -305,6 +305,46 @@
                    (filter #(text-attachment? %)
                            (:email/attachments @att-email)))))))
 
+;; ---------------------------------------------------------------------------
+;; Export context — set once at the start of each export run via
+;; init-export-context!.  Used by map-reports, dump-events!, dump-text!,
+;; and collect-vevents to access the DB and votes without threading
+;; parameters through every dump-* function.
+;; ---------------------------------------------------------------------------
+
+(def ^:private export-ctx
+  "Export context: {:db <datalevin-db> :votes {eid -> [vote-maps]} :config <config>}"
+  (atom {:db nil :votes {} :config nil}))
+
+(defn- init-export-context! [db votes config]
+  (reset! export-ctx {:db db :votes votes :config config}))
+
+(defn- ctx-db [] (:db @export-ctx))
+(defn- ctx-votes [] (:votes @export-ctx))
+(defn- ctx-config [] (:config @export-ctx))
+
+(def ^:private default-awaiting-delay-days 14)
+
+(defn- awaiting-reply?
+  "True when a report is open, last activity was by an admin/maintainer,
+  and the configured delay has elapsed."
+  [report source-name source-map maintainers-map]
+  (when (and (not (:report/closed report))
+             (:report/last-activity report)
+             (:report/last-activity-address report))
+    (let [addr    (str/lower-case (:report/last-activity-address report))
+          role    (sender-role addr source-name source-map maintainers-map)]
+      (when role
+        (let [config     (ctx-config)
+              src-cfg    (get source-map source-name)
+              delay-str  (or (:awaiting-delay src-cfg)
+                             (:awaiting-delay config))
+              delay-days (if delay-str (parse-delay delay-str) default-awaiting-delay-days)
+              ^java.util.Date last-act (:report/last-activity report)
+              elapsed-ms  (- (System/currentTimeMillis) (.getTime last-act))
+              elapsed-days (/ elapsed-ms (* 24 60 60 1000))]
+          (>= elapsed-days delay-days))))))
+
 (defn report->map [report source-map maintainers-map report-votes db]
   (let [email       (:report/email report)
         source-name (:email/source email)
@@ -315,7 +355,8 @@
         arch        (archive-url report email source-map)
         src-type    (get-in source-map [source-name :source-type])
         related     (:report/related report)
-        role        (sender-role from source-name source-map maintainers-map)]
+        role        (sender-role from source-name source-map maintainers-map)
+        awaiting?   (awaiting-reply? report source-name source-map maintainers-map)]
     (-> {:type     (name (:report/type report))
          :subject  (or (:email/subject email) "")
          :from     from
@@ -337,6 +378,7 @@
           arch                            (assoc :archived-at arch)
           (:report/deadline report)       (assoc :deadline (format-date-iso (:report/deadline report)))
           (:report/last-activity report)  (assoc :last-activity (format-date-iso (:report/last-activity report)))
+          awaiting?                      (assoc :awaiting true)
           (:report/expiry report)         (assoc :expiry (format-date-iso (:report/expiry report)))
           (:report/close-reason report)   (assoc :close-reason (name (:report/close-reason report)))
           (:report/superseded-by report)  (assoc :superseded-by
@@ -360,23 +402,6 @@
         (cond->
           (seq (:report/patches report)) (assoc :patches (report-patch-fields report)))
         (merge (report-attachment-files report att-email)))))
-
-;; ---------------------------------------------------------------------------
-;; Export context — set once at the start of each export run via
-;; init-export-context!.  Used by map-reports, dump-events!, dump-text!,
-;; and collect-vevents to access the DB and votes without threading
-;; parameters through every dump-* function.
-;; ---------------------------------------------------------------------------
-
-(def ^:private export-ctx
-  "Export context: {:db <datalevin-db> :votes {eid -> [vote-maps]}}"
-  (atom {:db nil :votes {}}))
-
-(defn- init-export-context! [db votes]
-  (reset! export-ctx {:db db :votes votes}))
-
-(defn- ctx-db [] (:db @export-ctx))
-(defn- ctx-votes [] (:votes @export-ctx))
 
 (defn- map-reports
   "Map reports through report->map, looking up votes from export context."
@@ -1211,7 +1236,8 @@
                                                   [?v :vote/voter  ?voter]
                                                   [?v :vote/email  ?e]
                                                   [?e :email/message-id ?emid]]
-                                                db)))
+                                                db))
+                                          config)
                         effective-ps    (or page-size (:page-size config))
                         cli-tf          (resolve-topics-filter topics-filter)
                         drop-cutoff     (resolve-closed-retention-date

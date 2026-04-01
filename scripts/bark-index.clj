@@ -145,7 +145,7 @@
                            replies _archived-at message-id related role source
                            acked owned closed urgent important patches events texts votes
                            deadline topic close-reason expired-date expiry
-                           _superseded-by]
+                           awaiting last-activity _superseded-by]
                     :as report}
                    source-type]
   (let [label    (get type-labels type type)
@@ -193,6 +193,8 @@
           :data-deadline    (or deadline "")
           :data-expired     (or expired-date "")
           :data-topic       (str/lower-case (or topic ""))
+          :data-awaiting    (str (boolean awaiting))
+          :data-last-activity (or last-activity "")
           :data-search      (str/lower-case (str subject " " from " " author " " owned " " iso-date " " topic))}
      [:td {:title "Filter by type"}
       [:mark {:data-type type :style "cursor:pointer"
@@ -205,6 +207,7 @@
            :style "text-align:center; font-family:monospace; font-size:0.8rem; letter-spacing:0.1em"} flags-str]
      [:td (patch-link patches) (event-link events) (text-link texts) (related-link related)
       (vote-badge votes)
+      (when awaiting [:span {:title "Awaiting reply" :style "font-size:0.75rem"} "⌚ "])
       (subject-el report closed? source-type)]
      [:td.secondary
       [:a {:href "javascript:void(0)" :title from
@@ -253,6 +256,8 @@
   .filters.status-filters button.acked-btn.outline  { background: none; color: var(--bark-btn-acked, var(--pico-primary-background)); opacity: 0.5; }
   .filters.status-filters button.owned-btn         { background: var(--bark-btn-owned, var(--pico-contrast-background)); border-color: var(--bark-btn-owned, var(--pico-contrast-border)); color: var(--bark-btn-owned-text, var(--pico-contrast-inverse)); }
   .filters.status-filters button.owned-btn.outline  { background: none; color: var(--bark-btn-owned, var(--pico-contrast-background)); opacity: 0.5; }
+  .filters.status-filters button.awaiting-btn         { background: var(--bark-btn-awaiting, #b8860b); border-color: var(--bark-btn-awaiting, #b8860b); color: var(--bark-btn-awaiting-text, #fff); }
+  .filters.status-filters button.awaiting-btn.outline  { background: none; color: var(--bark-btn-awaiting, #b8860b); opacity: 0.5; }
   input[type=search] { max-width: 25vw; min-width: 200px; margin-bottom: 0; }
   th[data-sort] { cursor: pointer; user-select: none; white-space: nowrap; }
   th[data-sort]:hover { text-decoration: underline; }
@@ -274,6 +279,7 @@
   .vote-neg { background: var(--bark-vote-neg-bg, #c0392b33); color: var(--bark-vote-neg, #c0392b); }
   .vote-zero { background: var(--bark-vote-zero-bg, #95a5a622); color: var(--bark-vote-zero, #7f8c8d); }
   .theme-toggle { cursor: pointer; background: none; border: none; font-size: 1.2rem; padding: 0.3rem; }
+  [data-theme=dark] .bark-logo svg { filter: invert(0.7); }
 
   /* Responsive: progressively hide columns — only Subject remains */
   @media (max-width: 1200px) {
@@ -346,7 +352,7 @@
                       [:th {:data-sort "priority" :onclick "sortTable(1,'priority')"} "Prio"]
                       [:th {:data-sort "due"      :onclick "sortTable(2,'due')"}      "Due"]
                       [:th {:data-sort "flags"    :onclick "sortTable(3,'flags')"}    "Flags"]
-                      [:th {:data-sort "subject"  :onclick "sortTable(4,'subject')"}  "Subject"]
+                      [:th {:data-sort "subject"  :onclick "sortTable(4,'subject')" :title "Sort by last activity"} "Subject"]
                       [:th {:data-sort "from"     :onclick "sortTable(5,'from')"}     "Author"]
                       [:th {:data-sort "owner"    :onclick "sortTable(6,'owner')"}    "Owner"]
                       [:th {:data-sort "date"     :onclick "sortTable(7,'date')"}     "Date"]
@@ -380,7 +386,7 @@
           (str "Generated " generated-at)]
          [:div.toolbar
           [:input#si {:type        "search"
-                      :placeholder "Search"
+                      :placeholder "Press / to search"
                       :oninput     "onSearchInput()"}]
           [:div.filters
            (for [t types]
@@ -396,7 +402,11 @@
             "Acked"]
            [:button#btn-owned.owned-btn.outline
             {:onclick "toggleOwned(this)" :title "Toggle visibility of owned reports"}
-            "Owned"]]]
+            "Owned"]
+           [:button#btn-awaiting.awaiting-btn.outline
+            {:onclick "toggleAwaiting(this)" :title "Show only reports awaiting reply"
+             :style "margin-left:auto"}
+            "⌚ Awaiting"]]]
          [:div#status]
          [:figure {:style "overflow-x:auto"}
           [:table

@@ -46,14 +46,15 @@
 (defn- insert-report!
   "Insert a report linked to an email. Returns report eid."
   [conn {:keys [mid type email-eid date-sent]}]
-  (let [activity (or date-sent
-                     (:email/date-sent (d/pull (d/db conn) [:email/date-sent] email-eid))
-                     (Date.))]
-    (d/transact! conn [{:report/type          type
-                         :report/email         email-eid
-                         :report/message-id    mid
-                         :report/digested-at   (Date.)
-                         :report/last-activity activity}])
+  (let [email    (d/pull (d/db conn) [:email/date-sent :email/from-address] email-eid)
+        activity (or date-sent (:email/date-sent email) (Date.))
+        from     (:email/from-address email)]
+    (d/transact! conn [(cond-> {:report/type          type
+                                :report/email         email-eid
+                                :report/message-id    mid
+                                :report/digested-at   (Date.)
+                                :report/last-activity activity}
+                         from (assoc :report/last-activity-address from))])
     (d/q '[:find ?r . :in $ ?mid :where [?r :report/message-id ?mid]]
          (d/db conn) mid)))
 
@@ -66,11 +67,14 @@
 (defn- add-descendant!
   "Add a descendant email to a report, updating :report/last-activity."
   [conn report-eid email-eid]
-  (let [email-date (:email/date-sent (d/pull (d/db conn) [:email/date-sent] email-eid))
+  (let [email      (d/pull (d/db conn) [:email/date-sent :email/from-address] email-eid)
+        email-date (:email/date-sent email)
+        from-addr  (:email/from-address email)
         current    (:report/last-activity (d/pull (d/db conn) [:report/last-activity] report-eid))
         tx         [[:db/add report-eid :report/descendants email-eid]]
         tx         (if (and email-date (or (nil? current) (.after ^Date email-date ^Date current)))
-                     (conj tx [:db/add report-eid :report/last-activity email-date])
+                     (cond-> (conj tx [:db/add report-eid :report/last-activity email-date])
+                       from-addr (conj [:db/add report-eid :report/last-activity-address from-addr]))
                      tx)]
     (d/transact! conn tx)))
 

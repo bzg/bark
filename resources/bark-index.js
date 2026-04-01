@@ -16,6 +16,7 @@ allTypes.forEach(function(t) { activeTypes[t] = true; });
 var onlyOpen    = true;
 var onlyAcked   = false;
 var onlyOwned   = false;
+var onlyAwaiting = false;
 
 var closedLoaded = false;
 var closedLoading = false;
@@ -36,10 +37,12 @@ function resetFilters() {
   onlyOpen = false;
   onlyAcked = false;
   onlyOwned = false;
+  onlyAwaiting = false;
   allTypes.forEach(function(t) { activeTypes[t] = true; });
   document.getElementById('btn-open').classList.add('outline');
   document.getElementById('btn-acked').classList.add('outline');
   document.getElementById('btn-owned').classList.add('outline');
+  document.getElementById('btn-awaiting').classList.add('outline');
   document.querySelectorAll('.filters button[data-type]').forEach(function(btn) {
     btn.classList.remove('outline');
   });
@@ -187,6 +190,7 @@ function matchClause(tr, q) {
   if (onlyOpen && d.closed === 'true') return false;
   if (onlyAcked  && d.acked  === '') return false;
   if (onlyOwned  && d.owned  === '') return false;
+  if (onlyAwaiting && d.awaiting !== 'true') return false;
   for (var j = 0; j < fieldMap.length; j++) {
     var f = fieldMap[j];
     if (q[f.key].length > 0) {
@@ -395,6 +399,8 @@ function buildRowElement(r) {
   var closeReason = r['close-reason'] || '', role = r.role || '';
   var expiredDate = r['expired-date'] || '';
   var supersededBy = r['superseded-by'] || null;
+  var awaitingFlag = r.awaiting || false;
+  var lastActivity = r['last-activity'] || '';
 
   var isoDate = parseIsoDate(dateRaw);
   var closed_b = flags.length >= 3 && flags[2] !== '-';
@@ -422,7 +428,7 @@ function buildRowElement(r) {
       : 'patches/' + r.patches[0].file.replace(/\/[^/]+$/, '/');
     var plabel = n === 1 ? '1 patch file' : n + ' patch files';
     patchHtml = '<a href="' + escAttr(href) + '" title="' + escAttr(plabel) +
-      '" aria-label="' + escAttr(plabel) + '" style="font-size:0.75rem">\uD83D\uDCCE </a>';
+      '" aria-label="' + escAttr(plabel) + '" style="font-size:0.75rem">\uD83E\uDE79 </a>';
   }
 
   var relatedHtml = '';
@@ -433,6 +439,35 @@ function buildRowElement(r) {
         '\'); return false;" title="Filter related reports" style="font-size:0.75rem">\u21B3' +
         r.related.length + ' </a>';
     }
+  }
+
+  var eventsHtml = '';
+  if (r.events && r.events.length > 0) {
+    var en = r.events.length;
+    var ehref = en === 1
+      ? 'events/' + r.events[0].file
+      : 'events/' + r.events[0].file.replace(/\/[^/]+$/, '/');
+    var elabel = en === 1 ? '1 event file' : en + ' event files';
+    eventsHtml = '<a href="' + escAttr(ehref) + '" title="' + escAttr(elabel) +
+      '" aria-label="' + escAttr(elabel) + '" style="font-size:0.75rem">\uD83D\uDCC5 </a>';
+  }
+
+  var textsHtml = '';
+  if (r.texts && r.texts.length > 0) {
+    var tn = r.texts.length;
+    var thref = tn === 1
+      ? 'text/' + r.texts[0].file
+      : 'text/' + r.texts[0].file.replace(/\/[^/]+$/, '/');
+    var tlabel = tn === 1 ? '1 text file' : tn + ' text files';
+    textsHtml = '<a href="' + escAttr(thref) + '" title="' + escAttr(tlabel) +
+      '" aria-label="' + escAttr(tlabel) + '" style="font-size:0.75rem">\uD83D\uDCC4 </a>';
+  }
+
+  var votesHtml = '';
+  if (r.votes) {
+    var vs = r.votes.split('/'), vscore = parseInt(vs[0] || '0', 10);
+    var vcls = vscore > 0 ? 'vote-pos' : vscore < 0 ? 'vote-neg' : 'vote-zero';
+    votesHtml = '<span class="vote-badge ' + vcls + '">' + escHtml(r.votes) + '</span>';
   }
 
   var priLabel = priority === 3 ? 'A' : priority === 2 ? 'B' : priority === 1 ? 'C' : ' ';
@@ -462,6 +497,8 @@ function buildRowElement(r) {
   tr.dataset.deadline = deadline;
   tr.dataset.expired = expiredDate;
   tr.dataset.topic = (topic || '').toLowerCase();
+  tr.dataset.awaiting = String(!!awaitingFlag);
+  tr.dataset.lastActivity = lastActivity;
   tr.dataset.search = (subject + ' ' + from + ' ' + author + ' ' + ownerAddr + ' ' + isoDate + ' ' + topic).toLowerCase();
 
   tr.innerHTML =
@@ -469,7 +506,7 @@ function buildRowElement(r) {
     '<td data-value="' + priority + '" style="text-align:center">' + priLabel + '</td>' +
     '<td data-value="' + escAttr(deadline) + '" class="due-cell" title="Filter"></td>' +
     '<td data-value="' + flagsScore + '" title="' + escAttr(flagsStr) + '" style="text-align:center;font-family:monospace;font-size:0.8rem;letter-spacing:0.1em">' + flagsStr + '</td>' +
-    '<td>' + patchHtml + relatedHtml + subjectHtml + '</td>' +
+    '<td>' + patchHtml + eventsHtml + textsHtml + relatedHtml + votesHtml + (awaitingFlag ? '<span title="Awaiting reply" style="font-size:0.75rem">\u231A </span>' : '') + subjectHtml + '</td>' +
     '<td class="secondary">' + authorHtml + '</td>' +
     '<td class="secondary" data-value="' + escAttr(ownerAddr) + '" title="' + escAttr(ownerAddr) + '">' + ownerHtml + '</td>' +
     '<td data-value="' + escAttr(isoDate) + '" title="Filter"><small>' + (isoDate ? '<a href="javascript:void(0)" onclick="setSearch(\'d:' + escAttr(isoDate) + '..\')">' + escHtml(isoDate) + '</a>' : '') + '</small></td>' +
@@ -523,6 +560,7 @@ function loadClosedReports(callback) {
       closedLoaded = true;
       closedLoading = false;
       invalidateRowCache();
+      updateStatusButtons();
       if (callback) callback();
     })
     .catch(function(err) {
@@ -540,9 +578,10 @@ function buildURL() {
   if (q) params.set('q', q);
   var active = allTypes.filter(function(t) { return activeTypes[t]; });
   if (active.length !== allTypes.length) params.set('types', active.join(','));
-  if (!onlyOpen)   params.set('open', '0');
-  if (onlyAcked)   params.set('acked', '1');
-  if (onlyOwned)   params.set('owned', '1');
+  if (!onlyOpen)    params.set('open', '0');
+  if (onlyAcked)    params.set('acked', '1');
+  if (onlyOwned)    params.set('owned', '1');
+  if (onlyAwaiting) params.set('awaiting', '1');
   var sortKeys = Object.keys(sortState);
   if (sortKeys.length > 0) {
     params.set('sort', sortKeys[0]);
@@ -601,6 +640,14 @@ function toggleOwned(btn) {
   pushURL();
 }
 
+function toggleAwaiting(btn) {
+  onlyAwaiting = !onlyAwaiting;
+  btn.classList.toggle('outline');
+  currentPage = 1;
+  filterRows();
+  pushURL();
+}
+
 function toggleOpen(btn) {
   onlyOpen = !onlyOpen;
   btn.classList.toggle('outline');
@@ -635,8 +682,14 @@ function doSort(colIdx, key, dir) {
   var isDate = /^\d{4}-\d{2}-\d{2}$/;
   rows.sort(function(a, b) {
     var ac = a.children[colIdx], bc = b.children[colIdx];
-    var av = (ac.getAttribute('data-value') || ac.textContent).trim().toLowerCase();
-    var bv = (bc.getAttribute('data-value') || bc.textContent).trim().toLowerCase();
+    var av, bv;
+    if (key === 'subject') {
+      av = a.dataset.lastActivity || '';
+      bv = b.dataset.lastActivity || '';
+    } else {
+      av = (ac.getAttribute('data-value') || ac.textContent).trim().toLowerCase();
+      bv = (bc.getAttribute('data-value') || bc.textContent).trim().toLowerCase();
+    }
     if (isDate.test(av) && isDate.test(bv))
       return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
     var an = parseFloat(av), bn = parseFloat(bv);
@@ -687,6 +740,9 @@ function restoreFromURL() {
   onlyOwned = params.get('owned') === '1';
   document.getElementById('btn-owned').classList.toggle('outline', !onlyOwned);
 
+  onlyAwaiting = params.get('awaiting') === '1';
+  document.getElementById('btn-awaiting').classList.toggle('outline', !onlyAwaiting);
+
   document.querySelectorAll('th[data-sort]').forEach(function(th) {
     th.classList.remove('asc', 'desc');
   });
@@ -710,7 +766,25 @@ function restoreFromURL() {
   }
 }
 
+/* ── Conditionally hide status buttons with no matching reports ── */
+
+function updateStatusButtons() {
+  var rows = getCachedRows();
+  var hasAcked = false, hasOwned = false, hasAwaiting = false;
+  for (var i = 0; i < rows.length; i++) {
+    var d = rows[i].dataset;
+    if (!hasAcked   && d.acked   !== '') hasAcked = true;
+    if (!hasOwned   && d.owned   !== '') hasOwned = true;
+    if (!hasAwaiting && d.awaiting === 'true') hasAwaiting = true;
+    if (hasAcked && hasOwned && hasAwaiting) break;
+  }
+  document.getElementById('btn-acked').style.display   = hasAcked   ? '' : 'none';
+  document.getElementById('btn-owned').style.display    = hasOwned   ? '' : 'none';
+  document.getElementById('btn-awaiting').style.display = hasAwaiting ? '' : 'none';
+}
+
 restoreFromURL();
+updateStatusButtons();
 window.addEventListener('popstate', function() { restoreFromURL(); });
 
 document.addEventListener('keydown', function(e) {

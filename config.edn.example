@@ -185,6 +185,14 @@
  ;;                   "Unexpiry"     "No expiry"
  ;;                   "Unsuperseded" "Not superseded"}
 
+ ;; Awaiting-reply delay (optional) — flag reports where the last email
+ ;; was sent by an admin or maintainer and no reply has been received
+ ;; within this duration.  Reports matching this condition are shown
+ ;; with an ⌚ indicator in the HTML dashboard.
+ ;; Accepts a duration ("14d", "2w", "1m").  Default: "14d".
+ ;; Can be set globally or per source (per source overrides global).
+ ;; :awaiting-delay "14d"
+
  ;; Maintenance (optional) — settings for `bb maintenance`.
  ;; Run only when the JVM daemon is stopped.
  ;;   :orphan-retention — keep orphan emails for this long, then delete.
