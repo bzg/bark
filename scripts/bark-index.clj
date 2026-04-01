@@ -37,202 +37,6 @@
                   "patch" "patch" "release" "rel" "change" "chg"})
 
 ;; ---------------------------------------------------------------------------
-;; Date normalization
-;; ---------------------------------------------------------------------------
-
-(def ^:private month-numbers
-  {"Jan" "01" "Feb" "02" "Mar" "03" "Apr" "04"
-   "May" "05" "Jun" "06" "Jul" "07" "Aug" "08"
-   "Sep" "09" "Oct" "10" "Nov" "11" "Dec" "12"})
-
-(defn- parse-to-iso-date [s]
-  (when (seq s)
-    (let [s (str/trim s)]
-      (or
-       (when (and (>= (count s) 10)
-                  (re-matches #"\d{4}-\d{2}-\d{2}.*" s))
-         (subs s 0 10))
-       (when-let [[_ mon day year]
-                  (re-find #"^\w+ (\w+) (\d+) .* (\d{4})$" s)]
-         (when-let [m (month-numbers mon)]
-           (str year "-" m "-" (format "%02d" (parse-long day)))))
-       ""))))
-
-;; ---------------------------------------------------------------------------
-;; Hiccup helpers
-;; ---------------------------------------------------------------------------
-
-(defn- subject-el [{:strs [subject archived-at close-reason superseded-by]} closed? source-type]
-  (let [canceled?    (and closed? (= close-reason "canceled"))
-        expired?     (and closed? (= close-reason "expired"))
-        superseded?  (and closed? (= close-reason "superseded"))
-        inner     (cond (or canceled? superseded?) [:em [:s subject]]
-                        closed?   [:em subject]
-                        :else     subject)
-        linkable? (and archived-at
-                       (not (#{"alias" "mailbox"} source-type)))]
-    (if linkable?
-      [:a (cond-> {:href archived-at}
-             canceled?    (assoc :title "Canceled")
-             expired?     (assoc :title "Expired")
-             superseded?  (assoc :title (str "Superseded by: "
-                                             (get superseded-by "subject" "another report")))
-             (and closed? (not canceled?) (not expired?) (not superseded?))
-             (assoc :title "Resolved"))
-       inner]
-      inner)))
-
-(defn- related-mids [related]
-  (when (seq related)
-    (str/join "," (keep #(get % "message-id") related))))
-
-(defn- related-link [related]
-  (when-let [mids (related-mids related)]
-    [:a.secondary {:href "#"
-                   :onclick (str "showRelated('m:" mids "'); return false;")
-                   :title "Filter related reports"
-                   :style "font-size:0.75rem"}
-     (str "↳" (count related) " ")]))
-
-(defn- patch-link [patches]
-  (when (seq patches)
-    (let [n    (count patches)
-          href (if (= 1 n)
-                 (str "patches/" (get (first patches) "file"))
-                 (let [f (get (first patches) "file")]
-                   ;; directory: strip filename from first patch path
-                   (str "patches/" (str/replace f #"/[^/]+$" "/"))))
-          label (if (= 1 n) "1 patch file" (str n " patch files"))]
-      [:a {:href href :title label :aria-label label
-           :style "font-size:0.75rem"} "🩹 "])))
-
-(defn- event-link [events]
-  (when (seq events)
-    (let [n    (count events)
-          href (if (= 1 n)
-                 (str "events/" (get (first events) "file"))
-                 (let [f (get (first events) "file")]
-                   (str "events/" (str/replace f #"/[^/]+$" "/"))))
-          label (if (= 1 n) "1 event file" (str n " event files"))]
-      [:a {:href href :title label :aria-label label
-           :style "font-size:0.75rem"} "📅 "])))
-
-(defn- text-link [texts]
-  (when (seq texts)
-    (let [n    (count texts)
-          href (if (= 1 n)
-                 (str "text/" (get (first texts) "file"))
-                 (let [f (get (first texts) "file")]
-                   (str "text/" (str/replace f #"/[^/]+$" "/"))))
-          label (if (= 1 n) "1 text file" (str n " text files"))]
-      [:a {:href href :title label :aria-label label
-           :style "font-size:0.75rem"} "📄 "])))
-
-(defn- vote-badge
-  "Render a small vote badge with score/total and colored background."
-  [votes]
-  (when votes
-    (let [[score-s] (str/split votes #"/")
-          score (parse-long (or score-s "0"))
-          cls   (cond (pos? score) "vote-pos"
-                      (neg? score) "vote-neg"
-                      :else        "vote-zero")]
-      [:small {:class (str "vote-badge " cls)
-               :title (str "Vote: " votes)}
-       votes])))
-
-(defn- report-row [{:strs [type subject from from-name date date-raw flags priority
-                           replies _archived-at message-id related role source
-                           acked owned closed urgent important patches events texts votes
-                           deadline topic close-reason expired-date expiry
-                           awaiting last-activity _superseded-by]
-                    :as report}
-                   source-type]
-  (let [label    (get type-labels type type)
-        closed?  (and flags (>= (count flags) 3) (= (nth flags 2 \-) \C))
-        iso-date (or (parse-to-iso-date (or date-raw date "")) "")
-        author-display (if (seq from-name)
-                         (let [parts (str/split (str/trim from-name) #"\s+")]
-                           (if (>= (count parts) 2)
-                             (str (first parts) " " (subs (second parts) 0 (min 2 (count (second parts)))) ".")
-                             from-name))
-                         (first (str/split (or from "") #"@")))
-        author   (or (when (seq from-name) from-name) from)
-        flag-a   (if (seq acked) "A" "-")
-        flag-o   (if (seq owned) "O" "-")
-        flag-c   (cond (= close-reason "canceled")   "C"
-                       (= close-reason "expired")    "E"
-                       (= close-reason "superseded") "S"
-                       closed?                       "R"
-                       :else                         "-")
-        flags-str (str flag-a flag-o flag-c)
-        ;; Numeric score for sorting: acked=1, owned=2, open=4 (closed=0)
-        flags-score (+ (if (seq acked) 1 0)
-                       (if (seq owned) 2 0)
-                       (if closed? 0 4))
-        flags-title (str/join ", " (cond-> []
-                                     (= flag-a "A") (conj "Acked")
-                                     (= flag-o "O") (conj "Owned")
-                                     (= flag-c "C") (conj "Canceled")
-                                     (= flag-c "E") (conj "Expired")
-                                     (= flag-c "S") (conj "Superseded")
-                                     (= flag-c "R") (conj "Resolved")))]
-    [:tr {:data-type        type
-          :data-closed      (str closed?)
-          :data-mid         (or message-id "")
-          :data-from        (str/lower-case (or from ""))
-          :data-subject     (str/lower-case (or subject ""))
-          :data-date        iso-date
-          :data-source      (or source "")
-          :data-acked       (str/lower-case (or acked ""))
-          :data-owned       (str/lower-case (or owned ""))
-          :data-closedby    (str/lower-case (or closed ""))
-          :data-urgent      (str/lower-case (or urgent ""))
-          :data-important   (str/lower-case (or important ""))
-          :data-priority    (str (or priority 0))
-          :data-deadline    (or deadline "")
-          :data-expired     (or expired-date "")
-          :data-topic       (str/lower-case (or topic ""))
-          :data-awaiting    (str (boolean awaiting))
-          :data-last-activity (or last-activity "")
-          :data-search      (str/lower-case (str subject " " from " " author " " owned " " iso-date " " topic))}
-     [:td {:title "Filter by type"}
-      [:mark {:data-type type :style "cursor:pointer"
-              :onclick (str "isolateType('" type "')")}
-       label]]
-     [:td {:data-value (str (or priority 0)) :style "text-align:center"}
-      (case (str (or priority 0)) "3" "A" "2" "B" "1" "C" " ")]
-     [:td {:data-value (or deadline "") :class "due-cell" :title "Filter"} ""]
-     [:td {:data-value (str flags-score) :title flags-title
-           :style "text-align:center; font-family:monospace; font-size:0.8rem; letter-spacing:0.1em"} flags-str]
-     [:td (patch-link patches) (event-link events) (text-link texts) (related-link related)
-      (vote-badge votes)
-      (when awaiting [:span {:title "Awaiting reply" :style "font-size:0.75rem"} "⌚ "])
-      (subject-el report closed? source-type)]
-     [:td.secondary
-      [:a {:href "javascript:void(0)" :title from
-           :onclick (str "setSearch('f:" from "')")}
-       (if (#{"maintainer" "admin"} role) [:strong author-display] author-display)]]
-     [:td.secondary {:data-value (or owned "") :title (or owned "")}
-      (when (seq owned)
-        (let [local (first (str/split owned #"@"))]
-          [:a {:href "javascript:void(0)"
-               :title owned
-               :onclick (str "setSearch('o:" owned "')")}
-           local]))]
-     [:td {:data-value iso-date :title "Filter"}
-      (when (seq iso-date)
-        (if expiry
-          [:small {:title (str "Expires on " expiry)}
-           [:em [:a {:href "javascript:void(0)"
-                     :onclick (str "setSearch('d:" iso-date "..')")}
-                 iso-date]]]
-          [:small [:a {:href "javascript:void(0)"
-                       :onclick (str "setSearch('d:" iso-date "..')")}
-                  iso-date]]))]
-     [:td {:style "text-align:center"} (or replies 0)]]))
-
-;; ---------------------------------------------------------------------------
 ;; CSS (inlined)
 ;; ---------------------------------------------------------------------------
 
@@ -317,7 +121,7 @@
 
 (def ^:private index-js (slurp "resources/bark-index.js"))
 
-(defn page-js [types-json total open-count closed-count source-type page-size]
+(defn page-js [types-json total open-count closed-count source-type page-size reports-json]
   (wrap-js (str "var barkConfig = {types:" types-json
                 ",total:" total
                 ",openCount:" open-count
@@ -328,6 +132,7 @@
                 (when page-size
                   (str ",pageSize:" page-size))
                 "};\n"
+                "var barkData = " reports-json ";\n"
                 index-js "\n"
                 theme-toggle-js)))
 
@@ -411,11 +216,10 @@
          [:figure {:style "overflow-x:auto"}
           [:table
            [:thead [:tr (seq cols)]]
-           [:tbody
-            (for [r reports]
-              (report-row r source-type))]]]
+           [:tbody {:id "data"}]]]
          [:div#pagination]
-         [:script (h/raw (page-js types-json total open-count closed-count source-type page-size))]]
+         [:script (h/raw (page-js types-json total open-count closed-count source-type page-size
+                                  (json/generate-string reports)))]]
         (bark-footer {:ical has-ical?})]]))))
 
 ;; ---------------------------------------------------------------------------
