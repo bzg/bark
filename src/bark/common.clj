@@ -21,7 +21,7 @@
 
 (def bark-format
   "BARK export format version. Bump when the JSON/Org export shape changes."
-  "0.5.0")
+  "0.6.0")
 
 (def bark-schema
   (edn/read-string (slurp (io/resource "bark-schema.edn"))))
@@ -479,7 +479,7 @@
                               :source-type stype}
                            (select-keys src [:list :alias :to :commands :labels :notifications
                                              :archive-format-string :list-archive :base-url
-                                             :maintainers])
+                                             :maintainers :awaiting-delay])
                            (when global-st {:global-labels global-st})
                            (when global-cmd {:global-commands global-cmd})
                            (when global-aliases {:command-aliases global-aliases})
@@ -527,7 +527,7 @@
     {:report/superseded-by [:report/message-id {:report/email [:email/subject]}]}
     :report/has-ics :report/has-text-attachments
     :report/deadline :report/expiry
-    :report/last-activity :report/descendants :report/digested-at :report/updated-at
+    :report/last-activity :report/last-activity-address :report/descendants :report/digested-at :report/updated-at
     {:report/related [:report/type :report/message-id
                       {:report/email [:email/headers-edn]}]}
     {:report/series [:series/id :series/expected :series/closed

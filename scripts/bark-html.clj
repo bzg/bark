@@ -127,6 +127,7 @@
          (str "<link rel=\"alternate\" type=\"application/rss+xml\" "
               "title=\"BARK Reports RSS\" href=\"" rss-href "\">\n"))
        "<title>" title "</title>\n"
+       "<style>\n[data-theme=dark] .bark-logo svg { filter: invert(0.7); }\n</style>\n"
        (when css (str "<style>\n" css "\n</style>\n"))
        (or extra-head "")
        "</head>\n"))
@@ -163,9 +164,9 @@
   `current` is the id of the active page (bolded)."
   [title current]
   [:nav
-   [:ul [:li {:style "display:flex;align-items:center;gap:0.5rem"}
-         (h/raw bark-logo-svg)
-         [:strong title]]]
+   [:ul [:li [:a {:href "index.html" :style "display:flex;align-items:center;gap:0.5rem;text-decoration:none;color:inherit"}
+              [:span.bark-logo (h/raw bark-logo-svg)]
+              [:strong title]]]]
    [:ul
     (for [[id label href] nav-pages]
       [:li (if (= id current)

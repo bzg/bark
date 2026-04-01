@@ -121,19 +121,23 @@
                          :report/message-id message-id :report/digested-at (Date.)
                          :report/last-activity (or email-date (Date.))}
                         (remove (comp nil? val))
-                        {:report/version (:version report-info) :report/topic (:topic report-info)
+                        {:report/last-activity-address (:email/from-address email)
+                         :report/version (:version report-info) :report/topic (:topic report-info)
                          :report/patch-seq (:patch-seq report-info) :report/patch-source (:patch-source report-info)
                          :report/has-ics (boolean has-ics) :report/has-text-attachments has-text})])
     (d/q '[:find ?r . :in $ ?mid :where [?r :report/message-id ?mid]]
          (d/db conn) message-id)))
 
-(defn- add-descendant! [conn report-eid email-eid email-date]
+(defn- add-descendant! [conn report-eid email-eid email-date from-address]
   (let [tx [[:db/add report-eid :report/descendants email-eid]]
         tx (if email-date
              (let [current (:report/last-activity
                             (d/pull (d/db conn) [:report/last-activity] report-eid))]
-               (if (or (nil? current) (.after ^Date email-date ^Date current))
-                 (conj tx [:db/add report-eid :report/last-activity email-date])
+               (if (or (nil? current) (not (.before ^Date email-date ^Date current)))
+                 (-> tx
+                     (conj [:db/add report-eid :report/last-activity email-date])
+                     (cond-> from-address
+                       (conj [:db/add report-eid :report/last-activity-address from-address])))
                  tx))
              tx)]
     (d/transact! conn tx)))
@@ -315,7 +319,7 @@
                     nearest-eids (find-nearest-report email db)]
                 (when (and (seq parent-eids) via-channel?)
                   (doseq [rid parent-eids]
-                    (add-descendant! conn rid eid (:email/date-sent email)))
+                    (add-descendant! conn rid eid (:email/date-sent email) from-addr))
                   (let [;; Batch-fetch type and source for all nearest reports in one query.
                         rid-info (when (seq nearest-eids)
                                    (reduce (fn [m [r t s]] (assoc m r [t s]))

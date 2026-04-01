@@ -83,7 +83,8 @@
                           :source/list-archive :source/commands :source/labels
                           :source/bark-path :source/export-reports
                           :source/report-types :source/maintainers
-                          :source/notifications :source/expiry])
+                          :source/notifications :source/expiry
+                          :source/awaiting-delay])
          exactly-one-source-type?))
 
 (s/def :bark/sources
@@ -217,6 +218,10 @@
 (s/def :bark/logging (s/keys :opt-un [:logging/file :logging/level :logging/max-size
                                       :logging/backlog :logging/email]))
 
+;; Awaiting-reply delay
+(s/def :bark/awaiting-delay (s/and ::non-blank-string #(re-matches #"\d+[dwm]" %)))
+(s/def :source/awaiting-delay :bark/awaiting-delay)
+
 ;; Maintenance
 (s/def :maintenance/orphan-retention (s/or :date (s/and ::non-blank-string #(re-matches #"\d{4}-\d{2}-\d{2}" %))
                                           :str (s/and ::non-blank-string #(re-seq #"\d+\s*[ydwm]" %))))
@@ -228,6 +233,7 @@
           :opt-un [:bark/ingest :bark/notifications :bark/labels
                    :bark/commands :bark/command-aliases
                    :bark/export-reports :bark/report-types
+                   :bark/awaiting-delay
                    :bark/expiry :bark/logging :bark/maintenance]))
 
 ;; ---------------------------------------------------------------------------
