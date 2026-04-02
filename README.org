@@ -302,9 +302,9 @@ You can also [[mailto:bzg@bzg.fr][send me an email]] and support my work on [[ht
 
 This project uses [[https://intver.org][Intentional Versioning]], here are the three audiences:
 
-- =x= : administrators who deploy, configure, and operate BARK instances
-- =y= : consumers of the exported JSON/RSS/Org formats
-- =z= : contributors to the codebase
+- =Users= : administrators who deploy, configure, and operate BARK instances
+- =Integrators= : consumers of the exported JSON/RSS/Org formats
+- =Maintainers= : maintainers of the codebase
 
 * Support the Clojure(script) ecosystem
 
