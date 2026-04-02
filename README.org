@@ -20,6 +20,8 @@ BARK reports can be read with other tools:
 
 For a more extensive documentation, please read the [[docs/bark-manual.org][BARK manual]].
 
+[[bark-capture.jpg]]
+
 * How it works
 
 - *JVM daemon* (=clojure -M:run=) --- Connects to IMAP, stores emails,
