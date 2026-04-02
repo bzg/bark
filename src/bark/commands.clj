@@ -95,10 +95,15 @@
 ;; Pattern compilation
 ;; ---------------------------------------------------------------------------
 
-(defn- trigger-pattern [& words]
+(def ^:private strict-punct-actions
+  "Trigger actions that must NOT accept bare whitespace as a separator
+  (too many false positives with ordinary prose, e.g. \"Important note:\")."
+  #{:urgent :important})
+
+(defn- trigger-pattern [strict? & words]
   (re-pattern
    (str "(?m)^(" (str/join "|" (map #(java.util.regex.Pattern/quote %) words))
-        ")(?:" trailing-punct "|$)")))
+        ")(?:" trailing-punct (when-not strict? "|\\s") "|$)")))
 
 (defn- directive-pattern [{:keys [syntax param]}]
   (let [qs (java.util.regex.Pattern/quote syntax)]
@@ -112,7 +117,10 @@
        (str "^" qs trailing-punct "?\\s*$")))))
 
 (defn- compile-trigger-words [action-map]
-  (update-vals action-map #(apply trigger-pattern %)))
+  (into {}
+        (map (fn [[k words]]
+               [k (apply trigger-pattern (contains? strict-punct-actions k) words)]))
+        action-map))
 
 (def default-compiled-commands (compile-trigger-words common/default-commands))
 
@@ -148,7 +156,7 @@
   (when (seq closed-words)
     (let [pattern (re-pattern
                    (str "(?m)^(" (str/join "|" (map #(java.util.regex.Pattern/quote %) closed-words))
-                        ")(?:" trailing-punct "|$)"))]
+                        ")(?:" trailing-punct "|\\s|$)"))]
       (when-let [[_ matched] (re-find pattern body-text)]
         (get common/close-reasons matched :resolved)))))
 

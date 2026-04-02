@@ -133,12 +133,20 @@ replying with:
 ** Updating reports
 
 State changes occur when a reply in the same thread contains a
-case-sensitive command keyword at the start of a line, followed by a
-punctuation mark (=.= =,= =;= =:= =?= =!=). 
+case-sensitive command keyword at the start of a line, followed by
+punctuation (=.= =,= =;= =:= =?= =!=), whitespace, or end of line.
 
 For example, a reply to a bug report with a line starting with
-=Confirmed.= marks the bug as "acked"; a reply to a patch with a line
-starting with =Applied.= marks the patch as "closed".
+=Confirmed.= marks the bug as "acked"; a reply to a patch starting
+with =Applied in master= or just =Applied= marks the patch as "closed".
+
+The =Urgent= and =Important= keywords are stricter: they require
+punctuation or end of line (not whitespace), because words like
+"Important" appear too often in ordinary prose (e.g. "Important
+note:").
+
+Email signatures (delimited by =-- = per RFC 3676) are stripped before
+scanning, so command-like words in signatures are ignored.
 
 See the [[#command-keywords][command keywords]] below for the full list.
 
@@ -366,8 +374,10 @@ turn take precedence over the built-in defaults.
 * Commands
 
 State changes are detected by command keywords within the body of a
-response down the thread, at the beginning of the line, followed by a
-punctuation mark (=.= =,= =;= =:= =?= =!=):
+response down the thread, at the beginning of the line, followed by
+punctuation (=.= =,= =;= =:= =?= =!=), whitespace, or end of line.
+Exception: =Urgent= and =Important= only accept punctuation or end of
+line (see [[#priority-commands][priority commands]]).
 
 ** Status commands
 
@@ -398,11 +408,18 @@ urgent, and important states. Announcements, releases, and changes can
 only be closed.
 
 ** Priority commands
+:PROPERTIES:
+:CUSTOM_ID: priority-commands
+:END:
 
 | Command keyword | Effect on report  |
 |-----------------+-------------------|
 | =Urgent=          | Mark as urgent    |
 | =Important=       | Mark as important |
+
+Unlike other triggers, =Urgent= and =Important= require punctuation
+(=.= =,= =;= =:= =?= =!=) or end of line --- a bare space is not
+accepted, to avoid false positives from ordinary prose.
 
 These values are used to calculate the "priority" sum:
 
