@@ -52,7 +52,7 @@ And Eve, the maintainer, concludes:
 : 
 : Fixed in commit0 bc12c0c, thanks to both of you!
 
-What happened here?  
+What happened here?
 
 1. Someone reported a bug
 2. Someone else confirmed it
@@ -148,7 +148,7 @@ note:").
 Email signatures (delimited by =-- = per RFC 3676) are stripped before
 scanning, so command-like words in signatures are ignored.
 
-See the [[#command-keywords][command keywords]] below for the full list.
+See the [[#all-commands][complete list of commands]] below for the full list.
 
 ** Voting on requests
 
@@ -225,8 +225,8 @@ Like =Deadline:=, the value can be an ISO date or a duration.  The
 expiry date appears in JSON exports (=:expiry=), Org output (=:EXPIRY:=
 property), and the HTML index (as a tooltip on the date column).
 
-To automatically expire reports at their deadline, use =:inactive-after :deadline=
-in the source-level expiry rules (see [[*Report expiry][Report expiry]]).
+To automatically expire reports at their deadline, use =:inactive-after
+:deadline= in the source-level expiry rules (see [[#report-expiry]["Report expiry"]]).
 
 To remove a per-report expiry:
 
@@ -317,6 +317,9 @@ state.  Notification preferences are personal and can be sent
 privately.
 
 * Report types
+  :PROPERTIES:
+  :CUSTOM_ID: report-types
+  :END:
 
 Reports are detected from email subject labels:
 
@@ -350,6 +353,9 @@ one. This allows version superseding: sending =[PATCH parser v2 0/3]=
 closes the earlier =v1= series for that topic.
 
 ** Customising subject labels
+   :PROPERTIES:
+   :CUSTOM_ID: customising-subject-labels
+   :END:
 
 The subject labels in the table above are the built-in defaults. You
 can override them globally or per source in =config.edn= via =:labels=.
@@ -408,9 +414,9 @@ urgent, and important states. Announcements, releases, and changes can
 only be closed.
 
 ** Priority commands
-:PROPERTIES:
-:CUSTOM_ID: priority-commands
-:END:
+  :PROPERTIES:
+  :CUSTOM_ID: priority-commands
+  :END:
 
 | Command keyword | Effect on report  |
 |-----------------+-------------------|
@@ -443,6 +449,9 @@ You can use multiple keywords in the same email, one per line.
 : Important.
 
 ** Customising commands
+   :PROPERTIES:
+   :CUSTOM_ID: customising-commands
+   :END:
 
 You can customize command keywords globally or per source.
 
@@ -479,6 +488,10 @@ Per-source settings take precedence over the global =:commands=, which
 in turn take precedence over the built-in defaults.
 
 ** All commands
+   :PROPERTIES:
+   :CUSTOM_ID: all-commands
+   :END:
+
 
 /Commands/ can all be sent publicly, by users or maintainers.
 
@@ -700,6 +713,9 @@ Like role controls, =Notify:= controls are only processed from direct
 emails, not from the mailing list.
 
 * Config
+  :PROPERTIES:
+  :CUSTOM_ID: config
+  :END:
 
 BARK is configured via a =config.edn= file. Use =bb test-config= to
 validate it.
@@ -751,8 +767,8 @@ Emails that don't match any source are not stored.
 | =:archive-format-string= | URL template for message-ids (=%s= is replaced), used when the                 |
 |                        | =Archived-At= header is absent                                                 |
 | =:base-url=              | Base URL where this source's public directory is served                      |
-| =:labels=                | Per-source label overrides (see [[#customising-subject-labels]])                 |
-| =:commands=              | Per-source command overrides (see [[#customising-command-keywords]])             |
+| =:labels=                | Per-source label overrides (see [[#customising-subject-labels]["Customising subject labels"]])                |
+| =:commands=              | Per-source command overrides (see [[#customising-commands]["Customising commands"]])                    |
 | =:maintainers=           | Initial maintainers, e.g. =[{:email "dev@example.org" :since "2025-01-01"}]=   |
 | =:report-types=          | Restrict detected types, e.g. =#{:bug :patch}=                                 |
 | =:export-formats=        | Output formats, e.g. =["json" "rss"]=  (default: =["json" "org" "rss"]=)         |
@@ -767,6 +783,9 @@ effect on all emails.  Note: the admin is NOT automatically a
 maintainer.
 
 ** Report expiry
+   :PROPERTIES:
+   :CUSTOM_ID: report-expiry
+   :END:
 
 Any report type can be automatically closed when its age and state
 match configured rules.  The close reason is set to "expired".
@@ -819,9 +838,9 @@ and owned (since expiry candidates are always open reports):
 This can be set globally or per source (per-source takes precedence).
 
 In addition to these source-level rules, maintainers can set a
-per-report expiry date using the =Expiry:= directive (see [[*Setting an expiry date][Setting an
-expiry date]]).  A per-report expiry overrides the source-level rules:
-if a report has an explicit expiry date, only that date is checked.
+per-report expiry date using the =Expiry:= directive (see [[#report-expiry]["Report
+expiry"]]). A per-report expiry overrides the source-level rules: if a
+report has an explicit expiry date, only that date is checked.
 
 ** Ingestion
 
@@ -913,17 +932,17 @@ A contributor submits a patch series:
 
 : From: carol@dev.org
 : Subject: [PATCH parser v1 0/2] Refactor tokenizer
-:
+: 
 : Cover letter: this series splits the tokenizer into two passes.
 
 : From: carol@dev.org
 : Subject: [PATCH parser v1 1/2] Extract lexer phase
-:
+: 
 : <inline patch>
 
 : From: carol@dev.org
 : Subject: [PATCH parser v1 2/2] Add second pass
-:
+: 
 : <inline patch>
 
 BARK creates a patch series (3 emails, cover + 2 patches).  The
@@ -931,16 +950,16 @@ maintainer reviews and asks for changes:
 
 : From: eve@project.org
 : Subject: Re: [PATCH parser v1 1/2] Extract lexer phase
-:
+: 
 : > <inline patch>
-:
+: 
 : The naming is confusing, can you rename foo to bar?
 
 Carol resubmits as v2:
 
 : From: carol@dev.org
 : Subject: [PATCH parser v2 0/2] Refactor tokenizer
-:
+: 
 : v2: renamed foo to bar as requested.
 
 BARK automatically closes the v1 series and opens a new v2 series.
@@ -948,7 +967,7 @@ The maintainer applies:
 
 : From: eve@project.org
 : Subject: Re: [PATCH parser v2 0/2] Refactor tokenizer
-:
+: 
 : Applied, thanks!
 
 The v2 series is now closed (resolved).
@@ -961,7 +980,7 @@ by replying to the list:
 : From: eve@project.org
 : To: bugs-list@project.org
 : Subject: Re: [BUG] Crash on startup
-:
+: 
 : Confirmed.
 : Owned.
 : Urgent.
@@ -971,7 +990,7 @@ Later, the fix lands:
 : From: eve@project.org
 : To: bugs-list@project.org
 : Subject: Re: [BUG] Crash on startup
-:
+: 
 : Fixed in commit abc123, thanks for reporting!
 
 ** Role management
@@ -981,7 +1000,7 @@ The admin adds a new maintainer (via the list):
 : From: admin@project.org
 : To: bugs-list@project.org
 : Subject: Role update
-:
+: 
 : Add maintainer: newdev@project.org
 
 Only the admin can =Remove maintainer:=.
@@ -1003,7 +1022,7 @@ sets a far-future expiry to protect it:
 : From: eve@project.org
 : To: bugs-list@project.org
 : Subject: Re: [BUG] Legacy encoding issue
-:
+: 
 : This is still relevant, keeping it open.
 : No expiry.
 : Owned.
