@@ -88,11 +88,22 @@
      (and (str/includes? body-text "BEGIN:VCALENDAR")
           (str/includes? body-text "BEGIN:VEVENT")))))
 
+(defn strip-signature
+  "Remove the RFC 3676 email signature (everything after a line
+  containing exactly \"-- \") from plain-text body."
+  [text]
+  (if-let [idx (str/index-of text "\n-- \n")]
+    (subs text 0 idx)
+    text))
+
 (defn email-body-text
   "Return the plain-text body of an email, preferring :email/body-text
-  over :email/body-text-from-html."
+  over :email/body-text-from-html.  The RFC 3676 signature delimiter
+  (\"-- \") is stripped so that signature lines are not scanned for
+  commands."
   [email]
-  (or (:email/body-text email) (:email/body-text-from-html email)))
+  (some-> (or (:email/body-text email) (:email/body-text-from-html email))
+          strip-signature))
 
 (defn ensure-set
   "Coerce a Datalevin cardinality/many value to a set.
