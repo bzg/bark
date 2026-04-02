@@ -14,7 +14,8 @@
   :run
   {:main-opts ["-m" "bark.main"]
    :jvm-opts  ["--add-opens=java.base/java.nio=ALL-UNNAMED"
-              "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"]}
+              "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
+              "--enable-native-access=ALL-UNNAMED"]}
 
   ;; Tests
   :test
@@ -24,7 +25,8 @@
    :main-opts   ["-m" "cognitect.test-runner"]
    :exec-fn     bark.test-runner/test
    :jvm-opts    ["--add-opens=java.base/java.nio=ALL-UNNAMED"
-                 "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"]}
+                 "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
+                 "--enable-native-access=ALL-UNNAMED"]}
 
   ;; Build uberjar
   :uberdeps
@@ -32,4 +34,5 @@
    :replace-paths []
    :main-opts     ["-m" "uberdeps.uberjar"]
    :jvm-opts      ["--add-opens=java.base/java.nio=ALL-UNNAMED"
-              "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"]}}}
+              "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
+              "--enable-native-access=ALL-UNNAMED"]}}}
