@@ -1,8 +1,8 @@
 #+title: BARK! Another Report Keeper
 
-[[https://intver.org/][https://img.shields.io/badge/versioning-intver.org-blue.svg?style=for-the-badge]]
-
 [[bark-logo.jpg]]
+[[https://www.repostatus.org/#active][https://img.shields.io/badge/status-active-brightgreen.svg?style=for-the-badge]]
+[[https://intver.org/][https://img.shields.io/badge/versioning-intver.org-blue.svg?style=for-the-badge]]
 
 BARK is an email-driven report tracker - see the [[docs/bark-manual.org#principles][principles]].
 
