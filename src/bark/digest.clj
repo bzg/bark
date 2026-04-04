@@ -393,4 +393,14 @@
                       (let [patches (detect/build-patch-entities email)]
                         (when (seq patches)
                           (d/transact! conn [{:db/id report-eid :report/patches patches}])
-                          (log/info (count patches) "patch file(s) stored"))))))))))))
+                          (log/info (count patches) "patch file(s) stored")
+                          ;; Auto-create a single-member series for multi-attachment
+                          ;; patches without an explicit N/M sequence.
+                          (when (and (nil? (:patch-seq report-info))
+                                     (> (count patches) 1))
+                            (let [series-eid (series/create-series!
+                                              conn (:topic report-info) from-addr 1)]
+                              (series/add-patch-to-series! conn series-eid report-eid)
+                              (series/close-series! conn series-eid eid)
+                              (log/info "Auto-created single-member series for"
+                                        (count patches) "patch attachments"))))))))))))))

@@ -270,7 +270,8 @@
 (defn- report-series-fields [series]
   (when series
     (let [patches (:series/patches series)]
-      {:received (count patches)
+      {:id       (:series/id series)
+       :received (count patches)
        :expected (:series/expected series)
        :complete (= (count patches) (:series/expected series))
        :closed   (some? (:series/closed series))})))
@@ -550,7 +551,8 @@
                       (when-let [v (:version m)]  (str " version:" v))
                       (when-let [t (:topic m)]    (str " topic:" t))
                       (when-let [d (:deadline m)] (str " deadline:" d))
-                      (when-let [d (:expiry m)]   (str " expiry:" d))))]
+                      (when-let [d (:expiry m)]   (str " expiry:" d))
+                      (when-let [s (:series-summary m)] (str " series:" s))))]
     (str "    <item>\n"
          "      <title>" title "</title>\n"
          (when (seq link)
@@ -565,14 +567,57 @@
          "      <description>" desc "</description>\n"
          "    </item>")))
 
+(defn- series-status-summary
+  "Build a short status summary for a folded series, e.g. \"3/5 acked, 1 open\".
+  Excludes cover letters (patch-seq starting with \"0/\") from the tally."
+  [members]
+  (let [patches (remove #(str/starts-with? (or (:patch-seq %) "") "0/") members)
+        counts (reduce (fn [acc m]
+                         (let [flags (or (:flags m) "---")]
+                           (cond
+                             (not= \- (nth flags 2 \-)) (update acc :closed (fnil inc 0))
+                             (not= \- (nth flags 0 \-)) (update acc :acked (fnil inc 0))
+                             :else                       (update acc :open (fnil inc 0)))))
+                       {} patches)
+        parts (cond-> []
+                (:acked counts) (conj (str (:acked counts) " acked"))
+                (:closed counts) (conj (str (:closed counts) " closed"))
+                (:open counts) (conj (str (:open counts) " open")))]
+    (str/join ", " parts)))
+
+(defn- fold-series
+  "Fold report maps by series: replace each series group with a single
+  representative (cover letter preferred, else first patch by patch-seq).
+  Non-series reports pass through unchanged.  Preserves original order
+  (the representative appears at the position of the first group member)."
+  [report-maps]
+  (let [groups (group-by #(get-in % [:series :id]) report-maps)
+        seen   (volatile! #{})]
+    (reduce (fn [acc m]
+              (let [sid (get-in m [:series :id])]
+                (if-not sid
+                  (conj acc m)
+                  (if (contains? @seen sid)
+                    acc ;; already emitted representative
+                    (let [_ (vswap! seen conj sid)
+                          members (get groups sid)
+                          sorted  (sort-by #(parse-long (re-find #"^\d+" (or (:patch-seq %) "0"))) members)
+                          cover   (first (filter #(str/starts-with? (or (:patch-seq %) "") "0/") sorted))
+                          rep     (or cover (first sorted))
+                          summary (series-status-summary members)]
+                      (conj acc (assoc rep :series-summary summary)))))))
+            [] report-maps)))
+
 (defn dump-rss!
   "Dump reports as RSS 2.0 for a single source.
-  Only includes open reports, capped at rss-limit (50)."
+  Only includes open reports, capped at rss-limit (50).
+  Patch series are folded: one item per series."
   ([reports out-dir source-name source-map maintainers-map]
    (dump-rss! reports out-dir source-name source-map maintainers-map "all.xml" "reports"))
   ([reports out-dir source-name source-map maintainers-map basename feed-label]
-   (let [capped   (->> reports open-reports (take rss-limit))
-         data     (map-reports capped source-map maintainers-map)
+   (let [open     (->> reports open-reports (take (* rss-limit 20)))
+         data     (map-reports open source-map maintainers-map)
+         data     (->> data fold-series (take rss-limit))
          items    (str/join "\n" (map report->rss-item data))
          list-url (get-in source-map [source-name :list-archive] "")
          filename (str out-dir "/" basename)]
