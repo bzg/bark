@@ -29,6 +29,8 @@ var _todayMs = _today.getTime();
 // All data lives in JS arrays; DOM is only used for rendering the current page.
 var _allReports = [];       // prepared report objects
 var _filteredReports = [];  // filtered + sorted subset
+var _displayList = [];      // after series folding (what pagination sees)
+var _seriesFoldState = {};  // series-id → true (folded) | false (unfolded); null = auto
 
 function getSearchInput() { return document.getElementById('si'); }
 
@@ -257,8 +259,11 @@ function prepareReport(r) {
     }
   }
 
+  var seriesId = (r.series && r.series.id) ? r.series.id : '';
+
   return {
     raw: r,
+    seriesId: seriesId,
     // Filter/sort index (lowercase for string comparisons)
     type: type,
     closed: closedBool,
@@ -341,6 +346,7 @@ function filterReports() {
   if (sortKeys.length > 0) {
     sortReports(sortKeys[0], sortState[sortKeys[0]]);
   }
+  buildDisplayList();
   console.timeEnd('bark:filter');
   console.time('bark:render');
   renderPage();
@@ -374,6 +380,140 @@ function sortReports(key, dir) {
     if (av !== '' && bv === '') return -1;
     return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
   });
+}
+
+/* ── Series folding ─────────────────────────────────────────── */
+
+function seriesStatusSummary(members) {
+  var acked = 0, closed = 0, open = 0;
+  for (var i = 0; i < members.length; i++) {
+    var seq = members[i].raw['patch-seq'] || '';
+    if (seq.indexOf('0/') === 0) continue; // skip cover letter
+    var flags = members[i].raw.flags || '---';
+    if (flags.length >= 3 && flags[2] !== '-') closed++;
+    else if (flags[0] !== '-') acked++;
+    else open++;
+  }
+  var parts = [];
+  if (acked)  parts.push(acked + ' acked');
+  if (closed) parts.push(closed + ' closed');
+  if (open)   parts.push(open + ' open');
+  return parts.join(', ');
+}
+
+function isSeriesHomogeneous(members) {
+  var refCat = null;
+  for (var i = 0; i < members.length; i++) {
+    var seq = members[i].raw['patch-seq'] || '';
+    if (seq.indexOf('0/') === 0) continue; // skip cover letter
+    var f = members[i].raw.flags || '---';
+    var cat = f.length >= 3 && f[2] !== '-' ? 'C' : f[0] !== '-' ? 'A' : 'O';
+    if (refCat === null) { refCat = cat; continue; }
+    if (cat !== refCat) return false;
+  }
+  return true;
+}
+
+function buildDisplayList() {
+  var groups = {};
+  var order = [];
+  var result = [];
+
+  for (var i = 0; i < _filteredReports.length; i++) {
+    var rpt = _filteredReports[i];
+    var sid = rpt.seriesId;
+    if (!sid) {
+      result.push(rpt);
+    } else {
+      if (!groups[sid]) {
+        groups[sid] = [];
+        order.push({sid: sid, insertAt: result.length});
+        result.push(null); // placeholder
+      }
+      groups[sid].push(rpt);
+    }
+  }
+
+  // Process each series group
+  for (var j = 0; j < order.length; j++) {
+    var entry = order[j];
+    var sid = entry.sid;
+    var members = groups[sid];
+    // Sort by patch-seq within group (numeric, not lexicographic)
+    members.sort(function(a, b) {
+      var sa = a.raw['patch-seq'] || '0/0', sb = b.raw['patch-seq'] || '0/0';
+      var na = parseInt(sa, 10) || 0, nb = parseInt(sb, 10) || 0;
+      return na - nb;
+    });
+    // Determine fold state: manual override or auto (homogeneous = folded)
+    var manualState = _seriesFoldState[sid];
+    var folded;
+    if (manualState === true || manualState === false) {
+      folded = manualState;
+    } else {
+      folded = isSeriesHomogeneous(members);
+    }
+    // Pick representative: cover letter (0/n) or first patch
+    var rep = members[0];
+    for (var k = 0; k < members.length; k++) {
+      var seq = members[k].raw['patch-seq'] || '';
+      if (seq.indexOf('0/') === 0) { rep = members[k]; break; }
+    }
+    // Build representative entry
+    var repEntry = Object.create(rep);
+    repEntry._isSeries = true;
+    repEntry._seriesFolded = folded;
+    repEntry._seriesId = sid;
+    repEntry._seriesMembers = members;
+    repEntry._seriesSummary = seriesStatusSummary(members);
+
+    // Replace placeholder with representative + optionally expanded members
+    var insert = [repEntry];
+    if (!folded) {
+      for (var k = 0; k < members.length; k++) {
+        if (members[k] !== rep) {
+          var child = Object.create(members[k]);
+          child._isSeriesChild = true;
+          child._seriesId = sid;
+          insert.push(child);
+        }
+      }
+    }
+    // Splice into result at the placeholder position
+    result.splice(entry.insertAt, 1);
+    for (var k = insert.length - 1; k >= 0; k--) {
+      result.splice(entry.insertAt, 0, insert[k]);
+    }
+    // Adjust subsequent placeholder positions
+    var delta = insert.length - 1;
+    for (var m = j + 1; m < order.length; m++) {
+      if (order[m].insertAt > entry.insertAt) {
+        order[m].insertAt += delta;
+      }
+    }
+  }
+
+  _displayList = result;
+}
+
+function toggleSeriesFold(sid) {
+  // Find current effective state (manual override or auto-computed)
+  var manual = _seriesFoldState[sid];
+  var effective;
+  if (manual === true || manual === false) {
+    effective = manual;
+  } else {
+    // Compute auto state: find this series in _displayList
+    for (var i = 0; i < _displayList.length; i++) {
+      if (_displayList[i]._seriesId === sid && _displayList[i]._isSeries) {
+        effective = _displayList[i]._seriesFolded;
+        break;
+      }
+    }
+  }
+  _seriesFoldState[sid] = !effective;
+  buildDisplayList();
+  renderPage();
 }
 
 /* ── Rendering (builds only the current page's DOM nodes) ────── */
@@ -411,6 +551,25 @@ function buildRowElement(rpt) {
   if (archivedAt && _srcType !== 'alias' && _srcType !== 'mailbox') {
     var titleAttr = supersededBy ? ' title="Superseded by: ' + escAttr(supersededBy.subject || 'another report') + '"' : '';
     subjectHtml = '<a href="' + escAttr(archivedAt) + '"' + titleAttr + ' target="_blank">' + subjectHtml + '</a>';
+  }
+
+  var seriesHtml = '';
+  if (rpt._isSeries && rpt._seriesMembers && rpt._seriesMembers.length > 1) {
+    var arrow = rpt._seriesFolded ? '\u25B6' : '\u25BC';
+    var stitle = rpt._seriesFolded ? 'Unfold series' : 'Fold series';
+    var patchCount = 0;
+    if (rpt._seriesMembers) {
+      for (var si = 0; si < rpt._seriesMembers.length; si++) {
+        var ps = rpt._seriesMembers[si].raw['patch-seq'] || '';
+        if (ps.indexOf('0/') !== 0) patchCount++;
+      }
+    }
+    var slabel = '[' + patchCount + ' patch' + (patchCount !== 1 ? 'es' : '') + ': ' + (rpt._seriesSummary || '') + ']';
+    var safeSid = rpt._seriesId.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    seriesHtml = '<a href="javascript:void(0)" onclick="toggleSeriesFold(\'' +
+      escAttr(safeSid) + '\'); return false;" title="' + escAttr(stitle) +
+      '" style="font-size:0.75rem;margin-right:0.3em;text-decoration:none">' +
+      arrow + ' <small>' + escHtml(slabel) + '</small></a>';
   }
 
   var patchHtml = '';
@@ -502,7 +661,7 @@ function buildRowElement(rpt) {
     '<td style="text-align:center">' + priLabel + '</td>' +
     '<td style="text-align:center;' + dueStyle + '">' + dueHtml + '</td>' +
     '<td title="' + escAttr(flagsTitle) + '" style="text-align:center;font-family:monospace;font-size:0.8rem;letter-spacing:0.1em">' + flagsStr + '</td>' +
-    '<td>' + patchHtml + eventsHtml + textsHtml + relatedHtml + votesHtml + (awaitingFlag ? '<span title="Awaiting reply" style="font-size:0.75rem">\u231A </span>' : '') + subjectHtml + '</td>' +
+    '<td>' + seriesHtml + patchHtml + eventsHtml + textsHtml + relatedHtml + votesHtml + (awaitingFlag ? '<span title="Awaiting reply" style="font-size:0.75rem">\u231A </span>' : '') + subjectHtml + '</td>' +
     '<td class="secondary">' + authorHtml + '</td>' +
     '<td class="secondary" title="' + escAttr(ownerAddr) + '">' + ownerHtml + '</td>' +
     '<td title="Filter">' + dateHtml + '</td>' +
@@ -512,7 +671,7 @@ function buildRowElement(rpt) {
 }
 
 function renderPage() {
-  var total = _filteredReports.length;
+  var total = _displayList.length;
   var start, end;
 
   if (pageSize > 0 && total > pageSize) {
@@ -531,15 +690,18 @@ function renderPage() {
   var tbody = document.querySelector('tbody');
   var fragment = document.createDocumentFragment();
   for (var i = start; i < end; i++) {
-    var tr = buildRowElement(_filteredReports[i]);
+    var tr = buildRowElement(_displayList[i]);
     tr.classList.toggle('stripe', (i - start) % 2 === 1);
+    if (_displayList[i]._isSeriesChild) {
+      tr.style.backgroundColor = 'var(--pico-card-background-color, #f8f9fa)';
+    }
     fragment.appendChild(tr);
   }
   tbody.innerHTML = '';
   tbody.appendChild(fragment);
 
   document.getElementById('status').textContent =
-    total + '/' + barkConfig.total + ' reports';
+    _filteredReports.length + '/' + barkConfig.total + ' reports';
 
   // Setup subject toggles for rendered rows only (not all 2000+)
   _setupToggles(tbody);
@@ -745,6 +907,7 @@ function sortTable(colIdx, key) {
   });
   document.querySelector('th[data-sort="' + key + '"]').classList.add(dir);
   sortReports(key, dir);
+  buildDisplayList();
   currentPage = 1;
   renderPage();
   pushURL();

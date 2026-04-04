@@ -142,5 +142,6 @@
           (doseq [sid existing-series]
             (d/transact! conn [{:db/id sid :series/superseded-by series-eid}])))
         (if (zero? n)
-          (set-cover-letter! conn series-eid email-eid)
+          (do (set-cover-letter! conn series-eid email-eid)
+              (d/transact! conn [{:db/id report-eid :report/series series-eid}]))
           (add-patch-to-series! conn series-eid report-eid))))))
