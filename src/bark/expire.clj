@@ -95,6 +95,33 @@
                          :email/subject      (str "Auto-expired: " report-mid)}])]
           (get (:tempids tx) tempid)))))
 
+(defn should-expire?
+  "Decide whether a report candidate should be expired.
+  Returns truthy when the report matches either its explicit expiry
+  or the source-level expiry rules."
+  [report-data source-map src rtype now]
+  (let [explicit-expiry (:report/expiry report-data)]
+    (if explicit-expiry
+      (.before ^Date explicit-expiry now)
+      (let [expiry-cfg (:expiry (get source-map src))
+            rule-raw   (get expiry-cfg (keyword rtype))]
+        (when-let [rule (parse-expiry-rule rule-raw)]
+          (rule-matches? rule report-data now))))))
+
+(defn filter-expirable
+  "Given candidates and a DB snapshot, return a seq of
+  {:rid :rtype :src :report-mid} maps for reports that should expire."
+  [candidates db-snap source-map now]
+  (keep (fn [[rid rtype src]]
+          (let [report-data (d/pull db-snap [:report/acked :report/owned
+                                             :report/urgent :report/important
+                                             :report/expiry :report/deadline
+                                             :report/last-activity] rid)]
+            (when (should-expire? report-data source-map src rtype now)
+              {:rid rid :rtype rtype :src src
+               :report-mid (:report/message-id (d/entity db-snap rid))})))
+        candidates))
+
 (defn expire-reports!
   "Close open reports whose age and state match the :expiry rules for
   their source. Sets :report/close-reason to :expired."
@@ -107,35 +134,17 @@
                           [?e :email/source ?src]
                           (not [?r :report/closed _])]
                         (d/db conn))
-        ;; Immutable snapshot for all read-only checks.
-        ;; Write operations (find-or-create-expiry-email!) deliberately use (d/db conn)
-        ;; to see their own prior inserts within this reduce.
-        db-snap (d/db conn)
-        expired (reduce
-                 (fn [n [rid rtype src]]
-                   (let [report-data (d/pull db-snap [:report/acked :report/owned
-                                                      :report/urgent :report/important
-                                                      :report/expiry :report/deadline
-                                                      :report/last-activity] rid)
-                         explicit-expiry (:report/expiry report-data)
-                         ;; Per-report expiry takes precedence over source-level rules
-                         should-expire?
-                         (if explicit-expiry
-                           (.before ^Date explicit-expiry now)
-                           (let [expiry-cfg (:expiry (get source-map src))
-                                 rule-raw   (get expiry-cfg (keyword rtype))]
-                             (when-let [rule (parse-expiry-rule rule-raw)]
-                               (rule-matches? rule report-data now))))]
-                     (if should-expire?
-                       (let [report-mid (:report/message-id (d/entity db-snap rid))
-                             synth-eid  (find-or-create-expiry-email! conn src report-mid now)]
-                         (d/transact! conn [[:db/add rid :report/closed synth-eid]
-                                            [:db/add rid :report/closed-address "bark-system"]
-                                            [:db/add rid :report/close-reason :expired]])
-                         (tracking/bump-report-updated! conn rid)
-                         (log/info "Expired" (name rtype) "report:" report-mid)
-                         (inc n))
-                       n)))
-                 0 candidates)]
+        db-snap  (d/db conn)
+        to-expire (filter-expirable candidates db-snap source-map now)
+        expired  (reduce
+                  (fn [n {:keys [rid rtype src report-mid]}]
+                    (let [synth-eid (find-or-create-expiry-email! conn src report-mid now)]
+                      (d/transact! conn [[:db/add rid :report/closed synth-eid]
+                                         [:db/add rid :report/closed-address "bark-system"]
+                                         [:db/add rid :report/close-reason :expired]])
+                      (tracking/bump-report-updated! conn rid)
+                      (log/info "Expired" (name rtype) "report:" report-mid)
+                      (inc n)))
+                  0 to-expire)]
     (when (pos? expired)
       (log/info "Expired" expired "report(s)."))))
