@@ -219,18 +219,20 @@
 
 (def ^:private one-day-ms (* 24 60 60 1000))
 
-(def ^:private last-expire-ms (atom 0))
-
 (defn- maybe-expire!
-  "Run expire-reports! if at least one day has elapsed since the last run."
-  [db-conn source-map]
+  "Run expire-reports! if at least one day has elapsed since `last-ms`.
+  Returns the updated timestamp on success, or `last-ms` on failure
+  so that the next cycle retries."
+  [db-conn source-map last-ms]
   (let [now (System/currentTimeMillis)]
-    (when (> (- now @last-expire-ms) one-day-ms)
+    (if (> (- now last-ms) one-day-ms)
       (try
         (expire/expire-reports! db-conn source-map)
-        (reset! last-expire-ms now)
+        now
         (catch Exception e
-          (log/error e "Expire failed:" (or (.getMessage e) (str (class e)))))))))
+          (log/error e "Expire failed:" (or (.getMessage e) (str (class e))))
+          last-ms))
+      last-ms)))
 
 ;; ---------------------------------------------------------------------------
 ;; IDLE mode with reconnection
@@ -268,7 +270,8 @@
   (let [folder      (or (:folder imap-cfg) "INBOX")
         fetch-opts  (parse-initial-fetch (or (:initial-fetch ingest-cfg) 50))
         ingest-opts (select-keys ingest-cfg [:max-size :max-attachment-size])]
-    (loop [backoff-ms 1000]
+    (loop [backoff-ms 1000
+           last-expire-ms 0]
       (when-not (shutting-down?)
         (let [config     (or (common/load-config config-path) {})
               source-map (common/build-source-map config)
@@ -277,21 +280,24 @@
           (if-not conn
             (do (log/error "IMAP connection failed, retrying in" (/ backoff-ms 1000) "s")
                 (Thread/sleep backoff-ms)
-                (recur (min (* backoff-ms 2) max-backoff-ms)))
+                (recur (min (* backoff-ms 2) max-backoff-ms) last-expire-ms))
             (do
-              (try
-                (log/info "IMAP connected, folder:" folder)
-                (catch-up-fetch! conn db-conn folder fetch-opts source-map sources ingest-opts)
-                (maybe-expire! db-conn source-map)
+              (let [new-expire-ms
+                    (try
+                      (log/info "IMAP connected, folder:" folder)
+                      (catch-up-fetch! conn db-conn folder fetch-opts source-map sources ingest-opts)
+                      (let [ts (maybe-expire! db-conn source-map last-expire-ms)]
+                        (when-not (shutting-down?)
+                          (start-idle! conn db-conn folder source-map sources ingest-opts))
+                        ts)
+                      (catch Exception e
+                        (log/error e "IDLE interrupted:" (or (.getMessage e) (str (class e))))
+                        last-expire-ms))]
+                (try (imap/disconnect conn) (catch Exception _))
                 (when-not (shutting-down?)
-                  (start-idle! conn db-conn folder source-map sources ingest-opts))
-                (catch Exception e
-                  (log/error e "IDLE interrupted:" (or (.getMessage e) (str (class e))))))
-              (try (imap/disconnect conn) (catch Exception _))
-              (when-not (shutting-down?)
-                (log/debug "IDLE exited, reconnecting in 1s")
-                (Thread/sleep 1000)
-                (recur 1000)))))))))
+                  (log/debug "IDLE exited, reconnecting in 1s")
+                  (Thread/sleep 1000)
+                  (recur 1000 new-expire-ms))))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Main

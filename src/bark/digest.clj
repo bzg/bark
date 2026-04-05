@@ -108,38 +108,47 @@
 (defn- report-exists? [db message-id]
   (some? (d/entid db [:report/message-id message-id])))
 
-(defn- create-report!
-  "Create a new report entity. Returns the entity id of the new report."
-  [conn email-eid message-id report-info email-date email]
+(defn report-entity
+  "Build the entity map for a new report from email data."
+  [email-eid message-id report-info email-date email now]
   (let [attachments (:email/attachments email)
         body-text   (common/email-body-text email)
         has-ics     (or (common/has-ics-attachment? attachments)
                         (common/has-inline-ics? body-text))
         has-text    (boolean (some common/text-attachment? attachments))]
-    (d/transact! conn
-                 [(into {:report/type (:type report-info) :report/email email-eid
-                         :report/message-id message-id :report/digested-at (Date.)
-                         :report/last-activity (or email-date (Date.))}
-                        (remove (comp nil? val))
-                        {:report/last-activity-address (:email/from-address email)
-                         :report/version (:version report-info) :report/topic (:topic report-info)
-                         :report/patch-seq (:patch-seq report-info) :report/patch-source (:patch-source report-info)
-                         :report/has-ics (boolean has-ics) :report/has-text-attachments has-text})])
-    (d/entid (d/db conn) [:report/message-id message-id])))
+    (into {:report/type (:type report-info) :report/email email-eid
+           :report/message-id message-id :report/digested-at now
+           :report/last-activity (or email-date now)}
+          (remove (comp nil? val))
+          {:report/last-activity-address (:email/from-address email)
+           :report/version (:version report-info) :report/topic (:topic report-info)
+           :report/patch-seq (:patch-seq report-info) :report/patch-source (:patch-source report-info)
+           :report/has-ics (boolean has-ics) :report/has-text-attachments has-text})))
+
+(defn- create-report!
+  "Create a new report entity. Returns the entity id of the new report."
+  [conn email-eid message-id report-info email-date email]
+  (d/transact! conn [(report-entity email-eid message-id report-info email-date email (Date.))])
+  (d/entid (d/db conn) [:report/message-id message-id]))
+
+(defn descendant-tx
+  "Build transaction data to add an email as descendant of a report.
+  `current-activity` is the report's current :report/last-activity (or nil)."
+  [report-eid email-eid email-date from-address current-activity]
+  (let [tx [[:db/add report-eid :report/descendants email-eid]]]
+    (if email-date
+      (if (or (nil? current-activity) (not (.before ^Date email-date ^Date current-activity)))
+        (-> tx
+            (conj [:db/add report-eid :report/last-activity email-date])
+            (cond-> from-address
+              (conj [:db/add report-eid :report/last-activity-address from-address])))
+        tx)
+      tx)))
 
 (defn- add-descendant! [conn report-eid email-eid email-date from-address]
-  (let [tx [[:db/add report-eid :report/descendants email-eid]]
-        tx (if email-date
-             (let [current (:report/last-activity
-                            (d/pull (d/db conn) [:report/last-activity] report-eid))]
-               (if (or (nil? current) (not (.before ^Date email-date ^Date current)))
-                 (-> tx
-                     (conj [:db/add report-eid :report/last-activity email-date])
-                     (cond-> from-address
-                       (conj [:db/add report-eid :report/last-activity-address from-address])))
-                 tx))
-             tx)]
-    (d/transact! conn tx)))
+  (let [current (:report/last-activity
+                  (d/pull (d/db conn) [:report/last-activity] report-eid))]
+    (d/transact! conn (descendant-tx report-eid email-eid email-date from-address current))))
 
 (defn- link-related-reports! [conn new-report-eid parent-report-eids]
   (when (seq parent-report-eids)
@@ -298,7 +307,141 @@
         [src-name email delivery]))))
 
 ;; ---------------------------------------------------------------------------
-;; Single-email processing
+;; Single-email processing — pure decisions
+;; ---------------------------------------------------------------------------
+
+(defn creation-decision
+  "Decide whether a report should be created for this email.
+  Returns :create, :denied-channel, :denied-role, or nil (no report detected
+  or report already exists)."
+  [report-info from-addr via-channel? rroles email source-cfg already-exists?]
+  (when (and report-info (not already-exists?))
+    (let [permitted? (and from-addr via-channel?
+                         (roles/can-create-report? rroles from-addr report-info
+                                                   email source-cfg))]
+      (cond
+        permitted?          :create
+        (not via-channel?)  :denied-channel
+        :else               :denied-role))))
+
+(defn post-creation-plan
+  "Given report-info and context, return a set of post-creation
+  action keywords to execute."
+  [report-info nearest-eids parent-eids patches]
+  (let [rtype (:type report-info)]
+    (cond-> #{}
+      (seq parent-eids)                                       (conj :link-related)
+      (and (= :release rtype) (:version report-info))        (conj :close-changes)
+      (and (= :patch rtype) (:version report-info)
+           (seq nearest-eids))                                (conj :close-previous-version)
+      (and (= :patch rtype) (seq nearest-eids))               (conj :close-superseded-thread)
+      (and (= :patch rtype) (:patch-seq report-info))         (conj :manage-series)
+      (and (= :patch rtype) (seq patches))                    (conj :store-patches)
+      (and (= :patch rtype) (seq patches)
+           (nil? (:patch-seq report-info))
+           (> (count patches) 1))                             (conj :auto-series))))
+
+;; ---------------------------------------------------------------------------
+;; Single-email processing — effectful phases
+;; ---------------------------------------------------------------------------
+
+(defn- apply-controls!
+  "Apply role and notify controls from the email body."
+  [conn rroles source-name from-addr email via-channel?]
+  (let [body-text (common/email-body-text email)]
+    (when (and from-addr body-text source-name)
+      (when via-channel?
+        (roles/apply-role-controls! conn rroles source-name from-addr
+                                    body-text (:email/date-sent email)))
+      (roles/apply-notify-controls! conn rroles source-name from-addr body-text))))
+
+(defn- maybe-create-report!
+  "Detect report type, check permissions, create if allowed.
+  Returns [report-eid report-info] or [nil report-info]."
+  [conn eid message-id email from-addr source-name source-cfg via-channel? rroles]
+  (let [subj-patterns (detect/resolve-labels (or source-cfg {}))
+        allowed-types (:report-types source-cfg)
+        report-info   (detect/detect-report email subj-patterns allowed-types)]
+    (case (creation-decision report-info from-addr via-channel? rroles email
+                             source-cfg (report-exists? (d/db conn) message-id))
+      :create
+      (do (log/info (str "[" (name (:type report-info)) "]") (:email/subject email))
+          (let [rid (create-report! conn eid message-id report-info
+                                    (:email/date-sent email) email)]
+            (ensure-participant! conn source-name from-addr
+                                 (:email/from-name email) (:email/date-sent email)
+                                 :contributor? (= :patch (:type report-info)))
+            (tracking/bump-report-updated! conn rid)
+            [rid report-info]))
+
+      :denied-channel
+      (do (log/warn "Denied:" from-addr "cannot create" (name (:type report-info))
+                    "(not via source channel)")
+          [nil report-info])
+
+      :denied-role
+      (do (log/warn "Denied:" from-addr "cannot create" (name (:type report-info))
+                    "(not maintainer)")
+          [nil report-info])
+
+      ;; nil — no report detected
+      [nil report-info])))
+
+(defn- thread-and-apply-commands!
+  "Add email as descendant of parent reports and apply commands on nearest reports.
+  Returns true if any command was applied."
+  [conn eid email from-addr source-name rroles source-map delivery
+   parent-eids nearest-eids new-report?]
+  (doseq [rid parent-eids]
+    (add-descendant! conn rid eid (:email/date-sent email) from-addr))
+  (let [rid-info (when (seq nearest-eids)
+                   (reduce (fn [m [r t s]] (assoc m r [t s]))
+                           {}
+                           (d/q '[:find ?r ?t ?src
+                                  :in $ [?r ...]
+                                  :where
+                                  [?r :report/type ?t]
+                                  [?r :report/email ?e]
+                                  [?e :email/source ?src]]
+                                (d/db conn) nearest-eids)))
+        any-cmd? (reduce (fn [acc rid]
+                           (if-let [[rtype rsrc] (get rid-info rid)]
+                             (let [rroles (if rsrc (roles/get-roles (d/db conn) rsrc) rroles)]
+                               (if (commands/apply-commands! conn rid rtype email source-map rroles delivery)
+                                 true acc))
+                             acc))
+                         false nearest-eids)]
+    (when (and any-cmd? (not new-report?))
+      (ensure-participant! conn source-name from-addr
+                           (:email/from-name email) (:email/date-sent email)))
+    (tracking/bump-report-updated! conn parent-eids)))
+
+(defn- run-post-creation-hooks!
+  "Execute post-creation side effects driven by the plan."
+  [conn report-eid eid email from-addr report-info
+   parent-eids nearest-eids patches plan]
+  (when (:link-related plan)
+    (link-related-reports! conn report-eid parent-eids))
+  (when (:close-changes plan)
+    (close-changes-for-release! conn (:version report-info) eid report-eid))
+  (when (:close-previous-version plan)
+    (close-patch-previous-version! conn report-eid report-info eid nearest-eids))
+  (when (:close-superseded-thread plan)
+    (close-superseded-thread-patches! conn report-eid eid email nearest-eids))
+  (when (:manage-series plan)
+    (series/manage-series! conn report-eid eid report-info from-addr parent-eids))
+  (when (:store-patches plan)
+    (d/transact! conn [{:db/id report-eid :report/patches patches}])
+    (log/info (count patches) "patch file(s) stored"))
+  (when (:auto-series plan)
+    (let [series-eid (series/create-series! conn (:topic report-info) from-addr 1)]
+      (series/add-patch-to-series! conn series-eid report-eid)
+      (series/close-series! conn series-eid eid)
+      (log/info "Auto-created single-member series for"
+                (count patches) "patch attachments"))))
+
+;; ---------------------------------------------------------------------------
+;; Single-email processing — orchestrator
 ;; ---------------------------------------------------------------------------
 
 (defn process-email!
@@ -311,100 +454,32 @@
         [source-name email delivery] (resolve-email-source! conn email sources source-map)]
     (if-not source-name
       (log/debug "No matching source for" message-id "— skipping")
-      (let [source-cfg  (get source-map source-name)
+      (let [source-cfg   (get source-map source-name)
             via-channel? (common/sent-via-source-channel? delivery source-cfg)
             rroles       (roles/get-roles (d/db conn) source-name)]
-        ;; Role controls: only via public channel (shared state).
-        ;; Notify controls: allowed from any channel (personal state).
-        (let [body-text (common/email-body-text email)]
-          (when (and from-addr body-text source-name)
-            (when via-channel?
-              (roles/apply-role-controls! conn rroles source-name from-addr
-                                          body-text (:email/date-sent email)))
-            (roles/apply-notify-controls! conn rroles source-name from-addr body-text)))
 
-        ;; Re-fetch roles after role controls may have mutated them.
+        ;; Phase 1: apply controls (may mutate roles)
+        (apply-controls! conn rroles source-name from-addr email via-channel?)
+
+        ;; Phase 2: detect and maybe create report (re-fetch roles after controls)
         (let [rroles      (roles/get-roles (d/db conn) source-name)
-              subj-patterns (detect/resolve-labels (or source-cfg {}))
-              allowed-types (:report-types source-cfg)
-              report-info   (detect/detect-report email subj-patterns allowed-types)
-              permitted?    (and report-info from-addr via-channel?
-                                 (roles/can-create-report? rroles from-addr report-info
-                                                           email source-cfg))
-              new-report?   (and permitted? (not (report-exists? (d/db conn) message-id)))
-              report-eid    (when new-report?
-                                  (log/info (str "[" (name (:type report-info)) "]") (:email/subject email))
-                                  (let [rid (create-report! conn eid message-id report-info (:email/date-sent email) email)]
-                                    (ensure-participant! conn source-name from-addr
-                                                         (:email/from-name email) (:email/date-sent email)
-                                                         :contributor? (= :patch (:type report-info)))
-                                    (tracking/bump-report-updated! conn rid)
-                                    rid))]
+              [report-eid report-info]
+              (maybe-create-report! conn eid message-id email from-addr
+                                    source-name source-cfg via-channel? rroles)
 
-              (when (and report-info (not permitted?)
-                         (not (report-exists? (d/db conn) message-id)))
-                (if (not via-channel?)
-                  (log/warn "Denied:" from-addr "cannot create" (name (:type report-info))
-                            "(not via source channel)")
-                  (log/warn "Denied:" from-addr "cannot create" (name (:type report-info))
-                            "(not maintainer)")))
+              ;; Phase 3: threading and commands
+              db           (d/db conn)
+              parent-eids  (find-reports-for-email email db)
+              nearest-eids (find-nearest-report email db)]
 
-              ;; Thread descendants and commands — only via public channel.
-              (let [db          (d/db conn)
-                    parent-eids (find-reports-for-email email db)
-                    nearest-eids (find-nearest-report email db)]
-                (when (and (seq parent-eids) via-channel?)
-                  (doseq [rid parent-eids]
-                    (add-descendant! conn rid eid (:email/date-sent email) from-addr))
-                  (let [;; Batch-fetch type and source for all nearest reports in one query.
-                        rid-info (when (seq nearest-eids)
-                                   (reduce (fn [m [r t s]] (assoc m r [t s]))
-                                           {}
-                                           (d/q '[:find ?r ?t ?src
-                                                  :in $ [?r ...]
-                                                  :where
-                                                  [?r :report/type ?t]
-                                                  [?r :report/email ?e]
-                                                  [?e :email/source ?src]]
-                                                (d/db conn) nearest-eids)))
-                        any-cmd? (reduce (fn [acc rid]
-                                           (if-let [[rtype rsrc] (get rid-info rid)]
-                                             (let [rroles (if rsrc (roles/get-roles (d/db conn) rsrc) rroles)]
-                                               (if (commands/apply-commands! conn rid rtype email source-map rroles delivery)
-                                                 true acc))
-                                             acc))
-                                         false nearest-eids)]
-                    ;; Only count as participant if the email carried a command.
-                    (when (and any-cmd? (not new-report?))
-                      (ensure-participant! conn source-name from-addr
-                                           (:email/from-name email) (:email/date-sent email))))
-                  (tracking/bump-report-updated! conn parent-eids))
+          (when (and (seq parent-eids) via-channel?)
+            (thread-and-apply-commands! conn eid email from-addr source-name rroles
+                                        source-map delivery parent-eids nearest-eids
+                                        (some? report-eid)))
 
-                ;; Post-creation hooks
-                (when report-eid
-                  (when (seq parent-eids)
-                    (link-related-reports! conn report-eid parent-eids))
-                  (let [rtype (:type report-info)]
-                    (when (and (= :release rtype) (:version report-info))
-                      (close-changes-for-release! conn (:version report-info) eid report-eid))
-                    (when (and (= :patch rtype) (:version report-info) (seq nearest-eids))
-                      (close-patch-previous-version! conn report-eid report-info eid nearest-eids))
-                    (when (and (= :patch rtype) (seq nearest-eids))
-                      (close-superseded-thread-patches! conn report-eid eid email nearest-eids))
-                    (when (and (= :patch rtype) (:patch-seq report-info))
-                      (series/manage-series! conn report-eid eid report-info from-addr parent-eids))
-                    (when (= :patch rtype)
-                      (let [patches (detect/build-patch-entities email)]
-                        (when (seq patches)
-                          (d/transact! conn [{:db/id report-eid :report/patches patches}])
-                          (log/info (count patches) "patch file(s) stored")
-                          ;; Auto-create a single-member series for multi-attachment
-                          ;; patches without an explicit N/M sequence.
-                          (when (and (nil? (:patch-seq report-info))
-                                     (> (count patches) 1))
-                            (let [series-eid (series/create-series!
-                                              conn (:topic report-info) from-addr 1)]
-                              (series/add-patch-to-series! conn series-eid report-eid)
-                              (series/close-series! conn series-eid eid)
-                              (log/info "Auto-created single-member series for"
-                                        (count patches) "patch attachments"))))))))))))))
+          ;; Phase 4: post-creation hooks (plan is pure, execution is effectful)
+          (when report-eid
+            (let [patches (detect/build-patch-entities email)
+                  plan    (post-creation-plan report-info nearest-eids parent-eids patches)]
+              (run-post-creation-hooks! conn report-eid eid email from-addr report-info
+                                        parent-eids nearest-eids patches plan))))))))
