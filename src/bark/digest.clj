@@ -343,7 +343,11 @@
 
               (when (and report-info (not permitted?)
                          (not (report-exists? (d/db conn) message-id)))
-                (log/warn "Denied:" from-addr "cannot create" (name (:type report-info))))
+                (if (not via-channel?)
+                  (log/warn "Denied:" from-addr "cannot create" (name (:type report-info))
+                            "(not via source channel)")
+                  (log/warn "Denied:" from-addr "cannot create" (name (:type report-info))
+                            "(not maintainer)")))
 
               ;; Thread descendants and commands — only via public channel.
               (let [db          (d/db conn)
