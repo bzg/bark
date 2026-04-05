@@ -54,7 +54,9 @@ java --add-opens=java.base/java.nio=ALL-UNNAMED \
      --add-opens=java.base/sun.nio.ch=ALL-UNNAMED \
      --enable-native-access=ALL-UNNAMED \
      -jar target/bark.jar
+#+end_src
 
+#+begin_example
 # 3. Export reports
 bb export          # incremental (skips if nothing changed)
 bb export all      # all formats
@@ -85,7 +87,7 @@ bb maintenance --delete   # actually purge
 
 # 7. Run tests
 clj -M:test
-#+end_src
+#+end_example
 
 * Architecture
 
@@ -146,13 +148,13 @@ theme for HTML exports.  The value is resolved in order:
 
 Set to ="none"= to disable theming entirely.
 
-#+begin_src sh
+#+begin_example
 bb export html --theme org                                  # pico-themes name
 bb export html --theme https://example.com/custom.css       # external URL
 bb export html --theme file:///home/user/my-theme.css       # local file (inlined)
 bb export html --theme themes/custom.css                    # relative path (inlined)
 bb export html --theme none                                 # no theme
-#+end_src
+#+end_example
 
 * Configuration
 
