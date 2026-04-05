@@ -23,9 +23,10 @@ For a more extensive documentation, please read the [[docs/bark-manual.org][BARK
 
 * How it works
 
-- *JVM daemon* (=clojure -M:run=) --- Connects to IMAP, stores emails,
-  digests them into reports, applies commands and roles, periodically
-  expires stale reports. All database writes happen here.
+- *JVM* (=clojure -M:run=) --- Connects to IMAP, fetches new emails
+  since the last run, digests them into reports, applies commands and
+  roles, expires stale reports, then exits.  Use =--watch= to keep the
+  process running with IMAP IDLE.  All database writes happen here.
 - *bb export* --- Exports reports as JSON, RSS, Org, ICS (calendar),
   and generates HTML and stats pages. Read-only (no database writes).
 - *bb notify* --- Sends notification emails to admin/maintainers.
@@ -43,10 +44,13 @@ For a more extensive documentation, please read the [[docs/bark-manual.org][BARK
 # 1. Copy and edit config
 cp config.edn.example config.edn
 
-# 2a. Start the daemon (dev)
+# 2a. Run once (fetch new emails, expire, exit)
 clj -M:run
 
-# 2b. Or build an uberjar and run it (production)
+# 2b. Run in watch mode (IMAP IDLE, stays running)
+clj -M:run -- --watch
+
+# 2c. Or build an uberjar and run it (production)
 mkdir -p classes
 clj -M -e "(compile 'bark.main)"
 clj -M:uberdeps --main-class bark.main
@@ -95,7 +99,7 @@ All source code lives under =src/bark/=:
 
 | Namespace     | Role                                                |
 |---------------+-----------------------------------------------------|
-| =bark.main=     | Daemon entry point (IMAP IDLE loop, store+digest)   |
+| =bark.main=     | Entry point (batch by default, =--watch= for IDLE)    |
 | =bark.ingest=   | Datalevin connection, email parsing and storage     |
 | =bark.digest=   | Single-email processing (classify, detect, thread)  |
 | =bark.detect=   | Report type detection from subject/body/attachments |
@@ -109,16 +113,16 @@ All source code lives under =src/bark/=:
 
 Read-only bb scripts live under =scripts/=:
 
-| Script              | Role                                    |
-|---------------------+-----------------------------------------|
-| =bark-common.clj=     | Shared utilities (bb)                   |
+| Script              | Role                                                  |
+|---------------------+-------------------------------------------------------|
+| =bark-common.clj=     | Shared utilities (bb)                                 |
 | =bark-export.clj=     | Report export (JSON, RSS, Org, patches, events, text) |
-| =bark-notify.clj=     | Notification emails                     |
-| =bark-index.clj=      | HTML index page generation              |
-| =bark-stats.clj=      | Statistics and data page generation     |
-| =bark-docs.clj=       | Documentation page generation           |
-| =bark-html.clj=       | HTML template helpers                   |
-| =validate-config.clj= | Config validation                       |
+| =bark-notify.clj=     | Notification emails                                   |
+| =bark-index.clj=      | HTML index page generation                            |
+| =bark-stats.clj=      | Statistics and data page generation                   |
+| =bark-docs.clj=       | Documentation page generation                         |
+| =bark-html.clj=       | HTML template helpers                                 |
+| =validate-config.clj= | Config validation                                     |
 
 * bb tasks
 

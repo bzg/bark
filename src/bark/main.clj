@@ -4,8 +4,9 @@
 
 (ns bark.main
   "Entry point for BARK. Connects to a single IMAP mailbox,
-  watches for new emails, and stores+processes them atomically.
-  Each email is ingested and digested in one step."
+  fetches new emails since the last run, and stores+processes them
+  atomically. Default mode is single-pass (batch); use --watch for
+  persistent IMAP IDLE."
   (:require [bark.ingest :as ingest]
             [bark.logging :as blog]
             [bark.common :as common]
@@ -303,8 +304,29 @@
 ;; Main
 ;; ---------------------------------------------------------------------------
 
+(defn- batch-run!
+  "Single-pass mode (default): connect, fetch new messages, expire, exit."
+  [imap-cfg db-conn ingest-cfg config-path]
+  (let [folder      (or (:folder imap-cfg) "INBOX")
+        fetch-opts  (parse-initial-fetch (or (:initial-fetch ingest-cfg) 50))
+        ingest-opts (select-keys ingest-cfg [:max-size :max-attachment-size])
+        config      (or (common/load-config config-path) {})
+        source-map  (common/build-source-map config)
+        sources     (or (:sources config) [])
+        conn        (connect-imap imap-cfg)]
+    (when-not conn
+      (log/error "IMAP connection failed.")
+      (System/exit 1))
+    (try
+      (catch-up-fetch! conn db-conn folder fetch-opts source-map sources ingest-opts)
+      (expire/expire-reports! db-conn source-map)
+      (finally
+        (try (imap/disconnect conn) (catch Exception _))))))
+
 (defn -main [& args]
-  (let [;; Parse CLI args: --initial-fetch, -c config-path
+  (let [;; Parse CLI args: --initial-fetch, --watch, -c config-path
+        arg-set   (set args)
+        watch?    (contains? arg-set "--watch")
         pairs     (partition 2 args)
         cli-fetch (some (fn [[a b]] (when (= "--initial-fetch" a) b)) pairs)
         config-path (or (some (fn [[a b]] (when (= "-c" a) b)) pairs) "config.edn")
@@ -341,4 +363,6 @@
             (Thread/sleep 1000)
             (try (ingest/close db-conn) (catch Exception _))
             (log/info "Goodbye."))))
-        (idle-loop! imap-cfg db-conn ingest-cfg config-path)))))
+        (if watch?
+          (idle-loop! imap-cfg db-conn ingest-cfg config-path)
+          (batch-run! imap-cfg db-conn ingest-cfg config-path))))))
