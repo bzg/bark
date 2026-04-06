@@ -36,6 +36,7 @@
  :email/references       {:db/valueType :db.type/string}
  :email/headers-edn      {:db/valueType :db.type/string}
  :email/ingested-at      {:db/valueType :db.type/instant}
+ :email/digested-at      {:db/valueType :db.type/instant}
  :watermark/id           {:db/valueType :db.type/string
                           :db/unique    :db.unique/identity}
  :watermark/imap-uid     {:db/valueType :db.type/long}

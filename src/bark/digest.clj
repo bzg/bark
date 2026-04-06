@@ -482,4 +482,8 @@
             (let [patches (detect/build-patch-entities email)
                   plan    (post-creation-plan report-info nearest-eids parent-eids patches)]
               (run-post-creation-hooks! conn report-eid eid email from-addr report-info
-                                        parent-eids nearest-eids patches plan))))))))
+                                        parent-eids nearest-eids patches plan)))
+
+          ;; Mark email as fully digested so future re-fetches can skip it.
+          (when eid
+            (d/transact! conn [{:db/id eid :email/digested-at (java.util.Date.)}])))))))
