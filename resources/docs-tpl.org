@@ -54,7 +54,7 @@ All status/priority command keywords work on all report types:
 | Mark as closed (expired)  | =Expired=                            | Status   |
 | Mark as closed (resolved) | =Resolved= =Applied= =Done= =Fixed= =Closed= | Status   |
 | Mark as urgent            | =Urgent.=                            | Priority |
-| Mark asimportant          | =Important.=                         | Priority |
+| Mark as important         | =Important.=                         | Priority |
 
 Users don't set the priority directly: it is computed as the sum of
 important (+1) and urgent (+2).

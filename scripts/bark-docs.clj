@@ -109,8 +109,8 @@
                                                                        (:closed cmds))) "Status"]
               ["Mark as closed (resolved)" (fmt-command-words (filterv #(not (contains? #{"Canceled" "Cancelled" "Expired"} %))
                                                                        (:closed cmds))) "Status"]
-              ["Mark as urgent"            (fmt-command-words ["Urgent"])    "Priority"]
-              ["Mark as important"         (fmt-command-words ["Important"]) "Priority"]]
+              ["Mark as urgent"            (fmt-command-words ["Urgent."])    "Priority"]
+              ["Mark as important"         (fmt-command-words ["Important."]) "Priority"]]
         w-effect  (apply max (count "Effect on report")  (map #(count (nth % 0)) rows))
         w-command (apply max (count "Command keyword")   (map #(count (nth % 1)) rows))
         w-type    (apply max (count "Type")              (map #(count (nth % 2)) rows))
