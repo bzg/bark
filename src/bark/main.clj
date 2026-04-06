@@ -119,34 +119,39 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- try-digest!
-  "Run process-email!, returning true on success."
+  "Run process-email!, returning :ok on success, :retry on exception."
   [db-conn source-map sources email mid]
   (try
     (digest/process-email! db-conn source-map sources email)
-    true
+    :ok
     (catch Exception e
       (log/error e "Failed to digest email" mid
                  (or (.getMessage e) (str (class e))))
-      false)))
+      :retry)))
 
 (defn- store-and-process!
   "Classify, store, and digest an email.
-  Returns true on success, false on skip or failure.
-  When an email was previously stored but not fully digested (e.g. crash
-  between store and digest), re-runs process-email! which is idempotent."
+  Returns one of:
+    :ok    — fully processed (or already digested), advance watermark
+    :skip  — deterministic skip (oversized, no source, no Message-ID),
+             advance watermark since retrying won't help
+    :retry — transient failure, do not advance watermark
+  When an email was previously stored but not yet digested (e.g. crash
+  between store and digest), re-runs process-email! which is idempotent.
+  Already-digested emails are skipped to avoid redundant work."
   [db-conn source-map sources msg {:keys [max-size max-attachment-size]}]
   (let [size (:size msg -1)]
     (if (and max-size (pos? size) (> size max-size))
       (do (log/warn "Skipping oversized email UID:" (:uid msg)
                     "size:" size (str "bytes (max: " max-size ")"))
-          false)
+          :skip)
       (if-let [src-name (digest/pre-classify-source (d/db db-conn) source-map sources msg)]
         (let [mid (:message-id msg)
               store-opts (cond-> {}
                            max-attachment-size (assoc :max-attachment-size max-attachment-size))]
           (if (nil? mid)
             (do (log/warn "No Message-ID for UID:" (:uid msg) "— skipping")
-                false)
+                :skip)
             (let [lookup [:email/message-id mid]]
               (if (ingest/store-email! db-conn msg store-opts)
                 ;; Freshly stored — stamp source and digest.
@@ -154,19 +159,22 @@
                     (try-digest! db-conn source-map sources
                                  (d/pull (d/db db-conn) digest/email-pull-pattern lookup) mid))
                 ;; Already stored (duplicate message-id or UID collision).
-                ;; Re-digest to recover from a prior crash during process-email!.
                 (let [email (d/pull (d/db db-conn) digest/email-pull-pattern lookup)]
-                  (if (:db/id email)
+                  (cond
+                    ;; Lookup miss → UID collision (different message-id already
+                    ;; occupies this UID).  Original was fully handled — safe.
+                    (not (:db/id email)) :ok
+                    ;; Already fully digested — nothing to do.
+                    (:email/digested-at email)
+                    (do (log/debug "Already digested, skipping:" mid) :ok)
+                    ;; Stored but not digested (prior crash) — recover.
+                    :else
                     (do (log/info "Re-processing previously stored email:" mid)
                         (when-not (:email/source email)
                           (d/transact! db-conn [{:db/id lookup :email/source src-name}]))
-                        (try-digest! db-conn source-map sources email mid))
-                    ;; Lookup miss → UID collision (different message-id already
-                    ;; occupies this UID).  The original message was fully handled,
-                    ;; so this UID is safe to advance past.
-                    true))))))
+                        (try-digest! db-conn source-map sources email mid))))))))
         (do (log/debug "No matching source for UID:" (:uid msg) "— not stored")
-            false)))))
+            :skip)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Catch-up fetch (store+process per email)
@@ -192,8 +200,8 @@
       (when (and (seq msgs) (not (shutting-down?)))
         (let [safe-uids (reduce (fn [acc msg]
                                   (try
-                                    (let [ok? (store-and-process! db-conn source-map sources msg ingest-opts)]
-                                      (if (and ok? (:uid msg))
+                                    (let [result (store-and-process! db-conn source-map sources msg ingest-opts)]
+                                      (if (and (not= :retry result) (:uid msg))
                                         (conj acc (:uid msg))
                                         acc))
                                     (catch Exception e
@@ -254,8 +262,8 @@
                      (log/info "New message via IDLE — UID:" (:uid msg)
                                "Subject:" (:subject msg))
                      (try
-                       (let [ok? (store-and-process! db-conn source-map sources msg ingest-opts)]
-                         (when (and ok? (:uid msg))
+                       (let [result (store-and-process! db-conn source-map sources msg ingest-opts)]
+                         (when (and (not= :retry result) (:uid msg))
                            (ingest/save-imap-uid! db-conn (:uid msg))))
                        (catch Exception e
                          (log/error e "Error processing IDLE message UID:" (:uid msg)
