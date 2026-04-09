@@ -326,7 +326,7 @@
 (def ^:private default-awaiting-delay-days 14)
 
 (defn- awaiting-reply?
-  "True when a report is open, last activity was by an admin/maintainer,
+  "True when a report is open, last activity was by a maintainer,
   and the configured delay has elapsed."
   [report source-name source-map maintainers-map]
   (when (and (not (:report/closed report))

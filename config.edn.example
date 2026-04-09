@@ -192,9 +192,9 @@
  ;;                   "Unexpiry"     "No expiry"
  ;;                   "Unsuperseded" "Not superseded"}
 
- ;; Awaiting-reply delay (optional) — flag reports where the last email
- ;; was sent by an admin or maintainer and no reply has been received
- ;; within this duration.  Reports matching this condition are shown
+ ;; Awaiting-reply delay (optional) — flag reports where the last
+ ;; email was sent by a maintainer and no reply has been received
+ ;; within this duration. Reports matching this condition are shown
  ;; with an ⌚ indicator in the HTML dashboard.
  ;; Accepts a duration ("14d", "2w", "1m").  Default: "14d".
  ;; Can be set globally or per source (per source overrides global).
@@ -204,7 +204,7 @@
  ;; Run only when the JVM daemon is stopped.
  ;;   :orphan-retention — keep orphan emails for this long, then delete.
  ;;                       An orphan is an email not referenced by any report
- ;;                       and not sent by a maintainer or admin.
+ ;;                       and not sent by a maintainer.
  ;;                       Accepts a duration ("30d", "6w", "3m", "1y")
  ;;                       or an ISO date ("2025-01-01"). Default: 90 days.
  ;; :maintenance {:orphan-retention "90d"}
@@ -284,7 +284,7 @@
  ;;           :max-size "10MB"             ;; rotate when file exceeds this size (default: 10MB)
  ;;           :backlog  5                  ;; number of rotated files to keep (default: 5)
  ;;           ;; Email logging — requires :notifications :smtp to be configured.
- ;;           :email    {:to    "admin@example.com"  ;; recipient address
+ ;;           :email    {:to    "bark@example.com"   ;; recipient address
  ;;                      :level :error}}             ;; minimum level to email (default: :error)
 
  }

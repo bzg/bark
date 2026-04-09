@@ -3,7 +3,7 @@
 ;; bark-maintenance.clj — Purge orphan emails from the BARK database.
 ;;
 ;; An orphan email is one that is not referenced by any report (directly
-;; or as a descendant/command), and was not sent by a maintainer or admin.
+;; or as a descendant/command), and was not sent by a maintainer.
 ;;
 ;; IMPORTANT: Run this only when the JVM daemon is NOT running, to avoid
 ;; write collisions on the Datalevin database.
@@ -110,7 +110,7 @@
         emails      (all-emails db)]
     (log/info "Total emails in DB:" (count emails))
     (log/info "Protected by reports:" (count protected))
-    (log/info "Maintainer/admin addresses:" (count maintainers))
+    (log/info "Maintainer addresses:" (count maintainers))
     (log/info "Orphan retention cutoff:" cutoff-date)
     (->> emails
          (remove (fn [[eid _ _ _ _]] (contains? protected eid)))

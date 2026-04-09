@@ -635,7 +635,7 @@ function buildRowElement(rpt) {
   }
 
   var priLabel = priority === 3 ? 'A' : priority === 2 ? 'B' : priority === 1 ? 'C' : ' ';
-  var isMaint = role === 'maintainer' || role === 'admin';
+  var isMaint = role === 'maintainer';
   var authorInner = isMaint ? '<strong>' + escHtml(author) + '</strong>' : escHtml(author);
   var authorHtml = '<a href="javascript:void(0)" onclick="setSearch(\'f:' + escAttr(from) + '\')" title="' + escAttr(from) + '">' + authorInner + '</a>';
 

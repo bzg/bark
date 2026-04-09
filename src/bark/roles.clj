@@ -15,7 +15,6 @@
 ;; ---------------------------------------------------------------------------
 
 (def maintainer?         common/maintainer?)
-(def admin-or-maintainer? common/admin-or-maintainer?)
 (def lead-maintainer      common/lead-maintainer)
 (def lead-maintainer?     common/lead-maintainer?)
 (def active-tenures       common/active-tenures)
@@ -223,7 +222,7 @@
 
 (defn apply-notify-controls! [conn roles source-name from-addr body-text]
   (when-let [[_ params-str] (re-find notify-pattern (or body-text ""))]
-    (when (admin-or-maintainer? roles from-addr)
+    (when (maintainer? roles from-addr)
       (let [params (parse-notify-params params-str)
             k      (notify-key source-name from-addr)
             txn    (cond-> {:notify/key    k
