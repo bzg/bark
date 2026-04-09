@@ -444,13 +444,6 @@
                         (or (nil? to)   (.before ^Date as-of ^Date to))))
                  tenures))))))
 
-;; Admin was previously a distinct concept; it has been folded into the
-;; "lead maintainer" (first element of the config :maintainers list).
-;; This alias is kept so call sites that want "anyone with privileges"
-;; stay readable — semantically equivalent to `maintainer?` now.
-(def admin-or-maintainer? maintainer?)
-
-
 ;; ---------------------------------------------------------------------------
 ;; Config and source-map
 ;; ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 #!/usr/bin/env bb
 
-;; bark-notify.clj — Send notification emails to admin/maintainers.
+;; bark-notify.clj — Send notification emails to maintainers.
 ;;
 ;; BARK: Bug And Report Keeper
 ;;
@@ -24,7 +24,7 @@
 (declare load-datalevin-pod! get-header format-date format-date-iso
          report-priority report-status report-descendant-count
          all-reports report-pull-pattern load-config build-source-map bark-schema
-         get-tenures admin-or-maintainer?)
+         get-tenures maintainer?)
 
 (load-file "scripts/bark-common.clj")
 
@@ -112,11 +112,11 @@
         (>= (- (.getTime now) last-ms) interval-ms))))
 
 (defn- still-privileged?
-  "Confirm the subscriber is still admin or maintainer for the source.
+  "Confirm the subscriber is still maintainer for the source.
   Uses the non-temporal check (current state, not as-of a specific date)."
   [db notify]
   (let [roles (get-tenures db (:notify/source notify))]
-    (admin-or-maintainer? roles (:notify/email notify))))
+    (maintainer? roles (:notify/email notify))))
 
 ;; ---------------------------------------------------------------------------
 ;; Report formatting
@@ -352,7 +352,7 @@
                              (doseq [p on-time
                                      :when (not (still-privileged? db p))]
                                (log/debug "DROPPED" (:notify/email p)
-                                          "— not admin/maintainer for"
+                                          "— not maintainer for"
                                           (:notify/source p)))))
               sent     (atom 0)
               updated-map (atom last-sent-map)]

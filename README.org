@@ -209,7 +209,7 @@ one of the three type keys:
 | =:report-types=          | no       | Restrict detected types, e.g. =#{:bug :patch}=                         |
 | =:export-formats=        | no       | Output formats (default: =["json" "org" "rss"]=)                       |
 | =:export-reports=        | no       | Restrict exported types, e.g. =#{:bug :patch :request}=                |
-| =:topics-filter=         | no       | Only export reports with matching topics, e.g. =["event"]=              |
+| =:topics-filter=         | no       | Only export reports with matching topics, e.g. =["event"]=             |
 | =:expiry=                | no       | Auto-close delays in days per type                                   |
 | =:awaiting-delay=        | no       | Duration before "awaiting reply" flag, e.g. ="14d"= (default: 14 days) |
 
@@ -219,9 +219,8 @@ running BARK on the same source sees the same state.
 
 *** Maintainers and the "lead"
 
-A source has no distinct admin: the only privileged role is
-=maintainer=. Maintainers are seeded from the per-source =:maintainers=
-vector; the *first entry* is the *lead maintainer*.
+=Maintainers= are seeded from the per-source =:maintainers= vector; the
+*first entry* is the *lead maintainer*.
 
 - Any active maintainer can run =Add maintainer:= directives.
 - Only the lead maintainer can run =Remove maintainer:= directives.
@@ -331,7 +330,7 @@ You can also [[mailto:bzg@bzg.fr][send me an email]] and support my work on [[ht
 
 This project uses [[https://intver.org][Intentional Versioning]], here are the three audiences:
 
-- =Users= : administrators who deploy, configure, and operate BARK instances
+- =Users= : sysadmins who deploy, configure, and operate BARK instances
 - =Integrators= : consumers of the exported JSON/RSS/Org formats
 - =Maintainers= : maintainers of the codebase
 

@@ -24,11 +24,6 @@
 ;; Email address (basic check: contains @)
 (s/def ::email (s/and ::non-blank-string #(str/includes? % "@")))
 
-;; Admin
-;; :bark/admin and :source/admin are no longer part of the config schema.
-;; The "lead maintainer" (the only role allowed to remove maintainers) is
-;; derived from the first entry of a source's :maintainers vector.
-
 ;; IMAP connection
 (s/def :imap/host ::non-blank-string)
 (s/def :imap/port ::pos-int)

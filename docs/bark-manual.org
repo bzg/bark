@@ -1,5 +1,5 @@
 #+title: BARK! Another Report Keeper
-#+subtitle: User and admin manual
+#+subtitle: User manual
 #+options: toc:1
 
 * EmBARK
@@ -7,9 +7,9 @@
 BARK monitors a mailbox and converts incoming emails into reports.
 
 Subsequent emails in the same thread can update the status of that
-report using predefined commands. Admins and maintainers can also
-update reports by writing directly to the monitored inbox, manage
-roles, and receive periodic digest emails.
+report using predefined commands. Maintainers can also update reports
+by writing directly to the monitored inbox, manage roles, and receive
+periodic digest emails.
 
 BARK expose reports as a HTML website and export data to various
 formats.
@@ -297,17 +297,15 @@ Maintainers can also write directly to the BARK inbox to act as
 
 Here is how the permissions work:
 
-- There is only one admin per source.
-- The admin and maintainers can promote users as maintainers.
-- The admin and maintainers can ignore users.
-- The admin can demote maintainers as users.
-- The admin can "unignore" users.
+- There is only one lead maintainer per source.
+- Maintainers can promote other users to maintainers.
+- Only the lead maintainer can demote maintainers as users.
 
 Roles and permissions are set by writing to the BARK inbox:
 
 #+begin_example
-Add maintainer: dev@example.com        (admin or maintainer)
-Remove maintainer: dev@example.com     (admin only)
+Add maintainer: dev@example.com        (any maintainer)
+Remove maintainer: dev@example.com     (lead maintainer only)
 #+end_example
 
 All state-changing actions (commands, role controls) must be sent
@@ -537,11 +535,11 @@ in turn take precedence over the built-in defaults.
 Role controls must be sent via the source's public channel.
 Notification controls can be sent privately.
 
-| ID     | Syntax / Words                     | Permission | Channel  |
-|--------+------------------------------------+------------+----------|
-| notify | =Notify: on= / =off= / =d:7 p:2 s:4 ...= | maintainer | any      |
-| role   | =Add maintainer: addr@host=          | maintainer | public   |
-| role   | =Remove maintainer: addr@host=       | admin      | public   |
+| ID     | Syntax / Words                     | Permission      | Channel |
+|--------+------------------------------------+-----------------+---------|
+| notify | =Notify: on= / =off= / =d:7 p:2 s:4 ...= | maintainer      | any     |
+| role   | =Add maintainer: addr@host=          | maintainer      | public  |
+| role   | =Remove maintainer: addr@host=       | lead maintainer | public  |
 
 * Exploring reports
 

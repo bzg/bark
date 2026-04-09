@@ -13,8 +13,7 @@
                             default-labels default-commands
                             resolve-labels-map resolve-commands-map
                             active-tenures lead-maintainer lead-maintainer?
-                            maintainer? admin-or-maintainer?
-                            load-config build-source-map
+                            maintainer? load-config build-source-map
                             report-priority report-status report-descendant-count
                             report-pull-pattern attachment-pull-pattern parse-cli-args
                             votes-by-report vote-counts

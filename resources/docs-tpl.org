@@ -2,11 +2,11 @@
 
 BARK monitors a mailbox and converts incoming emails into reports.
 Subsequent emails in the same thread can update the status of that
-report using predefined commands. Admins and maintainers can
-update reports by writing directly to the monitored inbox, manage
-roles, and receive periodic digest emails.
+report using predefined commands. Maintainers can update reports by
+writing directly to the monitored inbox, manage roles, and receive
+periodic digest emails.
 
-For admin and maintainers, see the full [[https://codeberg.org/bzg/bark/src/branch/main/docs/bark-manual.org][BARK manual]].
+For maintainers, see the full [[https://codeberg.org/bzg/bark/src/branch/main/docs/bark-manual.org][BARK manual]].
 
 To explore BARK reports from your terminal, use [[https://codeberg.org/bzg/bone][bone]].
 
