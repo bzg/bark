@@ -108,13 +108,14 @@
 (defn- setup-db! []
   (let [db-path (str "/tmp/bark-test-" (System/currentTimeMillis))
         conn    (d/get-conn db-path common/bark-schema)]
-    ;; Setup roles
-    (d/transact! conn [{:roles/source      "direct"
-                        :roles/admin       "admin@test.org"
-                        :roles/maintainers "admin@test.org"}])
-    (d/transact! conn [{:roles/source      "public-list"
-                        :roles/admin       "admin@test.org"
-                        :roles/maintainers "admin@test.org"}])
+    ;; Seed an initial open tenure (from = nil, order = 0) making
+    ;; admin@test.org the lead maintainer on both sources.
+    (d/transact! conn [{:maint-tenure/source "direct"
+                        :maint-tenure/email  "admin@test.org"
+                        :maint-tenure/order  0}
+                       {:maint-tenure/source "public-list"
+                        :maint-tenure/email  "admin@test.org"
+                        :maint-tenure/order  0}])
     ;; Insert test emails
     (let [emails (edn/read-string (slurp "resources/emails.edn"))]
       (doseq [email emails]
@@ -188,10 +189,9 @@
 
         ;; --- Roles ---
         (testing "Roles (final state)"
-          (let [r (d/pull db '[:roles/admin :roles/maintainers]
-                          [:roles/source "direct"])]
-            (is (= "admin@test.org" (:roles/admin r)))
-            (is (contains? (set (:roles/maintainers r)) "maint@test.org"))))
+          (let [ts (roles/get-tenures db "direct")]
+            (is (= "admin@test.org" (common/lead-maintainer ts)))
+            (is (common/maintainer? ts "maint@test.org"))))
 
         ;; --- Bug 02 lifecycle ---
         (testing "Bug 02 lifecycle"
@@ -312,8 +312,7 @@
 
         ;; --- Email 29 role control via mailing list (now allowed) ---
         (testing "Email 29 role control via mailing list"
-          (let [r (d/pull db '[:roles/maintainers] [:roles/source "direct"])]
-            (is (contains? (set (:roles/maintainers r)) "evil@hacker.org"))))
+          (is (common/maintainer? (roles/get-tenures db "direct") "evil@hacker.org")))
 
         ;; --- Email 30 bug via list ---
         (testing "Email 30 bug via list"
@@ -389,20 +388,17 @@
 
         ;; --- Emails 41-42 add then remove maintainer ---
         (testing "Emails 41-42 add then remove maintainer"
-          (let [r (d/pull db '[:roles/maintainers] [:roles/source "direct"])]
-            (is (not (contains? (set (:roles/maintainers r)) "maint2@test.org")))))
+          (is (not (common/maintainer? (roles/get-tenures db "direct") "maint2@test.org"))))
 
         ;; --- Email 44 unignore (Ignore mechanism removed) ---
 
         ;; --- Email 45 maintainer adds peer ---
         (testing "Email 45 maintainer adds peer"
-          (let [r (d/pull db '[:roles/maintainers] [:roles/source "direct"])]
-            (is (contains? (set (:roles/maintainers r)) "maint3@test.org"))))
+          (is (common/maintainer? (roles/get-tenures db "direct") "maint3@test.org")))
 
         ;; --- Email 47 user can't add maintainer ---
         (testing "Email 47 user can't add maintainer"
-          (let [r (d/pull db '[:roles/maintainers] [:roles/source "direct"])]
-            (is (not (contains? (set (:roles/maintainers r)) "user@test.org")))))
+          (is (not (common/maintainer? (roles/get-tenures db "direct") "user@test.org"))))
 
         ;; --- Emails 48-49 command with semicolon ---
         (testing "Emails 48-49 command with semicolon"

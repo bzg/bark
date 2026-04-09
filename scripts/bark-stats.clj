@@ -67,44 +67,48 @@
          [?e :participant/contributor-since ?since]]
        db))
 
-(defn total-maintainers
-  "Count distinct maintainer addresses across all sources."
+(defn- all-active-tenures
+  "Return all currently-active tenures (no :to) across all sources
+  as maps with :email and :from."
   [db]
-  (let [addrs (d/q '[:find [?a ...]
-                      :where [_ :roles/maintainers ?a]]
-                    db)]
-    (count (distinct addrs))))
+  (let [eids (d/q '[:find [?e ...]
+                    :where [?e :maint-tenure/email _]]
+                  db)]
+    (->> eids
+         (map (fn [eid]
+                (d/pull db '[:maint-tenure/email
+                             :maint-tenure/from
+                             :maint-tenure/to] eid)))
+         (remove :maint-tenure/to)
+         (mapv (fn [m] {:email (:maint-tenure/email m)
+                        :from  (:maint-tenure/from m)})))))
+
+(defn total-maintainers
+  "Count distinct currently-active maintainer addresses across all sources."
+  [db]
+  (->> (all-active-tenures db)
+       (keep :email)
+       distinct
+       count))
 
 (defn all-maintainer-since-dates
-  "Fetch all :roles/maintainer-since entries from the database.
-  Returns a seq of date-strings (\"yyyy-MM-dd\")."
+  "Return :from dates of currently-active tenures as ISO strings
+  (\"yyyy-MM-dd\"). Tenures with :from = nil are excluded — they are
+  counted via `maintainers-without-since` and fed as `n-always` to the
+  cumulative chart."
   [db]
-  (let [entries (d/q '[:find [?s ...]
-                       :where [_ :roles/maintainer-since ?s]]
-                     db)]
-    (keep (fn [entry]
-            (let [idx (str/last-index-of entry ":")]
-              (when (and idx (pos? idx))
-                (subs entry (inc idx)))))
-          entries)))
+  (let [fmt (doto (java.text.SimpleDateFormat. "yyyy-MM-dd")
+              (.setTimeZone (java.util.TimeZone/getTimeZone "UTC")))]
+    (->> (all-active-tenures db)
+         (keep :from)
+         (mapv #(.format fmt ^java.util.Date %)))))
 
 (defn- maintainers-without-since
-  "Count current maintainers who have no :roles/maintainer-since entry.
-  These are config-seeded without :since or directive-added — they've
-  been maintainers 'forever' and should always appear in the chart."
+  "Count currently-active tenures with no :from (seeded 'forever')."
   [db]
-  (let [all-maints  (set (d/q '[:find [?a ...]
-                                :where [_ :roles/maintainers ?a]]
-                              db))
-        since-entries (d/q '[:find [?s ...]
-                             :where [_ :roles/maintainer-since ?s]]
-                           db)
-        with-since  (set (keep (fn [entry]
-                                 (let [idx (str/last-index-of entry ":")]
-                                   (when (and idx (pos? idx))
-                                     (subs entry 0 idx))))
-                               since-entries))]
-    (count (remove with-since all-maints))))
+  (->> (all-active-tenures db)
+       (filter #(nil? (:from %)))
+       count))
 
 ;; ---------------------------------------------------------------------------
 ;; Time helpers

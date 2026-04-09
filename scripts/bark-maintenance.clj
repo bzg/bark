@@ -27,7 +27,7 @@
 
 ;; Forward-declared for clj-kondo (provided at runtime by load-file below).
 (declare load-datalevin-pod! parse-delay days-between ensure-set
-         load-config build-source-map bark-schema get-roles format-date)
+         load-config build-source-map bark-schema get-tenures format-date)
 
 (load-file "scripts/bark-common.clj")
 
@@ -66,20 +66,16 @@
            db)))
 
 (defn- maintainer-addresses
-  "Union of all maintainer and admin addresses across all sources.
-  Includes config-level :admin, per-source :admin, and DB :roles/maintainers."
-  [db config source-map]
-  (let [global-admin (some-> (:admin config) str/lower-case)
-        cfg-addrs    (for [[_src-name cfg] source-map
-                           addr (concat
-                                 (when-let [a (:admin cfg)] [a])
-                                 (map :email (:maintainers cfg)))]
-                       (str/lower-case addr))
-        db-addrs     (for [[src-name _] source-map
-                           :let [roles (get-roles db src-name)]
-                           addr (ensure-set (:roles/maintainers roles))]
-                       (str/lower-case addr))]
-    (into #{} (remove nil?) (concat [global-admin] cfg-addrs db-addrs))))
+  "Union of all addresses that ever held maintainer status on any source,
+  including closed tenures — these are still 'privileged' for the purpose
+  of orphan detection (we don't want to delete emails from a former
+  maintainer just because their tenure was closed)."
+  [db _config source-map]
+  (->> source-map
+       (mapcat (fn [[src-name _]]
+                 (keep :email (get-tenures db src-name))))
+       (map str/lower-case)
+       (into #{})))
 
 (defn- all-emails
   "All email entities as [eid source from-address date-sent message-id]."

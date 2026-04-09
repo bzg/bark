@@ -12,7 +12,8 @@
                             days-between parse-delay get-header source-type
                             default-labels default-commands
                             resolve-labels-map resolve-commands-map
-                            parse-maintainer-since-strings admin-or-maintainer?
+                            active-tenures lead-maintainer lead-maintainer?
+                            maintainer? admin-or-maintainer?
                             load-config build-source-map
                             report-priority report-status report-descendant-count
                             report-pull-pattern attachment-pull-pattern parse-cli-args
@@ -58,12 +59,58 @@
   (when message-id
     (dpull db attachment-pull-pattern [:report/message-id message-id])))
 
-(defn get-roles
-  "Fetch roles for a source. Returns a map or {}."
+(defn get-tenures
+  "Fetch all maintainer tenures (active and closed) for `source-name`.
+  Returns a vector of tenure maps {:eid :email :from :to :order}."
   [db source-name]
-  (or (dpull db '[:roles/admin :roles/maintainers :roles/maintainer-since]
-             [:roles/source source-name])
-      {}))
+  (let [eids (dq '[:find [?e ...]
+                   :in $ ?src
+                   :where [?e :maint-tenure/source ?src]]
+                 db source-name)]
+    (mapv (fn [eid]
+            (let [m (dpull db '[:db/id
+                                :maint-tenure/email
+                                :maint-tenure/from
+                                :maint-tenure/to
+                                :maint-tenure/order] eid)]
+              {:eid   (:db/id m)
+               :email (:maint-tenure/email m)
+               :from  (:maint-tenure/from m)
+               :to    (:maint-tenure/to m)
+               :order (:maint-tenure/order m)}))
+          eids)))
+
+(defn- ^java.text.SimpleDateFormat iso-date-fmt []
+  (doto (java.text.SimpleDateFormat. "yyyy-MM-dd")
+    (.setTimeZone (java.util.TimeZone/getTimeZone "UTC"))))
+
+(defn tenures-snapshot
+  "Return a serialization-friendly view of all tenures for a source,
+  suitable for embedding in JSON/EDN exports. Each entry has:
+    :email  lower-cased address
+    :from   ISO date string \"yyyy-MM-dd\" or nil (= since the beginning)
+    :to     ISO date string or nil (= currently active)
+    :order  integer index from config.edn (absent when unknown)
+    :lead?  true iff this is the currently-active lead tenure
+  The list is sorted active-first (by :from asc, nil first), then closed
+  tenures by :to desc — matching how the HTML docs render them."
+  [tenures]
+  (let [lead    (lead-maintainer tenures)
+        fmt     (iso-date-fmt)
+        fmt-iso (fn [^java.util.Date d] (when d (.format fmt d)))
+        sort-k  (fn [{:keys [from to]}]
+                  [(if to 1 0)
+                   (if to
+                     (- (.getTime ^java.util.Date to))
+                     (if-let [^java.util.Date f from] (.getTime f) 0))])]
+    (->> tenures
+         (sort-by sort-k)
+         (mapv (fn [{:keys [email from to order]}]
+                 (cond-> {:email email
+                          :from  (fmt-iso from)
+                          :to    (fmt-iso to)
+                          :lead? (and (nil? to) (= email lead))}
+                   order (assoc :order order)))))))
 
 (defn get-last-modified [db]
   (dq '[:find ?t .

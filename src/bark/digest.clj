@@ -406,7 +406,7 @@
                                 (d/db conn) nearest-eids)))
         any-cmd? (reduce (fn [acc rid]
                            (if-let [[rtype rsrc] (get rid-info rid)]
-                             (let [rroles (if rsrc (roles/get-roles (d/db conn) rsrc) rroles)]
+                             (let [rroles (if rsrc (roles/get-tenures (d/db conn) rsrc) rroles)]
                                (if (commands/apply-commands! conn rid rtype email source-map rroles delivery)
                                  true acc))
                              acc))
@@ -456,13 +456,13 @@
       (log/debug "No matching source for" message-id "— skipping")
       (let [source-cfg   (get source-map source-name)
             via-channel? (common/sent-via-source-channel? delivery source-cfg)
-            rroles       (roles/get-roles (d/db conn) source-name)]
+            rroles       (roles/get-tenures (d/db conn) source-name)]
 
         ;; Phase 1: apply controls (may mutate roles)
         (apply-controls! conn rroles source-name from-addr email via-channel?)
 
         ;; Phase 2: detect and maybe create report (re-fetch roles after controls)
-        (let [rroles      (roles/get-roles (d/db conn) source-name)
+        (let [rroles      (roles/get-tenures (d/db conn) source-name)
               [report-eid report-info]
               (maybe-create-report! conn eid message-id email from-addr
                                     source-name source-cfg via-channel? rroles)

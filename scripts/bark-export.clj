@@ -54,7 +54,8 @@
          ensure-set format-date format-date-iso report-priority report-status
          report-descendant-count all-reports report-pull-pattern attachment-pull-pattern
          parse-cli-args load-config build-source-map bark-schema bark-format
-         fetch-attachment-data get-last-modified changed-source-types-since
+         fetch-attachment-data get-tenures tenures-snapshot
+         get-last-modified changed-source-types-since
          set-theme! resolve-css-theme votes-by-report vote-counts
          html-head footer-css bark-footer wrap-js spit-html theme-toggle-js bark-repo-url
          ics-file? text-attachment?)
@@ -180,15 +181,17 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- build-maintainers
-  "Gather per-source maintainer sets from DB roles.
+  "Gather per-source currently-active maintainer sets from DB tenures.
    Returns source-name -> #{maintainer-emails}."
   [db source-map]
   (into {}
         (map (fn [[source-name _]]
-               (let [roles (d/pull db '[:roles/maintainers]
-                                   [:roles/source source-name])]
-                 [source-name (set (map str/lower-case
-                                        (ensure-set (:roles/maintainers roles))))])))
+               [source-name
+                (->> (get-tenures db source-name)
+                     (remove :to)
+                     (keep :email)
+                     (map str/lower-case)
+                     set)]))
         source-map))
 
 ;; ---------------------------------------------------------------------------
@@ -202,15 +205,11 @@
 
 (defn- sender-role
   "Determine role of sender for a given source context."
-  [from source-name source-map maintainers-map]
+  [from source-name _source-map maintainers-map]
   (when (and (seq from) source-name)
-    (let [from-lc  (str/lower-case from)
-          src-info (get source-map source-name)
-          admin    (some-> (:admin src-info) str/lower-case)]
-      (cond
-        (= from-lc admin)                                            "admin"
-        (contains? (get maintainers-map source-name #{}) from-lc)    "maintainer"
-        :else                                                        nil))))
+    (let [from-lc (str/lower-case from)]
+      (when (contains? (get maintainers-map source-name #{}) from-lc)
+        "maintainer"))))
 
 (def ^:private address-fields
   "Report address attrs to extract into the output map."
@@ -1014,11 +1013,13 @@
                                             :open   (count (remove :report/closed rs))
                                             :closed (count (filter :report/closed rs))}]))
                           by-type)
+        tenures    (when-let [db (ctx-db)] (get-tenures db source-name))
         meta-data  (merge counts
                           {:bark-format bark-format
                            :source      source-name
                            :generated   (str (java.util.Date.))
-                           :by-type     type-counts}
+                           :by-type     type-counts
+                           :maintainers (tenures-snapshot (or tenures []))}
                           (source-metadata source-name source-map))]
     ;; meta.json
     (spit (str reports-dir "/meta.json")
