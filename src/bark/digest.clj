@@ -172,16 +172,19 @@
                            (not [?r :report/closed _])]
                          db version)]
       (when (seq open-chgs)
-        (d/transact! conn (mapv (fn [r] {:db/id r
-                                         :report/closed release-email-eid
-                                         :report/close-reason :resolved})
-                                open-chgs))
-        (let [rel-tx (into []
-                           (mapcat (fn [chg-rid]
-                                     [[:db/add release-report-eid :report/related chg-rid]
-                                      [:db/add chg-rid :report/related release-report-eid]]))
-                           open-chgs)]
-          (d/transact! conn rel-tx))
+        ;; Single transaction: closing the changes and linking them to the
+        ;; release must be atomic — otherwise a crash between the two could
+        ;; leave changes closed but not linked to their release.
+        (let [close-tx (mapv (fn [r] {:db/id r
+                                      :report/closed release-email-eid
+                                      :report/close-reason :resolved})
+                             open-chgs)
+              rel-tx   (into []
+                             (mapcat (fn [chg-rid]
+                                       [[:db/add release-report-eid :report/related chg-rid]
+                                        [:db/add chg-rid :report/related release-report-eid]]))
+                             open-chgs)]
+          (d/transact! conn (into close-tx rel-tx)))
         (tracking/bump-report-updated! conn open-chgs)
         (log/info "Auto-closed" (count open-chgs)
                   "[CHG" version "] (superseded by release)")))))

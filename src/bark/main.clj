@@ -302,7 +302,9 @@
                       (catch Exception e
                         (log/error e "IDLE interrupted:" (or (.getMessage e) (str (class e))))
                         last-expire-ms))]
-                (try (imap/disconnect conn) (catch Exception _))
+                (try (imap/disconnect conn)
+                     (catch Exception e
+                       (log/debug "IMAP disconnect failed:" (.getMessage e))))
                 (when-not (shutting-down?)
                   (log/debug "IDLE exited, reconnecting in 1s")
                   (Thread/sleep 1000)
@@ -329,7 +331,9 @@
       (catch-up-fetch! conn db-conn folder fetch-opts source-map sources ingest-opts)
       (expire/expire-reports! db-conn source-map)
       (finally
-        (try (imap/disconnect conn) (catch Exception _))))))
+        (try (imap/disconnect conn)
+                     (catch Exception e
+                       (log/debug "IMAP disconnect failed:" (.getMessage e))))))))
 
 (defn -main [& args]
   (let [;; Parse CLI args: --initial-fetch, --watch, -c config-path
@@ -369,7 +373,9 @@
             (log/info "Shutting down...")
             (reset! shutdown? true)
             (Thread/sleep 1000)
-            (try (ingest/close db-conn) (catch Exception _))
+            (try (ingest/close db-conn)
+                 (catch Exception e
+                   (log/debug "DB close failed:" (.getMessage e))))
             (log/info "Goodbye."))))
         (if watch?
           (idle-loop! imap-cfg db-conn ingest-cfg config-path)
@@ -377,6 +383,8 @@
             (batch-run! imap-cfg db-conn ingest-cfg config-path)
             ;; Datalevin/LMDB keeps non-daemon threads alive; without an
             ;; explicit close + System/exit the JVM hangs after batch mode.
-            (try (ingest/close db-conn) (catch Exception _))
+            (try (ingest/close db-conn)
+                 (catch Exception e
+                   (log/debug "DB close failed:" (.getMessage e))))
             (shutdown-agents)
             (System/exit 0)))))))
