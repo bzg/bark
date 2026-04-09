@@ -127,18 +127,29 @@
  :participant/since             {:db/valueType :db.type/instant}
  :participant/contributor-since {:db/valueType :db.type/instant}  ;; non-nil = submitted code
 
- ;; --- Per-source roles ---
- :roles/source           {:db/valueType :db.type/string
-                          :db/unique    :db.unique/identity}
- :roles/admin            {:db/valueType :db.type/string}
- :roles/maintainers      {:db/valueType   :db.type/string
-                          :db/cardinality :db.cardinality/many}
- ;; Temporal constraints for config-seeded maintainers.
- ;; Each entry is "email:yyyy-MM-dd" — the maintainer is only active
- ;; for emails dated on or after that date.  Directive-added maintainers
- ;; have no entry here (meaning no temporal constraint).
- :roles/maintainer-since {:db/valueType   :db.type/string
-                          :db/cardinality :db.cardinality/many}
+ ;; --- Per-source maintainer tenures ---
+ ;; Each entity represents one contiguous period during which a given
+ ;; address held maintainer status on a given source. Multiple tenures
+ ;; can exist for the same (source, email) if a maintainer was removed
+ ;; and re-added over time.
+ ;;
+ ;; :maint-tenure/from absent = active since the beginning of time
+ ;;   (used for config-seeded tenures without an explicit :since).
+ ;; :maint-tenure/to   absent = tenure is currently active.
+ ;; :maint-tenure/order encodes the order of appearance in config.edn
+ ;;   for tenures seeded from config (used only as a tie-break when
+ ;;   computing the lead maintainer). Absent for tenures opened at
+ ;;   runtime via "Add maintainer:" directives.
+ ;;
+ ;; The "lead maintainer" for a source is the currently-active tenure
+ ;; (no :to) with the earliest :from (absent sorts first), tie-broken
+ ;; by :order, then by email lexicographic order. The lead is the only
+ ;; one allowed to remove maintainers and cannot remove themselves.
+ :maint-tenure/source    {:db/valueType :db.type/string}
+ :maint-tenure/email     {:db/valueType :db.type/string}
+ :maint-tenure/from      {:db/valueType :db.type/instant}
+ :maint-tenure/to        {:db/valueType :db.type/instant}
+ :maint-tenure/order     {:db/valueType :db.type/long}
 
  ;; --- Notification preferences (per subscriber per source) ---
  :notify/key             {:db/valueType :db.type/string

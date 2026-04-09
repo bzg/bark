@@ -3,10 +3,10 @@
 ;; test/bark-email-test.clj — Test SMTP configuration by sending a test email.
 ;;
 ;; Reads :notifications :smtp from config.edn, sends a short test message
-;; to the global :admin address (or to a custom address via --to).
+;; to the lead maintainer of the first source (or to a custom address via --to).
 ;;
 ;; Usage:
-;;   bb test-smtp                    — send test email to :admin
+;;   bb test-smtp                    — send test email to lead maintainer
 ;;   bb test-smtp --to me@example.com — send to a specific address
 ;;   bb test-smtp --dry-run          — validate config without sending
 
@@ -79,10 +79,13 @@
         (when-not (validate-smtp-config smtp)
           (System/exit 1))
 
-        ;; --- Resolve recipient ---
-        (let [to-addr (or to-arg (:admin config))]
+        ;; --- Resolve recipient: --to <addr>, else the lead maintainer
+        ;; (first entry of the first source's :maintainers). ---
+        (let [to-addr (or to-arg
+                          (some-> config :sources first :maintainers first :email))]
           (when-not to-addr
-            (println "\n✗ No recipient: set :admin in config.edn or use --to <addr>.")
+            (println "\n✗ No recipient: add a :maintainers entry on the first source,"
+                     "or use --to <addr>.")
             (System/exit 1))
 
           (println (str "\nRecipient: " to-addr))

@@ -13,9 +13,6 @@
 
  ;; ---- Who monitors what --------------------------------------------------
 
- ;; Default admin email
- :admin "admin@example.com"
-
  :sources [
            ;; --- Use-case 1: mailing list ---
            ;; Use :list with the List-Id identifier (inside angle brackets),
@@ -24,19 +21,29 @@
            {:name               "public-list"
             :list               "bugs.example.org"
             ;;
-	    ;; The Bark admin of this monitored mailbox
-            :admin              "lead@example.org"
+            ;; Maintainers — seed initial maintainer tenures.
             ;;
-            ;; Maintainers (optional) — seed initial maintainers.
-            ;; :since restricts the maintainer to emails dated on or after
+            ;; The FIRST entry is the "lead maintainer": the only person
+            ;; allowed to remove maintainers via "Remove maintainer:"
+            ;; directives, and they cannot remove themselves. Any active
+            ;; maintainer (lead or not) can add new maintainers via
+            ;; "Add maintainer:" directives.
+            ;;
+            ;; :since restricts a maintainer to emails dated on or after
             ;; that date (useful when adding someone retroactively without
-            ;; granting privileges on older emails).  Omit :since for
-            ;; immediate effect on all emails.
-            ;; "Add maintainer:" / "Remove maintainer:" directives in
-            ;; emails override this list at runtime.
-            ;; Note: the admin is NOT automatically a maintainer.
-            ;; :maintainers [{:email "lead@example.org" :since "2025-01-01"}
-            ;;               {:email "co-maint@example.org"}]
+            ;; granting privileges on older emails). Omit :since to be
+            ;; considered maintainer "since the beginning of time" — the
+            ;; usual default for a fresh deployment.
+            ;;
+            ;; This list only seeds the DB on first startup. Afterward,
+            ;; "Add maintainer:" / "Remove maintainer:" directives mutate
+            ;; the live tenure history in the DB, which then overrides this
+            ;; list. The full tenure history is exported into meta.json
+            ;; and docs.html so a new deployment can mirror command
+            ;; processing on archived emails.
+            ;;
+            ;; :maintainers [{:email "lead@example.org"}
+            ;;               {:email "co-maint@example.org" :since "2025-06-01"}]
             ;;
             ;; Base URL where this source's public/ directory is served (optional)
             :base-url "https://bark.example.org/public/public-list/"

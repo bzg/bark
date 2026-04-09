@@ -361,7 +361,7 @@
         (roles/ensure-source-roles! db-conn config)
         (doseq [{:keys [name]} (:sources config)]
           (roles/ensure-notify-defaults! db-conn name
-                                         (roles/get-roles (d/db db-conn) name)))
+                                         (roles/get-tenures (d/db db-conn) name)))
         (.addShutdownHook
          (Runtime/getRuntime)
          (Thread.
@@ -373,4 +373,10 @@
             (log/info "Goodbye."))))
         (if watch?
           (idle-loop! imap-cfg db-conn ingest-cfg config-path)
-          (batch-run! imap-cfg db-conn ingest-cfg config-path))))))
+          (do
+            (batch-run! imap-cfg db-conn ingest-cfg config-path)
+            ;; Datalevin/LMDB keeps non-daemon threads alive; without an
+            ;; explicit close + System/exit the JVM hangs after batch mode.
+            (try (ingest/close db-conn) (catch Exception _))
+            (shutdown-agents)
+            (System/exit 0)))))))

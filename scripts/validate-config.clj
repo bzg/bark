@@ -25,7 +25,9 @@
 (s/def ::email (s/and ::non-blank-string #(str/includes? % "@")))
 
 ;; Admin
-(s/def :bark/admin ::email)
+;; :bark/admin and :source/admin are no longer part of the config schema.
+;; The "lead maintainer" (the only role allowed to remove maintainers) is
+;; derived from the first entry of a source's :maintainers vector.
 
 ;; IMAP connection
 (s/def :imap/host ::non-blank-string)
@@ -60,7 +62,6 @@
 (s/def :source/list :match/list-id)
 (s/def :source/alias :match/alias)
 (s/def :source/to :match/to)
-(s/def :source/admin ::email)
 (s/def :source/list-archive (s/and ::non-blank-string #(re-find #"^https?://" %)))
 (s/def :source/base-url ::non-blank-string)
 
@@ -229,7 +230,7 @@
 
 ;; Top-level config
 (s/def ::config
-  (s/keys :req-un [:bark/admin :bark/imap :bark/sources :bark/db]
+  (s/keys :req-un [:bark/imap :bark/sources :bark/db]
           :opt-un [:bark/ingest :bark/notifications :bark/labels
                    :bark/commands :bark/command-aliases
                    :bark/export-reports :bark/report-types
@@ -266,7 +267,6 @@
           result (validate-config config)]
       (if (:valid? result)
         (do (log/info "✓" path "is valid.")
-            (log/info "  Default admin:" (:admin config))
             (let [imap (:imap config)]
               (log/info "  IMAP:" (str (:user imap) "@" (:host imap) "/" (:folder imap))))
             (log/info "  Sources:" (count (:sources config)))
@@ -277,7 +277,6 @@
                           (:alias src) (str "(alias: " (:alias src) ")")
                           (:to src)    (str "(mailbox: " (:to src) ")"))
                         (when-let [la (:list-archive src)] (str "archive: " la))
-                        (when-let [a (:admin src)] (str "admin: " a))
                         (when-let [rt (:report-types src)] (str "report-types: " (pr-str rt)))
                         (when-let [ms (:maintainers src)]
                           (str "maintainers: "

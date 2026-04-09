@@ -24,7 +24,7 @@
 (declare load-datalevin-pod! get-header format-date format-date-iso
          report-priority report-status report-descendant-count
          all-reports report-pull-pattern load-config build-source-map bark-schema
-         get-roles admin-or-maintainer?)
+         get-tenures admin-or-maintainer?)
 
 (load-file "scripts/bark-common.clj")
 
@@ -115,7 +115,7 @@
   "Confirm the subscriber is still admin or maintainer for the source.
   Uses the non-temporal check (current state, not as-of a specific date)."
   [db notify]
-  (let [roles (get-roles db (:notify/source notify))]
+  (let [roles (get-tenures db (:notify/source notify))]
     (admin-or-maintainer? roles (:notify/email notify))))
 
 ;; ---------------------------------------------------------------------------

@@ -392,67 +392,63 @@
            (when local (extract local)))))
 
 ;; ---------------------------------------------------------------------------
-;; Maintainer-since parsing
+;; Maintainer tenures (pure — operate on a seq of tenure maps, no DB access)
 ;; ---------------------------------------------------------------------------
+;;
+;; A "tenure" is a map {:email str :from Date|nil :to Date|nil :order long|nil}
+;; representing one contiguous period during which an address held maintainer
+;; status on a source. :from nil = active since the beginning of time.
+;; :to nil = the tenure is currently active. :order encodes the config order
+;; used as a tie-break when computing the lead maintainer.
 
-(defn parse-maintainer-since-strings
-  "Parse :roles/maintainer-since entries (\"email:yyyy-MM-dd\") into a map
-  of lower-cased email -> date-string (e.g. {\"alice@co\" \"2025-01-01\"}).
-  See also `parse-maintainer-since-dates` for the Date-valued variant."
-  [roles]
-  (let [entries (let [v (:roles/maintainer-since roles)]
-                  (cond (nil? v) #{} (string? v) #{v} :else (set v)))]
-    (into {}
-          (keep (fn [entry]
-                  (let [idx (str/last-index-of entry ":")]
-                    (when (and idx (pos? idx))
-                      [(subs entry 0 idx) (subs entry (inc idx))]))))
-          entries)))
+(defn active-tenures
+  "Return tenures that are currently active (no :to)."
+  [tenures]
+  (filter #(nil? (:to %)) tenures))
 
-;; Backward-compat alias — scripts still import the old name.
-(def parse-maintainer-since-entries
-  "Deprecated: use `parse-maintainer-since-strings` instead."
-  parse-maintainer-since-strings)
+(defn- tenure-sort-key [t]
+  [(if-let [^Date f (:from t)] (.getTime f) 0)
+   (or (:order t) Long/MAX_VALUE)
+   (str/lower-case (or (:email t) ""))])
 
-;; ---------------------------------------------------------------------------
-;; Role checks (pure — operate on a roles map, no DB access)
-;; ---------------------------------------------------------------------------
+(defn lead-maintainer
+  "Return the lower-cased email of the lead maintainer — the active tenure
+  with the earliest :from (nil sorts first), tie-broken by :order then email.
+  Returns nil if no active tenure."
+  [tenures]
+  (:email (first (sort-by tenure-sort-key (active-tenures tenures)))))
 
-(defn- roles-set [roles attr]
-  (ensure-set (get roles attr)))
-
-(defn- has-role? [roles attr addr]
-  (boolean (some #(= (str/lower-case %) (str/lower-case addr))
-                 (roles-set roles attr))))
-
-(defn admin? [roles addr]
-  (and addr (:roles/admin roles)
-       (= (str/lower-case (:roles/admin roles))
-          (str/lower-case addr))))
-
-(defn- parse-maintainer-since-dates
-  "Like `parse-maintainer-since-strings` but values are java.util.Date objects."
-  [roles]
-  (into {}
-        (keep (fn [[email date-str]]
-                (try [email (Date/from (.toInstant (.atStartOfDay (LocalDate/parse date-str)
-                                                                  ZoneOffset/UTC)))]
-                     (catch Exception _ nil))))
-        (parse-maintainer-since-strings roles)))
+(defn lead-maintainer?
+  "True if addr is the current lead maintainer for this source."
+  [tenures addr]
+  (and addr
+       (when-let [lead (lead-maintainer tenures)]
+         (= (str/lower-case addr) lead))))
 
 (defn maintainer?
-  ([roles addr]
-   (and addr (has-role? roles :roles/maintainers addr)))
-  ([roles addr as-of]
+  "True if addr has maintainer status on this source.
+  2-arity: any currently-active tenure matches.
+  3-arity: the tenure covering `as-of` matches (from <= as-of < to,
+  with nil bounds meaning unbounded)."
+  ([tenures addr]
    (and addr
-        (has-role? roles :roles/maintainers addr)
-        (if as-of
-          (let [since (get (parse-maintainer-since-dates roles) (str/lower-case addr))]
-            (or (nil? since) (not (.before ^Date as-of since))))
-          true))))
+        (let [a (str/lower-case addr)]
+          (boolean (some #(and (= a (:email %)) (nil? (:to %))) tenures)))))
+  ([tenures addr as-of]
+   (and addr
+        (let [a (str/lower-case addr)]
+          (boolean
+           (some (fn [{:keys [email from to]}]
+                   (and (= a email)
+                        (or (nil? from) (not (.before ^Date as-of ^Date from)))
+                        (or (nil? to)   (.before ^Date as-of ^Date to))))
+                 tenures))))))
 
-(defn admin-or-maintainer? [roles addr]
-  (or (admin? roles addr) (maintainer? roles addr)))
+;; Admin was previously a distinct concept; it has been folded into the
+;; "lead maintainer" (first element of the config :maintainers list).
+;; This alias is kept so call sites that want "anyone with privileges"
+;; stay readable — semantically equivalent to `maintainer?` now.
+(def admin-or-maintainer? maintainer?)
 
 
 ;; ---------------------------------------------------------------------------
@@ -470,8 +466,7 @@
 (defn build-source-map
   "Build source-name -> config map from config."
   [config]
-  (let [default-admin   (:admin config)
-        global-st       (:labels config)
+  (let [global-st       (:labels config)
         global-cmd      (:commands config)
         global-aliases  (:command-aliases config)
         global-ef       (:export-formats config)
@@ -486,8 +481,7 @@
                      (log/warn "Source has no :list, :alias, or :to key — skipping:" (:name src)))
                    (when stype
                      [(:name src)
-                      (merge {:admin (or (:admin src) default-admin)
-                              :source-type stype}
+                      (merge {:source-type stype}
                            (select-keys src [:list :alias :to :commands :labels :notifications
                                              :archive-format-string :list-archive :base-url
                                              :maintainers :awaiting-delay])

@@ -21,7 +21,7 @@
 (declare default-labels default-commands
          resolve-labels-map resolve-commands-map
          parse-cli-args load-config build-source-map
-         load-datalevin-pod! bark-schema parse-maintainer-since-strings
+         load-datalevin-pod! bark-schema get-tenures lead-maintainer
          pico-cdn resolved-theme set-theme! bark-description footer-css bark-footer wrap-js
          spit-html theme-toggle-btn theme-toggle-js nav-bar org-inline-links)
 
@@ -420,44 +420,44 @@
         (str/replace ">" "&gt;")
         (str/replace "\"" "&quot;"))))
 
-;; parse-maintainer-since-strings is in bark-common.clj
+(defn- fmt-iso [^java.util.Date d]
+  (when d
+    (let [f (doto (java.text.SimpleDateFormat. "yyyy-MM-dd")
+              (.setTimeZone (java.util.TimeZone/getTimeZone "UTC")))]
+      (.format f d))))
 
 (defn build-maintainers-html
-  "Build an HTML section listing maintainers by display name,
-  with since-dates when available. Only current maintainers are shown.
-  Maintainers sharing the same display name (or participant name) are
-  deduplicated, keeping the earliest since-date."
+  "Build an HTML section listing all maintainer tenures (active and closed),
+  with :from/:to dates when known. The lead maintainer is highlighted.
+  Deduplication is intentionally NOT applied: the goal is to let an
+  operator reproduce command processing in another deployment, which
+  requires the full tenure history."
   [db source-name source-cfg]
   (when source-name
-    (let [dp          (resolve 'pod.huahaiy.datalevin/pull)
-          roles       (dp db '[:roles/admin :roles/maintainers :roles/maintainer-since]
-                          [:roles/source source-name])
-          maint-v     (:roles/maintainers roles)
-          maint-emails (cond (nil? maint-v) []
-                             (string? maint-v) [maint-v]
-                             :else maint-v)
-          since-map   (parse-maintainer-since-strings roles)
-          ;; Resolve each email to {display, since} then deduplicate by display name
-          raw-entries (mapv (fn [email]
-                              {:display (or (participant-name db source-name email) email)
-                               :since   (get since-map (str/lower-case email))})
-                            maint-emails)
-          ;; Group by display name, keep earliest since-date per person
-          deduped     (->> raw-entries
-                           (group-by :display)
-                           vals
-                           (mapv (fn [group]
-                                   (let [display (:display (first group))
-                                         sinces  (keep :since group)
-                                         earliest (when (seq sinces)
-                                                    (first (sort sinces)))]
-                                     {:display display :since earliest}))))
-          entries     (mapv (fn [{:keys [display since]}]
-                              (let [escaped (html-escape display)]
-                                (if since
-                                  (str escaped " <small>(since " since ")</small>")
-                                  escaped)))
-                            deduped)]
+    (let [tenures     (get-tenures db source-name)
+          lead        (lead-maintainer tenures)
+          ;; Sort: active first (earliest :from), then closed by :to desc.
+          sort-key    (fn [{:keys [from to]}]
+                        [(if to 1 0)
+                         (if-let [^java.util.Date d (or to from)]
+                           (- (.getTime d)) 0)])
+          ordered     (sort-by sort-key tenures)
+          entries     (mapv
+                       (fn [{:keys [email from to]}]
+                         (let [display (or (participant-name db source-name email) email)
+                               escaped (html-escape display)
+                               range   (cond
+                                         (and from to)
+                                         (str " <small>(" (fmt-iso from) " → " (fmt-iso to) ")</small>")
+                                         from
+                                         (str " <small>(since " (fmt-iso from) ")</small>")
+                                         to
+                                         (str " <small>(until " (fmt-iso to) ")</small>")
+                                         :else "")
+                               badge   (when (and (nil? to) (= email lead))
+                                         " <small><em>(lead)</em></small>")]
+                           (str escaped range badge)))
+                       ordered)]
       (when (seq entries)
         (let [maint-cfg (:maintainers source-cfg)
               config-snippet (when (seq maint-cfg)

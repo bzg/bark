@@ -181,20 +181,50 @@
 ;; Role checks (pure)
 ;; ---------------------------------------------------------------------------
 
-(deftest maintainer-with-since-test
-  (let [roles {:roles/admin "admin@test.org"
-               :roles/maintainers #{"alice@test.org"}
-               :roles/maintainer-since #{"alice@test.org:2025-06-01"}}]
-    (testing "no date check → always true"
-      (is (common/maintainer? roles "alice@test.org")))
-
-    (testing "email after since date → true"
-      (is (common/maintainer? roles "alice@test.org"
+(deftest maintainer-tenure-test
+  (let [tenures [{:email "alice@test.org"
+                  :from  #inst "2025-06-01T00:00:00Z"
+                  :to    nil
+                  :order 0}]]
+    (testing "no date check → any active tenure matches"
+      (is (common/maintainer? tenures "alice@test.org")))
+    (testing "email after :from → true"
+      (is (common/maintainer? tenures "alice@test.org"
                               #inst "2025-07-01T00:00:00Z")))
+    (testing "email before :from → false"
+      (is (not (common/maintainer? tenures "alice@test.org"
+                                   #inst "2025-01-01T00:00:00Z")))))
 
-    (testing "email before since date → false"
-      (is (not (common/maintainer? roles "alice@test.org"
-                                   #inst "2025-01-01T00:00:00Z"))))))
+  (testing "closed tenure does not match after :to"
+    (let [tenures [{:email "bob@test.org"
+                    :from  #inst "2025-01-01T00:00:00Z"
+                    :to    #inst "2025-06-01T00:00:00Z"
+                    :order 0}]]
+      (is (common/maintainer? tenures "bob@test.org"
+                              #inst "2025-03-01T00:00:00Z"))
+      (is (not (common/maintainer? tenures "bob@test.org"
+                                   #inst "2025-07-01T00:00:00Z"))))))
+
+(deftest lead-maintainer-test
+  (testing "earliest :from wins (nil sorts first)"
+    (let [tenures [{:email "later@t.org" :from #inst "2025-06-01" :order 1}
+                   {:email "first@t.org" :from nil                :order 0}
+                   {:email "mid@t.org"   :from #inst "2025-03-01" :order 2}]]
+      (is (= "first@t.org" (common/lead-maintainer tenures)))))
+  (testing "tie-break by :order when :from is equal (both nil)"
+    (let [tenures [{:email "b@t.org" :from nil :order 1}
+                   {:email "a@t.org" :from nil :order 0}]]
+      (is (= "a@t.org" (common/lead-maintainer tenures)))))
+  (testing "closed tenures are ignored"
+    (let [tenures [{:email "first@t.org" :from nil :to #inst "2025-01-01" :order 0}
+                   {:email "now@t.org"   :from #inst "2025-02-01"          :order 1}]]
+      (is (= "now@t.org" (common/lead-maintainer tenures)))))
+  (testing "no active tenures → nil"
+    (is (nil? (common/lead-maintainer []))))
+  (testing "lead-maintainer? is case-insensitive"
+    (let [tenures [{:email "lead@t.org" :from nil :order 0}]]
+      (is (common/lead-maintainer? tenures "LEAD@t.org"))
+      (is (not (common/lead-maintainer? tenures "other@t.org"))))))
 
 ;; ---------------------------------------------------------------------------
 ;; resolve-commands-map with extended form

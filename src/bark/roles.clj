@@ -3,7 +3,7 @@
 ;; License-Filename: LICENSES/EPL-2.0.txt
 
 (ns bark.roles
-  "Role management, controls, and permission checks."
+  "Maintainer tenure management, controls, and permission checks."
   (:require [clojure.string :as str]
             [datalevin.core :as d]
             [taoensso.timbre :as log]
@@ -11,88 +11,88 @@
             [bark.tracking :as tracking]))
 
 ;; ---------------------------------------------------------------------------
-;; Role queries and checks (pure, given a roles map)
+;; Pure re-exports (canonical entry points; implementations live in common)
 ;; ---------------------------------------------------------------------------
 
-;; Pure checks are defined in bark.common (no datalevin dependency).
-;; These re-exports are the canonical entry points for all callers
-;; outside bark.common — prefer roles/admin? over common/admin? etc.
-(def admin?
-  "True if addr is the admin for this source. Canonical entry point."
-  common/admin?)
-(def maintainer?
-  "True if addr is a maintainer. 2-arity ignores temporal constraints,
-  3-arity checks maintainer-since dates. Canonical entry point."
-  common/maintainer?)
-(def admin-or-maintainer?
-  "True if addr is admin or maintainer. Canonical entry point."
-  common/admin-or-maintainer?)
+(def maintainer?         common/maintainer?)
+(def admin-or-maintainer? common/admin-or-maintainer?)
+(def lead-maintainer      common/lead-maintainer)
+(def lead-maintainer?     common/lead-maintainer?)
+(def active-tenures       common/active-tenures)
 
 ;; ---------------------------------------------------------------------------
-;; Role DB operations
+;; Tenure queries
 ;; ---------------------------------------------------------------------------
 
-(defn get-roles [db source-name]
-  (or (d/pull db '[:roles/admin :roles/maintainers :roles/maintainer-since]
-              [:roles/source source-name])
-      {}))
+(defn- pull-tenure [db eid]
+  (let [m (d/pull db '[:maint-tenure/email
+                       :maint-tenure/from
+                       :maint-tenure/to
+                       :maint-tenure/order
+                       :db/id] eid)]
+    {:eid   (:db/id m)
+     :email (:maint-tenure/email m)
+     :from  (:maint-tenure/from m)
+     :to    (:maint-tenure/to m)
+     :order (:maint-tenure/order m)}))
 
-(defn- roles-eid [conn source-name]
-  (d/entid (d/db conn) [:roles/source source-name]))
+(defn get-tenures
+  "Return the seq of all tenure maps (active and closed) for `source-name`."
+  [db source-name]
+  (let [eids (d/q '[:find [?e ...]
+                    :in $ ?src
+                    :where [?e :maint-tenure/source ?src]]
+                  db source-name)]
+    (mapv #(pull-tenure db %) eids)))
 
-(defn ensure-source-roles! [conn config]
-  (let [default-admin (:admin config)]
-    (doseq [{:keys [name admin maintainers]} (:sources config)]
-      (let [admin    (or admin default-admin)
-            existing (d/q '[:find ?e .
-                            :in $ ?src
-                            :where [?e :roles/source ?src]]
-                          (d/db conn) name)]
-        (d/transact! conn [{:roles/source name :roles/admin admin}])
-        (when-not existing
-          (log/info "Initialized roles for source" name (str "(admin: " admin ")")))
-        (when (seq maintainers)
-          (let [eid     (roles-eid conn name)
-                current (common/ensure-set (:roles/maintainers (get-roles (d/db conn) name)))]
-            (when eid
-              (let [new-maints (remove (fn [{:keys [email]}]
-                                         (or (nil? email)
-                                             (contains? current (str/lower-case email))))
-                                       maintainers)]
-                (when (seq new-maints)
-                  (let [tx (into []
-                                 (mapcat (fn [{:keys [email since]}]
-                                           (let [addr (str/lower-case email)]
-                                             (cond-> [[:db/add eid :roles/maintainers addr]]
-                                               since (conj [:db/add eid :roles/maintainer-since
-                                                            (str addr ":" since)])))))
-                                 new-maints)]
-                    (d/transact! conn tx)
-                    (doseq [{:keys [email since]} new-maints]
-                      (log/info (str "Config maintainer: " (str/lower-case email)
-                                     (when since (str " (since " since ")"))
-                                     " (for " name ")")))))))))))))
+(defn- active-tenure-eid
+  "Return the :db/id of the currently-active tenure for (source, email), or nil."
+  [db source-name email]
+  (let [a (str/lower-case email)]
+    (->> (get-tenures db source-name)
+         (filter #(and (= a (:email %)) (nil? (:to %))))
+         first
+         :eid)))
 
-;; Phase 0 fix: idempotent add-role! / remove-role!
-(defn- add-role!
-  "Add addresses to a role attr. Returns true if any change was made."
-  [conn source-name attr addresses]
-  (when-let [eid (roles-eid conn source-name)]
-    (let [current   (common/ensure-set (get (get-roles (d/db conn) source-name) attr))
-          new-addrs (remove #(contains? current (str/lower-case %)) addresses)]
-      (when (seq new-addrs)
-        (d/transact! conn (mapv (fn [addr] [:db/add eid attr (str/lower-case addr)]) new-addrs))
-        true))))
+;; ---------------------------------------------------------------------------
+;; Config seeding
+;; ---------------------------------------------------------------------------
 
-(defn- remove-role!
-  "Remove addresses from a role attr. Returns true if any change was made."
-  [conn source-name attr addresses]
-  (when-let [eid (roles-eid conn source-name)]
-    (let [current   (common/ensure-set (get (get-roles (d/db conn) source-name) attr))
-          to-remove (filter #(contains? current (str/lower-case %)) addresses)]
-      (when (seq to-remove)
-        (d/transact! conn (mapv (fn [addr] [:db/retract eid attr (str/lower-case addr)]) to-remove))
-        true))))
+(defn ensure-source-roles!
+  "Seed tenures from `config` for any source/email pair that does not yet
+  have any tenure in the DB. Each maintainer gets a new open tenure with
+  :from derived from :since (absent :since → :from = nil, meaning active
+  since the beginning of time). The :order field is the index of the entry
+  in the config :maintainers vector — used as a tie-break when computing
+  the lead maintainer."
+  [conn config]
+  (doseq [{:keys [name maintainers]} (:sources config)]
+    (when (seq maintainers)
+      (let [db       (d/db conn)
+            existing (set (map :email (get-tenures db name)))
+            tx       (into []
+                           (keep-indexed
+                            (fn [idx {:keys [email since]}]
+                              (when (and email
+                                         (not (contains? existing (str/lower-case email))))
+                                (let [addr (str/lower-case email)
+                                      from (when since
+                                             (cond
+                                               (inst? since) since
+                                               (string? since)
+                                               (try (common/parse-iso-date since)
+                                                    (catch Exception _ nil))))]
+                                  (cond-> {:maint-tenure/source name
+                                           :maint-tenure/email  addr
+                                           :maint-tenure/order  idx}
+                                    from (assoc :maint-tenure/from from))))))
+                           maintainers)]
+        (when (seq tx)
+          (d/transact! conn tx)
+          (doseq [{addr :maint-tenure/email from :maint-tenure/from} tx]
+            (log/info (str "Config maintainer: " addr
+                           (when from (str " (since " from ")"))
+                           " (for " name ")"))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Role control parsing and application
@@ -110,44 +110,74 @@
          (mapv (fn [[_ cmd addrs]]
                  {:command cmd :addresses (parse-addresses addrs)})))))
 
-(defn- set-maintainer-since! [conn source-name addresses date]
-  (when-let [eid (roles-eid conn source-name)]
-    (let [roles    (get-roles (d/db conn) source-name)
-          entries  (common/ensure-set (:roles/maintainer-since roles))
-          date-str (when date
-                     (if (string? date) date
-                         (common/format-date-iso date)))]
-      (doseq [addr addresses]
-        (let [target   (when date-str (str (str/lower-case addr) ":" date-str))
-              prefix   (str (str/lower-case addr) ":")
-              existing (some #(when (str/starts-with? % prefix) %) entries)]
-          (when (not= existing target)
-            (when existing
-              (d/transact! conn [[:db/retract eid :roles/maintainer-since existing]]))
-            (when target
-              (d/transact! conn [[:db/add eid :roles/maintainer-since target]]))))))))
+(defn- open-tenure!
+  "Open a new tenure for each address that does not already have an active one.
+  Returns the list of addresses for which a tenure was actually created."
+  [conn source-name addresses email-date]
+  (let [db    (d/db conn)
+        opens (remove #(active-tenure-eid db source-name %) addresses)]
+    (when (seq opens)
+      (d/transact! conn
+                   (mapv (fn [addr]
+                           {:maint-tenure/source source-name
+                            :maint-tenure/email  (str/lower-case addr)
+                            :maint-tenure/from   email-date})
+                         opens))
+      (mapv str/lower-case opens))))
 
-(def ^:private role-dispatch
-  {"Remove maintainer" {:requires :admin :attr :roles/maintainers :action :remove
-                        :post-fn (fn [conn src addrs _date]
-                                   (set-maintainer-since! conn src addrs nil))}
-   "Add maintainer"    {:requires :maint :attr :roles/maintainers :action :add
-                        :post-fn (fn [conn src addrs date]
-                                   (set-maintainer-since! conn src addrs date))}})
+(defn- close-tenure!
+  "Close the active tenure for each given address (by setting :to = email-date).
+  The lead maintainer's tenure is never closed. Returns the list of addresses
+  whose tenure was actually closed."
+  [conn tenures source-name addresses email-date]
+  (let [lead (lead-maintainer tenures)
+        db   (d/db conn)]
+    (->> addresses
+         (keep (fn [addr]
+                 (let [a (str/lower-case addr)]
+                   (cond
+                     (= a lead)
+                     (do (log/warn "Denied: cannot remove lead maintainer" a
+                                   "(for" source-name ")")
+                         nil)
+                     :else
+                     (when-let [eid (active-tenure-eid db source-name a)]
+                       (d/transact! conn [[:db/add eid :maint-tenure/to email-date]])
+                       a)))))
+         vec)))
 
-(defn apply-role-controls! [conn roles source-name from-addr body-text email-date]
+(defn apply-role-controls!
+  "Apply `Add maintainer:` / `Remove maintainer:` directives found in
+  `body-text`. `tenures` is the pre-directive snapshot used for permission
+  checks; the DB is re-read between operations so effects chain correctly."
+  [conn tenures source-name from-addr body-text email-date]
   (let [controls (parse-role-controls body-text)
-        perms    {:admin (admin? roles from-addr) :maint (admin-or-maintainer? roles from-addr)}]
+        is-maint (maintainer? tenures from-addr)
+        is-lead  (lead-maintainer? tenures from-addr)]
     (doseq [{:keys [command addresses]} controls]
-      (when-let [{:keys [requires action attr post-fn]} (role-dispatch command)]
-        (if (perms requires)
-          (when ((case action :add add-role! :remove remove-role!)
-                 conn source-name attr addresses)
-            (when post-fn (post-fn conn source-name addresses email-date))
+      (case command
+        "Add maintainer"
+        (if is-maint
+          (when-let [opened (seq (open-tenure! conn source-name addresses email-date))]
             (tracking/bump-global-modified! conn)
-            (log/info (str/lower-case command) ":"
-                      (str/join " " addresses) (str "(for " source-name ")")))
-          (log/warn "Denied:" from-addr "lacks permission for:" command))))))
+            (log/info "add maintainer:" (str/join " " opened)
+                      (str "(for " source-name ")")))
+          (log/warn "Denied:" from-addr "lacks permission for: Add maintainer"))
+
+        "Remove maintainer"
+        (if is-lead
+          ;; Always re-read tenures before closing so the lead check uses
+          ;; the latest state (e.g. if this directive follows an Add).
+          (let [current (get-tenures (d/db conn) source-name)]
+            (when-let [closed (seq (close-tenure! conn current source-name
+                                                  addresses email-date))]
+              (tracking/bump-global-modified! conn)
+              (log/info "remove maintainer:" (str/join " " closed)
+                        (str "(for " source-name ")"))))
+          (log/warn "Denied:" from-addr
+                    "lacks permission for: Remove maintainer (lead only)"))
+
+        nil))))
 
 ;; ---------------------------------------------------------------------------
 ;; Notify control parsing and application
@@ -178,10 +208,8 @@
 (defn- notify-key [source-name email]
   (str source-name ":" (str/lower-case email)))
 
-(defn ensure-notify-defaults! [conn source-name roles]
-  (let [admin  (:roles/admin roles)
-        maints (common/ensure-set (:roles/maintainers roles))
-        emails (distinct (remove nil? (cons admin maints)))]
+(defn ensure-notify-defaults! [conn source-name tenures]
+  (let [emails (distinct (keep :email (active-tenures tenures)))]
     (doseq [email emails]
       (let [k (notify-key source-name email)]
         (when-not (d/entid (d/db conn) [:notify/key k])

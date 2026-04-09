@@ -29,7 +29,7 @@ For a more extensive documentation, please read the [[docs/bark-manual.org][BARK
   process running with IMAP IDLE.  All database writes happen here.
 - *bb export* --- Exports reports as JSON, RSS, Org, ICS (calendar),
   and generates HTML and stats pages. Read-only (no database writes).
-- *bb notify* --- Sends notification emails to admin/maintainers.
+- *bb notify* --- Sends notification emails to maintainers.
   Read-only (no database writes).
 
 * Dependencies
@@ -200,10 +200,9 @@ one of the three type keys:
 |------------------------+----------+----------------------------------------------------------------------|
 | =:name=                  | yes      | Unique source identifier                                             |
 | =:list= / =:alias= / =:to=   | yes      | Exactly one (determines source type and header to match)             |
-| =:admin=                 | no       | Admin for this source (fallback: global)                             |
 | =:commands=              | no       | Command keyword overrides (per action)                               |
 | =:labels=                | no       | Report label overrides (per report type)                             |
-| =:maintainers=           | no       | Initial maintainers, e.g. =[{:email "dev@x.org" :since "2025-01-01"}]= |
+| =:maintainers=           | no       | Initial maintainers — first entry is the lead (see below)            |
 | =:list-archive=          | no       | URL of the list archive (shown in HTML reports)                      |
 | =:archive-format-string= | no       | URL template for message-ids (=%s= is replaced)                        |
 | =:base-url=              | no       | Base URL where this source's public directory is served              |
@@ -218,16 +217,38 @@ All state-changing actions (commands, role controls) must be sent
 through the source's public channel to ensure reproducibility — anyone
 running BARK on the same source sees the same state.
 
+*** Maintainers and the "lead"
+
+A source has no distinct admin: the only privileged role is
+=maintainer=. Maintainers are seeded from the per-source =:maintainers=
+vector; the *first entry* is the *lead maintainer*.
+
+- Any active maintainer can run =Add maintainer:= directives.
+- Only the lead maintainer can run =Remove maintainer:= directives.
+- The lead cannot remove themselves. To change lead, edit =config.edn=
+  and redeploy.
+
+Each =Add=/=Remove= opens or closes a *tenure* in the DB — a
+=[from, to)= interval recording when someone held maintainer status.
+The full tenure history (active and closed) is exported in
+=meta.json= and rendered in =docs.html=, so a new deployment can mirror
+command processing on archived emails even when maintainers have
+changed over time.
+
+The per-maintainer =:since= field is optional; omitting it means "active
+since the beginning of time" (the usual default for a fresh deploy).
+
 ** Example config
 
 #+begin_src clojure
-{:admin "admin@example.com"
- :imap  {:host "imap.example.com" :port 993 :ssl true
+{:imap  {:host "imap.example.com" :port 993 :ssl true
          :user "imap-login@example.com" :password "secret"
          :folder "INBOX"}
  :sources [{:name "public-list"
             :list "bugs.example.org"
-            :admin "lead@example.org"
+            ;; First entry = lead maintainer.
+            :maintainers [{:email "lead@example.org"}
+                          {:email "co-maint@example.org"}]
             :list-archive "https://lists.example.org/bugs/"}
            {:name "team-alias"
             :alias "team@example.com"}
@@ -295,7 +316,7 @@ SMTP fields:
 | =:from=     | yes      | Sender address for emails |
 
 Use =bb test-smtp --dry-run= to validate the configuration without
-sending, or =bb test-smtp= to send a test email to the global admin.
+sending, or =bb test-smtp= to send a test email to the lead maintainer.
 
 * Contributing
 
