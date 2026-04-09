@@ -80,7 +80,6 @@
 (s/def ::source
   (s/and (s/keys :req-un [:source/name]
                  :opt-un [:source/list :source/alias :source/to
-                          :source/admin
                           :source/list-archive :source/commands :source/labels
                           :source/bark-path :source/export-reports
                           :source/report-types :source/maintainers
