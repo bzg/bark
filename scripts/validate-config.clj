@@ -270,20 +270,21 @@
               (log/info "  IMAP:" (str (:user imap) "@" (:host imap) "/" (:folder imap))))
             (log/info "  Sources:" (count (:sources config)))
             (doseq [src (:sources config)]
-              (log/info "    -" (:name src)
-                        (cond
-                          (:list src)  (str "(list: " (:list src) ")")
-                          (:alias src) (str "(alias: " (:alias src) ")")
-                          (:to src)    (str "(mailbox: " (:to src) ")"))
-                        (when-let [la (:list-archive src)] (str "archive: " la))
-                        (when-let [rt (:report-types src)] (str "report-types: " (pr-str rt)))
-                        (when-let [ms (:maintainers src)]
-                          (str "maintainers: "
-                               (str/join ", " (map #(str (:email %)
-                                                         (when (:since %) (str " (since " (:since %) ")")))
-                                                   ms))))
-                        (when (some? (get-in src [:notifications :enable]))
-                          (str "notify: " (get-in src [:notifications :enable])))))
+              (let [parts (cond-> []
+                            (:list src)          (conj (str "(list: " (:list src) ")"))
+                            (:alias src)         (conj (str "(alias: " (:alias src) ")"))
+                            (:to src)            (conj (str "(mailbox: " (:to src) ")"))
+                            (:list-archive src)  (conj (str "archive: " (:list-archive src)))
+                            (:report-types src)  (conj (str "report-types: " (pr-str (:report-types src))))
+                            (seq (:maintainers src))
+                            (conj (str "maintainers: "
+                                       (str/join ", "
+                                                 (map #(str (:email %)
+                                                            (when (:since %) (str " (since " (:since %) ")")))
+                                                      (:maintainers src)))))
+                            (some? (get-in src [:notifications :enable]))
+                            (conj (str "notify: " (get-in src [:notifications :enable]))))]
+                (log/info "    -" (:name src) (str/join " " parts))))
             (log/info "  DB path:" (get-in config [:db :path]))
             (when-let [ingest (:ingest config)]
               (let [v (or (:initial-fetch ingest) 50)]
