@@ -361,7 +361,9 @@
          :subject  (or (:email/subject email) "")
          :from     from
          :date     (format-date (:email/date-sent email))
-         :date-raw (str (:email/date-sent email))
+         ;; Keep the Date object itself for internal formatters (RSS, Org).
+         ;; Cheshire serializes java.util.Date to ISO-8601 in JSON output.
+         :date-raw (:email/date-sent email)
          :flags    (flags-str report)
          :status   (report-status report)
          :priority (report-priority report)
@@ -497,30 +499,14 @@
      (when (seq data)
        (log/info "Wrote" (count data) "reports to" filename)))))
 
-(defn- parse-date-tostring
-  "Parse a java.util.Date#toString value into a java.util.Date.
-  Returns nil on invalid input."
-  [date-str]
-  (when (and date-str (not (str/blank? (str date-str))))
-    (try
-      (let [fmt (doto (java.text.SimpleDateFormat. "EEE MMM dd HH:mm:ss zzz yyyy"
-                                                    java.util.Locale/ENGLISH)
-                  (.setLenient true))]
-        (.parse fmt (str date-str)))
-      (catch Exception _ nil))))
-
 (defn- rfc822-date
-  "RFC 822 date from a java.util.Date#toString string."
-  [date-str]
-  (when-let [d (parse-date-tostring date-str)]
-    (try
-      (let [out-fmt (doto (java.text.SimpleDateFormat. "EEE, dd MMM yyyy HH:mm:ss Z"
-                                                       java.util.Locale/ENGLISH)
-                      (.setTimeZone (java.util.TimeZone/getTimeZone "UTC")))]
-        (.format out-fmt d))
-      (catch Exception _
-        (log/debug "Could not parse date for RSS:" date-str)
-        nil))))
+  "Format a java.util.Date as an RFC 822 date string (for RSS)."
+  [^java.util.Date d]
+  (when d
+    (let [out-fmt (doto (java.text.SimpleDateFormat. "EEE, dd MMM yyyy HH:mm:ss Z"
+                                                     java.util.Locale/ENGLISH)
+                    (.setTimeZone (java.util.TimeZone/getTimeZone "UTC")))]
+      (.format out-fmt d))))
 
 (defn- rss-author [m]
   (let [email (:from m)
@@ -634,17 +620,14 @@
        (log/info "Wrote" (count data) "reports to" filename)))))
 
 (defn- format-org-inactive-ts
-  "Parse a java.util.Date#toString and return an Org inactive timestamp
-  like [2026-03-12 Thu 20:05]."
-  [date-raw]
-  (if-let [d (parse-date-tostring date-raw)]
-    (try
-      (let [out-fmt (doto (java.text.SimpleDateFormat. "yyyy-MM-dd EEE HH:mm"
-                                                       java.util.Locale/ENGLISH)
-                      (.setTimeZone (java.util.TimeZone/getTimeZone "UTC")))]
-        (str "[" (.format out-fmt d) "]"))
-      (catch Exception _ (str date-raw)))
-    (str date-raw)))
+  "Format a java.util.Date as an Org inactive timestamp like
+  [2026-03-12 Thu 20:05]."
+  [^java.util.Date d]
+  (when d
+    (let [out-fmt (doto (java.text.SimpleDateFormat. "yyyy-MM-dd EEE HH:mm"
+                                                     java.util.Locale/ENGLISH)
+                    (.setTimeZone (java.util.TimeZone/getTimeZone "UTC")))]
+      (str "[" (.format out-fmt d) "]"))))
 
 (defn- strip-angle-brackets [s]
   (when s (str/replace s #"^<|>$" "")))
