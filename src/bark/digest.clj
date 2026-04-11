@@ -120,8 +120,13 @@
            :report/message-id message-id :report/digested-at now
            :report/last-activity (or email-date now)}
           (remove (comp nil? val))
+          ;; The topic parsed from the subject is credited to the
+          ;; founding email, so `:report/topic` (the ref) and
+          ;; `:report/topic-value` (the string) both point to it.
           {:report/last-activity-address (:email/from-address email)
-           :report/version (:version report-info) :report/topic (:topic report-info)
+           :report/version (:version report-info)
+           :report/topic (when (:topic report-info) email-eid)
+           :report/topic-value (:topic report-info)
            :report/patch-seq (:patch-seq report-info) :report/patch-source (:patch-source report-info)
            :report/has-ics (boolean has-ics) :report/has-text-attachments has-text})))
 
@@ -201,22 +206,23 @@
                                 (> n 1) (conj (str "v" (dec n))))
             db (d/db conn)]
         (doseq [rid nearest-report-eids]
-          (let [r (d/pull db [:report/type :report/version :report/topic :report/closed
+          (let [r (d/pull db [:report/type :report/version :report/topic-value :report/closed
                               :report/message-id] rid)]
             (when (and (= :patch (:report/type r))
                        (contains? versions-to-close (:report/version r))
                        (not (:report/closed r))
-                       (or (and (nil? new-topic) (nil? (:report/topic r)))
+                       (or (and (nil? new-topic) (nil? (:report/topic-value r)))
                            (and new-topic
                                 (= (str/lower-case new-topic)
-                                   (str/lower-case (or (:report/topic r) ""))))))
+                                   (str/lower-case (or (:report/topic-value r) ""))))))
               (d/transact! conn [{:db/id rid
                                   :report/closed email-eid
                                   :report/close-reason :superseded
-                                  :report/superseded-by report-eid}])
+                                  :report/superseded-by email-eid
+                                  :report/superseded-by-target report-eid}])
               (tracking/bump-report-updated! conn rid)
               (log/info "Auto-closed [PATCH" (:report/version r)
-                        (or (:report/topic r) "") "]"
+                        (or (:report/topic-value r) "") "]"
                         (str "(" (:report/message-id r) ")")
                         (str "(superseded by " new-version ")")))))))))
 
@@ -248,7 +254,8 @@
               (d/transact! conn [{:db/id rid
                                   :report/closed email-eid
                                   :report/close-reason :superseded
-                                  :report/superseded-by report-eid}])
+                                  :report/superseded-by email-eid
+                                  :report/superseded-by-target report-eid}])
               (tracking/bump-report-updated! conn rid)
               (log/info "Auto-closed patch" (:report/message-id r)
                         "(superseded by same-subject thread patch)"))))))))

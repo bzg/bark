@@ -28,13 +28,13 @@
 
 (defn- get-report [db message-id]
   (d/pull db
-          '[:report/type :report/version :report/topic
+          '[:report/type :report/version :report/topic-value
             :report/patch-seq :report/patch-source :report/message-id
             :report/acked :report/owned :report/closed
             :report/close-reason
-            {:report/superseded-by [:report/message-id {:report/email [:email/subject]}]}
+            {:report/superseded-by-target [:report/message-id {:report/email [:email/subject]}]}
             :report/urgent :report/important
-            :report/deadline :report/expiry
+            :report/deadline-value :report/expiry-value
             :report/acked-address :report/owned-address
             :report/closed-address :report/urgent-address
             :report/important-address
@@ -197,7 +197,7 @@
         (testing "Bug 02 lifecycle"
           (let [r (get-report db "<02@test.org>")]
             (is (= :bug (:report/type r)))
-            (is (= "9.7" (:report/topic r)))
+            (is (= "9.7" (:report/topic-value r)))
             (is (some? (:report/acked r)))
             (is (some? (:report/owned r)))
             (is (some? (:report/closed r)))
@@ -209,13 +209,13 @@
         (testing "Bug 03 mailing list prefix"
           (let [r (get-report db "<03@test.org>")]
             (is (= :bug (:report/type r)))
-            (is (nil? (:report/topic r)))))
+            (is (nil? (:report/topic-value r)))))
 
         ;; --- Patch 07 subject detection ---
         (testing "Patch 07 subject detection"
           (let [r (get-report db "<07@test.org>")]
             (is (= :patch (:report/type r)))
-            (is (= "org-agenda" (:report/topic r)))
+            (is (= "org-agenda" (:report/topic-value r)))
             (is (= "1/2" (:report/patch-seq r)))
             (is (contains? (set (:report/patch-source r)) :subject))
             (is (some? (:report/acked r)))
@@ -307,7 +307,7 @@
         (testing "Patch 28 mailing list prefix"
           (let [r (get-report db "<28@test.org>")]
             (is (= :patch (:report/type r)))
-            (is (= "refactor" (:report/topic r)))
+            (is (= "refactor" (:report/topic-value r)))
             (is (= "2/3" (:report/patch-seq r)))))
 
         ;; --- Email 29 role control via mailing list (now allowed) ---
@@ -527,23 +527,23 @@
           (is (= [{:action :set :attr :report/owned :email-address "x@y.com" :scope :maintainer}
                   {:action :set :attr :report/urgent :email-address "x@y.com" :scope :maintainer}]
                  (commands/detect-directives :bug "Owned-by: x@y.com\nUrgent-by: x@y.com\n")))
-          (is (= [{:action :unset :attr :report/acked :scope :maintainer}]
+          (is (= [{:action :unset :attr :report/acked :scope :setter-or-maintainer}]
                  (commands/detect-directives :bug "Not acked\n")))
-          (is (= [{:action :unset :attr :report/urgent :scope :maintainer}]
+          (is (= [{:action :unset :attr :report/urgent :scope :setter-or-maintainer}]
                  (commands/detect-directives :bug "Not urgent\n")))
-          (is (= [{:action :unset :attr :report/important :scope :maintainer}]
+          (is (= [{:action :unset :attr :report/important :scope :setter-or-maintainer}]
                  (commands/detect-directives :bug "Not important\n")))
           (is (= [{:action :set-deadline :date (parse-date-iso "2026-06-15") :scope :maintainer}]
                  (commands/detect-directives :bug "Deadline: 2026-06-15\n")))
           (is (= [{:action :unset-deadline :scope :maintainer}]
                  (commands/detect-directives :bug "No deadline\n")))
-          (is (= [{:action :unset-topic :scope :maintainer}]
+          (is (= [{:action :unset-topic :scope :user}]
                  (commands/detect-directives :bug "No topic\n")))
-          (is (= [{:action :set-topic :topic "my-topic" :scope :maintainer}]
+          (is (= [{:action :set-topic :topic "my-topic" :scope :user}]
                  (commands/detect-directives :bug "Topic: my-topic\n")))
           (is (= [{:action :set :attr :report/acked :email-address "a@b.com" :scope :maintainer}
                   {:action :set-deadline :date (parse-date-iso "2026-07-01") :scope :maintainer}
-                  {:action :set-topic :topic "urgent-fix" :scope :maintainer}]
+                  {:action :set-topic :topic "urgent-fix" :scope :user}]
                  (commands/detect-directives :bug "Acked-by: a@b.com\nDeadline: 2026-07-01\nTopic: urgent-fix\n")))
           (is (= [{:action :set :attr :report/owned :email-address "x@y.com" :scope :maintainer}]
                  (commands/detect-directives :bug "Thanks for the report.\nOwned-by: x@y.com\nWill look into it.\n")))
@@ -651,15 +651,15 @@
 
         ;; --- Bug 90 Topic directive ---
         (testing "Bug 90 Topic directive"
-          (is (= "regression" (:report/topic (get-report db "<90@test.org>")))))
+          (is (= "regression" (:report/topic-value (get-report db "<90@test.org>")))))
 
         ;; --- Bug 93 Undeadline ---
         (testing "Bug 93 Undeadline removes deadline"
-          (is (nil? (:report/deadline (get-report db "<93@test.org>")))))
+          (is (nil? (:report/deadline-value (get-report db "<93@test.org>")))))
 
         ;; --- Bug 98 standalone deadline ---
         (testing "Bug 98 standalone deadline"
-          (is (some? (:report/deadline (get-report db "<98@test.org>")))))
+          (is (some? (:report/deadline-value (get-report db "<98@test.org>")))))
 
         ;; --- Email 100 [source-name] prefix (bark-source fallback removed) ---
         (testing "Email 100 — no bark-source fallback"
@@ -689,7 +689,7 @@
             (is (some? (:report/closed r105)) "superseded report is closed")
             (is (= :superseded (:report/close-reason r105)))
             (is (= "<106@test.org>"
-                    (get-in r105 [:report/superseded-by :report/message-id])))
+                    (get-in r105 [:report/superseded-by-target :report/message-id])))
             ;; Bidirectional related link
             (is (some #(= "<106@test.org>" (:report/message-id %))
                       (:report/related r105)))
@@ -697,23 +697,37 @@
                       (:report/related r106)))))
 
         ;; --- Emails 108-110 Supersede then unsupersede ---
+        ;; 109 admin supersedes 108 by 106, 110 admin "Not superseded"
+        ;; reopens it.  Email 111 is a neutral user reply (no command),
+        ;; so the final state of 108 is cleanly "reopened".
         (testing "Bug 108 superseded then unsuperseded"
           (let [r108 (get-report db "<108@test.org>")
                 r106 (get-report db "<106@test.org>")]
             (is (nil? (:report/closed r108)) "unsuperseded report is reopened")
             (is (nil? (:report/close-reason r108)))
-            (is (nil? (:report/superseded-by r108)))
+            (is (nil? (:report/superseded-by-target r108)))
             ;; Related link from the supersede is removed
             (is (not (some #(= "<106@test.org>" (:report/message-id %))
                            (:report/related r108))))
             (is (not (some #(= "<108@test.org>" (:report/message-id %))
                            (:report/related r106))))))
 
-        ;; --- Email 111 user can't supersede ---
-        (testing "Email 111 user Superseded-by denied"
-          (let [r108 (get-report db "<108@test.org>")]
-            (is (nil? (:report/closed r108)))
-            (is (nil? (:report/superseded-by r108)))))
+        ;; --- Emails 122-124 user Superseded-by ---
+        ;; user-a (not a maintainer) marks their own narrow report 122
+        ;; as superseded by user-b's broader report 123.  With
+        ;; :superseded-by scoped as :user, this must succeed.
+        (testing "Bug 122 superseded by 123 via regular user"
+          (let [r122 (get-report db "<122@test.org>")
+                r123 (get-report db "<123@test.org>")]
+            (is (some? (:report/closed r122)) "user supersede closes 122")
+            (is (= :superseded (:report/close-reason r122)))
+            (is (= "<123@test.org>"
+                    (get-in r122 [:report/superseded-by-target :report/message-id])))
+            ;; Bidirectional related link set by the supersede
+            (is (some #(= "<123@test.org>" (:report/message-id %))
+                      (:report/related r122)))
+            (is (some #(= "<122@test.org>" (:report/message-id %))
+                      (:report/related r123)))))
 
         ;; --- Emails 114-116 Not closed on superseded report ---
         (testing "Bug 114 superseded then reopened via Not closed"
@@ -721,7 +735,7 @@
                 r106 (get-report db "<106@test.org>")]
             (is (nil? (:report/closed r114)) "report is reopened")
             (is (nil? (:report/close-reason r114)) "close-reason is cleared")
-            (is (nil? (:report/superseded-by r114)) "superseded-by is cleared")
+            (is (nil? (:report/superseded-by-target r114)) "superseded-by-target is cleared")
             (is (not (some #(= "<106@test.org>" (:report/message-id %))
                            (:report/related r114)))
                 "related link to superseder is removed")
@@ -731,15 +745,15 @@
 
         ;; --- Directive unit tests for supersede ---
         (testing "detect-directives: Superseded-by with angle brackets"
-          (is (= [{:action :set-superseded :target-message-id "<msg@example.com>" :scope :maintainer}]
+          (is (= [{:action :set-superseded :target-message-id "<msg@example.com>" :scope :user}]
                  (commands/detect-directives :bug "Superseded-by: <msg@example.com>\n"))))
 
         (testing "detect-directives: Superseded-by without angle brackets"
-          (is (= [{:action :set-superseded :target-message-id "<msg@example.com>" :scope :maintainer}]
+          (is (= [{:action :set-superseded :target-message-id "<msg@example.com>" :scope :user}]
                  (commands/detect-directives :bug "Superseded-by: msg@example.com\n"))))
 
         (testing "detect-directives: Not superseded"
-          (is (= [{:action :unset-superseded :scope :maintainer}]
+          (is (= [{:action :unset-superseded :scope :user}]
                  (commands/detect-directives :bug "Not superseded\n"))))
 
         (testing "resolve-commands: superseded-by"
@@ -808,7 +822,7 @@
             (is (some? (:report/closed r117)) "first patch should be closed")
             (is (= :superseded (:report/close-reason r117)))
             (is (= "<118@test.org>"
-                    (get-in r117 [:report/superseded-by :report/message-id])))))
+                    (get-in r117 [:report/superseded-by-target :report/message-id])))))
 
         (testing "Patch 118 superseded by same-subject reply 119"
           (let [r118 (get-report db "<118@test.org>")]
@@ -816,7 +830,7 @@
             (is (some? (:report/closed r118)) "second patch should be closed")
             (is (= :superseded (:report/close-reason r118)))
             (is (= "<119@test.org>"
-                    (get-in r118 [:report/superseded-by :report/message-id])))))
+                    (get-in r118 [:report/superseded-by-target :report/message-id])))))
 
         (testing "Patch 119 is open (latest in chain)"
           (let [r119 (get-report db "<119@test.org>")]
@@ -830,7 +844,7 @@
             (is (some? (:report/closed r120)) "first diff should be closed")
             (is (= :superseded (:report/close-reason r120)))
             (is (= "<121@test.org>"
-                    (get-in r120 [:report/superseded-by :report/message-id])))))
+                    (get-in r120 [:report/superseded-by-target :report/message-id])))))
 
         (testing "Inline diff 121 is open (latest)"
           (let [r121 (get-report db "<121@test.org>")]

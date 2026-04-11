@@ -357,6 +357,18 @@
    :urgent    ["Urgent"]
    :important ["Important"]})
 
+;; Command IDs that accept the :setter-or-maintainer scope.
+;; These are the unset directives whose target attribute is tracked
+;; by a ref to the pose-email (either via the proxy-capable `-address`
+;; cache, or by following the ref to :email/from-address).  A drift
+;; test in `bark.common-test` asserts this set matches the set derived
+;; from the authoritative registry in `bark.commands`.
+;; Kept in bark.common (and not in bark.commands) so that the Babashka
+;; config validator can consume it without pulling in datalevin.
+(def setter-scoped-command-ids
+  #{:unacked :unowned :unclosed :unurgent :unimportant
+    :untopic :undeadline :unexpiry :unsuperseded})
+
 (def close-reasons
   {"Canceled"  :canceled
    "Cancelled" :canceled
@@ -512,19 +524,29 @@
 ;; ---------------------------------------------------------------------------
 
 (def report-pull-pattern
-  '[:db/id :report/type :report/version :report/topic
+  ;; Each `:report/<state>` ref carries :email/from-address and
+  ;; :email/date-sent so consumers can display "set by X on Y"
+  ;; without a second query.  Paired `-value`/`-target` attrs
+  ;; carry the business datum posed alongside the setter identity.
+  '[:db/id :report/type :report/version
     :report/patch-seq :report/patch-source :report/message-id
-    {:report/acked [:email/from-address]}
-    {:report/owned [:email/from-address]}
+    {:report/acked [:email/from-address :email/date-sent]}
+    {:report/owned [:email/from-address :email/date-sent]}
     {:report/closed [:email/from-address :email/date-sent]}
-    {:report/urgent [:email/from-address]}
-    {:report/important [:email/from-address]}
+    {:report/urgent [:email/from-address :email/date-sent]}
+    {:report/important [:email/from-address :email/date-sent]}
     :report/acked-address :report/owned-address :report/closed-address
     :report/urgent-address :report/important-address
     :report/close-reason
-    {:report/superseded-by [:report/message-id {:report/email [:email/subject]}]}
+    {:report/topic [:email/from-address :email/date-sent]}
+    :report/topic-value
+    {:report/deadline [:email/from-address :email/date-sent]}
+    :report/deadline-value
+    {:report/expiry [:email/from-address :email/date-sent]}
+    :report/expiry-value
+    {:report/superseded-by [:email/from-address :email/date-sent]}
+    {:report/superseded-by-target [:report/message-id {:report/email [:email/subject]}]}
     :report/has-ics :report/has-text-attachments
-    :report/deadline :report/expiry
     :report/last-activity :report/last-activity-address :report/descendants :report/digested-at :report/updated-at
     {:report/related [:report/type :report/message-id
                       {:report/email [:email/headers-edn]}]}

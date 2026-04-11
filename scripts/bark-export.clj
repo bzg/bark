@@ -127,12 +127,13 @@
         (set (map str/lower-case topics))))))
 
 (defn- filter-by-topics
-  "Keep only reports whose :report/topic matches one of the given topics (case-insensitive).
-  Returns all reports when `topics` is nil."
+  "Keep only reports whose :report/topic-value matches one of the
+  given topics (case-insensitive).  Returns all reports when `topics`
+  is nil."
   [reports topics]
   (if topics
     (filter (fn [r]
-              (when-let [t (:report/topic r)]
+              (when-let [t (:report/topic-value r)]
                 (topics (str/lower-case t))))
             reports)
     reports))
@@ -374,18 +375,19 @@
           role                            (assoc :role role)
           (:report/message-id report)     (assoc :message-id (:report/message-id report))
           (:report/version report)        (assoc :version (:report/version report))
-          (:report/topic report)          (assoc :topic (:report/topic report))
+          (:report/topic-value report)    (assoc :topic (:report/topic-value report))
           (:report/patch-seq report)      (assoc :patch-seq (:report/patch-seq report))
           (:report/patch-source report)   (assoc :patch-source (mapv name (sort (:report/patch-source report))))
           arch                            (assoc :archived-at arch)
-          (:report/deadline report)       (assoc :deadline (format-date-iso (:report/deadline report)))
+          (:report/deadline-value report) (assoc :deadline (format-date-iso (:report/deadline-value report)))
           (:report/last-activity report)  (assoc :last-activity (format-date-iso (:report/last-activity report)))
           awaiting?                      (assoc :awaiting true)
-          (:report/expiry report)         (assoc :expiry (format-date-iso (:report/expiry report)))
+          (:report/expiry-value report)   (assoc :expiry (format-date-iso (:report/expiry-value report)))
           (:report/close-reason report)   (assoc :close-reason (name (:report/close-reason report)))
-          (:report/superseded-by report)  (assoc :superseded-by
-                                                 {:message-id (:report/message-id (:report/superseded-by report))
-                                                  :subject (get-in report [:report/superseded-by :report/email :email/subject])})
+          (:report/superseded-by-target report)
+          (assoc :superseded-by
+                 {:message-id (:report/message-id (:report/superseded-by-target report))
+                  :subject (get-in report [:report/superseded-by-target :report/email :email/subject])})
           (and (= :expired (:report/close-reason report))
                (:email/date-sent (:report/closed report)))
           (assoc :expired-date (format-date-iso (:email/date-sent (:report/closed report)))))

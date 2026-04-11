@@ -11,7 +11,8 @@
 (require '[clojure.spec.alpha :as s]
          '[clojure.edn :as edn]
          '[clojure.string :as str]
-         '[taoensso.timbre :as log])
+         '[taoensso.timbre :as log]
+         '[bark.common :as common])
 
 ;; ---------------------------------------------------------------------------
 ;; Specs
@@ -122,11 +123,20 @@
     :deadline :undeadline :expiry :unexpiry
     :topic :untopic :superseded-by :unsuperseded})
 
+;; The :setter-or-maintainer scope is only valid on the unset-style
+;; directives whose target attribute is tracked by a ref to the
+;; pose-email.  The authoritative set lives in `bark.common` so both
+;; this Babashka script and the JVM daemon share the same definition —
+;; a drift test in `bark.common-test` asserts it matches the
+;; `bark.commands` registry.
+(def valid-plain-scopes  #{:user :maintainer})
+(def valid-setter-scopes #{:user :maintainer :setter-or-maintainer})
+
 ;; Per-source commands (optional)
 ;; Values can be vectors (word lists) or maps with
 ;; :words, :scope, :report-types overrides.
 (s/def ::trigger-words (s/coll-of ::non-blank-string :kind vector? :min-count 1))
-(s/def ::command-scope #{:user :maintainer})
+(s/def ::command-scope valid-setter-scopes)
 (s/def ::command-report-types (s/coll-of valid-report-types :kind set? :min-count 1))
 (s/def ::command-entry
   (s/or :words-only ::trigger-words
@@ -136,17 +146,25 @@
   (s/and map?
          (s/keys :opt-un [:cmd/words :cmd/scope :cmd/report-types])))
 
-(defn valid-command-value? [v]
+(defn valid-command-value?
+  "Validate a single command override. `cmd-id` is needed because
+  :setter-or-maintainer is only allowed on the commands listed in
+  `common/setter-scoped-command-ids`."
+  [cmd-id v]
   (or (and (vector? v) (s/valid? ::trigger-words v))
       (and (map? v)
            (every? #{:words :scope :report-types} (keys v))
            (if (:words v) (s/valid? ::trigger-words (:words v)) true)
-           (if (:scope v) (contains? #{:user :maintainer} (:scope v)) true)
+           (if-let [sc (:scope v)]
+             (if (contains? common/setter-scoped-command-ids cmd-id)
+               (contains? valid-setter-scopes sc)
+               (contains? valid-plain-scopes sc))
+             true)
            (if (:report-types v) (s/valid? ::command-report-types (:report-types v)) true))))
 
 (s/def ::commands-map
   (s/and (s/map-of valid-command-ids any?)
-         #(every? valid-command-value? (vals %))))
+         #(every? (fn [[k v]] (valid-command-value? k v)) %)))
 
 (s/def :source/commands ::commands-map)
 
@@ -235,14 +253,66 @@
 ;; Validation
 ;; ---------------------------------------------------------------------------
 
+(defn- commands-map-errors
+  "Walk a :commands (or :global-commands) map and return a seq of
+  human-readable error strings.  Used to surface precise, actionable
+  messages before falling back to `s/explain-str`."
+  [where commands-map]
+  (when (map? commands-map)
+    (for [[cmd-id v] commands-map
+          :let [errs (cond
+                       (not (contains? valid-command-ids cmd-id))
+                       [(str "unknown command id " (pr-str cmd-id))]
+
+                       (vector? v) nil
+
+                       (not (map? v))
+                       [(str "expected a vector of words or an extended "
+                             "map, got " (pr-str v))]
+
+                       :else
+                       (let [bad-keys   (remove #{:words :scope :report-types} (keys v))
+                             sc         (:scope v)
+                             allows-s-o-m? (contains? common/setter-scoped-command-ids cmd-id)
+                             allowed-scopes (if allows-s-o-m?
+                                              valid-setter-scopes
+                                              valid-plain-scopes)]
+                         (concat
+                          (when (seq bad-keys)
+                            [(str "unknown key(s) in extended form: "
+                                  (str/join ", " (map pr-str bad-keys)))])
+                          (when (and sc (not (contains? allowed-scopes sc)))
+                            [(str ":scope " (pr-str sc)
+                                  " is not valid for " (pr-str cmd-id)
+                                  ". Valid values: "
+                                  (str/join ", "
+                                            (map pr-str (sort allowed-scopes))))]))))]
+          err errs]
+      (str where " " (pr-str cmd-id) ": " err))))
+
+(defn- pre-check-commands
+  "Return a seq of human-readable errors for all :commands and
+  :global-commands maps in the config, or nil if everything is fine."
+  [config]
+  (let [errs (concat (commands-map-errors ":global-commands" (:global-commands config))
+                     (mapcat (fn [src]
+                               (commands-map-errors
+                                (str ":sources [" (pr-str (:name src)) "] :commands")
+                                (:commands src)))
+                             (:sources config)))]
+    (seq errs)))
+
 (defn validate-config [config]
-  (if (s/valid? ::config config)
-    (cond-> {:valid? true}
-      (and (get-in config [:logging :email])
-           (not (get-in config [:notifications :smtp])))
-      (assoc :warnings ["Logging :email is configured but :notifications :smtp is absent."]))
+  (if-let [errs (pre-check-commands config)]
     {:valid? false
-     :explanation (s/explain-str ::config config)}))
+     :explanation (str/join "\n" errs)}
+    (if (s/valid? ::config config)
+      (cond-> {:valid? true}
+        (and (get-in config [:logging :email])
+             (not (get-in config [:notifications :smtp])))
+        (assoc :warnings ["Logging :email is configured but :notifications :smtp is absent."]))
+      {:valid? false
+       :explanation (s/explain-str ::config config)})))
 
 ;; ---------------------------------------------------------------------------
 ;; Main

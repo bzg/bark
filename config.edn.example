@@ -119,16 +119,31 @@
  ;; :commands {:acked    {:words ["Approved" "LGTM"]
  ;;                       :scope :maintainer}          ;; restrict to maintainers
  ;;            :deadline {:report-types #{:bug :patch :request :change}}  ;; widen types
+ ;;            :unclosed {:scope :setter-or-maintainer} ;; only the user who closed can reopen
  ;;            :closed   ["Canceled" "Fixed" "Wontfix"]}  ;; simple form still works
  ;;
- ;; :scope can be :user (anyone) or :maintainer (maintainer only).
+ ;; :scope values:
+ ;;   :user                 — anyone
+ ;;   :maintainer           — maintainer only
+ ;;   :setter-or-maintainer — the address that previously set the
+ ;;                           attribute, or any maintainer (maintainers
+ ;;                           retain full override)
+ ;;
+ ;; :setter-or-maintainer is ONLY valid on unset directives whose
+ ;; target attribute is tracked by a ref to the pose-email:
+ ;;   :unacked :unowned :unclosed :unurgent :unimportant
+ ;;   :untopic :undeadline :unexpiry :unsuperseded
+ ;; It is rejected elsewhere because triggers have no setter to
+ ;; compare against and `-by` directives credit a third party.
+ ;;
  ;; :report-types replaces the default set for that command.
  ;; Both simple and extended forms can be mixed in the same map.
  ;; These overrides apply to any command ID (triggers and directives):
  ;;   :acked :owned :closed :urgent :important
  ;;   :acked-by :owned-by :closed-by :urgent-by :important-by
  ;;   :unacked :unowned :unclosed :unurgent :unimportant
- ;;   :deadline :undeadline :topic
+ ;;   :deadline :undeadline :expiry :unexpiry
+ ;;   :topic :untopic :superseded-by :unsuperseded
  ;;
  ;; Default trigger words:
  ;;   :acked     ["Acked" "Confirmed" "Reviewed" "Approved"]

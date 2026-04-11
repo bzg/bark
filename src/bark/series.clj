@@ -138,9 +138,12 @@
                                        (pr-str (series-id topic from-addr m))
                                        "(expecting" m "patches)")
                              sid))]
-        (when (and restart? ancestor? (:version report-info))
-          (doseq [sid existing-series]
-            (d/transact! conn [{:db/id sid :series/superseded-by series-eid}])))
+        ;; Series supersession is encoded indirectly via `:series/closed`
+        ;; on the old series (set above by `close-series!`), which points
+        ;; to the email that triggered the supersession.  No structural
+        ;; pointer from old series → new series is needed; consumers that
+        ;; care about "what replaced this series" can look at the new
+        ;; series created in the same thread.
         (if (zero? n)
           (do (set-cover-letter! conn series-eid email-eid)
               (d/transact! conn [{:db/id report-eid :report/series series-eid}]))
