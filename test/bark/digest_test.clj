@@ -7,7 +7,7 @@
   Ported from test/bark-digest-test.clj (bb version)."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [datalevin.core :as d]
             [bark.commands :as commands]
             [bark.common :as common]
@@ -16,6 +16,8 @@
             [bark.test-helpers :as th])
   (:import [java.text SimpleDateFormat]
            [java.util TimeZone]))
+
+(use-fixtures :once th/with-temp-failures-file)
 
 ;; ---------------------------------------------------------------------------
 ;; Helpers
@@ -180,6 +182,30 @@
     (is (nil? (commands/detect-vote "nothing here")))
     (is (nil? (commands/detect-vote "")))
     (is (nil? (commands/detect-vote nil)))))
+
+(deftest trigger-scope-denial-recording
+  (testing "non-maintainer trigger on a source that overrides :closed to :maintainer"
+    (let [filter-triggers   (var-get #'bark.commands/filter-triggers-by-scope)
+          describe-trigger  (var-get #'bark.commands/describe-denied-trigger)
+          recorded          (atom [])]
+      (testing "describe-denied-trigger labels"
+        (is (= "Closed." (describe-trigger :report/closed)))
+        (is (= "Acked." (describe-trigger :report/acked)))
+        (is (= "Urgent." (describe-trigger :report/urgent))))
+      (with-redefs [commands/record-failure! (fn [entry] (swap! recorded conj entry))]
+        (let [trig-result {:report/closed true :report/acked true}
+              overrides   {:closed {:scope :maintainer}}
+              failure-ctx {:source "src" :from-addr "user@test" :email-date nil :report-mid "<r@test>"}
+              filtered    (filter-triggers trig-result overrides false failure-ctx)]
+          (is (= {:report/acked true} filtered)
+              "acked (default :user scope) survives, closed (maintainer-only override) is dropped")
+          (is (= 1 (count @recorded)) "exactly one failure recorded")
+          (let [entry (first @recorded)]
+            (is (= :insufficient-scope (:reason entry)))
+            (is (= :maintainers (:audience entry)))
+            (is (= "Closed." (:command entry)))
+            (is (= "user@test" (:from-addr entry)))
+            (is (= "src" (:source entry)))))))))
 
 (deftest digest-integration-test
   (let [{:keys [conn] :as ctx} (setup-db!)]
@@ -522,37 +548,37 @@
 
         ;; --- Directive unit tests ---
         (testing "detect-directives"
-          (is (= [{:action :set :attr :report/acked :email-address "a@b.com" :scope :maintainer}]
+          (is (= [{:action :set :attr :report/acked :email-address "a@b.com" :scope :maintainer :id :acked-by}]
                  (commands/detect-directives :bug "Acked-by: a@b.com\n")))
-          (is (= [{:action :set :attr :report/owned :email-address "x@y.com" :scope :maintainer}
-                  {:action :set :attr :report/urgent :email-address "x@y.com" :scope :maintainer}]
+          (is (= [{:action :set :attr :report/owned :email-address "x@y.com" :scope :maintainer :id :owned-by}
+                  {:action :set :attr :report/urgent :email-address "x@y.com" :scope :maintainer :id :urgent-by}]
                  (commands/detect-directives :bug "Owned-by: x@y.com\nUrgent-by: x@y.com\n")))
-          (is (= [{:action :unset :attr :report/acked :scope :setter-or-maintainer}]
+          (is (= [{:action :unset :attr :report/acked :scope :setter-or-maintainer :id :unacked}]
                  (commands/detect-directives :bug "Not acked\n")))
-          (is (= [{:action :unset :attr :report/urgent :scope :setter-or-maintainer}]
+          (is (= [{:action :unset :attr :report/urgent :scope :setter-or-maintainer :id :unurgent}]
                  (commands/detect-directives :bug "Not urgent\n")))
-          (is (= [{:action :unset :attr :report/important :scope :setter-or-maintainer}]
+          (is (= [{:action :unset :attr :report/important :scope :setter-or-maintainer :id :unimportant}]
                  (commands/detect-directives :bug "Not important\n")))
-          (is (= [{:action :set-deadline :date (parse-date-iso "2026-06-15") :scope :maintainer}]
+          (is (= [{:action :set-deadline :date (parse-date-iso "2026-06-15") :scope :maintainer :id :deadline}]
                  (commands/detect-directives :bug "Deadline: 2026-06-15\n")))
-          (is (= [{:action :unset-deadline :scope :maintainer}]
+          (is (= [{:action :unset-deadline :scope :maintainer :id :undeadline}]
                  (commands/detect-directives :bug "No deadline\n")))
-          (is (= [{:action :unset-topic :scope :user}]
+          (is (= [{:action :unset-topic :scope :user :id :untopic}]
                  (commands/detect-directives :bug "No topic\n")))
-          (is (= [{:action :set-topic :topic "my-topic" :scope :user}]
+          (is (= [{:action :set-topic :topic "my-topic" :scope :user :id :topic}]
                  (commands/detect-directives :bug "Topic: my-topic\n")))
-          (is (= [{:action :set :attr :report/acked :email-address "a@b.com" :scope :maintainer}
-                  {:action :set-deadline :date (parse-date-iso "2026-07-01") :scope :maintainer}
-                  {:action :set-topic :topic "urgent-fix" :scope :user}]
+          (is (= [{:action :set :attr :report/acked :email-address "a@b.com" :scope :maintainer :id :acked-by}
+                  {:action :set-deadline :date (parse-date-iso "2026-07-01") :scope :maintainer :id :deadline}
+                  {:action :set-topic :topic "urgent-fix" :scope :user :id :topic}]
                  (commands/detect-directives :bug "Acked-by: a@b.com\nDeadline: 2026-07-01\nTopic: urgent-fix\n")))
-          (is (= [{:action :set :attr :report/owned :email-address "x@y.com" :scope :maintainer}]
+          (is (= [{:action :set :attr :report/owned :email-address "x@y.com" :scope :maintainer :id :owned-by}]
                  (commands/detect-directives :bug "Thanks for the report.\nOwned-by: x@y.com\nWill look into it.\n")))
           (is (= [] (commands/detect-directives :bug "Just a normal reply.\n")))
           (is (nil? (commands/detect-directives :bug nil)))
           ;; Expiry directive
-          (is (= [{:action :set-expiry :date (parse-date-iso "2026-09-01") :scope :maintainer}]
+          (is (= [{:action :set-expiry :date (parse-date-iso "2026-09-01") :scope :maintainer :id :expiry}]
                  (commands/detect-directives :bug "Expiry: 2026-09-01\n")))
-          (is (= [{:action :unset-expiry :scope :maintainer}]
+          (is (= [{:action :unset-expiry :scope :maintainer :id :unexpiry}]
                  (commands/detect-directives :bug "No expiry\n")))
           ;; "Expiry: deadline" is no longer a valid command (use :inactive-after :deadline in config)
           (is (= [] (commands/detect-directives :bug "Expiry: deadline\n")))
@@ -745,15 +771,15 @@
 
         ;; --- Directive unit tests for supersede ---
         (testing "detect-directives: Superseded-by with angle brackets"
-          (is (= [{:action :set-superseded :target-message-id "<msg@example.com>" :scope :user}]
+          (is (= [{:action :set-superseded :target-message-id "<msg@example.com>" :scope :user :id :superseded-by}]
                  (commands/detect-directives :bug "Superseded-by: <msg@example.com>\n"))))
 
         (testing "detect-directives: Superseded-by without angle brackets"
-          (is (= [{:action :set-superseded :target-message-id "<msg@example.com>" :scope :user}]
+          (is (= [{:action :set-superseded :target-message-id "<msg@example.com>" :scope :user :id :superseded-by}]
                  (commands/detect-directives :bug "Superseded-by: msg@example.com\n"))))
 
         (testing "detect-directives: Not superseded"
-          (is (= [{:action :unset-superseded :scope :user}]
+          (is (= [{:action :unset-superseded :scope :user :id :unsuperseded}]
                  (commands/detect-directives :bug "Not superseded\n"))))
 
         (testing "resolve-commands: superseded-by"

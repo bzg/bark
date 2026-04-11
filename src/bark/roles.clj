@@ -8,6 +8,7 @@
             [datalevin.core :as d]
             [taoensso.timbre :as log]
             [bark.common :as common]
+            [bark.commands :as commands]
             [bark.tracking :as tracking]))
 
 ;; ---------------------------------------------------------------------------
@@ -127,8 +128,10 @@
 (defn- close-tenure!
   "Close the active tenure for each given address (by setting :to = email-date).
   The lead maintainer's tenure is never closed. Returns the list of addresses
-  whose tenure was actually closed."
-  [conn tenures source-name addresses email-date]
+  whose tenure was actually closed.  Attempts to close the lead maintainer
+  are recorded as `:insufficient-scope` failures (audience `:maintainers`)
+  when `failure-ctx` is provided."
+  [conn tenures source-name addresses email-date failure-ctx]
   (let [lead (lead-maintainer tenures)
         db   (d/db conn)]
     (->> addresses
@@ -138,6 +141,12 @@
                      (= a lead)
                      (do (log/warn "Denied: cannot remove lead maintainer" a
                                    "(for" source-name ")")
+                         (when failure-ctx
+                           (commands/record-failure!
+                            (assoc failure-ctx
+                                   :reason   :insufficient-scope
+                                   :audience :maintainers
+                                   :command  (str "Remove maintainer: " a))))
                          nil)
                      :else
                      (when-let [eid (active-tenure-eid db source-name a)]
@@ -148,11 +157,20 @@
 (defn apply-role-controls!
   "Apply `Add maintainer:` / `Remove maintainer:` directives found in
   `body-text`. `tenures` is the pre-directive snapshot used for permission
-  checks; the DB is re-read between operations so effects chain correctly."
+  checks; the DB is re-read between operations so effects chain correctly.
+
+  Denied attempts are written to the failures file as
+  `:insufficient-scope`/`:maintainers` so the lead maintainer (and any
+  other notified maintainer) sees them in the next digest."
   [conn tenures source-name from-addr body-text email-date]
-  (let [controls (parse-role-controls body-text)
-        is-maint (maintainer? tenures from-addr)
-        is-lead  (lead-maintainer? tenures from-addr)]
+  (let [controls    (parse-role-controls body-text)
+        is-maint    (maintainer? tenures from-addr)
+        is-lead     (lead-maintainer? tenures from-addr)
+        failure-ctx (when (and from-addr source-name)
+                      {:source     source-name
+                       :from-addr  from-addr
+                       :email-date email-date
+                       :report-mid ""})]
     (doseq [{:keys [command addresses]} controls]
       (case command
         "Add maintainer"
@@ -161,7 +179,13 @@
             (tracking/bump-global-modified! conn)
             (log/info "add maintainer:" (str/join " " opened)
                       (str "(for " source-name ")")))
-          (log/warn "Denied:" from-addr "lacks permission for: Add maintainer"))
+          (do (log/warn "Denied:" from-addr "lacks permission for: Add maintainer")
+              (when failure-ctx
+                (commands/record-failure!
+                 (assoc failure-ctx
+                        :reason   :insufficient-scope
+                        :audience :maintainers
+                        :command  (str "Add maintainer: " (str/join " " addresses)))))))
 
         "Remove maintainer"
         (if is-lead
@@ -169,12 +193,18 @@
           ;; the latest state (e.g. if this directive follows an Add).
           (let [current (get-tenures (d/db conn) source-name)]
             (when-let [closed (seq (close-tenure! conn current source-name
-                                                  addresses email-date))]
+                                                  addresses email-date failure-ctx))]
               (tracking/bump-global-modified! conn)
               (log/info "remove maintainer:" (str/join " " closed)
                         (str "(for " source-name ")"))))
-          (log/warn "Denied:" from-addr
-                    "lacks permission for: Remove maintainer (lead only)"))
+          (do (log/warn "Denied:" from-addr
+                        "lacks permission for: Remove maintainer (lead only)")
+              (when failure-ctx
+                (commands/record-failure!
+                 (assoc failure-ctx
+                        :reason   :insufficient-scope
+                        :audience :maintainers
+                        :command  (str "Remove maintainer: " (str/join " " addresses)))))))
 
         nil))))
 
@@ -220,9 +250,16 @@
                               :notify/min-priority 1
                               :notify/min-status   1}]))))))
 
-(defn apply-notify-controls! [conn roles source-name from-addr body-text]
+(defn apply-notify-controls!
+  "Apply a `Notify:` control found in `body-text`.  Only maintainers
+  are allowed to change their notification preferences.  A non-
+  maintainer attempt is logged and recorded as an
+  `:insufficient-scope` failure (audience `:maintainers`), so it
+  becomes visible to the lead maintainer — otherwise the attempt
+  would leave no trace at all."
+  [conn roles source-name from-addr body-text email-date]
   (when-let [[_ params-str] (re-find notify-pattern (or body-text ""))]
-    (when (maintainer? roles from-addr)
+    (if (maintainer? roles from-addr)
       (let [params (parse-notify-params params-str)
             k      (notify-key source-name from-addr)
             txn    (cond-> {:notify/key    k
@@ -235,7 +272,18 @@
                      (contains? params :subject-match)  (assoc :notify/subject-match (:subject-match params))
                      (contains? params :topic)          (assoc :notify/topic (:topic params)))]
         (d/transact! conn [txn])
-        (log/info "Notify:" params-str (str "(for " from-addr " on " source-name ")"))))))
+        (log/info "Notify:" params-str (str "(for " from-addr " on " source-name ")")))
+      (do (log/warn "Denied:" from-addr
+                    "lacks permission for: Notify (non-maintainer)")
+          (when (and from-addr source-name)
+            (commands/record-failure!
+             {:source     source-name
+              :from-addr  from-addr
+              :email-date email-date
+              :report-mid ""
+              :reason     :insufficient-scope
+              :audience   :maintainers
+              :command    (str "Notify: " params-str)}))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Permission check for report creation (pure)
