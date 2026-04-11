@@ -42,24 +42,32 @@
  :watermark/imap-uid     {:db/valueType :db.type/long}
 
  ;; --- Reports (defined by bark-digest) ---
+ ;;
+ ;; Every "state" attribute is a ref to the email that posed it.
+ ;; The setter's address is available either via the ref (follow it
+ ;; to :email/from-address) or, for proxy-capable state attrs, via
+ ;; the cached `-address` attr below — which may diverge from the
+ ;; email's from-address when a maintainer uses the `-by` form.
  :report/type            {:db/valueType :db.type/keyword}
  :report/email           {:db/valueType :db.type/ref}
  :report/message-id      {:db/valueType :db.type/string
                           :db/unique    :db.unique/identity}
  :report/version         {:db/valueType :db.type/string}
- :report/topic           {:db/valueType :db.type/string}
  :report/patch-seq       {:db/valueType :db.type/string}
  :report/patch-source    {:db/valueType :db.type/keyword
                           :db/cardinality :db.cardinality/many}
  :report/descendants     {:db/valueType   :db.type/ref
                           :db/cardinality :db.cardinality/many}
+ ;; State attributes — ref to the email that posed the state.
+ ;; Paired with `-address` for the proxy-capable ones (see below).
  :report/acked           {:db/valueType :db.type/ref}
  :report/owned           {:db/valueType :db.type/ref}
  :report/closed          {:db/valueType :db.type/ref}
  :report/urgent          {:db/valueType :db.type/ref}
  :report/important       {:db/valueType :db.type/ref}
  ;; Address of the person designated by the command (same as email's from-address
- ;; for direct triggers, may differ for -by directives)
+ ;; for direct triggers, may differ for -by directives).
+ ;; Present only for state attrs that support the `-by` proxy form.
  :report/acked-address     {:db/valueType :db.type/string}
  :report/owned-address     {:db/valueType :db.type/string}
  :report/closed-address    {:db/valueType :db.type/string}
@@ -67,9 +75,18 @@
  :report/important-address {:db/valueType :db.type/string}
  ;; Why the report was closed: :resolved, :cancelled, :expired, or :superseded
  :report/close-reason    {:db/valueType :db.type/keyword}
- :report/superseded-by   {:db/valueType :db.type/ref}
- :report/deadline              {:db/valueType :db.type/instant}
- :report/expiry               {:db/valueType :db.type/instant}
+ ;; Topic, deadline, expiry and superseded-by: the ref points to the
+ ;; email that posed the value.  The actual business value lives in
+ ;; the paired `-value` (scalar) or `-target` (structural ref) attr.
+ ;; These commands have no proxy form, so there is no `-address` attr.
+ :report/topic           {:db/valueType :db.type/ref}
+ :report/topic-value     {:db/valueType :db.type/string}
+ :report/deadline        {:db/valueType :db.type/ref}
+ :report/deadline-value  {:db/valueType :db.type/instant}
+ :report/expiry          {:db/valueType :db.type/ref}
+ :report/expiry-value    {:db/valueType :db.type/instant}
+ :report/superseded-by        {:db/valueType :db.type/ref}
+ :report/superseded-by-target {:db/valueType :db.type/ref}
  :report/last-activity        {:db/valueType :db.type/instant}
  :report/last-activity-address {:db/valueType :db.type/string}
  :report/has-ics              {:db/valueType :db.type/boolean}
@@ -116,7 +133,6 @@
  :series/patches         {:db/valueType   :db.type/ref
                           :db/cardinality :db.cardinality/many}
  :series/closed          {:db/valueType :db.type/ref}
- :series/superseded-by   {:db/valueType :db.type/ref}
 
  ;; --- Participants (anyone who creates a report or applies a command) ---
  :participant/key               {:db/valueType :db.type/string

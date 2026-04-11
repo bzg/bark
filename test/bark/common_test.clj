@@ -3,7 +3,9 @@
   classify-delivery, classify-source, parse-duration-str,
   gate-related helpers, and build-source-map edge cases."
   (:require [clojure.test :refer [deftest is testing]]
-            [bark.common :as common]))
+            [clojure.string :as str]
+            [bark.common :as common]
+            [bark.commands :as commands]))
 
 ;; ---------------------------------------------------------------------------
 ;; parse-duration-str
@@ -298,3 +300,28 @@
   (is (false? (common/ics-file? "readme.txt")))
   (is (false? (common/ics-file? "ics-like.doc")))
   (is (false? (common/ics-file? nil))))
+
+;; ---------------------------------------------------------------------------
+;; setter-scoped-command-ids drift check
+;;
+;; `bark.common/setter-scoped-command-ids` is consumed by the Babashka
+;; config validator, which cannot load `bark.commands` (datalevin dep).
+;; This test asserts the hand-maintained set matches what we would
+;; derive from the authoritative registry: every unset-style directive
+;; whose target attribute is tracked by a ref to the pose-email (i.e.
+;; present in `bark.commands/setter-ref-attrs`).  Any new tracked
+;; attribute will fail this test until the common set is updated.
+;; ---------------------------------------------------------------------------
+
+(defn- unset-action? [action]
+  (str/starts-with? (name action) "unset"))
+
+(deftest setter-scoped-command-ids-matches-registry
+  (let [derived (into #{}
+                      (comp (filter #(unset-action? (:action %)))
+                            (filter #(contains? commands/setter-ref-attrs (:attr %)))
+                            (map :id))
+                      commands/commands)]
+    (is (= derived common/setter-scoped-command-ids)
+        (str "bark.common/setter-scoped-command-ids drifted from "
+             "bark.commands/commands. Derived: " derived))))

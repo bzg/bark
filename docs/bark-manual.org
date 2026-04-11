@@ -125,10 +125,12 @@ Topics can be set in two ways:
   also sets topic to "parser" (the first colon-delimited segment after
   the closing bracket).
 
-A maintainer can also change the topic of an existing report by
-replying with:
+Anyone can also change the topic of an existing report by replying
+with:
 
 : Topic: new-topic.
+
+Or remove it with =No topic.=.
 
 ** Updating reports
 
@@ -149,6 +151,33 @@ Email signatures (delimited by =-- = per RFC 3676) are stripped before
 scanning, so command-like words in signatures are ignored.
 
 See the [[#all-commands][complete list of commands]] below for the full list.
+
+** Retracting your own updates
+
+If you previously marked a report with =Acked.=, =Owned.=, =Closed.=,
+=Urgent.= or =Important.=, you can retract your own action by replying
+with the matching "Not" command:
+
+: Not acked.
+: Not owned.
+: Not closed.
+: Not urgent.
+: Not important.
+
+Only the person who set the state can undo it this way — except
+maintainers, who can undo anyone's action (see [[#undoing-updates][Undoing updates]] below).
+
+** Superseding a report
+
+If your report turns out to duplicate another one, or if you send a
+new version of a patch that replaces the previous one, you can mark
+the old report as superseded by replying to its thread with:
+
+: Superseded-by: <target-message-id@example.com>
+
+The angle brackets around the message-id are optional.  See the
+[[#superseding-a-report-1][maintainer section]] for the full details on what this does and how to
+undo it.
 
 ** Voting on requests
 
@@ -184,8 +213,12 @@ Use =[ANN event]= to set the topic to "event" for easier filtering,
 but any announcement with ICS content is included regardless of topic.
 
 ** Undoing updates
+:PROPERTIES:
+:CUSTOM_ID: undoing-updates
+:END:
 
-Maintainers can also "undo" an update:
+Maintainers can "undo" any update on a report, regardless of who made
+it:
 
 : Not acked.
 : Not owned.
@@ -195,6 +228,12 @@ Maintainers can also "undo" an update:
 : No deadline.
 : No expiry.
 : No topic.
+: Not superseded.
+
+Of these, =No deadline.= and =No expiry.= are maintainer-only.  The
+others can also be used by regular users, but only to retract their
+*own* actions (see [[#retracting-your-own-updates][Retracting your own updates]] above).  =No topic.=
+can be used by anyone.
 
 ** Setting a deadline
 
@@ -233,19 +272,23 @@ To remove a per-report expiry:
 : No expiry.
 
 ** Superseding a report
+:PROPERTIES:
+:CUSTOM_ID: superseding-a-report-1
+:END:
 
 When a report is made obsolete by another (e.g. a patch resubmitted
 without version numbers, or a bug report that duplicates a broader
-one), a maintainer can mark the old report as superseded by replying
-to its thread with:
+one), anyone can mark the old report as superseded by replying to its
+thread with:
 
 : Superseded-by: <target-message-id@example.com>
 
 The angle brackets around the message-id are optional. This does three
 things automatically:
 
-1. Sets =:report/superseded-by= on the old report (a reference to the
-   target report).
+1. Sets =:report/superseded-by-target= on the old report (a reference
+   to the target report) and =:report/superseded-by= to the email that
+   posed the supersession.
 2. Closes the old report with close-reason =:superseded=.
 3. Links the two reports as related (bidirectional).
 
@@ -473,8 +516,19 @@ command) and =:report-types= (which report types it applies to):
            :closed   ["Canceled" "Fixed" "Wontfix"]}    ;; Simple form still works
 #+end_src
 
-- =:scope= can be =:user= (anyone) or =:maintainer= (maintainer only).
-  It overrides the default permission for that command.
+- =:scope= overrides the default permission for that command. Possible
+  values:
+  - =:user= — anyone
+  - =:maintainer= — maintainer only
+  - =:setter-or-maintainer= — the address that previously set the
+    attribute, or any maintainer (maintainers keep their administrative
+    override)
+
+  =:setter-or-maintainer= is only valid on unset directives whose
+  target attribute is tracked by a ref to the pose-email: =:unacked=,
+  =:unowned=, =:unclosed=, =:unurgent=, =:unimportant=, =:untopic=,
+  =:undeadline=, =:unexpiry=, =:unsuperseded=.  =bb test-config=
+  rejects this scope on any other command.
 - =:report-types= replaces the default set of report types the command
   applies to. When absent, the registry default is used.
 - Both simple (vector) and extended (map) forms can be mixed.
@@ -491,43 +545,44 @@ in turn take precedence over the built-in defaults.
    :END:
 
 
-/Commands/ can all be sent publicly, by users or maintainers.
+/Commands/ can all be sent publicly, by users or maintainers.  In the
+"Permission" column, "setter or maintainer" means the user who
+previously set the attribute — or any maintainer (maintainers retain a
+full override).
 
-| ID             | Syntax / Words                        | Permission      | Report types        |
-|----------------+---------------------------------------+-----------------+---------------------|
-| =:closed=        | Canceled, Applied, Fixed, Closed...   | any user        | all                 |
-| =:urgent=        | Urgent                                | any user        | all                 |
-| =:important=     | Important                             | any user        | all                 |
-|----------------+---------------------------------------+-----------------+---------------------|
-| =:closed-by=     | =Closed-by: addr@host=                  | maintainer      | all                 |
-| =:unclosed=      | =Not closed=                            | maintainer      | all                 |
-| =:unurgent=      | =Not urgent=                            | maintainer      | all                 |
-| =:urgent-by=     | =Urgent-by: addr@host=                  | maintainer      | all                 |
-| =:unimportant=   | =Not important=                         | maintainer      | all                 |
-| =:important-by=  | =Important-by: addr@host=               | maintainer      | all                 |
-| =:topic=         | =Topic: word=                           | maintainer      | all                 |
-| =:untopic=       | =No topic=                              | maintainer      | all                 |
-|----------------+---------------------------------------+-----------------+---------------------|
-| vote up        | =+1= or =1+=                              | any user (once) | request             |
-| vote down      | =-1= or =1-=                              | any user (once) | request             |
-| vote null      | =+0= / =0+= / =-0= / =0-=                     | any user (once) | request             |
-|----------------+---------------------------------------+-----------------+---------------------|
-| =:acked=         | Acked, Confirmed, Reviewed, Approved  | any user        | bug, patch, request |
-| =:owned=         | Owned, Handled, Assigned              | any user        | bug, patch, request |
-|----------------+---------------------------------------+-----------------+---------------------|
-| =:unacked=       | =Not acked=                             | maintainer      | bug, patch, request |
-| =:acked-by=      | =Acked-by: addr@host=                   | maintainer      | bug, patch, request |
-| =:unowned=       | =Not owned=                             | maintainer      | bug, patch, request |
-| =:owned-by=      | =Owned-by: addr@host=                   | maintainer      | bug, patch, request |
-| =:deadline=      | =Deadline: 2025-03-19= or =Deadline: 30d= | maintainer      | bug, patch, request |
-| =:undeadline=    | =No deadline=                           | maintainer      | bug, patch, request |
-| =:expiry=        | =Expiry: 2025-06-15= or =Expiry: 30d=     | maintainer      | bug, patch, request |
-| =:unexpiry=      | =No expiry=                             | maintainer      | bug, patch, request |
-| =:topic=         | =Topic: word=                           | maintainer      | all                 |
-| =:untopic=       | =No topic=                              | maintainer      | all                 |
-|----------------+---------------------------------------+-----------------+---------------------|
-| =:superseded-by= | =Superseded-by: <msg-id>=               | maintainer      | all                 |
-| =:unsuperseded=  | =Not superseded=                        | maintainer      | all                 |
+| ID             | Syntax / Words                        | Permission           | Report types        |
+|----------------+---------------------------------------+----------------------+---------------------|
+| =:closed=        | Canceled, Applied, Fixed, Closed...   | any user             | all                 |
+| =:urgent=        | Urgent                                | any user             | all                 |
+| =:important=     | Important                             | any user             | all                 |
+|----------------+---------------------------------------+----------------------+---------------------|
+| =:closed-by=     | =Closed-by: addr@host=                  | maintainer           | all                 |
+| =:unclosed=      | =Not closed=                            | setter or maintainer | all                 |
+| =:unurgent=      | =Not urgent=                            | setter or maintainer | all                 |
+| =:urgent-by=     | =Urgent-by: addr@host=                  | maintainer           | all                 |
+| =:unimportant=   | =Not important=                         | setter or maintainer | all                 |
+| =:important-by=  | =Important-by: addr@host=               | maintainer           | all                 |
+|----------------+---------------------------------------+----------------------+---------------------|
+| vote up        | =+1= or =1+=                              | any user (once)      | request             |
+| vote down      | =-1= or =1-=                              | any user (once)      | request             |
+| vote null      | =+0= / =0+= / =-0= / =0-=                     | any user (once)      | request             |
+|----------------+---------------------------------------+----------------------+---------------------|
+| =:acked=         | Acked, Confirmed, Reviewed, Approved  | any user             | bug, patch, request |
+| =:owned=         | Owned, Handled, Assigned              | any user             | bug, patch, request |
+|----------------+---------------------------------------+----------------------+---------------------|
+| =:unacked=       | =Not acked=                             | setter or maintainer | bug, patch, request |
+| =:acked-by=      | =Acked-by: addr@host=                   | maintainer           | bug, patch, request |
+| =:unowned=       | =Not owned=                             | setter or maintainer | bug, patch, request |
+| =:owned-by=      | =Owned-by: addr@host=                   | maintainer           | bug, patch, request |
+| =:deadline=      | =Deadline: 2025-03-19= or =Deadline: 30d= | maintainer           | bug, patch, request |
+| =:undeadline=    | =No deadline=                           | maintainer           | bug, patch, request |
+| =:expiry=        | =Expiry: 2025-06-15= or =Expiry: 30d=     | maintainer           | bug, patch, request |
+| =:unexpiry=      | =No expiry=                             | maintainer           | bug, patch, request |
+| =:topic=         | =Topic: word=                           | any user             | all                 |
+| =:untopic=       | =No topic=                              | any user             | all                 |
+|----------------+---------------------------------------+----------------------+---------------------|
+| =:superseded-by= | =Superseded-by: <msg-id>=               | any user             | all                 |
+| =:unsuperseded=  | =Not superseded=                        | any user             | all                 |
 
 ** All controls
 

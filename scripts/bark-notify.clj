@@ -163,8 +163,8 @@
         from    (or (:email/from-address email) "?")
         pri     (report-priority report)
         replies (report-descendant-count report)
-        deadline (:report/deadline report)
-        expiry   (:report/expiry report)
+        deadline (:report/deadline-value report)
+        expiry   (:report/expiry-value report)
         arch    (get-header (:email/headers-edn email) "Archived-At")]
     (str "  [" type "] " subject "\n"
          "    from: " from " — " date
@@ -205,7 +205,7 @@
                      by-sts)
         by-topic   (if topic
                      (let [lc (str/lower-case topic)]
-                       (filter #(some-> (:report/topic %)
+                       (filter #(some-> (:report/topic-value %)
                                         str/lower-case
                                         (str/includes? lc))
                                by-subj))
@@ -228,10 +228,10 @@
                             #(compare %2 %1) by-topic)
         owned      (filter #(owned-by? % email) relevant)
         owned-dl   (->> owned
-                        (filter :report/deadline)
-                        (sort-by #(.getTime ^java.util.Date (:report/deadline %))))
+                        (filter :report/deadline-value)
+                        (sort-by #(.getTime ^java.util.Date (:report/deadline-value %))))
         owned-rest (->> owned
-                        (remove :report/deadline)
+                        (remove :report/deadline-value)
                         (sort-by #(- (report-priority %))))
         unacked    (->> relevant
                         (filter unacked?)

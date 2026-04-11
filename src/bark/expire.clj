@@ -60,7 +60,7 @@
      ;; Age check: deadline-based, fixed date, or delay from last activity
      (cond
        expires-on-deadline
-       (when-let [deadline (:report/deadline report-data)]
+       (when-let [deadline (:report/deadline-value report-data)]
          (.before ^Date deadline now))
        expires-on-date
        (.before ^Date expires-on-date now)
@@ -100,7 +100,7 @@
   Returns truthy when the report matches either its explicit expiry
   or the source-level expiry rules."
   [report-data source-map src rtype now]
-  (let [explicit-expiry (:report/expiry report-data)]
+  (let [explicit-expiry (:report/expiry-value report-data)]
     (if explicit-expiry
       (.before ^Date explicit-expiry now)
       (let [expiry-cfg (:expiry (get source-map src))
@@ -115,7 +115,7 @@
   (keep (fn [[rid rtype src]]
           (let [report-data (d/pull db-snap [:report/acked :report/owned
                                              :report/urgent :report/important
-                                             :report/expiry :report/deadline
+                                             :report/expiry-value :report/deadline-value
                                              :report/last-activity] rid)]
             (when (should-expire? report-data source-map src rtype now)
               {:rid rid :rtype rtype :src src

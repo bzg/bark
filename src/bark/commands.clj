@@ -23,6 +23,20 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Command registry
+;;
+;; :scope values:
+;;   :user                 — anyone
+;;   :maintainer           — any maintainer
+;;   :setter-or-maintainer — the address that previously set the attribute,
+;;                           or any maintainer (maintainers keep their
+;;                           administrative override)
+;;
+;; :setter-or-maintainer is only meaningful for unset-style directives
+;; whose target attribute is tracked by a ref to the pose-email (see
+;; `setter-ref-attrs` below).  These are the five original state
+;; attrs (acked/owned/closed/urgent/important) plus topic, deadline,
+;; expiry and superseded-by — a total of nine `:un*` commands.
+;; `validate-config.clj` rejects that scope on any other command.
 ;; ---------------------------------------------------------------------------
 
 (def commands
@@ -45,14 +59,15 @@
     :syntax "Urgent-by" :param :email-address}
    {:id :important-by :kind :directive :action :set   :attr :report/important :scope :maintainer
     :syntax "Important-by" :param :email-address}
-   ;; Unset directives
-   {:id :unacked     :kind :directive :action :unset :attr :report/acked    :scope :maintainer
+   ;; Unset directives — :setter-or-maintainer lets the user who previously
+   ;; set the attribute retract it (and maintainers retain full override).
+   {:id :unacked     :kind :directive :action :unset :attr :report/acked    :scope :setter-or-maintainer
     :syntax "Not acked" :report-types #{:bug :patch :request}}
-   {:id :unowned     :kind :directive :action :unset :attr :report/owned    :scope :maintainer
+   {:id :unowned     :kind :directive :action :unset :attr :report/owned    :scope :setter-or-maintainer
     :syntax "Not owned" :report-types #{:bug :patch :request}}
-   {:id :unclosed    :kind :directive :action :unset :attr :report/closed   :scope :maintainer :syntax "Not closed"}
-   {:id :unurgent    :kind :directive :action :unset :attr :report/urgent   :scope :maintainer :syntax "Not urgent"}
-   {:id :unimportant :kind :directive :action :unset :attr :report/important :scope :maintainer :syntax "Not important"}
+   {:id :unclosed    :kind :directive :action :unset :attr :report/closed   :scope :setter-or-maintainer :syntax "Not closed"}
+   {:id :unurgent    :kind :directive :action :unset :attr :report/urgent   :scope :setter-or-maintainer :syntax "Not urgent"}
+   {:id :unimportant :kind :directive :action :unset :attr :report/important :scope :setter-or-maintainer :syntax "Not important"}
    ;; Deadline / topic
    {:id :deadline    :kind :directive :action :set-deadline   :attr :report/deadline :scope :maintainer
     :syntax "Deadline" :param :date-or-duration :report-types #{:bug :patch :request}}
@@ -62,14 +77,14 @@
     :syntax "Expiry" :param :date-or-duration :report-types #{:bug :patch :request}}
    {:id :unexpiry    :kind :directive :action :unset-expiry :attr :report/expiry :scope :maintainer
     :syntax "No expiry" :report-types #{:bug :patch :request}}
-   {:id :topic       :kind :directive :action :set-topic :attr :report/topic :scope :maintainer
+   {:id :topic       :kind :directive :action :set-topic :attr :report/topic :scope :user
     :syntax "Topic" :param :word}
-   {:id :untopic     :kind :directive :action :unset-topic :attr :report/topic :scope :maintainer
+   {:id :untopic     :kind :directive :action :unset-topic :attr :report/topic :scope :user
     :syntax "No topic"}
    ;; Supersede
-   {:id :superseded-by  :kind :directive :action :set-superseded :attr :report/superseded-by :scope :maintainer
+   {:id :superseded-by  :kind :directive :action :set-superseded :attr :report/superseded-by :scope :user
     :syntax "Superseded-by" :param :message-id}
-   {:id :unsuperseded   :kind :directive :action :unset-superseded :attr :report/superseded-by :scope :maintainer
+   {:id :unsuperseded   :kind :directive :action :unset-superseded :attr :report/superseded-by :scope :user
     :syntax "Not superseded"}])
 
 ;; Derived indexes
@@ -81,15 +96,44 @@
 (def attr->trigger-cmd
   (into {} (map (juxt :attr identity)) trigger-commands))
 
-(def state-attrs
+;; The five state attrs that support the `-by` proxy form (e.g.
+;; `Acked-by: bob@example.com`, where the sender credits Bob instead
+;; of themselves).  Paired with `-address` caches below so the
+;; designated address survives the proxy indirection.
+(def proxy-state-attrs
   [:report/acked :report/owned :report/closed :report/urgent :report/important])
 
+;; Proxy-state attr → paired `-address` cache.  The cache holds the
+;; credited address, which may differ from the pose-email's
+;; from-address when the `-by` form is used.
 (def address-attrs
   {:report/acked     :report/acked-address
    :report/owned     :report/owned-address
    :report/closed    :report/closed-address
    :report/urgent    :report/urgent-address
    :report/important :report/important-address})
+
+;; All report attributes that Bark tracks as refs to the pose-email.
+;; Shape: `{ref-attr paired-value-attr-or-nil}`.
+;; The paired attr holds the business datum posed alongside the
+;; setter identity — a scalar for topic/deadline/expiry (`-value`),
+;; a structural ref for superseded-by (`-target`).  The five
+;; proxy-state attrs (acked/owned/closed/urgent/important) carry no
+;; paired value — their "value" is just the fact that the state was
+;; set, and the proxy-designated address lives in `address-attrs`.
+;; Consumed by `set-ref-value-tx`/`retract-ref-value-tx` helpers, by
+;; the drift test in `bark.common-test`, and by the config validator
+;; via `bark.common/setter-scoped-command-ids`.
+(def setter-ref-attrs
+  {:report/acked         nil
+   :report/owned         nil
+   :report/closed        nil
+   :report/urgent        nil
+   :report/important     nil
+   :report/topic         :report/topic-value
+   :report/deadline      :report/deadline-value
+   :report/expiry        :report/expiry-value
+   :report/superseded-by :report/superseded-by-target})
 
 ;; ---------------------------------------------------------------------------
 ;; Pattern compilation
@@ -365,7 +409,8 @@
 
 (defn build-trigger-tx
   "Build transaction data for trigger results.
-  `current` is the report's current state (pulled with state-attrs).
+  `current` is the report's current state (pulled with
+  `proxy-state-attrs`).
   Returns [tx-data new-sets] or nil if nothing to do."
   [report-eid trig-result email-eid from-addr current]
   (let [close-reason (:report/close-reason trig-result)
@@ -381,7 +426,7 @@
 
 (defn apply-triggers! [conn report-eid trig-result email-eid email-mid from-addr]
   (when trig-result
-    (let [current (d/pull (d/db conn) state-attrs report-eid)]
+    (let [current (d/pull (d/db conn) proxy-state-attrs report-eid)]
       (when-let [[all-tx new-sets close-reason]
                  (build-trigger-tx report-eid trig-result email-eid from-addr current)]
         (d/transact! conn all-tx)
@@ -391,12 +436,43 @@
                   (str "(by " email-mid ")"))))))
 
 (def ^:private directive-pull-pattern
-  (into state-attrs [:report/deadline :report/expiry
-                     :report/close-reason :report/topic
-                     :report/superseded-by
-                     :report/closed-address :report/acked-address
-                     :report/owned-address :report/urgent-address
-                     :report/important-address]))
+  ;; Proxy-state attrs are pulled as bare refs (we only need :db/id
+  ;; for retractions; the setter address comes from their paired
+  ;; `-address` cache, pulled separately below).  The other ref
+  ;; attrs additionally pull :email/from-address so scope-permits?
+  ;; can derive the setter without a second query.
+  (into proxy-state-attrs
+        [:report/close-reason
+         {:report/topic         [:db/id :email/from-address]}
+         :report/topic-value
+         {:report/deadline      [:db/id :email/from-address]}
+         :report/deadline-value
+         {:report/expiry        [:db/id :email/from-address]}
+         :report/expiry-value
+         {:report/superseded-by [:db/id :email/from-address]}
+         :report/superseded-by-target
+         :report/closed-address :report/acked-address
+         :report/owned-address :report/urgent-address
+         :report/important-address]))
+
+(defn- set-ref-value-tx
+  "Datoms to set the pose-email ref and the paired value in one shot.
+  `attr` must be a key of `setter-ref-attrs` with a non-nil paired
+  value attr."
+  [report-eid email-eid attr value]
+  [[:db/add report-eid attr email-eid]
+   [:db/add report-eid (setter-ref-attrs attr) value]])
+
+(defn- retract-ref-value-tx
+  "Datoms to retract the pose-email ref and the paired value from
+  `current`.  Skips the pair when the current value is absent."
+  [report-eid current attr]
+  (let [value-attr (setter-ref-attrs attr)
+        ref-cur    (get current attr)
+        val-cur    (get current value-attr)]
+    (cond-> []
+      ref-cur (conj [:db/retract report-eid attr (ref-eid ref-cur)])
+      val-cur (conj [:db/retract report-eid value-attr val-cur]))))
 
 (defn build-directives-tx
   "Build transaction data from resolved commands and current report state.
@@ -412,39 +488,44 @@
         (into (build-unset-tx report-eid current unset))
         (cond-> (and (contains? unset :report/closed) (:report/close-reason current))
           (conj [:db/retract report-eid :report/close-reason (:report/close-reason current)]))
+        ;; Deadline / expiry / topic all share the same set/retract
+        ;; shape: pose-email ref + paired `-value` scalar.
         (cond-> deadline
-          (conj [:db/add report-eid :report/deadline deadline]))
-        (cond-> (and undeadline? (:report/deadline current))
-          (conj [:db/retract report-eid :report/deadline (:report/deadline current)]))
+          (into (set-ref-value-tx report-eid email-eid :report/deadline deadline)))
+        (cond-> undeadline?
+          (into (retract-ref-value-tx report-eid current :report/deadline)))
         (cond-> expiry
-          (conj [:db/add report-eid :report/expiry expiry]))
-        (cond-> (and unexpiry? (:report/expiry current))
-          (conj [:db/retract report-eid :report/expiry (:report/expiry current)]))
+          (into (set-ref-value-tx report-eid email-eid :report/expiry expiry)))
+        (cond-> unexpiry?
+          (into (retract-ref-value-tx report-eid current :report/expiry)))
         (cond-> topic
-          (conj [:db/add report-eid :report/topic topic]))
-        (cond-> (and untopic? (:report/topic current))
-          (conj [:db/retract report-eid :report/topic (:report/topic current)]))
-        ;; Supersede: set ref, close with reason, link related
+          (into (set-ref-value-tx report-eid email-eid :report/topic topic)))
+        (cond-> untopic?
+          (into (retract-ref-value-tx report-eid current :report/topic)))
+        ;; Supersede uses the same ref-and-target shape plus the
+        ;; side-effects of closing the report and linking it to
+        ;; the target bidirectionally.
         (cond-> target-eid
-          (into [[:db/add report-eid :report/superseded-by target-eid]
-                 [:db/add report-eid :report/closed email-eid]
-                 [:db/add report-eid :report/closed-address from-addr]
-                 [:db/add report-eid :report/close-reason :superseded]
-                 [:db/add report-eid :report/related target-eid]
-                 [:db/add target-eid :report/related report-eid]]))
-        ;; Unsupersede: retract ref, reopen, clear reason
+          (into (into (set-ref-value-tx report-eid email-eid
+                                        :report/superseded-by target-eid)
+                      [[:db/add report-eid :report/closed email-eid]
+                       [:db/add report-eid :report/closed-address from-addr]
+                       [:db/add report-eid :report/close-reason :superseded]
+                       [:db/add report-eid :report/related target-eid]
+                       [:db/add target-eid :report/related report-eid]])))
+        ;; Unsupersede: retract both ref and target, reopen, clear reason
         (cond-> (and unsuperseded? (:report/superseded-by current))
-          (into (cond-> [[:db/retract report-eid :report/superseded-by
-                          (ref-eid (:report/superseded-by current))]]
-                  (:report/closed current)
-                  (conj [:db/retract report-eid :report/closed
-                         (ref-eid (:report/closed current))])
-                  (:report/closed-address current)
-                  (conj [:db/retract report-eid :report/closed-address
-                         (:report/closed-address current)])
-                  (:report/close-reason current)
-                  (conj [:db/retract report-eid :report/close-reason
-                         (:report/close-reason current)])))))))
+          (into (into (retract-ref-value-tx report-eid current :report/superseded-by)
+                      (cond-> []
+                        (:report/closed current)
+                        (conj [:db/retract report-eid :report/closed
+                               (ref-eid (:report/closed current))])
+                        (:report/closed-address current)
+                        (conj [:db/retract report-eid :report/closed-address
+                               (:report/closed-address current)])
+                        (:report/close-reason current)
+                        (conj [:db/retract report-eid :report/close-reason
+                               (:report/close-reason current)]))))))))
 
 (defn describe-directives
   "Build a human-readable summary of applied directives."
@@ -460,19 +541,64 @@
                            (when topic [(str "topic:" topic)])
                            (when untopic? ["no topic"])
                            (when target-eid [(str "superseded-by:" superseded-by)])
-                           (when (and unsuperseded? (:report/superseded-by current))
+                           (when (and unsuperseded? (:report/superseded-by-target current))
                              ["not superseded"])))))
+
+(defn- setter-address
+  "Return the address credited as the setter of `attr` on `current`.
+  For proxy-capable state attrs, reads the `-address` cache (which
+  captures the designated setter in the `-by` case).  For all other
+  setter-tracked attrs, follows the email ref and reads the pose
+  email's `:email/from-address`."
+  [current attr]
+  (or (get current (address-attrs attr))
+      (:email/from-address (get current attr))))
+
+(defn- scope-permits?
+  "Check whether a directive scope permits `from-addr` to act on `attr`.
+  `current-d` is a `delay` that pulls the report's current state — it
+  is only forced in the `:setter-or-maintainer` branch, so emails that
+  contain only `:user`/`:maintainer`-scoped directives pay no pull cost.
+
+  - :user                 — anyone
+  - :setter-or-maintainer — the address that previously set `attr`, or any
+                            maintainer (maintainers retain full override)
+  - :maintainer           — any maintainer
+  Unknown scopes are rejected with a warning (defensive fallthrough for
+  configs that bypassed the validator)."
+  [scope attr from-addr is-maintainer? current-d]
+  (case scope
+    :user                 true
+    :setter-or-maintainer (or (boolean is-maintainer?)
+                              (= (setter-address @current-d attr) from-addr))
+    :maintainer           (boolean is-maintainer?)
+    (do (log/warn "Unknown command scope on directive:" scope)
+        false)))
+
+(defn- filter-permitted-directives
+  "Return the subset of `directives` whose scope permits `from-addr` to
+  act, optionally further filtered by `action-pred`. `current-d` is
+  the delay passed through to `scope-permits?` — only forced when at
+  least one directive has scope `:setter-or-maintainer`."
+  ([directives current-d from-addr is-maintainer?]
+   (filter-permitted-directives directives current-d from-addr is-maintainer? (constantly true)))
+  ([directives current-d from-addr is-maintainer? action-pred]
+   (filter (fn [{:keys [scope attr action]}]
+             (and (action-pred action)
+                  (scope-permits? scope attr from-addr is-maintainer? current-d)))
+           directives)))
 
 (defn apply-directives! [conn report-eid directives email-eid from-addr is-maintainer?
                          failure-ctx]
-  (let [permitted (filter (fn [{:keys [scope]}]
-                            (or (= :user scope) (and (= :maintainer scope) is-maintainer?)))
-                          directives)]
+  (let [db         (d/db conn)
+        current-d  (delay (d/pull db directive-pull-pattern report-eid))
+        permitted  (filter-permitted-directives directives current-d from-addr is-maintainer?)]
     (when (seq permitted)
-      (let [db         (d/db conn)
+      ;; `current` is definitely needed from here on (for close-reason
+      ;; lookups, directive tx building, and logging).
+      (let [current    @current-d
             resolved   (resolve-commands permitted)
             report-mid (:report/message-id (d/entity db report-eid))
-            current    (d/pull db directive-pull-pattern report-eid)
             superseded-by (:superseded-by resolved)
             target-eid (when superseded-by
                          (d/entid db [:report/message-id superseded-by]))
@@ -483,7 +609,7 @@
           (tracking/bump-report-updated! conn report-eid)
           (when target-eid (tracking/bump-report-updated! conn target-eid))
           (log/info "Commands:" (describe-directives resolved target-eid current)
-                    (str "(proxy by " from-addr ")")))
+                    (str "(by " from-addr ")")))
         (when (and superseded-by (nil? target-eid))
           (log/warn "Superseded-by: unknown message-id" superseded-by)
           (when failure-ctx
@@ -492,36 +618,77 @@
                                     :command (str "Superseded-by: " superseded-by)
                                     :report-mid report-mid))))))))
 
+(def ^:private unclosed-pull-pattern
+  ;; `:report/superseded-by` is pulled as {:db/id :email/from-address}
+  ;; so scope-permits? can derive the setter; the target report is
+  ;; under `:report/superseded-by-target`.
+  [:report/closed :report/closed-address :report/close-reason
+   {:report/superseded-by [:db/id :email/from-address]}
+   :report/superseded-by-target
+   :report/related])
+
 (defn- try-unclosed!
   "If a closed report has a Not closed or Not superseded directive, retract the closure."
   [conn report-eid directives is-maintainer? from-addr]
-  (let [permitted (filter (fn [{:keys [action scope]}]
-                            (and (#{:unset :unset-superseded} action)
-                                 (or (= :user scope) (and (= :maintainer scope) is-maintainer?))))
-                          directives)
+  (let [current-d (delay (d/pull (d/db conn) unclosed-pull-pattern report-eid))
+        permitted (filter-permitted-directives
+                   directives current-d from-addr is-maintainer?
+                   #{:unset :unset-superseded})
         {:keys [unset unsuperseded?]} (resolve-commands permitted)]
     (when (or (contains? unset :report/closed) unsuperseded?)
-      (let [current  (d/pull (d/db conn) [:report/closed :report/closed-address :report/close-reason
-                                          :report/superseded-by :report/related] report-eid)
-            superseded-ref (:report/superseded-by current)
-            clear-supersede? (or unsuperseded? (and (contains? unset :report/closed) superseded-ref))
+      ;; From here on `current` is always needed.
+      (let [current          @current-d
+            supersede-pose   (:report/superseded-by current)
+            target-ref       (:report/superseded-by-target current)
+            clear-supersede? (or unsuperseded?
+                                 (and (contains? unset :report/closed) target-ref))
             all-tx   (-> []
                          (into (build-unset-tx report-eid current #{:report/closed}))
                          (cond-> (:report/close-reason current)
                            (conj [:db/retract report-eid :report/close-reason (:report/close-reason current)]))
-                         (cond-> (and clear-supersede? superseded-ref)
-                           (into (let [target-eid (ref-eid superseded-ref)]
-                                   [[:db/retract report-eid :report/superseded-by target-eid]
-                                    [:db/retract report-eid :report/related target-eid]
-                                    [:db/retract target-eid :report/related report-eid]]))))]
+                         (cond-> (and clear-supersede? target-ref)
+                           (into (let [target-eid (ref-eid target-ref)]
+                                   (cond-> [[:db/retract report-eid
+                                             :report/superseded-by-target target-eid]
+                                            [:db/retract report-eid :report/related target-eid]
+                                            [:db/retract target-eid :report/related report-eid]]
+                                     supersede-pose
+                                     (conj [:db/retract report-eid
+                                            :report/superseded-by
+                                            (ref-eid supersede-pose)]))))))]
         (when (seq all-tx)
           (d/transact! conn all-tx)
-          (when (and clear-supersede? superseded-ref)
-            (tracking/bump-report-updated! conn (ref-eid superseded-ref)))
+          (when (and clear-supersede? target-ref)
+            (tracking/bump-report-updated! conn (ref-eid target-ref)))
           (tracking/bump-report-updated! conn report-eid)
           (log/info (str "Commands: "
                          (if unsuperseded? "not superseded" "not closed")
-                         " (proxy by " from-addr ")")))))))
+                         " (by " from-addr ")")))))))
+
+(defn- trigger-scope-permits?
+  "Scope check for triggers.
+
+  Triggers always *set* an attribute, so the scope values behave as
+  follows:
+  - :user                 — anyone
+  - :maintainer           — maintainer only
+  - :setter-or-maintainer — equivalent to :user here; the sender of
+                            the trigger IS the setter.  The validator
+                            rejects this value on triggers, so this
+                            branch only fires for configs that bypass
+                            validation.  We fall back to :user silently
+                            rather than logging on every incoming
+                            trigger.
+
+  Truly unknown scopes (e.g. typos that also bypass validation) are
+  rejected with a warning so they surface in the logs."
+  [scope is-maintainer?]
+  (case scope
+    :user                 true
+    :setter-or-maintainer true
+    :maintainer           (boolean is-maintainer?)
+    (do (log/warn "Unknown command scope on trigger:" scope)
+        false)))
 
 (defn- filter-triggers-by-scope [trig-result overrides is-maintainer?]
   (when trig-result
@@ -529,7 +696,8 @@
                          (keep (fn [[attr :as entry]]
                                  (let [cmd   (attr->trigger-cmd attr)
                                        scope (or (:scope (get overrides (:id cmd))) (:scope cmd))]
-                                   (when (or (= :user scope) is-maintainer?) entry))))
+                                   (when (trigger-scope-permits? scope is-maintainer?)
+                                     entry))))
                          (dissoc trig-result :report/close-reason))]
       (when (seq filtered)
         (cond-> filtered

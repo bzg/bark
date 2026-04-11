@@ -221,7 +221,7 @@
           source-map {"test-src" {:expiry {:bug {:inactive-after :deadline}}}}
           eid (insert-email! conn {:mid "<dl-past@test>" :date-sent (days-ago 10)})
           rid (insert-report! conn {:mid "<dl-past@test>" :type :bug :email-eid eid})
-          _   (d/transact! conn [[:db/add rid :report/deadline (days-ago 2)]])]
+          _   (d/transact! conn [[:db/add rid :report/deadline-value (days-ago 2)]])]
       (expire/expire-reports! conn source-map)
       (is (report-closed? conn "<dl-past@test>"))
       (teardown! ctx)))
@@ -231,7 +231,7 @@
           source-map {"test-src" {:expiry {:bug {:inactive-after :deadline}}}}
           eid (insert-email! conn {:mid "<dl-future@test>" :date-sent (days-ago 10)})
           rid (insert-report! conn {:mid "<dl-future@test>" :type :bug :email-eid eid})
-          _   (d/transact! conn [[:db/add rid :report/deadline (days-from-now 5)]])]
+          _   (d/transact! conn [[:db/add rid :report/deadline-value (days-from-now 5)]])]
       (expire/expire-reports! conn source-map)
       (is (not (report-closed? conn "<dl-future@test>")))
       (teardown! ctx)))
@@ -324,7 +324,7 @@
           source-map {"test-src" {}}
           eid (insert-email! conn {:mid "<explicit-yes@test>" :date-sent (days-ago 5)})
           rid (insert-report! conn {:mid "<explicit-yes@test>" :type :bug :email-eid eid})
-          _   (d/transact! conn [[:db/add rid :report/expiry (days-ago 1)]])]
+          _   (d/transact! conn [[:db/add rid :report/expiry-value (days-ago 1)]])]
       (expire/expire-reports! conn source-map)
       (is (report-closed? conn "<explicit-yes@test>"))
       (teardown! ctx)))
@@ -335,7 +335,7 @@
           eid (insert-email! conn {:mid "<explicit-no@test>" :date-sent (days-ago 10)})
           rid (insert-report! conn {:mid "<explicit-no@test>" :type :bug :email-eid eid})
           ;; Explicit expiry in the future overrides the global rule that would expire it
-          _   (d/transact! conn [[:db/add rid :report/expiry (days-from-now 30)]])]
+          _   (d/transact! conn [[:db/add rid :report/expiry-value (days-from-now 30)]])]
       (expire/expire-reports! conn source-map)
       (is (not (report-closed? conn "<explicit-no@test>")))
       (teardown! ctx))))
