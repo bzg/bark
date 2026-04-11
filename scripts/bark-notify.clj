@@ -72,15 +72,26 @@
       [])))
 
 (defn- failures-for-subscriber
-  "Return failures for `email-addr` on `source` since `since-date`."
+  "Return failures relevant to `email-addr` on `source` since `since-date`.
+
+  Routing is driven by the `:audience` field on each failure entry:
+  - `:author`      — shown only to the address that triggered the failure
+                     (someone seeing their own typo); default for legacy
+                     entries that predate the field.
+  - `:maintainers` — shown to every maintainer subscriber on the source
+                     (the notification loop already gates on
+                     `still-privileged?`, so we don't re-check here)."
   [all-failures email-addr source since-date]
   (let [addr (str/lower-case email-addr)]
     (->> all-failures
-         (filter (fn [{:keys [from] src :source date :date}]
-                   (and (= addr from)
-                        (= source src)
+         (filter (fn [{:keys [from audience date] src :source}]
+                   (and (= source src)
                         (or (nil? since-date)
-                            (and date (.after ^java.util.Date date since-date)))))))))
+                            (and date (.after ^java.util.Date date since-date)))
+                        (case (or audience :author)
+                          :author      (= addr from)
+                          :maintainers true
+                          false)))))))
 
 (defn- report-subject-by-mid
   "Look up the report's email subject from its message-id."
@@ -138,19 +149,22 @@
   (nil? (:report/owned report)))
 
 (def ^:private reason-labels
-  {:unknown-target "unknown target"})
+  {:unknown-target     "unknown target"
+   :insufficient-scope "insufficient permissions"})
 
 (defn- format-failure-line
   "Format a single command failure as a text line.
   `subjects` is a pre-loaded {message-id -> subject} map."
   [subjects failure]
-  (let [date    (format-date (:cmd-failure/date failure))
-        reason  (get reason-labels (:cmd-failure/reason failure)
-                     (some-> (:cmd-failure/reason failure) name))
-        command (:cmd-failure/command failure)
-        mid     (:cmd-failure/report-mid failure)
+  (let [date    (format-date (:date failure))
+        reason  (get reason-labels (:reason failure)
+                     (some-> (:reason failure) name))
+        command (:command failure)
+        from    (:from failure)
+        mid     (:report-mid failure)
         subject (or (get subjects mid) mid)]
     (str "  [" date "] " command " — " reason "\n"
+         "    by: " from "\n"
          "    on: " subject)))
 
 (defn- format-report-line
@@ -247,14 +261,14 @@
                     unacked)
         fail-subjects (when (seq failures)
                        (->> failures
-                            (map :cmd-failure/report-mid)
+                            (map :report-mid)
                             distinct
                             (reduce (fn [m mid]
                                       (if-let [s (report-subject-by-mid db mid)]
                                         (assoc m mid s) m))
                                     {})))
         sec-fail   (when (seq failures)
-                     (str "== Failed commands (your emails, " source ") ==\n"
+                     (str "== Failed commands (" source ") ==\n"
                           (str/join "\n\n"
                                    (map #(format-failure-line fail-subjects %) failures))
                           "\n"))]

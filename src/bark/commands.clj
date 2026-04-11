@@ -10,8 +10,7 @@
             [datalevin.core :as d]
             [taoensso.timbre :as log]
             [bark.common :as common]
-            [bark.tracking :as tracking]
-            [bark.roles :as roles])
+            [bark.tracking :as tracking])
   (:import [java.time LocalDate ZoneOffset]
            [java.util Date]))
 
@@ -286,7 +285,7 @@
                                                                    {:action :set-superseded
                                                                     :target-message-id (str "<" mid ">")})
                                                :unset-superseded {:action :unset-superseded})]
-                                    (when base (assoc base :scope sc)))))))
+                                    (when base (assoc base :scope sc :id id)))))))
                           all-directives)))
             vec)))))
 
@@ -294,23 +293,36 @@
 ;; Command failure recording (file-based)
 ;; ---------------------------------------------------------------------------
 
-(def ^:private failures-file "public/.failures.edn")
+(def ^:dynamic *failures-file*
+  "Path to the failures EDN file. Bound to `public/.failures.edn` in
+  production; tests rebind it to a temp path so they don't pollute the
+  real file."
+  "public/.failures.edn")
+
 (def ^:private max-failure-age-ms (* 365 24 60 60 1000))
 
 (defn- load-failures []
-  (let [f (io/file failures-file)]
+  (let [f (io/file *failures-file*)]
     (if (.exists f)
       (try (edn/read-string (slurp f)) (catch Exception _ []))
       [])))
 
 (defn- save-failures! [failures]
-  (io/make-parents failures-file)
-  (spit failures-file (pr-str failures)))
+  (io/make-parents (io/file *failures-file*))
+  (spit *failures-file* (pr-str failures)))
 
 (defn record-failure!
   "Append a command failure to the failures file for later notification.
-  Prunes entries older than 1 year."
-  [{:keys [source from-addr email-date reason command report-mid]}]
+  Prunes entries older than 1 year.
+
+  `:audience` controls who the notifier will route the entry to:
+  - `:author`      — the address that sent the command (the default,
+                     used for typo-class failures like `Superseded-by:`
+                     with an unknown target).
+  - `:maintainers` — all maintainer subscribers on the source, so a
+                     permission denial is visible to the people who can
+                     act on it."
+  [{:keys [source from-addr email-date reason command report-mid audience]}]
   (let [now-ms   (System/currentTimeMillis)
         cutoff   (Date. (- now-ms max-failure-age-ms))
         existing (load-failures)
@@ -322,9 +334,11 @@
                   :date       (or email-date (Date.))
                   :reason     reason
                   :command    command
-                  :report-mid (or report-mid "")}]
+                  :report-mid (or report-mid "")
+                  :audience   (or audience :author)}]
     (save-failures! (conj pruned entry))
-    (log/info "Command failure:" reason command "from" from-addr)))
+    (log/info "Command failure:" reason command "from" from-addr
+              (str "(audience: " (name (:audience entry)) ")"))))
 
 (defn resolve-commands
   "Fold a seq of parsed directives into a summary map.
@@ -575,30 +589,67 @@
     (do (log/warn "Unknown command scope on directive:" scope)
         false)))
 
+(defn- describe-denied-directive
+  "Rebuild a short, human-readable form of a parsed directive for use
+  in failure records and logs.  Dates are formatted as ISO (yyyy-MM-dd)
+  so the failure record stays readable when rendered verbatim in a
+  notification email.  Falls back to the `:syntax` of the looked-up
+  command when the directive carries no parameter."
+  [{:keys [id action email-address date topic target-message-id]}]
+  (let [cmd    (get commands-by-id id)
+        syntax (or (:syntax cmd) (some-> id name))]
+    (case action
+      :set              (str syntax ": " email-address)
+      :set-deadline     (str syntax ": " (common/format-date-iso date))
+      :set-expiry       (str syntax ": " (common/format-date-iso date))
+      :set-topic        (str syntax ": " topic)
+      :set-superseded   (str syntax ": " target-message-id)
+      syntax)))
+
 (defn- filter-permitted-directives
   "Return the subset of `directives` whose scope permits `from-addr` to
   act, optionally further filtered by `action-pred`. `current-d` is
   the delay passed through to `scope-permits?` — only forced when at
-  least one directive has scope `:setter-or-maintainer`."
+  least one directive has scope `:setter-or-maintainer`.
+
+  When `failure-ctx` is non-nil, directives that are rejected by the
+  scope check (but pass `action-pred`) are written to the failures
+  file as `:insufficient-scope`, audience `:maintainers`, so they
+  surface in the next notification round."
   ([directives current-d from-addr is-maintainer?]
-   (filter-permitted-directives directives current-d from-addr is-maintainer? (constantly true)))
+   (filter-permitted-directives directives current-d from-addr is-maintainer?
+                                 (constantly true) nil))
   ([directives current-d from-addr is-maintainer? action-pred]
-   (filter (fn [{:keys [scope attr action]}]
-             (and (action-pred action)
-                  (scope-permits? scope attr from-addr is-maintainer? current-d)))
-           directives)))
+   (filter-permitted-directives directives current-d from-addr is-maintainer?
+                                 action-pred nil))
+  ([directives current-d from-addr is-maintainer? action-pred failure-ctx]
+   ;; Eager realization via `filterv` so the recording side effect in
+   ;; the denial branch fires deterministically, regardless of whether
+   ;; callers seq or reduce over the result.
+   (filterv (fn [{:keys [scope attr action] :as directive}]
+              (and (action-pred action)
+                   (or (scope-permits? scope attr from-addr is-maintainer? current-d)
+                       (do (when failure-ctx
+                             (record-failure!
+                              (assoc failure-ctx
+                                     :reason    :insufficient-scope
+                                     :audience  :maintainers
+                                     :command   (describe-denied-directive directive))))
+                           false))))
+            directives)))
 
 (defn apply-directives! [conn report-eid directives email-eid from-addr is-maintainer?
                          failure-ctx]
   (let [db         (d/db conn)
         current-d  (delay (d/pull db directive-pull-pattern report-eid))
-        permitted  (filter-permitted-directives directives current-d from-addr is-maintainer?)]
+        permitted  (filter-permitted-directives directives current-d from-addr
+                                                 is-maintainer? (constantly true)
+                                                 failure-ctx)]
     (when (seq permitted)
       ;; `current` is definitely needed from here on (for close-reason
       ;; lookups, directive tx building, and logging).
       (let [current    @current-d
             resolved   (resolve-commands permitted)
-            report-mid (:report/message-id (d/entity db report-eid))
             superseded-by (:superseded-by resolved)
             target-eid (when superseded-by
                          (d/entid db [:report/message-id superseded-by]))
@@ -615,8 +666,8 @@
           (when failure-ctx
             (record-failure! (assoc failure-ctx
                                     :reason :unknown-target
-                                    :command (str "Superseded-by: " superseded-by)
-                                    :report-mid report-mid))))))))
+                                    :audience :author
+                                    :command (str "Superseded-by: " superseded-by)))))))))
 
 (def ^:private unclosed-pull-pattern
   ;; `:report/superseded-by` is pulled as {:db/id :email/from-address}
@@ -629,11 +680,11 @@
 
 (defn- try-unclosed!
   "If a closed report has a Not closed or Not superseded directive, retract the closure."
-  [conn report-eid directives is-maintainer? from-addr]
+  [conn report-eid directives is-maintainer? from-addr failure-ctx]
   (let [current-d (delay (d/pull (d/db conn) unclosed-pull-pattern report-eid))
         permitted (filter-permitted-directives
                    directives current-d from-addr is-maintainer?
-                   #{:unset :unset-superseded})
+                   #{:unset :unset-superseded} failure-ctx)
         {:keys [unset unsuperseded?]} (resolve-commands permitted)]
     (when (or (contains? unset :report/closed) unsuperseded?)
       ;; From here on `current` is always needed.
@@ -690,14 +741,36 @@
     (do (log/warn "Unknown command scope on trigger:" scope)
         false)))
 
-(defn- filter-triggers-by-scope [trig-result overrides is-maintainer?]
+(defn- describe-denied-trigger
+  "Short, human-readable form of a trigger refused by scope — always
+  the canonical English command word (\"Closed.\", \"Acked.\", …)
+  derived from the command id.  Source-level word overrides aren't
+  reflected: the goal is a stable label in failure logs, not a
+  round-trip of the user's exact input."
+  [attr]
+  (some-> (attr->trigger-cmd attr) :id name str/capitalize (str ".")))
+
+(defn- filter-triggers-by-scope
+  "Filter `trig-result` to the subset allowed by the effective scope
+  for each trigger.  When `failure-ctx` is non-nil, triggers that fail
+  the scope check are recorded as `:insufficient-scope` failures with
+  `:audience :maintainers`, so denied attempts surface to maintainer
+  subscribers via the notification loop."
+  [trig-result overrides is-maintainer? failure-ctx]
   (when trig-result
     (let [filtered (into {}
                          (keep (fn [[attr :as entry]]
                                  (let [cmd   (attr->trigger-cmd attr)
                                        scope (or (:scope (get overrides (:id cmd))) (:scope cmd))]
-                                   (when (trigger-scope-permits? scope is-maintainer?)
-                                     entry))))
+                                   (if (trigger-scope-permits? scope is-maintainer?)
+                                     entry
+                                     (do (when failure-ctx
+                                           (record-failure!
+                                            (assoc failure-ctx
+                                                   :reason   :insufficient-scope
+                                                   :audience :maintainers
+                                                   :command  (describe-denied-trigger attr))))
+                                         nil)))))
                          (dissoc trig-result :report/close-reason))]
       (when (seq filtered)
         (cond-> filtered
@@ -713,25 +786,26 @@
     (let [db          (d/db conn)
           from-addr   (:email/from-address email)
           eid         (:db/id email)
+          report-mid  (:report/message-id (d/entity db report-eid))
           src-name    (d/q '[:find ?src . :in $ ?rid
                              :where [?rid :report/email ?e] [?e :email/source ?src]] db report-eid)
           source-cfg  (get source-map src-name)
           src-cmds    (build-source-commands source-cfg)
           overrides   (:overrides src-cmds)
-          is-maint?   (roles/maintainer? roles from-addr (:email/date-sent email))
-          trig-result (-> (detect-triggers report-type body-text src-cmds)
-                          (filter-triggers-by-scope overrides is-maint?))
-          aliases     (compile-directive-aliases (:command-aliases source-cfg))
-          directives  (detect-directives report-type body-text overrides (:email/date-sent email) aliases)
-          closed?     (some? (:report/closed (d/pull db [:report/closed] report-eid)))
+          is-maint?   (common/maintainer? roles from-addr (:email/date-sent email))
           fail-ctx    (when (and from-addr src-name)
                         {:source     src-name
                          :from-addr  from-addr
                          :email-date (:email/date-sent email)
-                         :email-mid  (:email/message-id email)})]
+                         :report-mid report-mid})
+          trig-result (-> (detect-triggers report-type body-text src-cmds)
+                          (filter-triggers-by-scope overrides is-maint? fail-ctx))
+          aliases     (compile-directive-aliases (:command-aliases source-cfg))
+          directives  (detect-directives report-type body-text overrides (:email/date-sent email) aliases)
+          closed?     (some? (:report/closed (d/pull db [:report/closed] report-eid)))]
 
       (if closed?
-        (do (try-unclosed! conn report-eid directives is-maint? from-addr)
+        (do (try-unclosed! conn report-eid directives is-maint? from-addr fail-ctx)
             (boolean (seq directives)))
         (let [voted? (when (and (= :request report-type) from-addr)
                        (apply-vote! conn report-eid from-addr body-text email delivery source-cfg)

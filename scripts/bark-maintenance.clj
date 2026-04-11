@@ -128,7 +128,8 @@
 ;; ---------------------------------------------------------------------------
 
 (def ^:private reason-labels
-  {:unknown-target "unknown target"})
+  {:unknown-target     "unknown target"
+   :insufficient-scope "insufficient permissions"})
 
 (defn- show-failures
   "Display command failures from the failures file, optionally filtered by source."

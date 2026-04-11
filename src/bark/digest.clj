@@ -363,7 +363,27 @@
       (when via-channel?
         (roles/apply-role-controls! conn rroles source-name from-addr
                                     body-text (:email/date-sent email)))
-      (roles/apply-notify-controls! conn rroles source-name from-addr body-text))))
+      (roles/apply-notify-controls! conn rroles source-name from-addr body-text
+                                    (:email/date-sent email)))))
+
+(defn- record-creation-denial!
+  "Write a failure record for a report-creation attempt that was
+  denied.  The report doesn't exist yet, so `:report-mid` is the
+  empty string — the notification renders the subject instead of a
+  report link.  Audience is `:maintainers` so the lead sees the
+  attempt."
+  [source-name from-addr email report-info reason]
+  (when (and from-addr source-name)
+    (commands/record-failure!
+     {:source     source-name
+      :from-addr  from-addr
+      :email-date (:email/date-sent email)
+      :report-mid ""
+      :reason     :insufficient-scope
+      :audience   :maintainers
+      :command    (str "Create " (name (:type report-info))
+                       " — " (name reason)
+                       " (subject: " (:email/subject email) ")")})))
 
 (defn- maybe-create-report!
   "Detect report type, check permissions, create if allowed.
@@ -387,11 +407,13 @@
       :denied-channel
       (do (log/warn "Denied:" from-addr "cannot create" (name (:type report-info))
                     "(not via source channel)")
+          (record-creation-denial! source-name from-addr email report-info :denied-channel)
           [nil report-info])
 
       :denied-role
       (do (log/warn "Denied:" from-addr "cannot create" (name (:type report-info))
                     "(not maintainer)")
+          (record-creation-denial! source-name from-addr email report-info :denied-role)
           [nil report-info])
 
       ;; nil — no report detected

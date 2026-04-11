@@ -4,10 +4,13 @@
     1. any active maintainer can Add maintainers
     2. only the lead maintainer can Remove maintainers
     3. the lead cannot remove themselves"
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [datalevin.core :as d]
             [bark.common :as common]
-            [bark.roles :as roles]))
+            [bark.roles :as roles]
+            [bark.test-helpers :as th]))
+
+(use-fixtures :once th/with-temp-failures-file)
 
 (defn- fresh-conn []
   (let [path (str "/tmp/bark-roles-test-" (System/nanoTime))]
