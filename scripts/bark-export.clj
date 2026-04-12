@@ -307,17 +307,17 @@
                            (:email/attachments @att-email)))))))
 
 ;; ---------------------------------------------------------------------------
-;; Export context — set once at the start of each export run via
-;; init-export-context!.  Used by map-reports, dump-events!, dump-text!,
-;; and collect-vevents to access the DB and votes without threading
-;; parameters through every dump-* function.
+;; Export context — bound once per export run via with-export-context.
+;; Used by map-reports, dump-events!, dump-text!, and collect-vevents
+;; to access the DB and votes without threading parameters through
+;; every dump-* function.
 ;; ---------------------------------------------------------------------------
 
 (def ^:private export-ctx
   "Export context: {:db <datalevin-db> :votes {eid -> [vote-maps]} :config <config>}"
   (atom {:db nil :votes {} :config nil}))
 
-(defn- init-export-context! [db votes config]
+(defn- set-export-context! [db votes config]
   (reset! export-ctx {:db db :votes votes :config config}))
 
 (defn- ctx-db [] (:db @export-ctx))
@@ -1262,18 +1262,15 @@
                 (if (and (not= format "root") (seq export-names))
                   (let [maintainers-map (if config (build-maintainers db source-map) {})
                         all-reps        (all-reports-by-date db)
-                        _               (init-export-context!
-                                          db
-                                          (votes-by-report
-                                           (d/q '[:find ?r ?val ?voter ?emid
-                                                  :where
-                                                  [?v :vote/report ?r]
-                                                  [?v :vote/value  ?val]
-                                                  [?v :vote/voter  ?voter]
-                                                  [?v :vote/email  ?e]
-                                                  [?e :email/message-id ?emid]]
-                                                db))
-                                          config)
+                        votes           (votes-by-report
+                                          (d/q '[:find ?r ?val ?voter ?emid
+                                                 :where
+                                                 [?v :vote/report ?r]
+                                                 [?v :vote/value  ?val]
+                                                 [?v :vote/voter  ?voter]
+                                                 [?v :vote/email  ?e]
+                                                 [?e :email/message-id ?emid]]
+                                               db))
                         effective-ps    (or page-size (:page-size config))
                         cli-tf          (resolve-topics-filter topics-filter)
                         drop-cutoff     (resolve-closed-retention-date
@@ -1290,6 +1287,7 @@
                                           (cond-> (vec (remove drop (rest *command-line-args*)))
                                             effective-theme (into ["--theme" effective-theme])
                                             effective-ps    (into ["--page-size" (str effective-ps)])))]
+                    (set-export-context! db votes config)
                     (reduce (fn [exported? src-name]
                               (let [reports  (filter-reports all-reps {:source       src-name
                                                                        :min-priority min-priority

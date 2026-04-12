@@ -24,18 +24,6 @@
 ;; Tenure queries
 ;; ---------------------------------------------------------------------------
 
-(defn- pull-tenure [db eid]
-  (let [m (d/pull db '[:maint-tenure/email
-                       :maint-tenure/from
-                       :maint-tenure/to
-                       :maint-tenure/order
-                       :db/id] eid)]
-    {:eid   (:db/id m)
-     :email (:maint-tenure/email m)
-     :from  (:maint-tenure/from m)
-     :to    (:maint-tenure/to m)
-     :order (:maint-tenure/order m)}))
-
 (defn get-tenures
   "Return the seq of all tenure maps (active and closed) for `source-name`."
   [db source-name]
@@ -43,7 +31,7 @@
                     :in $ ?src
                     :where [?e :maint-tenure/source ?src]]
                   db source-name)]
-    (mapv #(pull-tenure db %) eids)))
+    (mapv #(common/tenure-map (d/pull db common/tenure-pull-pattern %)) eids)))
 
 (defn- active-tenure-eid
   "Return the :db/id of the currently-active tenure for (source, email), or nil."

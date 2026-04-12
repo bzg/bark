@@ -567,6 +567,20 @@
                     {:email/attachments [:attachment/filename :attachment/content-type
                                          :attachment/size :attachment/data]}]}])
 
+;; Pull pattern for maintainer tenures. Shared between JVM (roles.clj) and
+;; bb (bark-common.clj) so both sides consume the same attribute list.
+(def tenure-pull-pattern
+  '[:db/id :maint-tenure/email :maint-tenure/from :maint-tenure/to :maint-tenure/order])
+
+(defn tenure-map
+  "Convert a raw Datalevin pull result into a tenure map."
+  [m]
+  {:eid   (:db/id m)
+   :email (:maint-tenure/email m)
+   :from  (:maint-tenure/from m)
+   :to    (:maint-tenure/to m)
+   :order (:maint-tenure/order m)})
+
 ;; ---------------------------------------------------------------------------
 ;; Vote helpers (pure — no datalevin dependency)
 ;; ---------------------------------------------------------------------------
