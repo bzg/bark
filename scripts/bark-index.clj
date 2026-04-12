@@ -40,7 +40,7 @@
 ;; CSS (inlined)
 ;; ---------------------------------------------------------------------------
 
-(def page-css (str "
+(def page-css (str noscript-css "
   main.container { max-width: 1800px; padding-left: max(1rem, env(safe-area-inset-left)); padding-right: max(1rem, env(safe-area-inset-right)); }
   mark[data-type=bug]          { --pico-mark-background-color: var(--bark-mark-bug-bg, #c0392b1a); --pico-mark-color: var(--bark-mark-bug, #c0392b); }
   mark[data-type=announcement] { --pico-mark-background-color: var(--bark-mark-ann-bg, #1a7a8a1a); --pico-mark-color: var(--bark-mark-ann, #1a7a8a); }
@@ -187,6 +187,7 @@
        [:body
         [:main.container
          (nav-bar "BARK — Reports" "reports")
+         (noscript-banner)
          [:p {:style "font-size:0.78rem;color:var(--pico-muted-color);margin-bottom:1rem"}
           (str "Generated " generated-at)]
          [:div.toolbar
