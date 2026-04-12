@@ -175,6 +175,51 @@
     [:li (theme-toggle-btn)]]])
 
 ;; ---------------------------------------------------------------------------
+;; Shared <noscript> banner (hiccup vector)
+;; ---------------------------------------------------------------------------
+
+(def noscript-css
+  (str ".noscript-banner { background:var(--pico-del-color,#e53935); color:#fff;"
+       " padding:1.5rem; border-radius:0.5rem; margin-bottom:1.5rem; }"
+       ".noscript-banner a { color:#fff; text-decoration:underline; }"
+       ".noscript-banner table { color:#fff; margin-top:1rem; font-size:0.85rem; }"
+       ".noscript-banner th, .noscript-banner td { padding:0.25rem 0.75rem;"
+       " border-color:rgba(255,255,255,0.3); }"))
+
+(defn noscript-banner
+  "Render a <noscript> block listing alternative tools and data files."
+  []
+  [:noscript
+   [:div.noscript-banner
+    [:p [:strong "This page requires JavaScript to display reports."]
+     " You can browse BARK data with these tools instead:"]
+    [:ul
+     [:li [:a {:href "https://codeberg.org/bzg/bone"} "bone"] " — CLI based on fzf"]
+     [:li [:a {:href "https://codeberg.org/bzg/gnus-bone"} "gnus-bone"] " — GNU Emacs Gnus interface"]
+     [:li [:a {:href "https://codeberg.org/bzg/notmuch-bone"} "notmuch-bone"] " — GNU Emacs notmuch interface"]]
+    [:p "You can also access the data files directly:"]
+    [:table
+     [:thead [:tr [:th "File"] [:th "Description"]]]
+     [:tbody
+      [:tr [:td "reports/all.json"] [:td "All reports (JSON)"]]
+      [:tr [:td "reports/all.xml"] [:td "All reports (RSS)"]]
+      [:tr [:td "reports/all.org"] [:td "All reports (Org)"]]
+      [:tr [:td "reports/bugs.json"] [:td "Bugs (JSON)"]]
+      [:tr [:td "reports/patches.json"] [:td "Patches (JSON)"]]
+      [:tr [:td "reports/requests.json"] [:td "Requests (JSON)"]]
+      [:tr [:td "reports/announcements.json"] [:td "Announcements (JSON)"]]
+      [:tr [:td "reports/releases.json"] [:td "Releases (JSON)"]]
+      [:tr [:td "reports/changes.json"] [:td "Changes (JSON)"]]
+      [:tr [:td "reports/meta.json"] [:td "Source metadata"]]
+      [:tr [:td "stats.json"] [:td "Statistics"]]
+      [:tr [:td "events/announcements.ics"] [:td "Calendar (iCal)"]]]]]])
+
+(defn noscript-banner-html
+  "Render the noscript banner as a raw HTML string (for non-hiccup pages)."
+  []
+  (str (h/html (noscript-banner))))
+
+;; ---------------------------------------------------------------------------
 ;; Shared footer (hiccup vector)
 ;; ---------------------------------------------------------------------------
 

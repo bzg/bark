@@ -592,7 +592,8 @@
      "<html lang=\"en\" data-theme=\"light\">\n"
      (html-head {:title      "BARK — Data"
                  :css        stats-css
-                 :extra-head vega-scripts})
+                 :extra-head (str "<noscript><style>.grid{display:none}</style></noscript>\n"
+                                  vega-scripts)})
      "<body>\n"
      "<main class=\"container\">\n"
      nav-html "\n"
