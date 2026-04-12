@@ -15,7 +15,8 @@
                             active-tenures lead-maintainer lead-maintainer?
                             maintainer? load-config build-source-map
                             report-priority report-status report-descendant-count
-                            report-pull-pattern attachment-pull-pattern parse-cli-args
+                            report-pull-pattern attachment-pull-pattern
+                            tenure-pull-pattern tenure-map parse-cli-args
                             votes-by-report vote-counts
                             ics-file? text-attachment?])
 
@@ -66,18 +67,7 @@
                    :in $ ?src
                    :where [?e :maint-tenure/source ?src]]
                  db source-name)]
-    (mapv (fn [eid]
-            (let [m (dpull db '[:db/id
-                                :maint-tenure/email
-                                :maint-tenure/from
-                                :maint-tenure/to
-                                :maint-tenure/order] eid)]
-              {:eid   (:db/id m)
-               :email (:maint-tenure/email m)
-               :from  (:maint-tenure/from m)
-               :to    (:maint-tenure/to m)
-               :order (:maint-tenure/order m)}))
-          eids)))
+    (mapv #(tenure-map (dpull db tenure-pull-pattern %)) eids)))
 
 (defn- ^java.text.SimpleDateFormat iso-date-fmt []
   (doto (java.text.SimpleDateFormat. "yyyy-MM-dd")
