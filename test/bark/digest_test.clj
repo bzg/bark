@@ -573,6 +573,9 @@
                  (commands/detect-directives :bug "Acked-by: a@b.com\nDeadline: 2026-07-01\nTopic: urgent-fix\n")))
           (is (= [{:action :set :attr :report/owned :email-address "x@y.com" :scope :maintainer :id :owned-by}]
                  (commands/detect-directives :bug "Thanks for the report.\nOwned-by: x@y.com\nWill look into it.\n")))
+          ;; RFC 5322 "Display Name <addr>" format
+          (is (= [{:action :set :attr :report/owned :email-address "x@y.com" :scope :maintainer :id :owned-by}]
+                 (commands/detect-directives :bug "Owned-by: Some User <x@y.com>\n")))
           (is (= [] (commands/detect-directives :bug "Just a normal reply.\n")))
           (is (nil? (commands/detect-directives :bug nil)))
           ;; Expiry directive

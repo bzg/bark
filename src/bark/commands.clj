@@ -152,7 +152,7 @@
   (let [qs (java.util.regex.Pattern/quote syntax)]
     (re-pattern
      (case param
-       :email-address (str "^" qs ":\\s+(\\S+@\\S+)" trailing-punct "?\\s*$")
+       :email-address (str "^" qs ":\\s+(?:.+<(\\S+@\\S+)>|(\\S+@\\S+))" trailing-punct "?\\s*$")
        :date          (str "^" qs ":\\s+(\\d{4}-\\d{2}-\\d{2})" trailing-punct "?\\s*$")
        :date-or-duration (str "^" qs ":\\s+(\\d{4}-\\d{2}-\\d{2}|\\d+[dwmy](?:\\s+\\d+[dwmy])*)" trailing-punct "?\\s*$")
        :word          (str "^" qs ":\\s+([a-zA-Z0-9_-]+)" trailing-punct "?\\s*$")
@@ -269,7 +269,7 @@
                               (when (or (nil? rt) (contains? rt report-type))
                                 (when-let [m (re-matches pattern line)]
                                   (let [base (case action
-                                               :set            (when-let [addr (nth m 1 nil)]
+                                               :set            (when-let [addr (or (nth m 1 nil) (nth m 2 nil))]
                                                                  {:action :set :attr attr :email-address addr})
                                                :unset          {:action :unset :attr attr}
                                                :set-deadline   (when-let [d (parse-date-or-duration (nth m 1) email-date)]
