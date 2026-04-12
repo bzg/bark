@@ -213,9 +213,6 @@ Use =[ANN event]= to set the topic to "event" for easier filtering,
 but any announcement with ICS content is included regardless of topic.
 
 ** Undoing updates
-:PROPERTIES:
-:CUSTOM_ID: undoing-updates
-:END:
 
 Maintainers can "undo" any update on a report, regardless of who made
 it:
@@ -272,9 +269,6 @@ To remove a per-report expiry:
 : No expiry.
 
 ** Superseding a report
-:PROPERTIES:
-:CUSTOM_ID: superseding-a-report-1
-:END:
 
 When a report is made obsolete by another (e.g. a patch resubmitted
 without version numbers, or a bug report that duplicates a broader
@@ -314,12 +308,12 @@ explicit version numbers.
 For example, in this thread:
 
 #+begin_example
-[PATCH] A new feature        ← patch report (1)
-  Re: [PATCH] A new feature  ← patch report (2), supersedes (1)
-    Re: [PATCH] A new feature  ← patch report (3), supersedes (2)
+[PATCH] A new feature          : patch report (1)
+  Re: [PATCH] A new feature    : patch report (2), supersedes (1)
+    Re: [PATCH] A new feature  : patch report (3), supersedes (2)
 #+end_example
 
-Only the most recent patch (3) remains open.  The same applies to
+Only the most recent patch (3) remains open. The same applies to
 emails containing an inline diff without a =[PATCH]= tag.
 
 Note: patches with explicit version numbers (=[PATCH v2]=) are handled
@@ -368,9 +362,6 @@ state.  Notification preferences are personal and can be sent
 privately.
 
 * Report types
-  :PROPERTIES:
-  :CUSTOM_ID: report-types
-  :END:
 
 Reports are detected from email subject labels:
 
@@ -404,9 +395,6 @@ one. This allows version superseding: sending =[PATCH parser v2 0/3]=
 closes the earlier =v1= series for that topic.
 
 ** Customising subject labels
-   :PROPERTIES:
-   :CUSTOM_ID: customising-subject-labels
-   :END:
 
 The subject labels in the table above are the built-in defaults. You
 can override them globally or per source in =config.edn= via =:labels=.
@@ -432,9 +420,9 @@ turn take precedence over the built-in defaults.
 
 State changes are detected by command keywords within the body of a
 response down the thread, at the beginning of the line, followed by
-punctuation (=.= =,= =;= =:= =?= =!=), whitespace, or end of line.
-Exception: =Urgent= and =Important= only accept punctuation or end of
-line (see [[#priority-commands][priority commands]]).
+punctuation (=.= =,= =;= =:= =?= =!=), whitespace, or end of line. Exception:
+=Urgent= and =Important= only accept punctuation or end of line (see
+[[#priority-commands][priority commands]]).
 
 ** Status commands
 
@@ -465,9 +453,6 @@ urgent, and important states. Announcements, releases, and changes can
 only be closed.
 
 ** Priority commands
-  :PROPERTIES:
-  :CUSTOM_ID: priority-commands
-  :END:
 
 | Command keyword | Effect on report  |
 |-----------------+-------------------|
@@ -500,9 +485,6 @@ You can use multiple keywords in the same email, one per line.
 : Important.
 
 ** Customising commands
-   :PROPERTIES:
-   :CUSTOM_ID: customising-commands
-   :END:
 
 You can customize command keywords globally or per source.
 
@@ -550,10 +532,6 @@ Per-source settings take precedence over the global =:commands=, which
 in turn take precedence over the built-in defaults.
 
 ** All commands
-   :PROPERTIES:
-   :CUSTOM_ID: all-commands
-   :END:
-
 
 /Commands/ can all be sent publicly, by users or maintainers.  In the
 "Permission" column, "setter or maintainer" means the user who
@@ -776,9 +754,6 @@ Like role controls, =Notify:= controls are only processed from direct
 emails, not from the mailing list.
 
 * Config
-  :PROPERTIES:
-  :CUSTOM_ID: config
-  :END:
 
 BARK is configured via a =config.edn= file. Use =bb test-config= to
 validate it.
@@ -846,9 +821,6 @@ effect on all emails.  Note: the admin is NOT automatically a
 maintainer.
 
 ** Report expiry
-   :PROPERTIES:
-   :CUSTOM_ID: report-expiry
-   :END:
 
 Any report type can be automatically closed when its age and state
 match configured rules.  The close reason is set to "expired".
