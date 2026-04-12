@@ -87,6 +87,44 @@
   (spit last-export-file (str (.getTime ts))))
 
 ;; ---------------------------------------------------------------------------
+;; Atomic export via staging directory
+;; ---------------------------------------------------------------------------
+
+(defn- delete-dir!
+  "Recursively delete a directory and its contents."
+  [^java.io.File dir]
+  (when (.exists dir)
+    (doseq [f (reverse (file-seq dir))]
+      (.delete ^java.io.File f))))
+
+(defn- move-dir!
+  "Move `src` to `dst` using Files/move. Tries ATOMIC_MOVE first,
+  falls back to a plain move if the filesystem does not support it."
+  [^java.io.File src ^java.io.File dst]
+  (try
+    (java.nio.file.Files/move (.toPath src) (.toPath dst)
+                              (into-array java.nio.file.CopyOption
+                                          [java.nio.file.StandardCopyOption/ATOMIC_MOVE]))
+    (catch java.util.concurrent.atomic.AtomicMoveNotSupportedException _
+      (java.nio.file.Files/move (.toPath src) (.toPath dst)
+                                (into-array java.nio.file.CopyOption
+                                            [java.nio.file.StandardCopyOption/REPLACE_EXISTING])))))
+
+(defn- atomic-swap-dir!
+  "Replace `target-dir` with `staging-dir`.
+  Moves the old target to a temp name, moves staging into place,
+  then deletes the old directory."
+  [staging-dir target-dir]
+  (let [target  (io/file target-dir)
+        staging (io/file staging-dir)
+        old     (io/file (str target-dir ".old-" (System/currentTimeMillis)))]
+    (when (.exists target)
+      (move-dir! target old))
+    (move-dir! staging target)
+    (when (.exists old)
+      (delete-dir! old))))
+
+;; ---------------------------------------------------------------------------
 ;; --closed-retention: resolve a date or duration to a cutoff java.util.Date.
 ;; Reports closed before that date are excluded from export.
 ;; ---------------------------------------------------------------------------
@@ -1299,7 +1337,9 @@
                                     _        (when src-tf
                                                (log/info (str "[" src-name "]") "topics filter:" (str/join ", " src-tf)))
                                     reports  (filter-by-topics reports src-tf)
-                                    base-dir (str "public/" (slugify src-name))
+                                    slug     (slugify src-name)
+                                    staging  (str "public/.staging-" slug)
+                                    final-dir (str "public/" slug)
                                     src-changed (when (seq changed-st) (get changed-st src-name))]
                                 (if (empty? reports)
                                   (do (log/info "No reports for source" (str "'" src-name "'") ", skipping.")
@@ -1307,9 +1347,16 @@
                                   (do (log/info (str "[" src-name "] " (count reports) " report(s)"
                                                      " (" (count (open-reports reports)) " open)"
                                                      (if incremental? " (incremental)" "")))
-                                      (export-source! format reports base-dir src-name
-                                                      source-map maintainers-map cli-extra
-                                                      :changed-types src-changed)
+                                      (try
+                                        (delete-dir! (io/file staging))
+                                        (export-source! format reports staging src-name
+                                                        source-map maintainers-map cli-extra
+                                                        :changed-types src-changed)
+                                        (atomic-swap-dir! staging final-dir)
+                                        (catch Exception e
+                                          (log/error e "Export failed for" src-name "— cleaning up staging dir")
+                                          (delete-dir! (io/file staging))
+                                          (throw e)))
                                       true))))
                             false export-names))
                   false)]
