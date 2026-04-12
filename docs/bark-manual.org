@@ -336,6 +336,10 @@ Maintainers can also write directly to the BARK inbox to act as
 : Urgent-by: a-user@example.com
 : Important-by: a-user@example.com
 
+The RFC 5322 =Display Name <addr>= format is also accepted:
+
+: Owned-by: A User <a-user@example.com>
+
 ** Managing roles and permissions
 
 Here is how the permissions work:
@@ -349,6 +353,12 @@ Roles and permissions are set by writing to the BARK inbox:
 #+begin_example
 Add maintainer: dev@example.com        (any maintainer)
 Remove maintainer: dev@example.com     (lead maintainer only)
+#+end_example
+
+The RFC 5322 =Display Name <addr>= format is also accepted:
+
+#+begin_example
+Add maintainer: Dev User <dev@example.com>
 #+end_example
 
 All state-changing actions (commands, role controls) must be sent
