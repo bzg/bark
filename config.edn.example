@@ -1,12 +1,21 @@
 { ;; ---- Connection --------------------------------------------------------
 
- ;; Connection to the monitored mailbox
- :imap {:host     "imap.example.com"
-        :port     993
-        :ssl      true
-        :user     "imap-login@example.com"
-        :password "secret"
-        :folder   "INBOX"}
+ ;; Mail source — IMAP or Maildir.
+ ;; :type is required (:imap or :maildir).
+ ;; :folder is the logical folder name (default: "INBOX").
+ ;;
+ ;; IMAP example:
+ :mailbox {:type     :imap
+           :host     "imap.example.com"
+           :port     993
+           :ssl      true
+           :user     "imap-login@example.com"
+           :password "secret"
+           :folder   "INBOX"}
+ ;; Maildir example:
+ ;; :mailbox {:type   :maildir
+ ;;           :path   "/home/me/Mail"
+ ;;           :folder "INBOX"}
 
  ;; Datalevin database path
  :db {:path "data/bark-db"}

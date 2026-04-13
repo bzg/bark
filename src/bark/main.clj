@@ -3,10 +3,10 @@
 ;; License-Filename: LICENSES/EPL-2.0.txt
 
 (ns bark.main
-  "Entry point for BARK. Connects to a single IMAP mailbox,
+  "Entry point for BARK. Connects to a mail source (IMAP or Maildir),
   fetches new emails since the last run, and stores+processes them
   atomically. Default mode is single-pass (batch); use --watch for
-  persistent IMAP IDLE."
+  persistent watching (IMAP IDLE or filesystem events)."
   (:require [bark.ingest :as ingest]
             [bark.logging :as blog]
             [bark.common :as common]
@@ -14,9 +14,7 @@
             [bark.expire :as expire]
             [bark.roles :as roles]
             [datalevin.core :as d]
-            [fetch-imap.core :as imap]
-            [fetch-imap.fetch :as fetch]
-            [fetch-imap.idle :as idle]
+            [mailseq :as mailseq]
             [clojure.string :as str]
             [postal.core :as postal]
             [taoensso.timbre :as log])
@@ -101,9 +99,9 @@
             (if (contains? safe-uids uid) uid (reduced acc)))
           nil all-uids))
 
-(defn- advance-watermark! [db-conn msgs safe-uids]
+(defn- advance-watermark! [db-conn msgs safe-ids]
   (let [all-uids (->> msgs (keep :uid) sort)]
-    (if-let [new-wm (max-contiguous-safe-uid all-uids safe-uids)]
+    (if-let [new-wm (max-contiguous-safe-uid all-uids safe-ids)]
       (do (when (not= new-wm (some->> all-uids last))
             (log/warn "Watermark stopped at UID" new-wm
                       "(some messages failed — will retry on next reconnect)"))
@@ -140,9 +138,10 @@
   between store and digest), re-runs process-email! which is idempotent.
   Already-digested emails are skipped to avoid redundant work."
   [db-conn source-map sources msg {:keys [max-size max-attachment-size]}]
-  (let [size (:size msg -1)]
+  (let [size (:size msg -1)
+        id   (:id msg)]
     (if (and max-size (pos? size) (> size max-size))
-      (do (log/warn "Skipping oversized email UID:" (:uid msg)
+      (do (log/warn "Skipping oversized email id:" id
                     "size:" size (str "bytes (max: " max-size ")"))
           :skip)
       (if-let [src-name (digest/pre-classify-source (d/db db-conn) source-map sources msg)]
@@ -150,7 +149,7 @@
               store-opts (cond-> {}
                            max-attachment-size (assoc :max-attachment-size max-attachment-size))]
           (if (nil? mid)
-            (do (log/warn "No Message-ID for UID:" (:uid msg) "— skipping")
+            (do (log/warn "No Message-ID for id:" id "— skipping")
                 :skip)
             (let [lookup [:email/message-id mid]]
               (if (ingest/store-email! db-conn msg store-opts)
@@ -158,11 +157,11 @@
                 (do (d/transact! db-conn [{:db/id lookup :email/source src-name}])
                     (try-digest! db-conn source-map sources
                                  (d/pull (d/db db-conn) digest/email-pull-pattern lookup) mid))
-                ;; Already stored (duplicate message-id or UID collision).
+                ;; Already stored (duplicate message-id or id collision).
                 (let [email (d/pull (d/db db-conn) digest/email-pull-pattern lookup)]
                   (cond
-                    ;; Lookup miss → UID collision (different message-id already
-                    ;; occupies this UID).  Original was fully handled — safe.
+                    ;; Lookup miss → id collision (different message-id already
+                    ;; occupies this id).  Original was fully handled — safe.
                     (not (:db/id email)) :ok
                     ;; Already fully digested — nothing to do.
                     (:email/digested-at email)
@@ -173,7 +172,7 @@
                         (when-not (:email/source email)
                           (d/transact! db-conn [{:db/id lookup :email/source src-name}]))
                         (try-digest! db-conn source-map sources email mid))))))))
-        (do (log/debug "No matching source for UID:" (:uid msg) "— not stored")
+        (do (log/debug "No matching source for id:" id "— not stored")
             :skip)))))
 
 ;; ---------------------------------------------------------------------------
@@ -183,7 +182,7 @@
 (defn catch-up-fetch!
   "Fetch messages missed while the process was down.
   Each message is stored and processed atomically."
-  [imap-conn db-conn folder fetch-opts source-map sources ingest-opts]
+  [src db-conn folder fetch-opts source-map sources ingest-opts]
   (when-not (shutting-down?)
     (let [watermark (ingest/max-imap-uid db-conn)
           msgs (if (zero? watermark)
@@ -191,35 +190,49 @@
                    (if since
                      (log/info "First run — fetching messages since" since)
                      (log/info "First run — fetching last" limit "messages"))
-                   (fetch/messages imap-conn folder
-                                  (merge {:attachments? true} fetch-opts)))
-                 (do (log/info "Resuming — fetching UIDs >" watermark)
-                     (fetch/by-uid-range imap-conn folder
-                                         (inc watermark) Long/MAX_VALUE)))]
-      (log/info "Fetched" (count msgs) "messages from IMAP")
+                   (mailseq/messages src folder
+                                    (merge {:attachments? true} fetch-opts)))
+                 (do (log/info "Resuming — fetching ids >" watermark)
+                     (mailseq/by-id-range src folder
+                                          (str (inc watermark)) nil)))]
+      (log/info "Fetched" (count msgs) "messages")
       (when (and (seq msgs) (not (shutting-down?)))
-        (let [safe-uids (reduce (fn [acc msg]
-                                  (try
-                                    (let [result (store-and-process! db-conn source-map sources msg ingest-opts)]
-                                      (if (and (not= :retry result) (:uid msg))
-                                        (conj acc (:uid msg))
-                                        acc))
-                                    (catch Exception e
-                                      (log/error e "Failed to process UID:" (:uid msg))
-                                      acc)))
-                                #{} msgs)]
-          (advance-watermark! db-conn msgs safe-uids))))))
+        (let [safe-ids (reduce (fn [acc msg]
+                                 (try
+                                   (let [result (store-and-process! db-conn source-map sources msg ingest-opts)]
+                                     (if (and (not= :retry result) (:uid msg))
+                                       (conj acc (:uid msg))
+                                       acc))
+                                   (catch Exception e
+                                     (log/error e "Failed to process id:" (:id msg))
+                                     acc)))
+                               #{} msgs)]
+          (advance-watermark! db-conn msgs safe-ids))))))
 
 ;; ---------------------------------------------------------------------------
-;; IMAP connection
+;; Mail source connection
 ;; ---------------------------------------------------------------------------
 
-(defn connect-imap [imap-cfg]
+(defn- mailbox->mailseq-cfg
+  "Convert a bark :mailbox config map to the format expected by mailseq/open.
+  Maps the single :folder key to the :folders map mailseq expects."
+  [{:keys [type folder path] :or {folder "INBOX"} :as cfg}]
+  (let [base    (dissoc cfg :folder :path)
+        folders (case type
+                  :imap    {folder folder}
+                  :maildir {folder (str path "/" folder)})]
+    (assoc base :folders folders)))
+
+(defn open-mailbox [mailbox-cfg]
   (try
-    (log/info "Connecting to IMAP" (:host imap-cfg) "as" (:user imap-cfg))
-    (imap/connect (select-keys imap-cfg [:host :port :ssl :user :password :oauth2-token]))
+    (log/info "Opening mailbox" (pr-str (:type mailbox-cfg))
+              (case (:type mailbox-cfg)
+                :imap    (str (:user mailbox-cfg) "@" (:host mailbox-cfg))
+                :maildir (:path mailbox-cfg)
+                ""))
+    (mailseq/open (mailbox->mailseq-cfg mailbox-cfg))
     (catch Exception e
-      (log/error e "IMAP connection failed:" (or (.getMessage e) (str (class e))))
+      (log/error e "Mailbox connection failed:" (or (.getMessage e) (str (class e))))
       nil)))
 
 ;; ---------------------------------------------------------------------------
@@ -249,34 +262,34 @@
 
 (def ^:private max-backoff-ms (* 5 60 1000))
 
-(defn start-idle!
-  "Start IMAP IDLE, storing+processing each new message as it arrives."
-  [imap-conn db-conn folder source-map sources ingest-opts]
-  (log/info "Starting IMAP IDLE on" folder)
-  (idle/idle imap-conn folder
-             (fn [msg]
-               (when-not (shutting-down?)
-                 (if (nil? msg)
-                   (log/warn "IDLE delivered nil message, skipping")
-                   (do
-                     (log/info "New message via IDLE — UID:" (:uid msg)
-                               "Subject:" (:subject msg))
-                     (try
-                       (let [result (store-and-process! db-conn source-map sources msg ingest-opts)]
-                         (when (and (not= :retry result) (:uid msg))
-                           (ingest/save-imap-uid! db-conn (:uid msg))))
-                       (catch Exception e
-                         (log/error e "Error processing IDLE message UID:" (:uid msg)
-                                    (str "(" (.getName (class e)) ": "
-                                         (or (.getMessage e) "no message") ")"))))))))
-             {:parse-opts   {:attachments? true}
-              :heartbeat-ms (* 20 60 1000)}))
+(defn start-watch!
+  "Start watching for new messages, storing+processing each as it arrives."
+  [src db-conn folder source-map sources ingest-opts]
+  (log/info "Starting watch on" folder)
+  (mailseq/watch src folder
+                 (fn [msg]
+                   (when-not (shutting-down?)
+                     (if (nil? msg)
+                       (log/warn "Watch delivered nil message, skipping")
+                       (do
+                         (log/info "New message via watch — id:" (:id msg)
+                                   "Subject:" (:subject msg))
+                         (try
+                           (let [result (store-and-process! db-conn source-map sources msg ingest-opts)]
+                             (when (and (not= :retry result) (:uid msg))
+                               (ingest/save-imap-uid! db-conn (:uid msg))))
+                           (catch Exception e
+                             (log/error e "Error processing watch message id:" (:id msg)
+                                        (str "(" (.getName (class e)) ": "
+                                             (or (.getMessage e) "no message") ")"))))))))
+                 {:parse-opts   {:attachments? true}
+                  :heartbeat-ms (* 20 60 1000)}))
 
-(defn idle-loop!
-  "Run IDLE with automatic reconnection and exponential backoff.
+(defn watch-loop!
+  "Run watch with automatic reconnection and exponential backoff.
   Reloads config.edn on each reconnect so changes take effect."
-  [imap-cfg db-conn ingest-cfg config-path]
-  (let [folder      (or (:folder imap-cfg) "INBOX")
+  [mailbox-cfg db-conn ingest-cfg config-path]
+  (let [folder      (or (:folder mailbox-cfg) "INBOX")
         fetch-opts  (parse-initial-fetch (or (:initial-fetch ingest-cfg) 50))
         ingest-opts (select-keys ingest-cfg [:max-size :max-attachment-size])]
     (loop [backoff-ms 1000
@@ -285,28 +298,28 @@
         (let [config     (or (common/load-config config-path) {})
               source-map (common/build-source-map config)
               sources    (or (:sources config) [])
-              conn       (connect-imap imap-cfg)]
-          (if-not conn
-            (do (log/error "IMAP connection failed, retrying in" (/ backoff-ms 1000) "s")
+              src        (open-mailbox mailbox-cfg)]
+          (if-not src
+            (do (log/error "Mailbox connection failed, retrying in" (/ backoff-ms 1000) "s")
                 (Thread/sleep backoff-ms)
                 (recur (min (* backoff-ms 2) max-backoff-ms) last-expire-ms))
             (do
               (let [new-expire-ms
                     (try
-                      (log/info "IMAP connected, folder:" folder)
-                      (catch-up-fetch! conn db-conn folder fetch-opts source-map sources ingest-opts)
+                      (log/info "Mailbox connected, folder:" folder)
+                      (catch-up-fetch! src db-conn folder fetch-opts source-map sources ingest-opts)
                       (let [ts (maybe-expire! db-conn source-map last-expire-ms)]
                         (when-not (shutting-down?)
-                          (start-idle! conn db-conn folder source-map sources ingest-opts))
+                          (start-watch! src db-conn folder source-map sources ingest-opts))
                         ts)
                       (catch Exception e
-                        (log/error e "IDLE interrupted:" (or (.getMessage e) (str (class e))))
+                        (log/error e "Watch interrupted:" (or (.getMessage e) (str (class e))))
                         last-expire-ms))]
-                (try (imap/disconnect conn)
+                (try (mailseq/close src)
                      (catch Exception e
-                       (log/debug "IMAP disconnect failed:" (.getMessage e))))
+                       (log/debug "Mailbox close failed:" (.getMessage e))))
                 (when-not (shutting-down?)
-                  (log/debug "IDLE exited, reconnecting in 1s")
+                  (log/debug "Watch exited, reconnecting in 1s")
                   (Thread/sleep 1000)
                   (recur 1000 new-expire-ms))))))))))
 
@@ -316,24 +329,24 @@
 
 (defn- batch-run!
   "Single-pass mode (default): connect, fetch new messages, expire, exit."
-  [imap-cfg db-conn ingest-cfg config-path]
-  (let [folder      (or (:folder imap-cfg) "INBOX")
+  [mailbox-cfg db-conn ingest-cfg config-path]
+  (let [folder      (or (:folder mailbox-cfg) "INBOX")
         fetch-opts  (parse-initial-fetch (or (:initial-fetch ingest-cfg) 50))
         ingest-opts (select-keys ingest-cfg [:max-size :max-attachment-size])
         config      (or (common/load-config config-path) {})
         source-map  (common/build-source-map config)
         sources     (or (:sources config) [])
-        conn        (connect-imap imap-cfg)]
-    (when-not conn
-      (log/error "IMAP connection failed.")
+        src         (open-mailbox mailbox-cfg)]
+    (when-not src
+      (log/error "Mailbox connection failed.")
       (System/exit 1))
     (try
-      (catch-up-fetch! conn db-conn folder fetch-opts source-map sources ingest-opts)
+      (catch-up-fetch! src db-conn folder fetch-opts source-map sources ingest-opts)
       (expire/expire-reports! db-conn source-map)
       (finally
-        (try (imap/disconnect conn)
-                     (catch Exception e
-                       (log/debug "IMAP disconnect failed:" (.getMessage e))))))))
+        (try (mailseq/close src)
+             (catch Exception e
+               (log/debug "Mailbox close failed:" (.getMessage e)))))))))
 
 (defn -main [& args]
   (let [;; Parse CLI args: --initial-fetch, --watch, -c config-path
@@ -346,17 +359,17 @@
     (when (nil? config)
       (log/error "Config file not found:" config-path)
       (System/exit 1))
-    (let [imap-cfg   (:imap config)
-          ingest-cfg (cond-> (or (:ingest config) {})
-                       cli-fetch (assoc :initial-fetch cli-fetch))]
+    (let [mailbox-cfg (:mailbox config)
+          ingest-cfg  (cond-> (or (:ingest config) {})
+                        cli-fetch (assoc :initial-fetch cli-fetch))]
       (when-let [logging (:logging config)]
         (blog/configure-file-logging! logging)
         (when-let [email-cfg (:email logging)]
           (if-let [smtp (get-in config [:notifications :smtp])]
             (configure-email-logging! smtp email-cfg)
             (log/warn "Logging :email configured but no :notifications :smtp found."))))
-      (when-not imap-cfg
-        (log/error "No :imap key in config.edn.")
+      (when-not mailbox-cfg
+        (log/error "No :mailbox key in config.edn.")
         (System/exit 1))
       (let [db-cfg  (:db config)
             db-conn (ingest/connect (:path db-cfg))
@@ -378,9 +391,9 @@
                    (log/debug "DB close failed:" (.getMessage e))))
             (log/info "Goodbye."))))
         (if watch?
-          (idle-loop! imap-cfg db-conn ingest-cfg config-path)
+          (watch-loop! mailbox-cfg db-conn ingest-cfg config-path)
           (do
-            (batch-run! imap-cfg db-conn ingest-cfg config-path)
+            (batch-run! mailbox-cfg db-conn ingest-cfg config-path)
             ;; Datalevin/LMDB keeps non-daemon threads alive; without an
             ;; explicit close + System/exit the JVM hangs after batch mode.
             (try (ingest/close db-conn)

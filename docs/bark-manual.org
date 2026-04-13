@@ -763,12 +763,13 @@ validate it.
 #+begin_src edn
 {:admin "admin@example.com"
 
- :imap {:host     "imap.example.com"
-        :port     993
-        :ssl      true
-        :user     "imap-login@example.com"
-        :password "secret"
-        :folder   "INBOX"}
+ :mailbox {:type     :imap
+           :host     "imap.example.com"
+           :port     993
+           :ssl      true
+           :user     "imap-login@example.com"
+           :password "secret"
+           :folder   "INBOX"}
 
  :db {:path "data/bark-db"}
 

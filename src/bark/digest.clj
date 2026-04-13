@@ -23,7 +23,7 @@
 ;; ---------------------------------------------------------------------------
 
 (def email-pull-pattern
-  '[:db/id :email/imap-uid :email/source :email/subject :email/message-id
+  '[:db/id :email/id :email/source :email/subject :email/message-id
     :email/in-reply-to :email/references
     :email/from-address :email/from-name :email/date-sent :email/ingested-at
     :email/body-text :email/body-text-from-html :email/headers-edn
@@ -283,7 +283,7 @@
     [delivery (or irt-src hdr-src) irt-src hdr-src]))
 
 (defn pre-classify-source
-  "Pre-storage source classification on a raw fetch-imap msg.
+  "Pre-storage source classification on a raw mailseq msg.
   Returns source-name or nil. When nil the email should not be stored."
   [db _source-map sources msg]
   (let [headers (:headers msg)

@@ -25,19 +25,28 @@
 ;; Email address (basic check: contains @)
 (s/def ::email (s/and ::non-blank-string #(str/includes? % "@")))
 
-;; IMAP connection
-(s/def :imap/host ::non-blank-string)
-(s/def :imap/port ::pos-int)
-(s/def :imap/ssl boolean?)
-(s/def :imap/user ::non-blank-string)
-(s/def :imap/password ::non-blank-string)
-(s/def :imap/oauth2-token ::non-blank-string)
-(s/def :imap/folder ::non-blank-string)
+;; Mailbox connection (IMAP or Maildir)
+(s/def :mailbox/type #{:imap :maildir})
+(s/def :mailbox/host ::non-blank-string)
+(s/def :mailbox/port ::pos-int)
+(s/def :mailbox/ssl boolean?)
+(s/def :mailbox/user ::non-blank-string)
+(s/def :mailbox/password ::non-blank-string)
+(s/def :mailbox/oauth2-token ::non-blank-string)
+(s/def :mailbox/folder ::non-blank-string)
+(s/def :mailbox/path ::non-blank-string)
 
-(s/def :bark/imap
-  (s/and (s/keys :req-un [:imap/host :imap/user :imap/folder]
-                 :opt-un [:imap/port :imap/ssl :imap/password :imap/oauth2-token])
-         (fn [m] (or (:password m) (:oauth2-token m)))))
+(s/def :bark/mailbox
+  (s/and (s/keys :req-un [:mailbox/type]
+                 :opt-un [:mailbox/host :mailbox/port :mailbox/ssl
+                          :mailbox/user :mailbox/password :mailbox/oauth2-token
+                          :mailbox/folder :mailbox/path])
+         (fn [m]
+           (case (:type m)
+             :imap    (and (:host m) (:user m)
+                           (or (:password m) (:oauth2-token m)))
+             :maildir (:path m)
+             false))))
 
 ;; Source match spec
 (s/def :match/list-id
@@ -242,7 +251,7 @@
 
 ;; Top-level config
 (s/def ::config
-  (s/keys :req-un [:bark/imap :bark/sources :bark/db]
+  (s/keys :req-un [:bark/mailbox :bark/sources :bark/db]
           :opt-un [:bark/ingest :bark/notifications :bark/labels
                    :bark/commands :bark/command-aliases
                    :bark/export-reports :bark/report-types
@@ -331,8 +340,12 @@
           result (validate-config config)]
       (if (:valid? result)
         (do (log/info "✓" path "is valid.")
-            (let [imap (:imap config)]
-              (log/info "  IMAP:" (str (:user imap) "@" (:host imap) "/" (:folder imap))))
+            (let [mb (:mailbox config)]
+              (log/info "  Mailbox:" (pr-str (:type mb))
+                        (case (:type mb)
+                          :imap    (str (:user mb) "@" (:host mb) "/" (or (:folder mb) "INBOX"))
+                          :maildir (str (:path mb) "/" (or (:folder mb) "INBOX"))
+                          "")))
             (log/info "  Sources:" (count (:sources config)))
             (doseq [src (:sources config)]
               (let [parts (cond-> []

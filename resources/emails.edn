@@ -19,7 +19,7 @@
  ;; 01 — Admin adds a maintainer via role control
  ;; =========================================================================
  {
-  :email/imap-uid   1
+  :email/id        "1"
   :email/source     "direct"
   :email/message-id "<01@test.org>"
   :email/subject    "Admin setup"
@@ -32,7 +32,7 @@
  ;; 02 — Bug report (from regular user)
  ;; =========================================================================
  {
-  :email/imap-uid   2
+  :email/id        "2"
   :email/source     "direct"
   :email/message-id "<02@test.org>"
   :email/subject    "[BUG 9.7] org-agenda crashes on startup"
@@ -45,7 +45,7 @@
  ;; 03 — Bug report with mailing list prefix
  ;; =========================================================================
  {
-  :email/imap-uid   3
+  :email/id        "3"
   :email/source     "direct"
   :email/message-id "<03@test.org>"
   :email/subject    "[Org-mode] [BUG] generic bug no version"
@@ -58,7 +58,7 @@
  ;; 04 — Reply to bug 02: mark urgent + confirm
  ;; =========================================================================
  {
-  :email/imap-uid   4
+  :email/id        "4"
   :email/source     "direct"
   :email/message-id "<04@test.org>"
   :email/subject    "Re: [BUG 9.7] org-agenda crashes on startup"
@@ -73,7 +73,7 @@
  ;; 05 — Reply to bug 02: mark handled
  ;; =========================================================================
  {
-  :email/imap-uid   5
+  :email/id        "5"
   :email/source     "direct"
   :email/message-id "<05@test.org>"
   :email/subject    "Re: [BUG 9.7] org-agenda crashes on startup"
@@ -88,7 +88,7 @@
  ;; 06 — Reply to bug 02: mark fixed (closes the bug)
  ;; =========================================================================
  {
-  :email/imap-uid   6
+  :email/id        "6"
   :email/source     "direct"
   :email/message-id "<06@test.org>"
   :email/subject    "Re: [BUG 9.7] org-agenda crashes on startup"
@@ -103,7 +103,7 @@
  ;; 07 — Patch via subject tag
  ;; =========================================================================
  {
-  :email/imap-uid   7
+  :email/id        "7"
   :email/source     "direct"
   :email/message-id "<07@test.org>"
   :email/subject    "[PATCH org-agenda 1/2] Fix sorting"
@@ -116,7 +116,7 @@
  ;; 08 — Patch via attachment (no [PATCH] in subject)
  ;; =========================================================================
  {
-  :email/imap-uid   8
+  :email/id        "8"
   :email/source     "direct"
   :email/message-id "<08@test.org>"
   :email/subject    "Fix for the display issue"
@@ -132,7 +132,7 @@
  ;; 09 — Patch via inline diff (no subject tag, no attachment)
  ;; =========================================================================
  {
-  :email/imap-uid   9
+  :email/id        "9"
   :email/source     "direct"
   :email/message-id "<09@test.org>"
   :email/subject    "Small cleanup"
@@ -145,7 +145,7 @@
  ;; 10 — Reply to patch 07: review and apply
  ;; =========================================================================
  {
-  :email/imap-uid   10
+  :email/id        "10"
   :email/source     "direct"
   :email/message-id "<10@test.org>"
   :email/subject    "Re: [PATCH org-agenda 1/2] Fix sorting"
@@ -160,7 +160,7 @@
  ;; 11 — POLL request
  ;; =========================================================================
  {
-  :email/imap-uid   11
+  :email/id        "11"
   :email/source     "direct"
   :email/message-id "<11@test.org>"
   :email/subject    "[POLL] Should we drop Emacs 27 support?"
@@ -173,7 +173,7 @@
  ;; 12 — Vote +1 on POLL
  ;; =========================================================================
  {
-  :email/imap-uid   12
+  :email/id        "12"
   :email/source     "direct"
   :email/message-id "<12@test.org>"
   :email/subject    "Re: [POLL] Should we drop Emacs 27 support?"
@@ -188,7 +188,7 @@
  ;; 13 — Vote -1 on POLL
  ;; =========================================================================
  {
-  :email/imap-uid   13
+  :email/id        "13"
   :email/source     "direct"
   :email/message-id "<13@test.org>"
   :email/subject    "Re: [POLL] Should we drop Emacs 27 support?"
@@ -203,7 +203,7 @@
  ;; 14 — Duplicate vote by voter1 (should be ignored)
  ;; =========================================================================
  {
-  :email/imap-uid   14
+  :email/id        "14"
   :email/source     "direct"
   :email/message-id "<14@test.org>"
   :email/subject    "Re: [POLL] Should we drop Emacs 27 support?"
@@ -218,7 +218,7 @@
  ;; 15 — TODO request
  ;; =========================================================================
  {
-  :email/imap-uid   15
+  :email/id        "15"
   :email/source     "direct"
   :email/message-id "<15@test.org>"
   :email/subject    "[TODO] New export backend"
@@ -231,7 +231,7 @@
  ;; 16 — Reply to TODO: close it
  ;; =========================================================================
  {
-  :email/imap-uid   16
+  :email/id        "16"
   :email/source     "direct"
   :email/message-id "<16@test.org>"
   :email/subject    "Re: [TODO] New export backend"
@@ -246,7 +246,7 @@
  ;; 17 — Announcement (admin only)
  ;; =========================================================================
  {
-  :email/imap-uid   17
+  :email/id        "17"
   :email/source     "direct"
   :email/message-id "<17@test.org>"
   :email/subject    "[ANN] New contributor guidelines"
@@ -259,7 +259,7 @@
  ;; 18 — Announcement attempt by regular user (should be denied)
  ;; =========================================================================
  {
-  :email/imap-uid   18
+  :email/id        "18"
   :email/source     "direct"
   :email/message-id "<18@test.org>"
   :email/subject    "[ANN] My cool thing"
@@ -272,7 +272,7 @@
  ;; 19 — Change announcement
  ;; =========================================================================
  {
-  :email/imap-uid   19
+  :email/id        "19"
   :email/source     "direct"
   :email/message-id "<19@test.org>"
   :email/subject    "[CHG 9.8] Deprecate old export"
@@ -285,7 +285,7 @@
  ;; 20 — Release announcement (auto-closes CHG 9.8)
  ;; =========================================================================
  {
-  :email/imap-uid   20
+  :email/id        "20"
   :email/source     "direct"
   :email/message-id "<20@test.org>"
   :email/subject    "[REL 9.8] Org 9.8 released"
@@ -298,7 +298,7 @@
  ;; 21 — Email from ignored user (should be skipped)
  ;; =========================================================================
  {
-  :email/imap-uid   21
+  :email/id        "21"
   :email/source     "direct"
   :email/message-id "<21@test.org>"
   :email/subject    "[BUG] Spam bug"
@@ -311,7 +311,7 @@
  ;; 22 — Cancel announcement 17
  ;; =========================================================================
  {
-  :email/imap-uid   22
+  :email/id        "22"
   :email/source     "direct"
   :email/message-id "<22@test.org>"
   :email/subject    "Re: [ANN] New contributor guidelines"
@@ -326,7 +326,7 @@
  ;; 23 — Bug with important flag, then unset it
  ;; =========================================================================
  {
-  :email/imap-uid   23
+  :email/id        "23"
   :email/source     "direct"
   :email/message-id "<23@test.org>"
   :email/subject    "[BUG] Slow export"
@@ -336,7 +336,7 @@
   :email/body-text  "Export is slow.\n"}
 
  {
-  :email/imap-uid   24
+  :email/id        "24"
   :email/source     "direct"
   :email/message-id "<24@test.org>"
   :email/subject    "Re: [BUG] Slow export"
@@ -348,7 +348,7 @@
   :email/body-text  "Important.\n"}
 
  {
-  :email/imap-uid   25
+  :email/id        "25"
   :email/source     "direct"
   :email/message-id "<25@test.org>"
   :email/subject    "Re: [BUG] Slow export"
@@ -363,7 +363,7 @@
  ;; 26 — FR request
  ;; =========================================================================
  {
-  :email/imap-uid   26
+  :email/id        "26"
   :email/source     "direct"
   :email/message-id "<26@test.org>"
   :email/subject    "[FR] Update CI pipeline"
@@ -376,7 +376,7 @@
  ;; 27 — Announcement with mailing list prefix
  ;; =========================================================================
  {
-  :email/imap-uid   27
+  :email/id        "27"
   :email/source     "direct"
   :email/message-id "<27@test.org>"
   :email/subject    "[emacs-orgmode] [ANNOUNCEMENT] Org Meetup 2026"
@@ -390,7 +390,7 @@
  ;; 28 — Patch with mailing list prefix
  ;; =========================================================================
  {
-  :email/imap-uid   28
+  :email/id        "28"
   :email/source     "direct"
   :email/message-id "<28@test.org>"
   :email/subject    "[emacs-orgmode] [PATCH refactor 2/3] Simplify parser"
@@ -403,7 +403,7 @@
  ;; 29 — Role command sent via mailing list (has List-Id & List-Post -> ignored)
  ;; =========================================================================
  {
-  :email/imap-uid   29
+  :email/id        "29"
   :email/source     "direct"
   :email/message-id "<29@test.org>"
   :email/subject    "Role change"
@@ -417,7 +417,7 @@
  ;; 30 — Bug on list-backed source, correct List-Post (allowed)
  ;; =========================================================================
  {
-  :email/imap-uid   30
+  :email/id        "30"
   :email/source     "public-list"
   :email/message-id "<30@test.org>"
   :email/subject    "[BUG] List bug via list"
@@ -432,7 +432,7 @@
  ;;      non-maintainer user cannot route direct email to a :mailing-list source)
  ;; =========================================================================
  {
-  :email/imap-uid   31
+  :email/id        "31"
   :email/message-id "<31@test.org>"
   :email/subject    "[BUG] Direct bug bypassing list"
   :email/from-address "user@test.org"
@@ -444,7 +444,7 @@
  ;; 32 — Bug via wrong mailing list (denied: List-Id doesn't match any source)
  ;; =========================================================================
  {
-  :email/imap-uid   32
+  :email/id        "32"
   :email/message-id "<32@test.org>"
   :email/subject    "[BUG] Bug via wrong list"
   :email/from-address "user@test.org"
@@ -457,7 +457,7 @@
  ;; 33 — Bug on list-backed source from admin, no List-Post (allowed)
  ;; =========================================================================
  {
-  :email/imap-uid   33
+  :email/id        "33"
   :email/source     "public-list"
   :email/message-id "<33@test.org>"
   :email/subject    "[BUG] Admin direct bug"
@@ -470,7 +470,7 @@
  ;; 34 — Cover letter for patch series (0/3)
  ;; =========================================================================
  {
-  :email/imap-uid   34
+  :email/id        "34"
   :email/source     "direct"
   :email/message-id "<34@test.org>"
   :email/subject    "[PATCH parser 0/3] Rewrite the parser"
@@ -483,7 +483,7 @@
  ;; 35 — First patch in series (1/3)
  ;; =========================================================================
  {
-  :email/imap-uid   35
+  :email/id        "35"
   :email/source     "direct"
   :email/message-id "<35@test.org>"
   :email/subject    "[PATCH parser 1/3] Tokenizer"
@@ -498,7 +498,7 @@
  ;; 36 — Second patch in series (2/3)
  ;; =========================================================================
  {
-  :email/imap-uid   36
+  :email/id        "36"
   :email/source     "direct"
   :email/message-id "<36@test.org>"
   :email/subject    "[PATCH parser 2/3] AST builder"
@@ -513,7 +513,7 @@
  ;; 37 — Third patch in series (3/3) — completes the series
  ;; =========================================================================
  {
-  :email/imap-uid   37
+  :email/id        "37"
   :email/source     "direct"
   :email/message-id "<37@test.org>"
   :email/subject    "[PATCH parser 3/3] Renderer"
@@ -528,7 +528,7 @@
  ;; 38 — v2 cover letter, as reply to old series (closes old, starts new)
  ;; =========================================================================
  {
-  :email/imap-uid   38
+  :email/id        "38"
   :email/source     "direct"
   :email/message-id "<38@test.org>"
   :email/subject    "[PATCH parser 0/3] Rewrite the parser v2"
@@ -543,7 +543,7 @@
  ;; 39 — v2 patch 1/3, reply to v2 cover letter
  ;; =========================================================================
  {
-  :email/imap-uid   39
+  :email/id        "39"
   :email/source     "direct"
   :email/message-id "<39@test.org>"
   :email/subject    "[PATCH parser 1/3] Tokenizer v2"
@@ -558,7 +558,7 @@
  ;; 40 — Patch sent as reply to bug 23 (creates a relation)
  ;; =========================================================================
  {
-  :email/imap-uid   40
+  :email/id        "40"
   :email/source     "direct"
   :email/message-id "<40@test.org>"
   :email/subject    "[PATCH] Fix slow export"
@@ -573,7 +573,7 @@
  ;; 41 — Add then remove maintainer (admin)
  ;; =========================================================================
  {
-  :email/imap-uid   41
+  :email/id        "41"
   :email/source     "direct"
   :email/message-id "<41@test.org>"
   :email/subject    "Add second maintainer"
@@ -583,7 +583,7 @@
   :email/body-text  "Add maintainer: maint2@test.org\n"}
 
  {
-  :email/imap-uid   42
+  :email/id        "42"
   :email/source     "direct"
   :email/message-id "<42@test.org>"
   :email/subject    "Remove second maintainer"
@@ -596,7 +596,7 @@
  ;; 43 — Add admin attempt (no longer recognized, command is ignored)
  ;; =========================================================================
  {
-  :email/imap-uid   43
+  :email/id        "43"
   :email/source     "direct"
   :email/message-id "<43@test.org>"
   :email/subject    "Transfer admin"
@@ -609,7 +609,7 @@
  ;; 44 — Unignore a previously ignored user
  ;; =========================================================================
  {
-  :email/imap-uid   44
+  :email/id        "44"
   :email/source     "direct"
   :email/message-id "<44@test.org>"
   :email/subject    "Unignore spam user"
@@ -622,7 +622,7 @@
  ;; 45 — Maintainer adds another maintainer (permitted)
  ;; =========================================================================
  {
-  :email/imap-uid   45
+  :email/id        "45"
   :email/source     "direct"
   :email/message-id "<45@test.org>"
   :email/subject    "Maint adds peer"
@@ -635,7 +635,7 @@
  ;; 46 — Maintainer tries to Add admin (denied)
  ;; =========================================================================
  {
-  :email/imap-uid   46
+  :email/id        "46"
   :email/source     "direct"
   :email/message-id "<46@test.org>"
   :email/subject    "Maint tries admin transfer"
@@ -648,7 +648,7 @@
  ;; 47 — Regular user tries to add maintainer (denied)
  ;; =========================================================================
  {
-  :email/imap-uid   47
+  :email/id        "47"
   :email/source     "direct"
   :email/message-id "<47@test.org>"
   :email/subject    "User tries role escalation"
@@ -661,7 +661,7 @@
  ;; 48 — Trigger with semicolon punctuation
  ;; =========================================================================
  {
-  :email/imap-uid   48
+  :email/id        "48"
   :email/source     "direct"
   :email/message-id "<48@test.org>"
   :email/subject    "[BUG] Trigger punctuation test"
@@ -671,7 +671,7 @@
   :email/body-text  "Steps to reproduce.\n"}
 
  {
-  :email/imap-uid   49
+  :email/id        "49"
   :email/source     "direct"
   :email/message-id "<49@test.org>"
   :email/subject    "Re: [BUG] Trigger punctuation test"
@@ -686,7 +686,7 @@
  ;; 50 — Trigger NOT at start of line (should be ignored)
  ;; =========================================================================
  {
-  :email/imap-uid   50
+  :email/id        "50"
   :email/source     "direct"
   :email/message-id "<50@test.org>"
   :email/subject    "[BUG] Inline trigger test"
@@ -696,7 +696,7 @@
   :email/body-text  "The status is open.\n"}
 
  {
-  :email/imap-uid   51
+  :email/id        "51"
   :email/source     "direct"
   :email/message-id "<51@test.org>"
   :email/subject    "Re: [BUG] Inline trigger test"
@@ -711,7 +711,7 @@
  ;; 52 — Closed. trigger on a request
  ;; =========================================================================
  {
-  :email/imap-uid   52
+  :email/id        "52"
   :email/source     "direct"
   :email/message-id "<52@test.org>"
   :email/subject    "[FR] Feature closed via Closed trigger"
@@ -721,7 +721,7 @@
   :email/body-text  "A feature request.\n"}
 
  {
-  :email/imap-uid   53
+  :email/id        "53"
   :email/source     "direct"
   :email/message-id "<53@test.org>"
   :email/subject    "Re: [FR] Feature closed via Closed trigger"
@@ -736,7 +736,7 @@
  ;; 54 — Try to ack an announcement (should have no effect)
  ;; =========================================================================
  {
-  :email/imap-uid   54
+  :email/id        "54"
   :email/source     "direct"
   :email/message-id "<54@test.org>"
   :email/subject    "[ANN] Ack test announcement"
@@ -746,7 +746,7 @@
   :email/body-text  "An announcement.\n"}
 
  {
-  :email/imap-uid   55
+  :email/id        "55"
   :email/source     "direct"
   :email/message-id "<55@test.org>"
   :email/subject    "Re: [ANN] Ack test announcement"
@@ -761,7 +761,7 @@
  ;; 56 — Notify: off (unsubscribe)
  ;; =========================================================================
  {
-  :email/imap-uid   56
+  :email/id        "56"
   :email/source     "direct"
   :email/message-id "<56@test.org>"
   :email/subject    "Unsubscribe notifications"
@@ -774,7 +774,7 @@
  ;; 57 — Notify: on d:7 p:2 (resubscribe with prefs)
  ;; =========================================================================
  {
-  :email/imap-uid   57
+  :email/id        "57"
   :email/source     "direct"
   :email/message-id "<57@test.org>"
   :email/subject    "Resubscribe with prefs"
@@ -787,7 +787,7 @@
  ;; 58 — Notify command from regular user (ignored)
  ;; =========================================================================
  {
-  :email/imap-uid   58
+  :email/id        "58"
   :email/source     "direct"
   :email/message-id "<58@test.org>"
   :email/subject    "User tries notify"
@@ -800,7 +800,7 @@
  ;; 59 — Case insensitive tag: [bug] lowercase
  ;; =========================================================================
  {
-  :email/imap-uid   59
+  :email/id        "59"
   :email/source     "direct"
   :email/message-id "<59@test.org>"
   :email/subject    "[bug] lowercase tag test"
@@ -813,7 +813,7 @@
  ;; 60 — [ANNOUNCEMENT] long form tag
  ;; =========================================================================
  {
-  :email/imap-uid   60
+  :email/id        "60"
   :email/source     "direct"
   :email/message-id "<60@test.org>"
   :email/subject    "[ANNOUNCEMENT] Long form tag test"
@@ -826,7 +826,7 @@
  ;; 61 — Threading via References only (no In-Reply-To)
  ;; =========================================================================
  {
-  :email/imap-uid   61
+  :email/id        "61"
   :email/source     "direct"
   :email/message-id "<61@test.org>"
   :email/subject    "Re: [bug] lowercase tag test"
@@ -840,7 +840,7 @@
  ;; 62 — Deep thread: grandchild triggers on grandparent report
  ;; =========================================================================
  {
-  :email/imap-uid   62
+  :email/id        "62"
   :email/source     "direct"
   :email/message-id "<62@test.org>"
   :email/subject    "Re: Re: [bug] lowercase tag test"
@@ -855,7 +855,7 @@
  ;; 63 — Orphan email (no tag, no thread parent)
  ;; =========================================================================
  {
-  :email/imap-uid   63
+  :email/id        "63"
   :email/source     "direct"
   :email/message-id "<63@test.org>"
   :email/subject    "Just a random email"
@@ -871,7 +871,7 @@
  ;; Uses its own message-id (unlike email 59) to avoid DB-level upsert.
  ;; =========================================================================
  {
-  :email/imap-uid   64
+  :email/id        "64"
   :email/source     "direct"
   :email/message-id "<64@test.org>"
   :email/subject    "[bug] lowercase tag test"
@@ -886,7 +886,7 @@
  ;; 65 — body-text-from-html fallback (no :email/body-text)
  ;; =========================================================================
  {
-  :email/imap-uid   65
+  :email/id        "65"
   :email/source     "direct"
   :email/message-id "<65@test.org>"
   :email/subject    "[BUG] HTML-only body"
@@ -896,7 +896,7 @@
   :email/body-text-from-html "Bug from HTML email.\n"}
 
  {
-  :email/imap-uid   66
+  :email/id        "66"
   :email/source     "direct"
   :email/message-id "<66@test.org>"
   :email/subject    "Re: [BUG] HTML-only body"
@@ -911,7 +911,7 @@
  ;; 67 — Maintainer ignores an address (permitted for maintainer)
  ;; =========================================================================
  {
-  :email/imap-uid   67
+  :email/id        "67"
   :email/source     "direct"
   :email/message-id "<67@test.org>"
   :email/subject    "Maint ignores nuisance"
@@ -924,7 +924,7 @@
  ;; 68 — Series without cover letter (starts at 1/2)
  ;; =========================================================================
  {
-  :email/imap-uid   68
+  :email/id        "68"
   :email/source     "direct"
   :email/message-id "<68@test.org>"
   :email/subject    "[PATCH cleanup 1/2] Remove dead code"
@@ -934,7 +934,7 @@
   :email/body-text  "Remove dead code.\n\ndiff --git a/core.clj b/core.clj\n--- a/core.clj\n+++ b/core.clj\n@@ -1,3 +1,3 @@\n-old\n+new\n"}
 
  {
-  :email/imap-uid   69
+  :email/id        "69"
   :email/source     "direct"
   :email/message-id "<69@test.org>"
   :email/subject    "[PATCH cleanup 2/2] Update docs"
@@ -949,7 +949,7 @@
  ;; 70 — Series from a different sender (same topic, separate series)
  ;; =========================================================================
  {
-  :email/imap-uid   70
+  :email/id        "70"
   :email/source     "direct"
   :email/message-id "<70@test.org>"
   :email/subject    "[PATCH cleanup 1/2] Alternative cleanup"
@@ -962,7 +962,7 @@
  ;; 71 — [ANN] permission denial from regular user (proper tag)
  ;; =========================================================================
  {
-  :email/imap-uid   71
+  :email/id        "71"
   :email/source     "direct"
   :email/message-id "<71@test.org>"
   :email/subject    "[ANN] User tries announcement"
@@ -975,7 +975,7 @@
  ;; 72 — [REL] permission denial from regular user
  ;; =========================================================================
  {
-  :email/imap-uid   72
+  :email/id        "72"
   :email/source     "direct"
   :email/message-id "<72@test.org>"
   :email/subject    "[REL 10.0] User tries release"
@@ -988,7 +988,7 @@
  ;; 73 — [CHG] permission denial from regular user
  ;; =========================================================================
  {
-  :email/imap-uid   73
+  :email/id        "73"
   :email/source     "direct"
   :email/message-id "<73@test.org>"
   :email/subject    "[CHG 10.0] User tries change"
@@ -1001,7 +1001,7 @@
  ;; 74 — Notify command via mailing list (should be ignored)
  ;; =========================================================================
  {
-  :email/imap-uid   74
+  :email/id        "74"
   :email/source     "direct"
   :email/message-id "<74@test.org>"
   :email/subject    "Notify via list"
@@ -1015,7 +1015,7 @@
  ;; 75 — POLL for vote-format tests
  ;; =========================================================================
  {
-  :email/imap-uid   75
+  :email/id        "75"
   :email/source     "direct"
   :email/message-id "<75@test.org>"
   :email/subject    "[POLL] Test vote formats"
@@ -1028,7 +1028,7 @@
  ;; 76 — Vote "+1, great idea" (inline with punctuation after)
  ;; =========================================================================
  {
-  :email/imap-uid   76
+  :email/id        "76"
   :email/source     "direct"
   :email/message-id "<76@test.org>"
   :email/subject    "Re: [POLL] Test vote formats"
@@ -1043,7 +1043,7 @@
  ;; 77 — Vote "1+" (reversed form)
  ;; =========================================================================
  {
-  :email/imap-uid   77
+  :email/id        "77"
   :email/source     "direct"
   :email/message-id "<77@test.org>"
   :email/subject    "Re: [POLL] Test vote formats"
@@ -1058,7 +1058,7 @@
  ;; 78 — Vote "1-" (reversed down vote)
  ;; =========================================================================
  {
-  :email/imap-uid   78
+  :email/id        "78"
   :email/source     "direct"
   :email/message-id "<78@test.org>"
   :email/subject    "Re: [POLL] Test vote formats"
@@ -1073,7 +1073,7 @@
  ;; 79 — NOT a vote: "+10" (digit follows)
  ;; =========================================================================
  {
-  :email/imap-uid   79
+  :email/id        "79"
   :email/source     "direct"
   :email/message-id "<79@test.org>"
   :email/subject    "Re: [POLL] Test vote formats"
@@ -1088,7 +1088,7 @@
  ;; 80 — Vote "+0" (null vote)
  ;; =========================================================================
  {
-  :email/imap-uid   80
+  :email/id        "80"
   :email/source     "direct"
   :email/message-id "<80@test.org>"
   :email/subject    "Re: [POLL] Test vote formats"
@@ -1103,7 +1103,7 @@
  ;; 81 — [BUG] base report for directive tests
  ;; =========================================================================
  {
-  :email/imap-uid   81
+  :email/id        "81"
   :email/source     "direct"
   :email/message-id "<81@test.org>"
   :email/subject    "[BUG] Directive test bug"
@@ -1116,7 +1116,7 @@
  ;; 82 — Maintainer uses Acked-by directive on bug 81
  ;; =========================================================================
  {
-  :email/imap-uid   82
+  :email/id        "82"
   :email/source     "direct"
   :email/message-id "<82@test.org>"
   :email/subject    "Re: [BUG] Directive test bug"
@@ -1131,7 +1131,7 @@
  ;; 83 — Maintainer uses Owned-by and Urgent-by directives on bug 81
  ;; =========================================================================
  {
-  :email/imap-uid   83
+  :email/id        "83"
   :email/source     "direct"
   :email/message-id "<83@test.org>"
   :email/subject    "Re: [BUG] Directive test bug"
@@ -1146,7 +1146,7 @@
  ;; 84 — Regular user tries Closed-by directive (should be denied)
  ;; =========================================================================
  {
-  :email/imap-uid   84
+  :email/id        "84"
   :email/source     "direct"
   :email/message-id "<84@test.org>"
   :email/subject    "Re: [BUG] Directive test bug"
@@ -1161,7 +1161,7 @@
  ;; 85 — Maintainer uses Unacked on bug 81
  ;; =========================================================================
  {
-  :email/imap-uid   85
+  :email/id        "85"
   :email/source     "direct"
   :email/message-id "<85@test.org>"
   :email/subject    "Re: [BUG] Directive test bug"
@@ -1176,7 +1176,7 @@
  ;; 86 — [BUG] base report for last-one-wins test
  ;; =========================================================================
  {
-  :email/imap-uid   86
+  :email/id        "86"
   :email/source     "direct"
   :email/message-id "<86@test.org>"
   :email/subject    "[BUG] Last-one-wins test"
@@ -1189,7 +1189,7 @@
  ;; 87 — Last-one-wins: Acked-by then Unacked in same email
  ;; =========================================================================
  {
-  :email/imap-uid   87
+  :email/id        "87"
   :email/source     "direct"
   :email/message-id "<87@test.org>"
   :email/subject    "Re: [BUG] Last-one-wins test"
@@ -1204,7 +1204,7 @@
  ;; 88 — [BUG] base report for Closed-by + Important-by test
  ;; =========================================================================
  {
-  :email/imap-uid   88
+  :email/id        "88"
   :email/source     "direct"
   :email/message-id "<88@test.org>"
   :email/subject    "[BUG] Closed-by test"
@@ -1217,7 +1217,7 @@
  ;; 89 — Admin uses Closed-by and Important-by on bug 88
  ;; =========================================================================
  {
-  :email/imap-uid   89
+  :email/id        "89"
   :email/source     "direct"
   :email/message-id "<89@test.org>"
   :email/subject    "Re: [BUG] Closed-by test"
@@ -1233,7 +1233,7 @@
  ;; =================================================================
 
  ;; 90 — Bug report (base for mixed trigger + directive tests)
- {:email/imap-uid    90
+ {:email/id        "90"
   :email/message-id  "<90@test.org>"
   :email/subject     "[BUG] Mixed trigger and directive test"
   :email/content-type "text/plain"
@@ -1244,7 +1244,7 @@
   :email/body-text  "Something is broken.\n"}
 
  ;; 91 — Maintainer reply with trigger (Confirmed.) + directive (Owned-by)
- {:email/imap-uid    91
+ {:email/id        "91"
   :email/message-id  "<91@test.org>"
   :email/subject     "Re: [BUG] Mixed trigger and directive test"
   :email/content-type "text/plain"
@@ -1257,7 +1257,7 @@
 
  ;; 92 — Maintainer reply: trigger (Fixed.) + conflicting directive (Not closed)
  ;; Directive wins because directives are applied after triggers.
- {:email/imap-uid    92
+ {:email/id        "92"
   :email/message-id  "<92@test.org>"
   :email/subject     "Re: [BUG] Mixed trigger and directive test"
   :email/content-type "text/plain"
@@ -1269,7 +1269,7 @@
   :email/body-text  "Fixed.\nNot closed\n"}
 
  ;; 93 — Bug report (base for deadline + directive test)
- {:email/imap-uid    93
+ {:email/id        "93"
   :email/message-id  "<93@test.org>"
   :email/subject     "[BUG] Deadline with directives test"
   :email/content-type "text/plain"
@@ -1280,7 +1280,7 @@
   :email/body-text  "Another bug here.\n"}
 
  ;; 94 — Maintainer reply with Deadline + Urgent-by + trigger (Confirmed.)
- {:email/imap-uid    94
+ {:email/id        "94"
   :email/message-id  "<94@test.org>"
   :email/subject     "Re: [BUG] Deadline with directives test"
   :email/content-type "text/plain"
@@ -1292,7 +1292,7 @@
   :email/body-text  "Confirmed.\nDeadline: 2026-06-01\nUrgent-by: user@test.org\n"}
 
  ;; 95 — Maintainer reply with trigger (Confirmed.) + Topic directive
- {:email/imap-uid    95
+ {:email/id        "95"
   :email/message-id  "<95@test.org>"
   :email/subject     "Re: [BUG] Mixed trigger and directive test"
   :email/content-type "text/plain"
@@ -1304,7 +1304,7 @@
   :email/body-text  "Confirmed.\nTopic: regression\n"}
 
  ;; 96 — Admin sets deadline then unsets it in email 97
- {:email/imap-uid    96
+ {:email/id        "96"
   :email/message-id  "<96@test.org>"
   :email/subject     "Re: [BUG] Deadline with directives test"
   :email/content-type "text/plain"
@@ -1316,7 +1316,7 @@
   :email/body-text  "Deadline: 2026-09-01\n"}
 
  ;; 97 — Admin removes deadline on bug 93
- {:email/imap-uid    97
+ {:email/id        "97"
   :email/message-id  "<97@test.org>"
   :email/subject     "Re: [BUG] Deadline with directives test"
   :email/content-type "text/plain"
@@ -1328,7 +1328,7 @@
   :email/body-text  "No deadline\n"}
 
  ;; 98 — Bug report (base for standalone deadline test)
- {:email/imap-uid    98
+ {:email/id        "98"
   :email/message-id  "<98@test.org>"
   :email/subject     "[BUG] Standalone deadline test"
   :email/content-type "text/plain"
@@ -1339,7 +1339,7 @@
   :email/body-text  "Need a deadline on this.\n"}
 
  ;; 99 — Admin sets deadline on bug 98 (no subsequent undeadline)
- {:email/imap-uid    99
+ {:email/id        "99"
   :email/message-id  "<99@test.org>"
   :email/subject     "Re: [BUG] Standalone deadline test"
   :email/content-type "text/plain"
@@ -1354,7 +1354,7 @@
  ;; 100 — Bug report using [public-list] prefix instead of List-Id header.
  ;; Should be classified under "public-list" source, with prefix stripped.
  ;; =========================================================================
- {:email/imap-uid    100
+ {:email/id        "100"
   :email/message-id  "<100@test.org>"
   :email/subject     "[public-list] [BUG] BARK prefix source test"
   :email/content-type "text/plain"
@@ -1367,7 +1367,7 @@
  ;; 101 — Maintainer replies off-list: no :email/source, no List-Id, no [source]
  ;;       Source should be resolved from In-Reply-To -> email 100 -> "direct"
  ;; =========================================================================
- {:email/imap-uid    101
+ {:email/id        "101"
   :email/message-id  "<101@test.org>"
   :email/subject     "Re: [BUG] BARK prefix source test"
   :email/content-type "text/plain"
@@ -1383,7 +1383,7 @@
  ;; 103 — CHG 10.0 (second change announcement, same version, different thread)
  ;; 104 — REL 10.0 (release closes both CHGs and links them as related)
  ;; =========================================================================
- {:email/imap-uid    102
+ {:email/id        "102"
   :email/source      "direct"
   :email/message-id  "<102@test.org>"
   :email/subject     "[CHG 10.0] New export format"
@@ -1392,7 +1392,7 @@
   :email/ingested-at #inst "2026-02-10T10:00:00"
   :email/body-text  "Export format changing to JSON.\n"}
 
- {:email/imap-uid    103
+ {:email/id        "103"
   :email/source      "direct"
   :email/message-id  "<103@test.org>"
   :email/subject     "[CHG 10.0] Config syntax update"
@@ -1401,7 +1401,7 @@
   :email/ingested-at #inst "2026-02-11T10:00:00"
   :email/body-text  "Config files now use EDN.\n"}
 
- {:email/imap-uid    104
+ {:email/id        "104"
   :email/source      "direct"
   :email/message-id  "<104@test.org>"
   :email/subject     "[REL 10.0] Version 10.0 released"
@@ -1413,7 +1413,7 @@
  ;; =========================================================================
  ;; 105 — Bug report (will be superseded)
  ;; =========================================================================
- {:email/imap-uid    105
+ {:email/id        "105"
   :email/source      "direct"
   :email/message-id  "<105@test.org>"
   :email/subject     "[BUG] Minor crash on empty input"
@@ -1425,7 +1425,7 @@
  ;; =========================================================================
  ;; 106 — Broader bug report (supersedes 105)
  ;; =========================================================================
- {:email/imap-uid    106
+ {:email/id        "106"
   :email/source      "direct"
   :email/message-id  "<106@test.org>"
   :email/subject     "[BUG] General input validation failure"
@@ -1437,7 +1437,7 @@
  ;; =========================================================================
  ;; 107 — Maintainer marks 105 as superseded by 106
  ;; =========================================================================
- {:email/imap-uid    107
+ {:email/id        "107"
   :email/source      "direct"
   :email/message-id  "<107@test.org>"
   :email/subject     "Re: [BUG] Minor crash on empty input"
@@ -1451,7 +1451,7 @@
  ;; =========================================================================
  ;; 108 — Second bug (will be superseded then unsuperseded)
  ;; =========================================================================
- {:email/imap-uid    108
+ {:email/id        "108"
   :email/source      "direct"
   :email/message-id  "<108@test.org>"
   :email/subject     "[BUG] Parser error on Unicode"
@@ -1463,7 +1463,7 @@
  ;; =========================================================================
  ;; 109 — Maintainer supersedes 108 by 106
  ;; =========================================================================
- {:email/imap-uid    109
+ {:email/id        "109"
   :email/source      "direct"
   :email/message-id  "<109@test.org>"
   :email/subject     "Re: [BUG] Parser error on Unicode"
@@ -1477,7 +1477,7 @@
  ;; =========================================================================
  ;; 110 — Maintainer unsupersedes 108 (it was a different issue after all)
  ;; =========================================================================
- {:email/imap-uid    110
+ {:email/id        "110"
   :email/source      "direct"
   :email/message-id  "<110@test.org>"
   :email/subject     "Re: [BUG] Parser error on Unicode"
@@ -1493,7 +1493,7 @@
  ;;       the ingestion sequence used by other tests; the user-supersede
  ;;       scenario lives in emails 122-124 below.
  ;; =========================================================================
- {:email/imap-uid    111
+ {:email/id        "111"
   :email/source      "direct"
   :email/message-id  "<111@test.org>"
   :email/subject     "Re: [BUG] Parser error on Unicode"
@@ -1508,7 +1508,7 @@
  ;; 112 — Public reply to list bug 30, sent through the list (has List-Id).
  ;;       Should be a descendant and trigger acked.
  ;; =========================================================================
- {:email/imap-uid    112
+ {:email/id        "112"
   :email/source      "public-list"
   :email/message-id  "<112@test.org>"
   :email/subject     "Re: [BUG] List bug via list"
@@ -1524,7 +1524,7 @@
  ;; 113 — Private reply to list bug 30, sent directly (no List-Id).
  ;;       Should NOT be a descendant, but commands (Handled → owned) still apply.
  ;; =========================================================================
- {:email/imap-uid    113
+ {:email/id        "113"
   :email/source      "public-list"
   :email/message-id  "<113@test.org>"
   :email/subject     "Re: [BUG] List bug via list"
@@ -1538,7 +1538,7 @@
  ;; =========================================================================
  ;; 114 — Bug report (will be superseded then reopened via "Not closed")
  ;; =========================================================================
- {:email/imap-uid    114
+ {:email/id        "114"
   :email/source      "direct"
   :email/message-id  "<114@test.org>"
   :email/subject     "[BUG] Encoding edge case"
@@ -1550,7 +1550,7 @@
  ;; =========================================================================
  ;; 115 — Admin supersedes 114 by 106
  ;; =========================================================================
- {:email/imap-uid    115
+ {:email/id        "115"
   :email/source      "direct"
   :email/message-id  "<115@test.org>"
   :email/subject     "Re: [BUG] Encoding edge case"
@@ -1565,7 +1565,7 @@
  ;; 116 — Admin reopens superseded report 114 via "Not closed"
  ;;       Should clear closed, close-reason, superseded-by, AND related link.
  ;; =========================================================================
- {:email/imap-uid    116
+ {:email/id        "116"
   :email/source      "direct"
   :email/message-id  "<116@test.org>"
   :email/subject     "Re: [BUG] Encoding edge case"
@@ -1579,7 +1579,7 @@
  ;; =========================================================================
  ;; 117 — Patch (no version): first submission
  ;; =========================================================================
- {:email/imap-uid    117
+ {:email/id        "117"
   :email/source      "public-list"
   :email/message-id  "<117@test.org>"
   :email/subject     "[PATCH] A new feature"
@@ -1592,7 +1592,7 @@
  ;; =========================================================================
  ;; 118 — Reply with updated patch, same subject: should supersede 117
  ;; =========================================================================
- {:email/imap-uid    118
+ {:email/id        "118"
   :email/source      "public-list"
   :email/message-id  "<118@test.org>"
   :email/subject     "Re: [PATCH] A new feature"
@@ -1607,7 +1607,7 @@
  ;; =========================================================================
  ;; 119 — Third reply with yet another patch: should supersede 118 (and 117)
  ;; =========================================================================
- {:email/imap-uid    119
+ {:email/id        "119"
   :email/source      "public-list"
   :email/message-id  "<119@test.org>"
   :email/subject     "Re: [PATCH] A new feature"
@@ -1622,7 +1622,7 @@
  ;; =========================================================================
  ;; 120 — Inline diff (no [PATCH] tag): first submission
  ;; =========================================================================
- {:email/imap-uid    120
+ {:email/id        "120"
   :email/source      "public-list"
   :email/message-id  "<120@test.org>"
   :email/subject     "Improve error handling"
@@ -1635,7 +1635,7 @@
  ;; =========================================================================
  ;; 121 — Reply with updated diff, same subject: should supersede 120
  ;; =========================================================================
- {:email/imap-uid    121
+ {:email/id        "121"
   :email/source      "public-list"
   :email/message-id  "<121@test.org>"
   :email/subject     "Re: Improve error handling"
@@ -1650,7 +1650,7 @@
  ;; =========================================================================
  ;; 122 — Narrow bug report filed by user-a
  ;; =========================================================================
- {:email/imap-uid    122
+ {:email/id        "122"
   :email/source      "direct"
   :email/message-id  "<122@test.org>"
   :email/subject     "[BUG] Crash when config is empty"
@@ -1662,7 +1662,7 @@
  ;; =========================================================================
  ;; 123 — Broader bug report filed by user-b (will supersede 122)
  ;; =========================================================================
- {:email/imap-uid    123
+ {:email/id        "123"
   :email/source      "direct"
   :email/message-id  "<123@test.org>"
   :email/subject     "[BUG] Missing config validation across the board"
@@ -1676,7 +1676,7 @@
  ;;       :superseded-by has :scope :user, so this MUST succeed
  ;;       even though user-a is not a maintainer.
  ;; =========================================================================
- {:email/imap-uid    124
+ {:email/id        "124"
   :email/source      "direct"
   :email/message-id  "<124@test.org>"
   :email/subject     "Re: [BUG] Crash when config is empty"

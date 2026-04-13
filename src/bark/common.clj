@@ -556,7 +556,7 @@
     {:report/patches [:patch/filename :patch/source :patch/text
                       :patch/author :patch/subject :patch/date]}
     {:report/email [:email/subject :email/from-address :email/from-name
-                    :email/date-sent :email/source :email/imap-uid
+                    :email/date-sent :email/source :email/id
                     :email/headers-edn]}])
 
 ;; Pull pattern for attachment-heavy operations (event/text export).
