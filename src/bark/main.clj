@@ -208,21 +208,34 @@
         (advance-watermark! db-conn msgs safe-ids)))))
 
 (defn- catch-up-maildir!
-  "Maildir incremental fetch: diff list-ids against known :email/id in DB."
-  [src db-conn folder source-map sources ingest-opts]
-  (let [all-ids  (mailseq/list-ids src folder)
-        known    (ingest/known-email-ids db-conn)
-        new-ids  (filterv (complement known) all-ids)]
-    (if (empty? new-ids)
+  "Maildir incremental fetch: diff list-ids against known :email/id in DB.
+  On first run (no known ids), uses mailseq/messages with fetch-opts
+  to honour :limit/:since, just like the IMAP path."
+  [src db-conn folder fetch-opts source-map sources ingest-opts]
+  (let [known   (ingest/known-email-ids db-conn)
+        msgs    (if (empty? known)
+                  ;; First run — use fetch-opts (:limit/:since) to avoid
+                  ;; ingesting the entire Maildir at once.
+                  (let [{:keys [limit since]} fetch-opts]
+                    (if since
+                      (log/info "First run — fetching messages since" since)
+                      (log/info "First run — fetching last" (or limit "all") "messages"))
+                    (mailseq/messages src folder
+                                     (merge {:attachments? true} fetch-opts)))
+                  ;; Subsequent runs — diff ids.
+                  (let [all-ids (mailseq/list-ids src folder)
+                        new-ids (filterv (complement known) all-ids)]
+                    (when (seq new-ids)
+                      (mailseq/by-ids src folder new-ids))))]
+    (if (empty? msgs)
       (log/info "No new messages in Maildir")
-      (let [msgs (mailseq/by-ids src folder new-ids)]
-        (log/info "Fetched" (count msgs) "new messages from Maildir")
-        (when-not (shutting-down?)
-          (doseq [msg msgs]
+      (do (log/info "Fetched" (count msgs) "new messages from Maildir")
+          (doseq [msg msgs
+                  :while (not (shutting-down?))]
             (try
               (store-and-process! db-conn source-map sources msg ingest-opts)
               (catch Exception e
-                (log/error e "Failed to process id:" (:id msg))))))))))
+                (log/error e "Failed to process id:" (:id msg)))))))))
 
 (defn catch-up-fetch!
   "Fetch messages missed while the process was down.
@@ -231,7 +244,7 @@
   (when-not (shutting-down?)
     (case mailbox-type
       :imap    (catch-up-imap! src db-conn folder fetch-opts source-map sources ingest-opts)
-      :maildir (catch-up-maildir! src db-conn folder source-map sources ingest-opts))))
+      :maildir (catch-up-maildir! src db-conn folder fetch-opts source-map sources ingest-opts))))
 
 ;; ---------------------------------------------------------------------------
 ;; Mail source connection
@@ -281,7 +294,7 @@
       last-ms)))
 
 ;; ---------------------------------------------------------------------------
-;; IDLE mode with reconnection
+;; Watch mode with reconnection
 ;; ---------------------------------------------------------------------------
 
 (def ^:private max-backoff-ms (* 5 60 1000))
@@ -397,6 +410,9 @@
             (log/warn "Logging :email configured but no :notifications :smtp found."))))
       (when-not mailbox-cfg
         (log/error "No :mailbox key in config.edn.")
+        (System/exit 1))
+      (when-not (#{:imap :maildir} (:type mailbox-cfg))
+        (log/error "Invalid :type in :mailbox — expected :imap or :maildir, got:" (pr-str (:type mailbox-cfg)))
         (System/exit 1))
       (let [db-cfg  (:db config)
             db-conn (ingest/connect (:path db-cfg))
