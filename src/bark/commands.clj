@@ -380,7 +380,6 @@
 
 (defn- ref-eid [v] (if (map? v) (:db/id v) v))
 
-
 (defn- apply-vote! [conn report-eid from-addr body-text email delivery source-cfg]
   (when-let [vote (detect-vote body-text)]
     (if-not (common/sent-via-source-channel? delivery source-cfg)

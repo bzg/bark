@@ -21,13 +21,8 @@
 
 (defn close [conn] (d/close conn))
 
-(defn- message-id-exists? [conn message-id]
-  (when message-id
-    (some? (d/entid (d/db conn) [:email/message-id message-id]))))
-
-(defn- email-id-exists? [conn id]
-  (when id
-    (some? (d/entid (d/db conn) [:email/id id]))))
+(defn- entity-exists? [conn attr v]
+  (when v (some? (d/entid (d/db conn) [attr v]))))
 
 (defn max-imap-uid [conn]
   (or (d/q '[:find ?uid . :where [?e :watermark/id "default"] [?e :watermark/imap-uid ?uid]]
@@ -87,7 +82,6 @@
                    vec)]
       (when (seq ids) (str/join " " ids)))))
 
-
 ;; ---------------------------------------------------------------------------
 ;; Transform
 ;; ---------------------------------------------------------------------------
@@ -115,12 +109,12 @@
                                            v)))
         attachments (mapv (fn [att]
                             (let [filename (or (:filename att) "unnamed")
-                                  is-patch (boolean (re-find #"(?i)\.(patch|diff)$" filename))
-                                  is-ics   (boolean (re-find #"(?i)\.ics$" filename))
-                                  is-text  (and (not is-patch) (not is-ics)
-                                                   (common/text-attachment?
-                                                     {:attachment/content-type
-                                                      (:content-type att)}))
+                                  is-patch (re-find #"(?i)\.(patch|diff)$" filename)
+                                  is-ics   (re-find #"(?i)\.ics$" filename)
+                                  is-text  (and (not (or is-patch is-ics))
+                                                (common/text-attachment?
+                                                  {:attachment/content-type
+                                                   (:content-type att)}))
                                   data     (:data att)
                                   raw-text (when (and (or is-patch is-ics is-text) data)
                                               (cond
@@ -188,10 +182,10 @@
       (nil? message-id)
       (do (log/warn "Skipping email with nil Message-ID, id:" id) false)
 
-      (message-id-exists? conn message-id)
+      (entity-exists? conn :email/message-id message-id)
       (do (log/debug "Skipping already stored Message-ID:" message-id) false)
 
-      (email-id-exists? conn id)
+      (entity-exists? conn :email/id id)
       (do (log/warn "Skipping id collision:" id
                     "— different Message-ID but id already stored")
           false)
@@ -206,7 +200,7 @@
           (catch Exception e
             ;; If the message-id now exists, another process (e.g. bb digest)
             ;; inserted it between our exists? check and the transact — harmless race.
-            (let [now-exists? (try (message-id-exists? conn message-id)
+            (let [now-exists? (try (entity-exists? conn :email/message-id message-id)
                                   (catch Exception _ false))]
               (if now-exists?
                 (do (log/debug "Duplicate Message-ID (race):" message-id) false)

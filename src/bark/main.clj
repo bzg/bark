@@ -80,8 +80,8 @@
         (when-let [days (common/parse-duration-str v)]
           {:since (Date/from (.minus (Instant/now) days ChronoUnit/DAYS))})
         (throw (ex-info (str "Invalid :initial-fetch value: " (pr-str v)
-                            " (expected integer, \"Nd/w/m/y\" duration, or \"yyyy-MM-dd\" date)")
-                       {:value v})))
+                             " (expected integer, \"Nd/w/m/y\" duration, or \"yyyy-MM-dd\" date)")
+                        {:value v})))
     :else {:limit 50}))
 
 ;; ---------------------------------------------------------------------------
@@ -139,39 +139,41 @@
   Already-digested emails are skipped to avoid redundant work."
   [db-conn source-map sources msg {:keys [max-size max-attachment-size]}]
   (let [size (:size msg -1)
-        id   (:id msg)]
-    (if (and max-size (pos? size) (> size max-size))
+        id   (:id msg)
+        mid  (:message-id msg)]
+    (cond
+      (and max-size (pos? size) (> size max-size))
       (do (log/warn "Skipping oversized email id:" id
                     "size:" size (str "bytes (max: " max-size ")"))
           :skip)
+
+      (nil? mid)
+      (do (log/warn "No Message-ID for id:" id "— skipping")
+          :skip)
+
+      :else
       (if-let [src-name (digest/pre-classify-source (d/db db-conn) source-map sources msg)]
-        (let [mid (:message-id msg)
-              store-opts (cond-> {}
-                           max-attachment-size (assoc :max-attachment-size max-attachment-size))]
-          (if (nil? mid)
-            (do (log/warn "No Message-ID for id:" id "— skipping")
-                :skip)
-            (let [lookup [:email/message-id mid]]
-              (if (ingest/store-email! db-conn msg store-opts)
-                ;; Freshly stored — stamp source and digest.
-                (do (d/transact! db-conn [{:db/id lookup :email/source src-name}])
-                    (try-digest! db-conn source-map sources
-                                 (d/pull (d/db db-conn) digest/email-pull-pattern lookup) mid))
-                ;; Already stored (duplicate message-id or id collision).
-                (let [email (d/pull (d/db db-conn) digest/email-pull-pattern lookup)]
-                  (cond
-                    ;; Lookup miss → id collision (different message-id already
-                    ;; occupies this id).  Original was fully handled — safe.
-                    (not (:db/id email)) :ok
-                    ;; Already fully digested — nothing to do.
-                    (:email/digested-at email)
-                    (do (log/debug "Already digested, skipping:" mid) :ok)
-                    ;; Stored but not digested (prior crash) — recover.
-                    :else
-                    (do (log/info "Re-processing previously stored email:" mid)
-                        (when-not (:email/source email)
-                          (d/transact! db-conn [{:db/id lookup :email/source src-name}]))
-                        (try-digest! db-conn source-map sources email mid))))))))
+        (let [lookup     [:email/message-id mid]
+              store-opts (if max-attachment-size
+                           {:max-attachment-size max-attachment-size}
+                           {})]
+          (if (ingest/store-email! db-conn msg store-opts)
+            (do (d/transact! db-conn [{:db/id lookup :email/source src-name}])
+                (try-digest! db-conn source-map sources
+                             (d/pull (d/db db-conn) digest/email-pull-pattern lookup) mid))
+            (let [email (d/pull (d/db db-conn) digest/email-pull-pattern lookup)]
+              (cond
+                (not (:db/id email))
+                :ok
+
+                (:email/digested-at email)
+                (do (log/debug "Already digested, skipping:" mid) :ok)
+
+                :else
+                (do (log/info "Re-processing previously stored email:" mid)
+                    (when-not (:email/source email)
+                      (d/transact! db-conn [{:db/id lookup :email/source src-name}]))
+                    (try-digest! db-conn source-map sources email mid))))))
         (do (log/debug "No matching source for id:" id "— not stored")
             :skip)))))
 
@@ -179,17 +181,20 @@
 ;; Catch-up fetch (store+process per email)
 ;; ---------------------------------------------------------------------------
 
+(defn- log-first-run [{:keys [limit since]}]
+  (log/info "First run — fetching"
+            (if since (str "messages since " since) (str "last " (or limit "all") " messages"))))
+
+(defn- first-run-messages [src folder fetch-opts]
+  (log-first-run fetch-opts)
+  (mailseq/messages src folder (merge {:attachments? true} fetch-opts)))
+
 (defn- catch-up-imap!
   "IMAP incremental fetch: use UID watermark to fetch only new messages."
   [src db-conn folder fetch-opts source-map sources ingest-opts]
   (let [watermark (ingest/max-imap-uid db-conn)
         msgs (if (zero? watermark)
-               (let [{:keys [limit since]} fetch-opts]
-                 (if since
-                   (log/info "First run — fetching messages since" since)
-                   (log/info "First run — fetching last" limit "messages"))
-                 (mailseq/messages src folder
-                                  (merge {:attachments? true} fetch-opts)))
+               (first-run-messages src folder fetch-opts)
                (do (log/info "Resuming — fetching UIDs >" watermark)
                    (mailseq/by-id-range src folder
                                         (str (inc watermark)) nil)))]
@@ -212,21 +217,13 @@
   On first run (no known ids), uses mailseq/messages with fetch-opts
   to honour :limit/:since, just like the IMAP path."
   [src db-conn folder fetch-opts source-map sources ingest-opts]
-  (let [known   (ingest/known-email-ids db-conn)
-        msgs    (if (empty? known)
-                  ;; First run — use fetch-opts (:limit/:since) to avoid
-                  ;; ingesting the entire Maildir at once.
-                  (let [{:keys [limit since]} fetch-opts]
-                    (if since
-                      (log/info "First run — fetching messages since" since)
-                      (log/info "First run — fetching last" (or limit "all") "messages"))
-                    (mailseq/messages src folder
-                                     (merge {:attachments? true} fetch-opts)))
-                  ;; Subsequent runs — diff ids.
-                  (let [all-ids (mailseq/list-ids src folder)
-                        new-ids (filterv (complement known) all-ids)]
-                    (when (seq new-ids)
-                      (mailseq/by-ids src folder new-ids))))]
+  (let [known (ingest/known-email-ids db-conn)
+        msgs  (if (empty? known)
+                (first-run-messages src folder fetch-opts)
+                (let [all-ids (mailseq/list-ids src folder)
+                      new-ids (remove known all-ids)]
+                  (when (seq new-ids)
+                    (mailseq/by-ids src folder (vec new-ids)))))]
     (if (empty? msgs)
       (log/info "No new messages in Maildir")
       (do (log/info "Fetched" (count msgs) "new messages from Maildir")
@@ -342,25 +339,24 @@
             (do (log/error "Mailbox connection failed, retrying in" (/ backoff-ms 1000) "s")
                 (Thread/sleep backoff-ms)
                 (recur (min (* backoff-ms 2) max-backoff-ms) last-expire-ms))
-            (do
-              (let [new-expire-ms
-                    (try
-                      (log/info "Mailbox connected, folder:" folder)
-                      (catch-up-fetch! src db-conn folder fetch-opts source-map sources ingest-opts mailbox-type)
-                      (let [ts (maybe-expire! db-conn source-map last-expire-ms)]
-                        (when-not (shutting-down?)
-                          (start-watch! src db-conn folder source-map sources ingest-opts))
-                        ts)
-                      (catch Exception e
-                        (log/error e "Watch interrupted:" (or (.getMessage e) (str (class e))))
-                        last-expire-ms))]
-                (try (mailseq/close src)
-                     (catch Exception e
-                       (log/debug "Mailbox close failed:" (.getMessage e))))
-                (when-not (shutting-down?)
-                  (log/debug "Watch exited, reconnecting in 1s")
-                  (Thread/sleep 1000)
-                  (recur 1000 new-expire-ms))))))))))
+            (let [new-expire-ms
+                  (try
+                    (log/info "Mailbox connected, folder:" folder)
+                    (catch-up-fetch! src db-conn folder fetch-opts source-map sources ingest-opts mailbox-type)
+                    (let [ts (maybe-expire! db-conn source-map last-expire-ms)]
+                      (when-not (shutting-down?)
+                        (start-watch! src db-conn folder source-map sources ingest-opts))
+                      ts)
+                    (catch Exception e
+                      (log/error e "Watch interrupted:" (or (.getMessage e) (str (class e))))
+                      last-expire-ms))]
+              (try (mailseq/close src)
+                   (catch Exception e
+                     (log/debug "Mailbox close failed:" (.getMessage e))))
+              (when-not (shutting-down?)
+                (log/debug "Watch exited, reconnecting in 1s")
+                (Thread/sleep 1000)
+                (recur 1000 new-expire-ms)))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Main
@@ -386,12 +382,12 @@
       (finally
         (try (mailseq/close src)
              (catch Exception e
-               (log/debug "Mailbox close failed:" (.getMessage e)))))))))
+               (log/debug "Mailbox close failed:" (.getMessage e))))))))
 
 (defn -main [& args]
   (let [;; Parse CLI args: --initial-fetch, --watch, -c config-path
         arg-set   (set args)
-        watch?    (contains? arg-set "--watch")
+        watch?    (arg-set "--watch")
         pairs     (partition 2 args)
         cli-fetch (some (fn [[a b]] (when (= "--initial-fetch" a) b)) pairs)
         config-path (or (some (fn [[a b]] (when (= "-c" a) b)) pairs) "config.edn")

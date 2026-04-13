@@ -44,7 +44,7 @@
         all  (if (and irt (not (some #{irt} refs)))
                (conj (vec refs) irt)
                (vec refs))]
-    (vec (distinct all))))
+    (into [] (distinct) all)))
 
 (defn- lookup-reports-by-mid
   "Find report eids matching a message-id, either as report root or descendant."
@@ -59,9 +59,7 @@
 (defn find-reports-for-email
   "Return all report eids threaded with this email."
   [email db]
-  (let [mids (ancestor-mids email)]
-    (reduce (fn [acc mid] (into acc (lookup-reports-by-mid db mid)))
-            #{} mids)))
+  (into #{} (mapcat #(lookup-reports-by-mid db %)) (ancestor-mids email)))
 
 (defn find-nearest-report
   "Return the report eids of the nearest ancestor only."
@@ -120,15 +118,12 @@
            :report/message-id message-id :report/digested-at now
            :report/last-activity (or email-date now)}
           (remove (comp nil? val))
-          ;; The topic parsed from the subject is credited to the
-          ;; founding email, so `:report/topic` (the ref) and
-          ;; `:report/topic-value` (the string) both point to it.
           {:report/last-activity-address (:email/from-address email)
            :report/version (:version report-info)
            :report/topic (when (:topic report-info) email-eid)
            :report/topic-value (:topic report-info)
            :report/patch-seq (:patch-seq report-info) :report/patch-source (:patch-source report-info)
-           :report/has-ics (boolean has-ics) :report/has-text-attachments has-text})))
+           :report/has-ics has-ics :report/has-text-attachments has-text})))
 
 (defn- create-report!
   "Create a new report entity. Returns the entity id of the new report."
@@ -518,4 +513,4 @@
 
           ;; Mark email as fully digested so future re-fetches can skip it.
           (when eid
-            (d/transact! conn [{:db/id eid :email/digested-at (java.util.Date.)}])))))))
+            (d/transact! conn [{:db/id eid :email/digested-at (Date.)}])))))))

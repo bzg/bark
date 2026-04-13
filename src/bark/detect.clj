@@ -235,4 +235,4 @@
                          (filter #(and (common/patch-file? (:attachment/filename %))
                                        (:attachment/data %)))
                          (mapv #(patch-entity (:attachment/filename %) :attachment (:attachment/data %))))]
-    (into (or inline []) att-patches)))
+    (into (vec inline) att-patches)))
