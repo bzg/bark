@@ -105,7 +105,7 @@
     (java.nio.file.Files/move (.toPath src) (.toPath dst)
                               (into-array java.nio.file.CopyOption
                                           [java.nio.file.StandardCopyOption/ATOMIC_MOVE]))
-    (catch java.util.concurrent.atomic.AtomicMoveNotSupportedException _
+    (catch Exception _
       (java.nio.file.Files/move (.toPath src) (.toPath dst)
                                 (into-array java.nio.file.CopyOption
                                             [java.nio.file.StandardCopyOption/REPLACE_EXISTING])))))
