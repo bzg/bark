@@ -40,6 +40,9 @@
  :watermark/id           {:db/valueType :db.type/string
                           :db/unique    :db.unique/identity}
  :watermark/imap-uid     {:db/valueType :db.type/long}
+ :watermark/seen-ids     {:db/valueType   :db.type/string
+                          :db/cardinality :db.cardinality/many}
+ :watermark/maildir-init {:db/valueType :db.type/boolean}
 
  ;; --- Reports (defined by bark-digest) ---
  ;;

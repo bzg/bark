@@ -39,6 +39,31 @@
         (d/q '[:find [?id ...] :where [_ :email/id ?id]]
              (d/db conn))))
 
+(defn seen-maildir-ids
+  "Return the set of Maildir ids recorded as seen (first-run baseline)."
+  [conn]
+  (into #{}
+        (d/q '[:find [?id ...]
+               :where [?e :watermark/id "default"]
+                      [?e :watermark/seen-ids ?id]]
+             (d/db conn))))
+
+(defn mark-ids-seen!
+  "Record Maildir ids as seen on the watermark entity so they are
+  excluded from future incremental diffs."
+  [conn ids]
+  (d/transact! conn [{:watermark/id "default"
+                      :watermark/seen-ids (set ids)}]))
+
+(defn maildir-init-done? [conn]
+  (true? (d/q '[:find ?v .
+                :where [?e :watermark/id "default"]
+                       [?e :watermark/maildir-init ?v]]
+              (d/db conn))))
+
+(defn set-maildir-init-done! [conn]
+  (d/transact! conn [{:watermark/id "default" :watermark/maildir-init true}]))
+
 ;; ---------------------------------------------------------------------------
 ;; Constants
 ;; ---------------------------------------------------------------------------
