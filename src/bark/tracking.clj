@@ -1,3 +1,7 @@
+;; Copyright (c) 2026 Bastien Guerry <bzg@gnu.org>
+;; SPDX-License-Identifier: EPL-2.0
+;; License-Filename: LICENSES/EPL-2.0.txt
+
 (ns bark.tracking
   "Change-tracking helpers for incremental export.
   Separated from bark.common so that common stays datalevin-free."

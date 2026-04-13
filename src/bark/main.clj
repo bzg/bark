@@ -214,25 +214,48 @@
 
 (defn- catch-up-maildir!
   "Maildir incremental fetch: diff list-ids against known :email/id in DB.
-  On first run (no known ids), uses mailseq/messages with fetch-opts
-  to honour :limit/:since, just like the IMAP path."
+  On first run (maildir-init not yet done), uses mailseq/messages with
+  fetch-opts to honour :limit/:since, then records all pre-existing ids
+  as seen.  The init flag is set last so a crash mid-first-run safely
+  retries (store-and-process! is idempotent for already-stored emails)."
   [src db-conn folder fetch-opts source-map sources ingest-opts]
-  (let [known (ingest/known-email-ids db-conn)
-        msgs  (if (empty? known)
-                (first-run-messages src folder fetch-opts)
-                (let [all-ids (mailseq/list-ids src folder)
-                      new-ids (remove known all-ids)]
-                  (when (seq new-ids)
-                    (mailseq/by-ids src folder (vec new-ids)))))]
-    (if (empty? msgs)
-      (log/info "No new messages in Maildir")
-      (do (log/info "Fetched" (count msgs) "new messages from Maildir")
-          (doseq [msg msgs
-                  :while (not (shutting-down?))]
-            (try
-              (store-and-process! db-conn source-map sources msg ingest-opts)
-              (catch Exception e
-                (log/error e "Failed to process id:" (:id msg)))))))))
+  (let [init-done? (ingest/maildir-init-done? db-conn)
+        all-ids    (mailseq/list-ids src folder)]
+    (if init-done?
+      ;; Incremental run: diff against stored emails + seen baseline
+      (let [known   (into (ingest/known-email-ids db-conn)
+                          (ingest/seen-maildir-ids db-conn))
+            new-ids (remove known all-ids)]
+        (if (empty? new-ids)
+          (log/info "No new messages in Maildir")
+          (let [msgs (mailseq/by-ids src folder (vec new-ids))]
+            (log/info "Fetched" (count msgs) "new messages from Maildir")
+            (doseq [msg msgs
+                    :while (not (shutting-down?))]
+              (try
+                (store-and-process! db-conn source-map sources msg ingest-opts)
+                (catch Exception e
+                  (log/error e "Failed to process id:" (:id msg))))))))
+      ;; First run (or retry after crash): fetch limited set, then seal baseline
+      (let [msgs (first-run-messages src folder fetch-opts)]
+        (if (empty? msgs)
+          (log/info "No new messages in Maildir")
+          (do (log/info "Fetched" (count msgs) "messages from Maildir (first run)")
+              (doseq [msg msgs
+                      :while (not (shutting-down?))]
+                (try
+                  (store-and-process! db-conn source-map sources msg ingest-opts)
+                  (catch Exception e
+                    (log/error e "Failed to process id:" (:id msg)))))))
+        ;; Record all pre-existing ids not yet stored, then flag init done.
+        ;; If we crash before this point, the next run retries the first-run
+        ;; path — store-and-process! skips already-stored emails harmlessly.
+        (let [stored (ingest/known-email-ids db-conn)
+              unseen (remove stored all-ids)]
+          (when (seq unseen)
+            (log/info "Marking" (count unseen) "pre-existing Maildir ids as seen")
+            (ingest/mark-ids-seen! db-conn unseen)))
+        (ingest/set-maildir-init-done! db-conn)))))
 
 (defn catch-up-fetch!
   "Fetch messages missed while the process was down.
