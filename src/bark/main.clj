@@ -179,35 +179,59 @@
 ;; Catch-up fetch (store+process per email)
 ;; ---------------------------------------------------------------------------
 
+(defn- catch-up-imap!
+  "IMAP incremental fetch: use UID watermark to fetch only new messages."
+  [src db-conn folder fetch-opts source-map sources ingest-opts]
+  (let [watermark (ingest/max-imap-uid db-conn)
+        msgs (if (zero? watermark)
+               (let [{:keys [limit since]} fetch-opts]
+                 (if since
+                   (log/info "First run — fetching messages since" since)
+                   (log/info "First run — fetching last" limit "messages"))
+                 (mailseq/messages src folder
+                                  (merge {:attachments? true} fetch-opts)))
+               (do (log/info "Resuming — fetching UIDs >" watermark)
+                   (mailseq/by-id-range src folder
+                                        (str (inc watermark)) nil)))]
+    (log/info "Fetched" (count msgs) "messages")
+    (when (and (seq msgs) (not (shutting-down?)))
+      (let [safe-ids (reduce (fn [acc msg]
+                               (try
+                                 (let [result (store-and-process! db-conn source-map sources msg ingest-opts)]
+                                   (if (and (not= :retry result) (:uid msg))
+                                     (conj acc (:uid msg))
+                                     acc))
+                                 (catch Exception e
+                                   (log/error e "Failed to process id:" (:id msg))
+                                   acc)))
+                             #{} msgs)]
+        (advance-watermark! db-conn msgs safe-ids)))))
+
+(defn- catch-up-maildir!
+  "Maildir incremental fetch: diff list-ids against known :email/id in DB."
+  [src db-conn folder source-map sources ingest-opts]
+  (let [all-ids  (mailseq/list-ids src folder)
+        known    (ingest/known-email-ids db-conn)
+        new-ids  (filterv (complement known) all-ids)]
+    (if (empty? new-ids)
+      (log/info "No new messages in Maildir")
+      (let [msgs (mailseq/by-ids src folder new-ids)]
+        (log/info "Fetched" (count msgs) "new messages from Maildir")
+        (when-not (shutting-down?)
+          (doseq [msg msgs]
+            (try
+              (store-and-process! db-conn source-map sources msg ingest-opts)
+              (catch Exception e
+                (log/error e "Failed to process id:" (:id msg))))))))))
+
 (defn catch-up-fetch!
   "Fetch messages missed while the process was down.
-  Each message is stored and processed atomically."
-  [src db-conn folder fetch-opts source-map sources ingest-opts]
+  Dispatches to IMAP (watermark) or Maildir (id diff) strategy."
+  [src db-conn folder fetch-opts source-map sources ingest-opts mailbox-type]
   (when-not (shutting-down?)
-    (let [watermark (ingest/max-imap-uid db-conn)
-          msgs (if (zero? watermark)
-                 (let [{:keys [limit since]} fetch-opts]
-                   (if since
-                     (log/info "First run — fetching messages since" since)
-                     (log/info "First run — fetching last" limit "messages"))
-                   (mailseq/messages src folder
-                                    (merge {:attachments? true} fetch-opts)))
-                 (do (log/info "Resuming — fetching ids >" watermark)
-                     (mailseq/by-id-range src folder
-                                          (str (inc watermark)) nil)))]
-      (log/info "Fetched" (count msgs) "messages")
-      (when (and (seq msgs) (not (shutting-down?)))
-        (let [safe-ids (reduce (fn [acc msg]
-                                 (try
-                                   (let [result (store-and-process! db-conn source-map sources msg ingest-opts)]
-                                     (if (and (not= :retry result) (:uid msg))
-                                       (conj acc (:uid msg))
-                                       acc))
-                                   (catch Exception e
-                                     (log/error e "Failed to process id:" (:id msg))
-                                     acc)))
-                               #{} msgs)]
-          (advance-watermark! db-conn msgs safe-ids))))))
+    (case mailbox-type
+      :imap    (catch-up-imap! src db-conn folder fetch-opts source-map sources ingest-opts)
+      :maildir (catch-up-maildir! src db-conn folder source-map sources ingest-opts))))
 
 ;; ---------------------------------------------------------------------------
 ;; Mail source connection
@@ -276,6 +300,7 @@
                                    "Subject:" (:subject msg))
                          (try
                            (let [result (store-and-process! db-conn source-map sources msg ingest-opts)]
+                             ;; Advance IMAP watermark when applicable
                              (when (and (not= :retry result) (:uid msg))
                                (ingest/save-imap-uid! db-conn (:uid msg))))
                            (catch Exception e
@@ -289,9 +314,10 @@
   "Run watch with automatic reconnection and exponential backoff.
   Reloads config.edn on each reconnect so changes take effect."
   [mailbox-cfg db-conn ingest-cfg config-path]
-  (let [folder      (or (:folder mailbox-cfg) "INBOX")
-        fetch-opts  (parse-initial-fetch (or (:initial-fetch ingest-cfg) 50))
-        ingest-opts (select-keys ingest-cfg [:max-size :max-attachment-size])]
+  (let [folder       (or (:folder mailbox-cfg) "INBOX")
+        mailbox-type (:type mailbox-cfg)
+        fetch-opts   (parse-initial-fetch (or (:initial-fetch ingest-cfg) 50))
+        ingest-opts  (select-keys ingest-cfg [:max-size :max-attachment-size])]
     (loop [backoff-ms 1000
            last-expire-ms 0]
       (when-not (shutting-down?)
@@ -307,7 +333,7 @@
               (let [new-expire-ms
                     (try
                       (log/info "Mailbox connected, folder:" folder)
-                      (catch-up-fetch! src db-conn folder fetch-opts source-map sources ingest-opts)
+                      (catch-up-fetch! src db-conn folder fetch-opts source-map sources ingest-opts mailbox-type)
                       (let [ts (maybe-expire! db-conn source-map last-expire-ms)]
                         (when-not (shutting-down?)
                           (start-watch! src db-conn folder source-map sources ingest-opts))
@@ -330,18 +356,19 @@
 (defn- batch-run!
   "Single-pass mode (default): connect, fetch new messages, expire, exit."
   [mailbox-cfg db-conn ingest-cfg config-path]
-  (let [folder      (or (:folder mailbox-cfg) "INBOX")
-        fetch-opts  (parse-initial-fetch (or (:initial-fetch ingest-cfg) 50))
-        ingest-opts (select-keys ingest-cfg [:max-size :max-attachment-size])
-        config      (or (common/load-config config-path) {})
-        source-map  (common/build-source-map config)
-        sources     (or (:sources config) [])
-        src         (open-mailbox mailbox-cfg)]
+  (let [folder       (or (:folder mailbox-cfg) "INBOX")
+        mailbox-type (:type mailbox-cfg)
+        fetch-opts   (parse-initial-fetch (or (:initial-fetch ingest-cfg) 50))
+        ingest-opts  (select-keys ingest-cfg [:max-size :max-attachment-size])
+        config       (or (common/load-config config-path) {})
+        source-map   (common/build-source-map config)
+        sources      (or (:sources config) [])
+        src          (open-mailbox mailbox-cfg)]
     (when-not src
       (log/error "Mailbox connection failed.")
       (System/exit 1))
     (try
-      (catch-up-fetch! src db-conn folder fetch-opts source-map sources ingest-opts)
+      (catch-up-fetch! src db-conn folder fetch-opts source-map sources ingest-opts mailbox-type)
       (expire/expire-reports! db-conn source-map)
       (finally
         (try (mailseq/close src)

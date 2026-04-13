@@ -37,6 +37,13 @@
 (defn save-imap-uid! [conn imap-uid]
   (d/transact! conn [{:watermark/id "default" :watermark/imap-uid imap-uid}]))
 
+(defn known-email-ids
+  "Return the set of all :email/id values stored in the DB."
+  [conn]
+  (into #{}
+        (d/q '[:find [?id ...] :where [_ :email/id ?id]]
+             (d/db conn))))
+
 ;; ---------------------------------------------------------------------------
 ;; Constants
 ;; ---------------------------------------------------------------------------
