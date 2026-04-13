@@ -164,17 +164,19 @@ bb export html --theme none                                 # no theme
 
 See =config.edn.example=. The configuration has three main sections:
 
-** IMAP connection (=:imap=)
+** Mail source (=:mailbox=)
 
-Single IMAP connection shared by all sources.
+Single mail source (IMAP or Maildir) shared by all sources.
 
-| Field         | Required | Description                        |
-|---------------+----------+------------------------------------|
-| =:host=         | yes      | IMAP server hostname               |
-| =:user=         | yes      | IMAP login username                |
-| =:password=     | ​*        | IMAP password (* or =:oauth2-token=) |
-| =:oauth2-token= | ​*        | OAuth2 token (* or =:password=)      |
-| =:folder=       | yes      | IMAP folder (usually ="INBOX"=)      |
+| Field         | Required     | Description                        |
+|---------------+--------------+------------------------------------|
+| =:type=         | yes          | =:imap= or =:maildir=                  |
+| =:host=         | IMAP only    | IMAP server hostname               |
+| =:user=         | IMAP only    | IMAP login username                |
+| =:password=     | IMAP *       | IMAP password (* or =:oauth2-token=) |
+| =:oauth2-token= | IMAP *       | OAuth2 token (* or =:password=)      |
+| =:path=         | Maildir only | Root path of the Maildir           |
+| =:folder=       | no           | Folder name (default: ="INBOX"=)     |
 
 ** Ingest settings (=:ingest=)
 
@@ -240,9 +242,9 @@ since the beginning of time" (the usual default for a fresh deploy).
 ** Example config
 
 #+begin_src clojure
-{:imap  {:host "imap.example.com" :port 993 :ssl true
-         :user "imap-login@example.com" :password "secret"
-         :folder "INBOX"}
+{:mailbox {:type :imap :host "imap.example.com" :port 993 :ssl true
+           :user "imap-login@example.com" :password "secret"
+           :folder "INBOX"}
  :sources [{:name "public-list"
             :list "bugs.example.org"
             ;; First entry = lead maintainer.

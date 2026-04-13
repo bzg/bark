@@ -25,9 +25,9 @@
   (when message-id
     (some? (d/entid (d/db conn) [:email/message-id message-id]))))
 
-(defn- imap-uid-exists? [conn imap-uid]
-  (when imap-uid
-    (some? (d/entid (d/db conn) [:email/imap-uid imap-uid]))))
+(defn- email-id-exists? [conn id]
+  (when id
+    (some? (d/entid (d/db conn) [:email/id id]))))
 
 (defn max-imap-uid [conn]
   (or (d/q '[:find ?uid . :where [?e :watermark/id "default"] [?e :watermark/imap-uid ?uid]]
@@ -86,14 +86,14 @@
 ;; ---------------------------------------------------------------------------
 
 (defn email->txdata
-  "Convert a fetch-imap message map to Datalevin transaction data.
+  "Convert a mailseq message map to Datalevin transaction data.
   No source is stamped here — that is resolved at digest time from headers.
   `opts` may contain :max-attachment-size to override the default (1 MB)."
   ([msg] (email->txdata msg {}))
   ([msg opts]
   (let [max-att-size (or (:max-attachment-size opts)
                          default-max-attachment-size)
-        imap-uid    (:uid msg)
+        id          (:id msg)
         body        (:body msg)
         text        (:text body)
         html-body   (:html body)
@@ -142,7 +142,7 @@
              :email/content-type (:content-type msg)
              :email/ingested-at  (Date.)}
 
-      imap-uid               (assoc :email/imap-uid imap-uid)
+      id                     (assoc :email/id id)
 
       (:address from)      (assoc :email/from-address (:address from))
       (:name from)         (assoc :email/from-name (:name from))
@@ -176,24 +176,24 @@
   ([conn msg] (store-email! conn msg {}))
   ([conn msg opts]
   (let [message-id (:message-id msg)
-        imap-uid   (:uid msg)]
+        id         (:id msg)]
     (cond
       (nil? message-id)
-      (do (log/warn "Skipping email with nil Message-ID, UID:" imap-uid) false)
+      (do (log/warn "Skipping email with nil Message-ID, id:" id) false)
 
       (message-id-exists? conn message-id)
       (do (log/debug "Skipping already stored Message-ID:" message-id) false)
 
-      (imap-uid-exists? conn imap-uid)
-      (do (log/warn "Skipping UID collision:" imap-uid
-                    "— different Message-ID but UID already stored")
+      (email-id-exists? conn id)
+      (do (log/warn "Skipping id collision:" id
+                    "— different Message-ID but id already stored")
           false)
 
       :else
       (let [txdata (email->txdata msg opts)]
         (try
           (d/transact! conn [txdata])
-          (log/info "Stored email UID:" imap-uid
+          (log/info "Stored email id:" id
                     "Subject:" (truncate (:email/subject txdata) 60))
           true
           (catch Exception e
