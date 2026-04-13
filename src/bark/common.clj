@@ -385,8 +385,7 @@
 (defn resolve-commands-map [source-cfg]
   (let [global (:global-commands source-cfg)
         local  (:commands source-cfg)
-        extract-words (fn [m]
-                        (update-vals m (fn [v] (:words (normalize-command-entry v)))))]
+        extract-words #(update-vals % (comp :words normalize-command-entry))]
     (cond-> default-commands
       global (merge (extract-words global))
       local  (merge (extract-words local)))))
@@ -481,12 +480,9 @@
         global-tf       (:topics-filter config)]
     (into {}
           (keep (fn [src]
-                 (let [stype (source-type src)]
-                   (when-not stype
-                     (log/warn "Source has no :list, :alias, or :to key — skipping:" (:name src)))
-                   (when stype
-                     [(:name src)
-                      (merge {:source-type stype}
+                 (if-let [stype (source-type src)]
+                   [(:name src)
+                    (merge {:source-type stype}
                            (select-keys src [:list :alias :to :commands :labels :notifications
                                              :archive-format-string :list-archive :base-url
                                              :maintainers :awaiting-delay])
@@ -499,7 +495,8 @@
                             :report-types (when-let [rt (or (:report-types src) global-rt)]
                                             (set (map keyword rt)))
                             :expiry (or (:expiry src) global-expiry)
-                            :topics-filter (or (:topics-filter src) global-tf)})]))))
+                            :topics-filter (or (:topics-filter src) global-tf)})]
+                   (log/warn "Source has no :list, :alias, or :to key — skipping:" (:name src)))))
           (:sources config))))
 
 ;; ---------------------------------------------------------------------------
@@ -620,6 +617,19 @@
     (flag-like? v) (do (log/warn "Flag" a "followed by flag" v "— missing value?") :flag-as-value)
     :else          :ok))
 
+(def ^:private valued-flags
+  "Map of flag names to [opt-key transform-fn]. Flags that share
+  short and long forms map both names to the same entry."
+  {"-o" [:out-file identity] "--output" [:out-file identity]
+   "-n" [:source-name identity] "--source" [:source-name identity]
+   "--json" [:json-file identity] "--dir" [:out-dir identity]
+   "--theme" [:theme identity]
+   "-p" [:min-priority parse-long] "--min-priority" [:min-priority parse-long]
+   "-s" [:min-status parse-long] "--min-status" [:min-status parse-long]
+   "--page-size" [:page-size parse-long]
+   "--closed-retention" [:closed-retention identity]
+   "--topics-filter" [:topics-filter identity]})
+
 (defn parse-cli-args
   "Parse common CLI flags into a map.
   Recognises: -o/--output, -n/--source, -p/--min-priority, -s/--min-status,
@@ -631,48 +641,13 @@
   (loop [opts {} [a & [v & r :as more]] args]
     (cond
       (nil? a)                        opts
-      (#{"--force"} a)                (recur (assoc opts :force-all? true) more)
-      (#{"--only-open"} a)            (recur (assoc opts :only-open? true) more)
-      (#{"-o" "--output"} a)          (case (check-flag-value a v)
-                                        :ok             (recur (assoc opts :out-file v) r)
-                                        :flag-as-value  (recur opts more)
-                                        :missing        opts)
-      (#{"-n" "--source"} a)          (case (check-flag-value a v)
-                                        :ok             (recur (assoc opts :source-name v) r)
-                                        :flag-as-value  (recur opts more)
-                                        :missing        opts)
-      (#{"--json"} a)                 (case (check-flag-value a v)
-                                        :ok             (recur (assoc opts :json-file v) r)
-                                        :flag-as-value  (recur opts more)
-                                        :missing        opts)
-      (#{"--dir"} a)                  (case (check-flag-value a v)
-                                        :ok             (recur (assoc opts :out-dir v) r)
-                                        :flag-as-value  (recur opts more)
-                                        :missing        opts)
-      (#{"--theme"} a)                (case (check-flag-value a v)
-                                        :ok             (recur (assoc opts :theme v) r)
-                                        :flag-as-value  (recur opts more)
-                                        :missing        opts)
-      (#{"-p" "--min-priority"} a)    (case (check-flag-value a v)
-                                        :ok             (recur (assoc opts :min-priority (parse-long v)) r)
-                                        :flag-as-value  (recur opts more)
-                                        :missing        opts)
-      (#{"-s" "--min-status"} a)      (case (check-flag-value a v)
-                                        :ok             (recur (assoc opts :min-status (parse-long v)) r)
-                                        :flag-as-value  (recur opts more)
-                                        :missing        opts)
-      (#{"--page-size"} a)             (case (check-flag-value a v)
-                                        :ok             (recur (assoc opts :page-size (parse-long v)) r)
-                                        :flag-as-value  (recur opts more)
-                                        :missing        opts)
-      (#{"--closed-retention"} a)           (case (check-flag-value a v)
-                                        :ok             (recur (assoc opts :closed-retention v) r)
-                                        :flag-as-value  (recur opts more)
-                                        :missing        opts)
-      (#{"--topics-filter"} a)         (case (check-flag-value a v)
-                                        :ok             (recur (assoc opts :topics-filter v) r)
-                                        :flag-as-value  (recur opts more)
-                                        :missing        opts)
+      (= "--force" a)                 (recur (assoc opts :force-all? true) more)
+      (= "--only-open" a)             (recur (assoc opts :only-open? true) more)
+      (contains? valued-flags a)      (let [[k xf] (valued-flags a)]
+                                        (case (check-flag-value a v)
+                                          :ok            (recur (assoc opts k (xf v)) r)
+                                          :flag-as-value (recur opts more)
+                                          :missing       opts))
       (not (:format opts))            (recur (assoc opts :format a) more)
       :else                           (do (when (flag-like? a)
                                                 (log/debug "Ignoring unrecognized flag:" a))
