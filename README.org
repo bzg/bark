@@ -113,16 +113,18 @@ All source code lives under =src/bark/=:
 
 Read-only bb scripts live under =scripts/=:
 
-| Script              | Role                                                  |
-|---------------------+-------------------------------------------------------|
-| =bark-common.clj=     | Shared utilities (bb)                                 |
-| =bark-export.clj=     | Report export (JSON, RSS, Org, patches, events, text) |
-| =bark-notify.clj=     | Notification emails                                   |
-| =bark-index.clj=      | HTML index page generation                            |
-| =bark-stats.clj=      | Statistics and data page generation                   |
-| =bark-docs.clj=       | Documentation page generation                         |
-| =bark-html.clj=       | HTML template helpers                                 |
-| =validate-config.clj= | Config validation                                     |
+| Script                | Role                                                  |
+|-----------------------+-------------------------------------------------------|
+| =bark-common.clj=       | Shared utilities (bb)                                 |
+| =bark-export.clj=       | Report export (JSON, RSS, Org, patches, events, text) |
+| =bark-notify.clj=       | Notification emails                                   |
+| =bark-index.clj=        | HTML index page generation                            |
+| =bark-stats.clj=        | Statistics and data page generation                   |
+| =bark-docs.clj=         | Documentation page generation                         |
+| =bark-html.clj=         | HTML template helpers                                 |
+| =bark-maintenance.clj=  | Orphan email purge                                    |
+| =bark-email-test.clj=   | SMTP configuration test                               |
+| =validate-config.clj=   | Config validation                                     |
 
 * bb tasks
 
@@ -213,6 +215,7 @@ one of the three type keys:
 | =:export-reports=        | no       | Restrict exported types, e.g. =#{:bug :patch :request}=                |
 | =:topics-filter=         | no       | Only export reports with matching topics, e.g. =["event"]=             |
 | =:expiry=                | no       | Auto-close delays in days per type                                   |
+| =:notifications=         | no       | ={:enable false}= silences notifications for this source               |
 | =:awaiting-delay=        | no       | Duration before "awaiting reply" flag, e.g. ="14d"= (default: 14 days) |
 
 All state-changing actions (commands, role controls) must be sent

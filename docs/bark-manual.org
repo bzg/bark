@@ -702,9 +702,9 @@ The search field has a minimal syntax:
 
 * Notifications
 
-BARK can send periodic email notifications to admins and maintainers
-with a summary of open reports. Notifications are never sent to
-regular users.
+BARK can send periodic email notifications to maintainers with a
+summary of open reports. Notifications are never sent to regular
+users.
 
 Notifications require SMTP configuration (see [[#config][Config]]) and are sent via
 =bb notify=, typically from a cron job. Use =bb notify --dry-run= to
@@ -714,9 +714,9 @@ unacked & unowned bugs/patches/requests by anyone.
 
 ** (Un)subscribing
 
-Admins and maintainers are subscribed by default when the daemon runs
-for the first time. To unsubscribe, send an email to the BARK inbox
-with this body:
+Maintainers are subscribed by default when the daemon runs for the
+first time. To unsubscribe, send an email to the BARK inbox with this
+body:
 
 #+begin_example
 Notify: off
@@ -761,9 +761,7 @@ validate it.
 ** Minimal example
 
 #+begin_src edn
-{:admin "admin@example.com"
-
- :mailbox {:type     :imap
+{:mailbox {:type     :imap
            :host     "imap.example.com"
            :port     993
            :ssl      true
@@ -773,9 +771,9 @@ validate it.
 
  :db {:path "data/bark-db"}
 
- :sources [{:name       "my-list"
-            :list       "my-list.example.org"
-            :admin      "lead@example.org"}]}
+ :sources [{:name        "my-list"
+            :list        "my-list.example.org"
+            :maintainers [{:email "lead@example.org"}]}]}
 #+end_src
 
 ** Source types and matching
@@ -797,29 +795,28 @@ Emails that don't match any source are not stored.
 
 ** Source options
 
-| Key                    | Description                                                                  |
-|------------------------+------------------------------------------------------------------------------|
-| =:name=                  | Source identifier (required)                                                 |
-| =:list= / =:alias= / =:to=   | Exactly one (determines source type and header to match)                     |
-| =:admin=                 | Admin email for this source (required)                                       |
-| =:list-archive=          | URL of the list archive (shown in HTML reports)                              |
-| =:archive-format-string= | URL template for message-ids (=%s= is replaced), used when the                 |
-|                        | =Archived-At= header is absent                                                 |
-| =:base-url=              | Base URL where this source's public directory is served                      |
-| =:labels=                | Per-source label overrides (see [[#customising-subject-labels][customising subject labels]])                  |
-| =:commands=              | Per-source command overrides (see [[#customising-commands][customising commands]])                      |
-| =:maintainers=           | Initial maintainers, e.g. =[{:email "dev@example.org" :since "2025-01-01"}]=   |
-| =:report-types=          | Restrict detected types, e.g. =#{:bug :patch}=                                 |
-| =:export-formats=        | Output formats, e.g. =["json" "rss"]=  (default: =["json" "org" "rss"]=)         |
-| =:export-reports=        | Restrict exported types, e.g. =#{:bug :patch :request}=                        |
-| =:expiry=                | Auto-close rules per report type (see below)                                 |
-| =:notifications=         | ={:enabled false}= to silence notifications for this source (default: enabled) |
-| =:awaiting-delay=        | Duration before flagging "awaiting reply", e.g. ="14d"= (default: 14 days)     |
+| Key                    | Description                                                                 |
+|------------------------+-----------------------------------------------------------------------------|
+| =:name=                  | Source identifier (required)                                                |
+| =:list= / =:alias= / =:to=   | Exactly one (determines source type and header to match)                    |
+| =:maintainers=           | Initial maintainers, e.g. =[{:email "dev@example.org" :since "2025-01-01"}]=  |
+|                        | The first entry is the lead maintainer (see [[#managing-roles-and-permissions][Managing roles and permissions]]) |
+| =:list-archive=          | URL of the list archive (shown in HTML reports)                             |
+| =:archive-format-string= | URL template for message-ids (=%s= is replaced), used when the                |
+|                        | =Archived-At= header is absent                                                |
+| =:base-url=              | Base URL where this source's public directory is served                     |
+| =:labels=                | Per-source label overrides (see [[#customising-subject-labels][customising subject labels]])                 |
+| =:commands=              | Per-source command overrides (see [[#customising-commands][customising commands]])                     |
+| =:report-types=          | Restrict detected types, e.g. =#{:bug :patch}=                                |
+| =:export-formats=        | Output formats, e.g. =["json" "rss"]=  (default: =["json" "org" "rss"]=)        |
+| =:export-reports=        | Restrict exported types, e.g. =#{:bug :patch :request}=                       |
+| =:expiry=                | Auto-close rules per report type (see below)                                |
+| =:notifications=         | ={:enable false}= to silence notifications for this source (default: enabled) |
+| =:awaiting-delay=        | Duration before flagging "awaiting reply", e.g. ="14d"= (default: 14 days)    |
 
 The =:since= date on a maintainer entry restricts their privileges to
 emails dated on or after that date.  Omit =:since= for immediate
-effect on all emails.  Note: the admin is NOT automatically a
-maintainer.
+effect on all emails.
 
 ** Report expiry
 
@@ -904,7 +901,7 @@ with =:max-attachment-size= in the =:ingest= config section.
 #+end_src
 
 - =:orphan-retention= — keep orphan emails (not referenced by any report,
-  not from a maintainer or admin) for this long, then delete.  Accepts a
+  not from a maintainer) for this long, then delete.  Accepts a
   duration string ("90d") or an ISO date ("2025-01-01").  Default: =90=
   days.  Run with =bb maintenance= (daemon must be stopped).
 
@@ -927,7 +924,7 @@ with =:max-attachment-size= in the =:ingest= config section.
           :level    :warn
           :max-size "10MB"
           :backlog  5
-          :email    {:to    "admin@example.com"
+          :email    {:to    "ops@example.com"
                      :level :error}}
 #+end_src
 
@@ -938,24 +935,24 @@ configured.
 
 All tasks are run via [[https://babashka.org/][Babashka]]:
 
-| Task                            | Description                                           |
-|---------------------------------+-------------------------------------------------------|
-| =bb export all=                   | Export all formats for all sources                    |
-| =bb export html=                  | Export HTML pages only                                |
-| =bb export json=                  | Export JSON feeds only                                |
-| =bb export rss=                   | Export RSS feeds only                                 |
-| =bb export org=                   | Export Org feeds only                                 |
-| =bb export stats=                 | Export stats pages only                               |
-| =bb export --page-size 100=       | Paginate HTML table (100 reports/page)                |
-| =bb export --closed-retention 1y= | Keep only reports closed within the last year         |
-| =bb export --only-open=           | Also export =-open= files (all-open.json, etc.)         |
-| =bb export root=                  | Regenerate top-level =index.html= only                  |
-| =bb notify=                       | Send notification emails                              |
-| =bb notify --dry-run=             | Preview notifications without sending                 |
-| =bb maintenance=                  | Show orphan emails (add =--delete= to purge)            |
-| =bb clean=                        | Remove all generated files (=public/=, =classes/=, =docs/=) |
-| =bb test-config=                  | Validate =config.edn=                                   |
-| =bb test-smtp=                    | Test SMTP configuration (=--to addr=, =--dry-run=)        |
+| Task                            | Description                                        |
+|---------------------------------+----------------------------------------------------|
+| =bb export all=                   | Export all formats for all sources                 |
+| =bb export html=                  | Export HTML pages only                             |
+| =bb export json=                  | Export JSON feeds only                             |
+| =bb export rss=                   | Export RSS feeds only                              |
+| =bb export org=                   | Export Org feeds only                              |
+| =bb export stats=                 | Export stats pages only                            |
+| =bb export --page-size 100=       | Paginate HTML table (100 reports/page)             |
+| =bb export --closed-retention 1y= | Keep only reports closed within the last year      |
+| =bb export --only-open=           | Also export =-open= files (all-open.json, etc.)      |
+| =bb export root=                  | Regenerate top-level =index.html= only               |
+| =bb notify=                       | Send notification emails                           |
+| =bb notify --dry-run=             | Preview notifications without sending              |
+| =bb maintenance=                  | Show orphan emails (add =--delete= to purge)         |
+| =bb clean=                        | Remove all files in =public/= (preserves =.org= files) |
+| =bb test-config=                  | Validate =config.edn=                                |
+| =bb test-smtp=                    | Test SMTP configuration (=--to addr=, =--dry-run=)     |
 
 Export accepts flags: =-n <source>= (restrict to one source), =-p <N>=
 (minimum priority), =-s <N>= (minimum status).
@@ -1031,15 +1028,15 @@ Later, the fix lands:
 
 ** Role management
 
-The admin adds a new maintainer (via the list):
+Any maintainer adds a new maintainer (via the list):
 
-: From: admin@project.org
+: From: eve@project.org
 : To: bugs-list@project.org
 : Subject: Role update
-: 
+:
 : Add maintainer: newdev@project.org
 
-Only the admin can =Remove maintainer:=.
+Only the lead maintainer can =Remove maintainer:=.
 
 ** Automatic expiry and override
 
