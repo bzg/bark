@@ -152,7 +152,7 @@
           :skip)
 
       :else
-      (if-let [src-name (digest/pre-classify-source (d/db db-conn) source-map sources msg)]
+      (if-let [src-name (digest/pre-classify-source (d/db db-conn) sources msg)]
         (let [lookup     [:email/message-id mid]
               store-opts (if max-attachment-size
                            {:max-attachment-size max-attachment-size}

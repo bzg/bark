@@ -53,7 +53,7 @@
 (declare load-datalevin-pod! get-header slugify mid-hash email-body-text
          ensure-set format-date format-date-iso report-priority report-status
          report-descendant-count all-reports report-pull-pattern attachment-pull-pattern
-         parse-cli-args load-config build-source-map bark-schema bark-format
+         parse-cli-args parse-cutoff-date load-config build-source-map bark-schema bark-format
          fetch-attachment-data get-tenures tenures-snapshot
          get-last-modified changed-source-types-since
          set-theme! resolve-css-theme votes-by-report vote-counts
@@ -128,20 +128,6 @@
 ;; --closed-retention: resolve a date or duration to a cutoff java.util.Date.
 ;; Reports closed before that date are excluded from export.
 ;; ---------------------------------------------------------------------------
-
-(defn- resolve-closed-retention-date
-  "Turn a --closed-retention value (ISO date or duration like \"1y\", \"6m\")
-  into a java.util.Date cutoff.  Returns nil on invalid input."
-  [v]
-  (when v
-    (if (re-matches #"\d{4}-\d{2}-\d{2}" v)
-      ;; ISO date
-      (try (.parse (java.text.SimpleDateFormat. "yyyy-MM-dd") v)
-           (catch Exception _ nil))
-      ;; Duration string → days before today
-      (when-let [days (parse-delay v)]
-        (java.util.Date. (- (System/currentTimeMillis)
-                            (* days 24 60 60 1000)))))))
 
 (defn- drop-old-closed
   "Remove reports closed before `cutoff-date`."
@@ -1311,7 +1297,7 @@
                                                db))
                         effective-ps    (or page-size (:page-size config))
                         cli-tf          (resolve-topics-filter topics-filter)
-                        drop-cutoff     (resolve-closed-retention-date
+                        drop-cutoff     (parse-cutoff-date
                                          (or closed-retention (:closed-retention config)))
                         _               (when cli-tf
                                           (log/info "CLI topics filter:" (str/join ", " cli-tf)))

@@ -12,15 +12,6 @@
             [bark.tracking :as tracking]))
 
 ;; ---------------------------------------------------------------------------
-;; Pure re-exports (canonical entry points; implementations live in common)
-;; ---------------------------------------------------------------------------
-
-(def maintainer?         common/maintainer?)
-(def lead-maintainer      common/lead-maintainer)
-(def lead-maintainer?     common/lead-maintainer?)
-(def active-tenures       common/active-tenures)
-
-;; ---------------------------------------------------------------------------
 ;; Tenure queries
 ;; ---------------------------------------------------------------------------
 
@@ -120,7 +111,7 @@
   are recorded as `:insufficient-scope` failures (audience `:maintainers`)
   when `failure-ctx` is provided."
   [conn tenures source-name addresses email-date failure-ctx]
-  (let [lead (lead-maintainer tenures)
+  (let [lead (common/lead-maintainer tenures)
         db   (d/db conn)]
     (->> addresses
          (keep (fn [addr]
@@ -152,8 +143,8 @@
   other notified maintainer) sees them in the next digest."
   [conn tenures source-name from-addr body-text email-date]
   (let [controls    (parse-role-controls body-text)
-        is-maint    (maintainer? tenures from-addr)
-        is-lead     (lead-maintainer? tenures from-addr)
+        is-maint    (common/maintainer? tenures from-addr)
+        is-lead     (common/lead-maintainer? tenures from-addr)
         failure-ctx (when (and from-addr source-name)
                       {:source     source-name
                        :from-addr  from-addr
@@ -226,7 +217,7 @@
   (str source-name ":" (str/lower-case email)))
 
 (defn ensure-notify-defaults! [conn source-name tenures]
-  (let [emails (distinct (keep :email (active-tenures tenures)))]
+  (let [emails (distinct (keep :email (common/active-tenures tenures)))]
     (doseq [email emails]
       (let [k (notify-key source-name email)]
         (when-not (d/entid (d/db conn) [:notify/key k])
@@ -247,7 +238,7 @@
   would leave no trace at all."
   [conn roles source-name from-addr body-text email-date]
   (when-let [[_ params-str] (re-find notify-pattern (or body-text ""))]
-    (if (maintainer? roles from-addr)
+    (if (common/maintainer? roles from-addr)
       (let [params (parse-notify-params params-str)
             k      (notify-key source-name from-addr)
             txn    (cond-> {:notify/key    k
@@ -285,5 +276,5 @@
   All other report types are allowed (source-match gate already filtered)."
   [roles from-addr report-info email _source-cfg]
   (if (announcement-types (:type report-info))
-    (maintainer? roles from-addr (:email/date-sent email))
+    (common/maintainer? roles from-addr (:email/date-sent email))
     true))
