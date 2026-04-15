@@ -26,7 +26,7 @@
          '[clojure.java.io :as io])
 
 ;; Forward-declared for clj-kondo (provided at runtime by load-file below).
-(declare load-datalevin-pod! parse-delay days-between ensure-set
+(declare load-datalevin-pod! parse-delay parse-cutoff-date days-between ensure-set
          load-config build-source-map bark-schema get-tenures format-date)
 
 (load-file "scripts/bark-common.clj")
@@ -98,14 +98,8 @@
   (let [protected   (report-referenced-eids db)
         maintainers (maintainer-addresses db config source-map)
         retention   (get-in config [:maintenance :orphan-retention])
-        cutoff-date (if-let [v (when (string? retention) retention)]
-                      (if (re-matches #"\d{4}-\d{2}-\d{2}" v)
-                        (try (.parse (java.text.SimpleDateFormat. "yyyy-MM-dd") v)
-                             (catch Exception _ (java.util.Date. (- (System/currentTimeMillis) (* 90 24 60 60 1000)))))
-                        (let [days (or (parse-delay v) 90)]
-                          (java.util.Date. (- (System/currentTimeMillis) (* days 24 60 60 1000)))))
-                      ;; Default: 90 days
-                      (java.util.Date. (- (System/currentTimeMillis) (* 90 24 60 60 1000))))
+        cutoff-date (or (parse-cutoff-date retention)
+                        (java.util.Date. (- (System/currentTimeMillis) (* 90 24 60 60 1000))))
         emails      (all-emails db)]
     (log/info "Total emails in DB:" (count emails))
     (log/info "Protected by reports:" (count protected))

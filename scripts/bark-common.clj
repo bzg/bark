@@ -9,7 +9,8 @@
 (require 'bark.common)
 (refer 'bark.common :only '[bark-format bark-schema slugify mid-hash
                             email-body-text ensure-set format-date format-date-iso
-                            days-between parse-delay get-header source-type
+                            days-between parse-delay parse-cutoff-date
+                            get-header source-type
                             default-labels default-commands
                             resolve-labels-map resolve-commands-map
                             active-tenures lead-maintainer lead-maintainer?
@@ -71,10 +72,6 @@
             (dpull db bark.common/tenure-pull-pattern %))
           eids)))
 
-(defn- iso-date-fmt ^java.text.SimpleDateFormat []
-  (doto (java.text.SimpleDateFormat. "yyyy-MM-dd")
-    (.setTimeZone (java.util.TimeZone/getTimeZone "UTC"))))
-
 (defn tenures-snapshot
   "Return a serialization-friendly view of all tenures for a source,
   suitable for embedding in JSON/EDN exports. Each entry has:
@@ -86,20 +83,18 @@
   The list is sorted active-first (by :from asc, nil first), then closed
   tenures by :to desc — matching how the HTML docs render them."
   [tenures]
-  (let [lead    (lead-maintainer tenures)
-        fmt     (iso-date-fmt)
-        fmt-iso (fn [^java.util.Date d] (when d (.format fmt d)))
-        sort-k  (fn [{:keys [from to]}]
-                  [(if to 1 0)
-                   (if to
-                     (- (.getTime ^java.util.Date to))
-                     (if-let [^java.util.Date f from] (.getTime f) 0))])]
+  (let [lead   (lead-maintainer tenures)
+        sort-k (fn [{:keys [from to]}]
+                 [(if to 1 0)
+                  (if to
+                    (- (.getTime ^java.util.Date to))
+                    (if-let [^java.util.Date f from] (.getTime f) 0))])]
     (->> tenures
          (sort-by sort-k)
          (mapv (fn [{:keys [email from to order]}]
                  (cond-> {:email email
-                          :from  (fmt-iso from)
-                          :to    (fmt-iso to)
+                          :from  (format-date-iso from)
+                          :to    (format-date-iso to)
                           :lead? (and (nil? to) (= email lead))}
                    order (assoc :order order)))))))
 

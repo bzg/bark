@@ -267,42 +267,38 @@
 
 (defn- classify-email-source
   "Shared source classification logic. Works on any headers (raw map or edn string).
-  Returns [delivery src-name irt-src hdr-src]."
+  Returns {:delivery :src-name :irt-src :hdr-src}."
   [db sources headers in-reply-to]
-  (let [delivery (common/classify-delivery headers)
-        ;; 1. In-Reply-To inheritance
-        irt-src  (source-from-in-reply-to db in-reply-to)
-        ;; 2. Normal header-based match
-        hdr-src  (when-not irt-src
-                   (common/classify-source headers sources))]
-    [delivery (or irt-src hdr-src) irt-src hdr-src]))
+  (let [irt-src (source-from-in-reply-to db in-reply-to)
+        hdr-src (when-not irt-src (common/classify-source headers sources))]
+    {:delivery (common/classify-delivery headers)
+     :src-name (or irt-src hdr-src)
+     :irt-src  irt-src
+     :hdr-src  hdr-src}))
 
 (defn pre-classify-source
   "Pre-storage source classification on a raw mailseq msg.
   Returns source-name or nil. When nil the email should not be stored."
-  [db _source-map sources msg]
+  [db sources msg]
   (let [headers (:headers msg)
-        irt     (common/extract-in-reply-to headers)
-        [_delivery src-name] (classify-email-source db sources headers irt)]
-    src-name))
+        irt     (common/extract-in-reply-to headers)]
+    (:src-name (classify-email-source db sources headers irt))))
 
 (defn- resolve-email-source!
   "Classify the email's source and persist to DB.
   For live emails (pre-classified by store-and-process!) the source is already
   set; for test emails this runs the full classification."
-  [conn email sources _source-map]
+  [conn email sources]
   (let [eid      (:db/id email)
         mid      (:email/message-id email)
         hdrs     (:email/headers-edn email)
         existing (:email/source email)]
     (if existing
-      ;; Already classified (live path via store-and-process!)
       (let [delivery (common/classify-delivery hdrs)]
         [existing email delivery])
-      ;; Not yet classified (test path — process-email! called directly)
       (let [irt (:email/in-reply-to email)
-            [delivery src-name irt-src hdr-src] (classify-email-source
-                                                  (d/db conn) sources hdrs irt)]
+            {:keys [delivery src-name irt-src hdr-src]}
+            (classify-email-source (d/db conn) sources hdrs irt)]
         (when (and irt-src hdr-src (not= irt-src hdr-src))
           (log/warn "Source mismatch for" mid
                     "— In-Reply-To says" irt-src
@@ -478,7 +474,7 @@
   (let [message-id (:email/message-id email)
         eid        (:db/id email)
         from-addr  (:email/from-address email)
-        [source-name email delivery] (resolve-email-source! conn email sources source-map)]
+        [source-name email delivery] (resolve-email-source! conn email sources)]
     (if-not source-name
       (log/debug "No matching source for" message-id "— skipping")
       (let [source-cfg   (get source-map source-name)

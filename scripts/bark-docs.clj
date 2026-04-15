@@ -20,7 +20,7 @@
 ;; Forward-declared for clj-kondo (provided at runtime by load-file calls below).
 (declare default-labels default-commands
          resolve-labels-map resolve-commands-map
-         parse-cli-args load-config build-source-map
+         parse-cli-args load-config build-source-map format-date-iso
          load-datalevin-pod! bark-schema get-tenures lead-maintainer
          pico-cdn resolved-theme set-theme! bark-description footer-css bark-footer wrap-js
          spit-html theme-toggle-btn theme-toggle-js nav-bar org-inline-links)
@@ -420,12 +420,6 @@
         (str/replace ">" "&gt;")
         (str/replace "\"" "&quot;"))))
 
-(defn- fmt-iso [^java.util.Date d]
-  (when d
-    (let [f (doto (java.text.SimpleDateFormat. "yyyy-MM-dd")
-              (.setTimeZone (java.util.TimeZone/getTimeZone "UTC")))]
-      (.format f d))))
-
 (defn build-maintainers-html
   "Build an HTML section listing all maintainer tenures (active and closed),
   with :from/:to dates when known. The lead maintainer is highlighted.
@@ -448,11 +442,11 @@
                                escaped (html-escape display)
                                range   (cond
                                          (and from to)
-                                         (str " <small>(" (fmt-iso from) " → " (fmt-iso to) ")</small>")
+                                         (str " <small>(" (format-date-iso from) " → " (format-date-iso to) ")</small>")
                                          from
-                                         (str " <small>(since " (fmt-iso from) ")</small>")
+                                         (str " <small>(since " (format-date-iso from) ")</small>")
                                          to
-                                         (str " <small>(until " (fmt-iso to) ")</small>")
+                                         (str " <small>(until " (format-date-iso to) ")</small>")
                                          :else "")
                                badge   (when (and (nil? to) (= email lead))
                                          " <small><em>(lead)</em></small>")]

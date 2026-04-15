@@ -184,6 +184,17 @@
     (try (.parse (java.text.SimpleDateFormat. "yyyy-MM-dd") s)
          (catch Exception _ nil))))
 
+(defn parse-cutoff-date
+  "Resolve a retention value to a java.util.Date cutoff in the past.
+  Accepts an ISO date (\"2024-01-01\") or a duration string (\"90d\", \"6m\")
+  relative to now. Returns nil when the value is not a string or unparseable."
+  [v]
+  (when (string? v)
+    (or (parse-iso-date v)
+        (when-let [days (parse-delay v)]
+          (Date. (- (System/currentTimeMillis)
+                    (* (long days) 24 60 60 1000)))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Header utilities
 ;; ---------------------------------------------------------------------------
