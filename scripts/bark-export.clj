@@ -966,12 +966,6 @@
   (or (get-in source-map [source-name :export-formats])
       default-export-formats))
 
-(defn- resolve-export-reports
-  "Return the set of report type keywords to export for a source,
-  or nil (meaning all types)."
-  [source-name source-map]
-  (get-in source-map [source-name :export-reports]))
-
 (defn- resolve-source-topics-filter
   "Return the topics filter for a source: CLI override > per-source > global.
   Returns a set of lower-cased topic strings, or nil (meaning no filter)."
@@ -1295,10 +1289,9 @@
                                                  [?v :vote/email  ?e]
                                                  [?e :email/message-id ?emid]]
                                                db))
-                        effective-ps    (or page-size (:page-size config))
+                        effective-ps    page-size
                         cli-tf          (resolve-topics-filter topics-filter)
-                        drop-cutoff     (parse-cutoff-date
-                                         (or closed-retention (:closed-retention config)))
+                        drop-cutoff     (parse-cutoff-date closed-retention)
                         _               (when cli-tf
                                           (log/info "CLI topics filter:" (str/join ", " cli-tf)))
                         _               (when drop-cutoff
@@ -1316,8 +1309,8 @@
                               (let [reports  (filter-reports all-reps {:source       src-name
                                                                        :min-priority min-priority
                                                                        :min-status   min-status})
-                                    er       (resolve-export-reports src-name source-map)
-                                    reports  (if er (filter #(contains? er (:report/type %)) reports) reports)
+                                    rt       (get-in source-map [src-name :report-types])
+                                    reports  (if rt (filter #(contains? rt (:report/type %)) reports) reports)
                                     reports  (if drop-cutoff (drop-old-closed reports drop-cutoff) reports)
                                     src-tf   (resolve-source-topics-filter src-name source-map cli-tf)
                                     _        (when src-tf

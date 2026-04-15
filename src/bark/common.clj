@@ -378,13 +378,10 @@
     (:global-labels source-cfg) (merge (:global-labels source-cfg))
     (:labels source-cfg)        (merge (:labels source-cfg))))
 
-(defn- normalize-command-entry [v]
-  (if (vector? v) {:words v} v))
-
 (defn resolve-commands-map [source-cfg]
   (let [global (:global-commands source-cfg)
         local  (:commands source-cfg)
-        extract-words #(update-vals % (comp :words normalize-command-entry))]
+        extract-words (fn [m] (->> m (keep (fn [[k v]] (when-let [w (:words v)] [k w]))) (into {})))]
     (cond-> default-commands
       global (merge (extract-words global))
       local  (merge (extract-words local)))))
@@ -394,8 +391,7 @@
         local  (:commands source-cfg)
         extract (fn [m]
                   (reduce-kv (fn [acc k v]
-                               (let [entry (normalize-command-entry v)
-                                     overrides (select-keys entry [:scope :report-types])]
+                               (let [overrides (select-keys v [:scope :report-types])]
                                  (if (seq overrides) (assoc acc k overrides) acc)))
                              {} m))]
     (merge (when global (extract global))
@@ -473,10 +469,8 @@
         global-cmd      (:commands config)
         global-aliases  (:command-aliases config)
         global-ef       (:export-formats config)
-        global-er       (:export-reports config)
         global-expiry   (:expiry config)
-        global-rt       (:report-types config)
-        global-tf       (:topics-filter config)]
+        global-rt       (:report-types config)]
     (into {}
           (keep (fn [src]
                  (if-let [stype (source-type src)]
@@ -484,17 +478,14 @@
                     (merge {:source-type stype}
                            (select-keys src [:list :alias :to :commands :labels :notifications
                                              :archive-format-string :list-archive :base-url
-                                             :maintainers :awaiting-delay])
+                                             :maintainers :awaiting-delay :topics-filter])
                            (when global-st {:global-labels global-st})
                            (when global-cmd {:global-commands global-cmd})
                            (when global-aliases {:command-aliases global-aliases})
                            {:export-formats (set (or (:export-formats src) global-ef ["json" "org" "rss"]))
-                            :export-reports (when-let [er (or (:export-reports src) global-er)]
-                                              (set (map keyword er)))
                             :report-types (when-let [rt (or (:report-types src) global-rt)]
                                             (set (map keyword rt)))
-                            :expiry (or (:expiry src) global-expiry)
-                            :topics-filter (or (:topics-filter src) global-tf)})]
+                            :expiry (or (:expiry src) global-expiry)})]
                    (log/warn "Source has no :list, :alias, or :to key — skipping:" (:name src)))))
           (:sources config))))
 

@@ -210,9 +210,8 @@ one of the three type keys:
 | =:list-archive=          | no       | URL of the list archive (shown in HTML reports)                      |
 | =:archive-format-string= | no       | URL template for message-ids (=%s= is replaced)                        |
 | =:base-url=              | no       | Base URL where this source's public directory is served              |
-| =:report-types=          | no       | Restrict detected types, e.g. =#{:bug :patch}=                         |
+| =:report-types=          | no       | Restrict detected and exported types, e.g. =#{:bug :patch}=            |
 | =:export-formats=        | no       | Output formats (default: =["json" "org" "rss"]=)                       |
-| =:export-reports=        | no       | Restrict exported types, e.g. =#{:bug :patch :request}=                |
 | =:topics-filter=         | no       | Only export reports with matching topics, e.g. =["event"]=             |
 | =:expiry=                | no       | Auto-close delays in days per type                                   |
 | =:notifications=         | no       | ={:enable false}= silences notifications for this source               |
