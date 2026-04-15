@@ -492,7 +492,7 @@
   Returns the tx vector (may be empty)."
   [report-eid email-eid from-addr resolved current target-eid]
   (let [{:keys [set unset deadline undeadline? expiry unexpiry?
-                topic untopic? superseded-by unsuperseded?]} resolved]
+                topic untopic? unsuperseded?]} resolved]
     (-> []
         (into (build-directive-set-tx report-eid email-eid set))
         (cond-> (and (contains? set :report/closed)
