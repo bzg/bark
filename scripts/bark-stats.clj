@@ -545,48 +545,7 @@
                           "<script>\n" (wrap-js theme-toggle-js) "\n</script>\n"
                           "<script>\n" (wrap-js stats-js) "\n</script>\n")
         n-yr (reduce + (vals reports-per-type))
-        pct  #(when % (str (Math/round (* 100.0 %)) "%"))
-        ;; JS that fetches stats.json and replaces the KPI area
-        kpi-loader-js (wrap-js "
-(function() {
-  function kpi(v, l, s) {
-    return '<div class=\"kpi\"><div class=\"kpi-v\">' + v + '</div>' +
-           '<div class=\"kpi-l\">' + l + '</div>' +
-           (s ? '<div class=\"kpi-s\">' + s + '</div>' : '') + '</div>';
-  }
-  fetch('reports/stats.json')
-    .then(function(r) { return r.json(); })
-    .then(function(s) {
-      var el = document.getElementById('kpi-area');
-      if (!el) return;
-      var rpt = s['reports-per-type'] || {};
-      var nYr = Object.keys(rpt).reduce(function(a, k) { return a + rpt[k]; }, 0);
-      var ocr = s['open-closed-ratio'] || {};
-      var ttc = s['time-to-close'];
-      var er  = s['email-ratio'];
-      var openYr = s['open-last-year'] || 0;
-      var totalP = s['total-participants'];
-      var totalC = s['total-contributors'];
-      var totalM = s['total-maintainers'];
-      var pct = (ocr.open + ocr.closed) > 0
-                ? Math.round(100 * ocr.ratio) + '%' : '';
-      var h = '';
-      h += kpi(nYr, 'Reports (last year)', openYr + ' still open');
-      h += kpi(ocr.open, 'Open (all time)', pct + ' of all');
-      h += kpi(ocr.closed, 'Closed (all time)');
-      if (ttc) h += kpi(ttc['median-days'] + 'd', 'Median to close',
-                        'avg ' + ttc['avg-days'] + 'd');
-      if (er)  h += kpi(er.ratio || '\\u2014', 'Report/email ratio',
-                        er['reports-last-year'] + ' reports / ' +
-                        er['total-emails'] + ' emails');
-      if (totalP) h += kpi(totalP, 'Participants',
-                           totalC ? totalC + ' contributors' : '');
-      if (totalM) h += kpi(totalM, 'Maintainers');
-      el.innerHTML = h;
-    })
-    .catch(function(e) { console.error('Failed to load stats.json:', e); });
-})();
-")]
+        pct  #(when % (str (Math/round (* 100.0 %)) "%"))]
     (str
      "<!DOCTYPE html>\n"
      "<html lang=\"en\" data-theme=\"light\">\n"
@@ -638,7 +597,6 @@
        (chart-box "chart-cancel" (chart-cancel-breakdown closed-cancel)))
      "</div>\n"
 
-     "<script>\n" kpi-loader-js "\n</script>\n"
      "</main>\n"
      (h/html (bark-footer {:ical (.exists (io/file out-dir "events" "announcements.ics"))}))
      "</body>\n</html>\n")))
@@ -646,6 +604,41 @@
 ;; ---------------------------------------------------------------------------
 ;; Main
 ;; ---------------------------------------------------------------------------
+
+(defn- load-stats-json
+  "Read a published stats.json and reconstruct the in-memory shape produced
+  by `compute-stats`. Cheshire keywordizes every map key, so we restore string
+  keys for the two maps whose keys are report-type names (e.g. \"bug\", \"patch\")
+  rather than fixed enum tags. Without this restore, Vega data points would
+  carry keyword values like :bug instead of \"bug\"."
+  [path]
+  (-> (json/parse-string (slurp path) true)
+      (update :reports-per-type #(some-> % (update-keys name)))
+      (update :closed-cancel    #(some-> % (update-keys name)))))
+
+(defn- generate-json! [out-file source-name]
+  (let [conn (d/get-conn db-path bark-schema {:wal? false})]
+    (try
+      (let [db       (d/db conn)
+            all-reps (all-reports db)
+            reports  (if source-name
+                       (filter #(= source-name (get-in % [:report/email :email/source])) all-reps)
+                       all-reps)
+            stats    (compute-stats reports db source-name)]
+        (spit out-file (json/generate-string stats {:pretty true}))
+        (log/info "Wrote" out-file "(JSON," (count reports) "reports)"))
+      (finally
+        (try (d/close conn) (catch Exception _ nil))))))
+
+(defn- generate-html! [out-file out-dir json-file]
+  (let [json-path (or json-file (str out-dir "/reports/stats.json"))]
+    (when-not (.exists (io/file json-path))
+      (throw (ex-info (str "stats.json not found at " json-path
+                           " — generate it first with `bb stats`")
+                      {:path json-path})))
+    (let [stats (load-stats-json json-path)]
+      (spit-html out-file (render-html stats out-dir))
+      (log/info "Wrote" out-file "(HTML, from" json-path ")"))))
 
 (defn -main [& args]
   (let [opts        (parse-cli-args args)
@@ -655,22 +648,9 @@
         out-file    (or (:out-file opts)
                         (if html? "public/web/data.html" "public/reports/stats.json"))
         out-dir     (or (:out-dir opts)
-                        (.getParent (io/file out-file)))
-        conn        (d/get-conn db-path bark-schema {:wal? false})]
-    (try
-      (let [db       (d/db conn)
-            all-reps (all-reports db)
-            reports  (if source-name
-                       (filter #(= source-name (get-in % [:report/email :email/source])) all-reps)
-                       all-reps)
-            stats    (compute-stats reports db source-name)]
-        (io/make-parents out-file)
-        (if html?
-          (do (spit-html out-file (render-html stats out-dir))
-              (log/info "Wrote" out-file "(HTML," (count reports) "reports)"))
-          (do (spit out-file (json/generate-string stats {:pretty true}))
-              (log/info "Wrote" out-file "(JSON," (count reports) "reports)"))))
-      (finally
-        (try (d/close conn)
-             (catch Exception _ nil))))))
+                        (.getParent (io/file out-file)))]
+    (io/make-parents out-file)
+    (if html?
+      (generate-html! out-file out-dir (:json-file opts))
+      (generate-json! out-file source-name))))
 (apply -main *command-line-args*)
