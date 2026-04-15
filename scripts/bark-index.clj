@@ -20,7 +20,7 @@
 ;; Forward-declared for clj-kondo (provided at runtime by load-file calls below).
 (declare parse-cli-args load-config
          pico-cdn resolved-theme set-theme! bark-description bark-repo-url
-         footer-css bark-footer wrap-js spit-html
+         footer-css bark-footer wrap-js spit-html noscript-css
          theme-toggle-btn theme-toggle-js nav-bar)
 
 (load-file "scripts/bark-common.clj")

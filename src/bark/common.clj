@@ -11,7 +11,7 @@
             [taoensso.timbre :as log])
   (:import [java.text Normalizer Normalizer$Form]
            [java.security MessageDigest]
-           [java.time LocalDate ZoneId ZoneOffset]
+           [java.time ZoneId]
            [java.time.format DateTimeFormatter]
            [java.util Date]))
 

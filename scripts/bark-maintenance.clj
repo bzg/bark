@@ -106,7 +106,6 @@
                           (java.util.Date. (- (System/currentTimeMillis) (* days 24 60 60 1000)))))
                       ;; Default: 90 days
                       (java.util.Date. (- (System/currentTimeMillis) (* 90 24 60 60 1000))))
-        now         (java.util.Date.)
         emails      (all-emails db)]
     (log/info "Total emails in DB:" (count emails))
     (log/info "Protected by reports:" (count protected))
@@ -127,6 +126,7 @@
 ;; Command failures
 ;; ---------------------------------------------------------------------------
 
+#_{:clj-kondo/ignore [:redefined-var]}
 (def ^:private reason-labels
   {:unknown-target     "unknown target"
    :insufficient-scope "insufficient permissions"})

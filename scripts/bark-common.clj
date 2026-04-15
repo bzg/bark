@@ -67,9 +67,11 @@
                    :in $ ?src
                    :where [?e :maint-tenure/source ?src]]
                  db source-name)]
-    (mapv #(tenure-map (dpull db tenure-pull-pattern %)) eids)))
+    (mapv #(bark.common/tenure-map
+            (dpull db bark.common/tenure-pull-pattern %))
+          eids)))
 
-(defn- ^java.text.SimpleDateFormat iso-date-fmt []
+(defn- iso-date-fmt ^java.text.SimpleDateFormat []
   (doto (java.text.SimpleDateFormat. "yyyy-MM-dd")
     (.setTimeZone (java.util.TimeZone/getTimeZone "UTC"))))
 
