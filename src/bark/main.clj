@@ -343,21 +343,44 @@
                  {:parse-opts   {:attachments? true}
                   :heartbeat-ms (* 20 60 1000)}))
 
+;; ---------------------------------------------------------------------------
+;; Run context — shared by batch and watch modes
+;; ---------------------------------------------------------------------------
+
+(defn- run-opts
+  "Derive the per-run options from mailbox and ingest config.  Same shape
+  for batch and watch — factoring this prevents the two paths drifting."
+  [mailbox-cfg ingest-cfg]
+  {:folder       (or (:folder mailbox-cfg) "INBOX")
+   :mailbox-type (:type mailbox-cfg)
+   :fetch-opts   (parse-initial-fetch (or (:initial-fetch ingest-cfg) 50))
+   :ingest-opts  (select-keys ingest-cfg [:max-size :max-attachment-size])})
+
+(defn- load-context
+  "Re-read config and derive source-map/sources.  Called once at startup
+  in batch mode, and on every reconnect in watch mode so edits to
+  config.edn take effect without a restart."
+  [config-path]
+  (let [config (or (common/load-config config-path) {})]
+    {:source-map (common/build-source-map config)
+     :sources    (or (:sources config) [])}))
+
+(defn- close-mailbox! [src]
+  (try (mailseq/close src)
+       (catch Exception e
+         (log/debug "Mailbox close failed:" (.getMessage e)))))
+
 (defn watch-loop!
   "Run watch with automatic reconnection and exponential backoff.
   Reloads config.edn on each reconnect so changes take effect."
   [mailbox-cfg db-conn ingest-cfg config-path]
-  (let [folder       (or (:folder mailbox-cfg) "INBOX")
-        mailbox-type (:type mailbox-cfg)
-        fetch-opts   (parse-initial-fetch (or (:initial-fetch ingest-cfg) 50))
-        ingest-opts  (select-keys ingest-cfg [:max-size :max-attachment-size])]
+  (let [{:keys [folder mailbox-type fetch-opts ingest-opts]}
+        (run-opts mailbox-cfg ingest-cfg)]
     (loop [backoff-ms 1000
            last-expire-ms 0]
       (when-not (shutting-down?)
-        (let [config     (or (common/load-config config-path) {})
-              source-map (common/build-source-map config)
-              sources    (or (:sources config) [])
-              src        (open-mailbox mailbox-cfg)]
+        (let [{:keys [source-map sources]} (load-context config-path)
+              src (open-mailbox mailbox-cfg)]
           (if-not src
             (do (log/error "Mailbox connection failed, retrying in" (/ backoff-ms 1000) "s")
                 (Thread/sleep backoff-ms)
@@ -373,9 +396,7 @@
                     (catch Exception e
                       (log/error e "Watch interrupted:" (or (.getMessage e) (str (class e))))
                       last-expire-ms))]
-              (try (mailseq/close src)
-                   (catch Exception e
-                     (log/debug "Mailbox close failed:" (.getMessage e))))
+              (close-mailbox! src)
               (when-not (shutting-down?)
                 (log/debug "Watch exited, reconnecting in 1s")
                 (Thread/sleep 1000)
@@ -388,14 +409,10 @@
 (defn- batch-run!
   "Single-pass mode (default): connect, fetch new messages, expire, exit."
   [mailbox-cfg db-conn ingest-cfg config-path]
-  (let [folder       (or (:folder mailbox-cfg) "INBOX")
-        mailbox-type (:type mailbox-cfg)
-        fetch-opts   (parse-initial-fetch (or (:initial-fetch ingest-cfg) 50))
-        ingest-opts  (select-keys ingest-cfg [:max-size :max-attachment-size])
-        config       (or (common/load-config config-path) {})
-        source-map   (common/build-source-map config)
-        sources      (or (:sources config) [])
-        src          (open-mailbox mailbox-cfg)]
+  (let [{:keys [folder mailbox-type fetch-opts ingest-opts]}
+        (run-opts mailbox-cfg ingest-cfg)
+        {:keys [source-map sources]} (load-context config-path)
+        src (open-mailbox mailbox-cfg)]
     (when-not src
       (log/error "Mailbox connection failed.")
       (System/exit 1))
@@ -403,63 +420,73 @@
       (catch-up-fetch! src db-conn folder fetch-opts source-map sources ingest-opts mailbox-type)
       (expire/expire-reports! db-conn source-map)
       (finally
-        (try (mailseq/close src)
-             (catch Exception e
-               (log/debug "Mailbox close failed:" (.getMessage e))))))))
+        (close-mailbox! src)))))
+
+(defn- parse-main-args [args]
+  (let [arg-set (set args)
+        pairs   (partition 2 args)]
+    {:watch?      (arg-set "--watch")
+     :cli-fetch   (some (fn [[a b]] (when (= "--initial-fetch" a) b)) pairs)
+     :config-path (or (some (fn [[a b]] (when (= "-c" a) b)) pairs) "config.edn")}))
+
+(defn- setup-logging! [config]
+  (when-let [logging (:logging config)]
+    (blog/configure-file-logging! logging)
+    (when-let [email-cfg (:email logging)]
+      (if-let [smtp (get-in config [:notifications :smtp])]
+        (configure-email-logging! smtp email-cfg)
+        (log/warn "Logging :email configured but no :notifications :smtp found.")))))
+
+(defn- validate-mailbox-cfg! [mailbox-cfg]
+  (when-not mailbox-cfg
+    (log/error "No :mailbox key in config.edn.")
+    (System/exit 1))
+  (when-not (#{:imap :maildir} (:type mailbox-cfg))
+    (log/error "Invalid :type in :mailbox — expected :imap or :maildir, got:"
+               (pr-str (:type mailbox-cfg)))
+    (System/exit 1)))
+
+(defn- install-shutdown-hook! [db-conn]
+  (.addShutdownHook
+   (Runtime/getRuntime)
+   (Thread.
+    (fn []
+      (log/info "Shutting down...")
+      (reset! shutdown? true)
+      (Thread/sleep 1000)
+      (try (ingest/close db-conn)
+           (catch Exception e
+             (log/debug "DB close failed:" (.getMessage e))))
+      (log/info "Goodbye.")))))
+
+(defn- init-roles! [db-conn config]
+  (roles/ensure-source-roles! db-conn config)
+  (doseq [{:keys [name]} (:sources config)]
+    (roles/ensure-notify-defaults! db-conn name
+                                   (roles/get-tenures (d/db db-conn) name))))
 
 (defn -main [& args]
-  (let [;; Parse CLI args: --initial-fetch, --watch, -c config-path
-        arg-set   (set args)
-        watch?    (arg-set "--watch")
-        pairs     (partition 2 args)
-        cli-fetch (some (fn [[a b]] (when (= "--initial-fetch" a) b)) pairs)
-        config-path (or (some (fn [[a b]] (when (= "-c" a) b)) pairs) "config.edn")
-        config      (common/load-config config-path)]
+  (let [{:keys [watch? cli-fetch config-path]} (parse-main-args args)
+        config (common/load-config config-path)]
     (when (nil? config)
       (log/error "Config file not found:" config-path)
       (System/exit 1))
     (let [mailbox-cfg (:mailbox config)
           ingest-cfg  (cond-> (or (:ingest config) {})
                         cli-fetch (assoc :initial-fetch cli-fetch))]
-      (when-let [logging (:logging config)]
-        (blog/configure-file-logging! logging)
-        (when-let [email-cfg (:email logging)]
-          (if-let [smtp (get-in config [:notifications :smtp])]
-            (configure-email-logging! smtp email-cfg)
-            (log/warn "Logging :email configured but no :notifications :smtp found."))))
-      (when-not mailbox-cfg
-        (log/error "No :mailbox key in config.edn.")
-        (System/exit 1))
-      (when-not (#{:imap :maildir} (:type mailbox-cfg))
-        (log/error "Invalid :type in :mailbox — expected :imap or :maildir, got:" (pr-str (:type mailbox-cfg)))
-        (System/exit 1))
-      (let [db-cfg  (:db config)
-            db-conn (ingest/connect (:path db-cfg))
-            _       (log/info "Datalevin connected.")]
-        ;; Initialize roles from config
-        (roles/ensure-source-roles! db-conn config)
-        (doseq [{:keys [name]} (:sources config)]
-          (roles/ensure-notify-defaults! db-conn name
-                                         (roles/get-tenures (d/db db-conn) name)))
-        (.addShutdownHook
-         (Runtime/getRuntime)
-         (Thread.
-          (fn []
-            (log/info "Shutting down...")
-            (reset! shutdown? true)
-            (Thread/sleep 1000)
-            (try (ingest/close db-conn)
-                 (catch Exception e
-                   (log/debug "DB close failed:" (.getMessage e))))
-            (log/info "Goodbye."))))
+      (setup-logging! config)
+      (validate-mailbox-cfg! mailbox-cfg)
+      (let [db-conn (ingest/connect (:path (:db config)))]
+        (log/info "Datalevin connected.")
+        (init-roles! db-conn config)
+        (install-shutdown-hook! db-conn)
         (if watch?
           (watch-loop! mailbox-cfg db-conn ingest-cfg config-path)
-          (do
-            (batch-run! mailbox-cfg db-conn ingest-cfg config-path)
-            ;; Datalevin/LMDB keeps non-daemon threads alive; without an
-            ;; explicit close + System/exit the JVM hangs after batch mode.
-            (try (ingest/close db-conn)
-                 (catch Exception e
-                   (log/debug "DB close failed:" (.getMessage e))))
-            (shutdown-agents)
-            (System/exit 0)))))))
+          (do (batch-run! mailbox-cfg db-conn ingest-cfg config-path)
+              ;; Datalevin/LMDB keeps non-daemon threads alive; without an
+              ;; explicit close + System/exit the JVM hangs after batch mode.
+              (try (ingest/close db-conn)
+                   (catch Exception e
+                     (log/debug "DB close failed:" (.getMessage e))))
+              (shutdown-agents)
+              (System/exit 0)))))))

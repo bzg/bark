@@ -368,18 +368,6 @@
    :urgent    ["Urgent"]
    :important ["Important"]})
 
-;; Command IDs that accept the :setter-or-maintainer scope.
-;; These are the unset directives whose target attribute is tracked
-;; by a ref to the pose-email (either via the proxy-capable `-address`
-;; cache, or by following the ref to :email/from-address).  A drift
-;; test in `bark.common-test` asserts this set matches the set derived
-;; from the authoritative registry in `bark.commands`.
-;; Kept in bark.common (and not in bark.commands) so that the Babashka
-;; config validator can consume it without pulling in datalevin.
-(def setter-scoped-command-ids
-  #{:unacked :unowned :unclosed :unurgent :unimportant
-    :untopic :undeadline :unexpiry :unsuperseded})
-
 (def close-reasons
   {"Canceled"  :canceled
    "Cancelled" :canceled
