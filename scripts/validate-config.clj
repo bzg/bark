@@ -12,7 +12,8 @@
          '[clojure.edn :as edn]
          '[clojure.string :as str]
          '[taoensso.timbre :as log]
-         '[bark.common :as common])
+         '[bark.common :as common]
+         '[bark.commands.registry :as reg])
 
 ;; ---------------------------------------------------------------------------
 ;; Specs
@@ -134,10 +135,8 @@
 
 ;; The :setter-or-maintainer scope is only valid on the unset-style
 ;; directives whose target attribute is tracked by a ref to the
-;; pose-email.  The authoritative set lives in `bark.common` so both
-;; this Babashka script and the JVM daemon share the same definition —
-;; a drift test in `bark.common-test` asserts it matches the
-;; `bark.commands` registry.
+;; pose-email.  The authoritative set is derived from the shared
+;; `bark.commands.registry`.
 (def valid-plain-scopes  #{:user :maintainer})
 (def valid-setter-scopes #{:user :maintainer :setter-or-maintainer})
 
@@ -158,14 +157,14 @@
 (defn valid-command-value?
   "Validate a single command override. `cmd-id` is needed because
   :setter-or-maintainer is only allowed on the commands listed in
-  `common/setter-scoped-command-ids`."
+  `reg/setter-scoped-command-ids`."
   [cmd-id v]
   (or (and (vector? v) (s/valid? ::trigger-words v))
       (and (map? v)
            (every? #{:words :scope :report-types} (keys v))
            (if (:words v) (s/valid? ::trigger-words (:words v)) true)
            (if-let [sc (:scope v)]
-             (if (contains? common/setter-scoped-command-ids cmd-id)
+             (if (contains? reg/setter-scoped-command-ids cmd-id)
                (contains? valid-setter-scopes sc)
                (contains? valid-plain-scopes sc))
              true)
@@ -282,7 +281,7 @@
                        :else
                        (let [bad-keys   (remove #{:words :scope :report-types} (keys v))
                              sc         (:scope v)
-                             allows-s-o-m? (contains? common/setter-scoped-command-ids cmd-id)
+                             allows-s-o-m? (contains? reg/setter-scoped-command-ids cmd-id)
                              allowed-scopes (if allows-s-o-m?
                                               valid-setter-scopes
                                               valid-plain-scopes)]
