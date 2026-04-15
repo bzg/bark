@@ -1,10 +1,6 @@
 { ;; ---- Connection --------------------------------------------------------
 
- ;; Mail source — IMAP or Maildir.
- ;; :type is required (:imap or :maildir).
- ;; :folder is the logical folder name (default: "INBOX").
- ;;
- ;; IMAP example:
+ ;; Mail source — IMAP or Maildir. :folder defaults to "INBOX".
  :mailbox {:type     :imap
            :host     "imap.example.com"
            :port     993
@@ -12,287 +8,132 @@
            :user     "imap-login@example.com"
            :password "secret"
            :folder   "INBOX"}
- ;; Maildir example:
- ;; :mailbox {:type   :maildir
- ;;           :path   "/home/me/Mail"
- ;;           :folder "INBOX"}
+ ;; Maildir alternative:
+ ;; :mailbox {:type :maildir :path "/home/me/Mail" :folder "INBOX"}
 
- ;; Datalevin database path
  :db {:path "data/bark-db"}
 
  ;; ---- Who monitors what --------------------------------------------------
 
- :sources [
-           ;; --- Use-case 1: mailing list ---
-           ;; Use :list with the List-Id identifier (inside angle brackets),
-           ;; e.g. for a header "List-Id: Org Mode <emacs-orgmode.gnu.org>",
-           ;; use "emacs-orgmode.gnu.org" (not the full header value).
-           {:name               "public-list"
-            :list               "bugs.example.org"
+ :sources [;; Mailing list — :list matches the List-Id identifier
+           ;; (bare, no angle brackets).
+           {:name                  "public-list"
+            :list                  "bugs.example.org"
+            :base-url              "https://bark.example.org/public/public-list/"
+            :list-archive          "https://list.example.org"
+            :archive-format-string "https://list.example.org/%s"
             ;;
-            ;; Maintainers — seed initial maintainer tenures.
-            ;;
-            ;; The FIRST entry is the "lead maintainer": the only person
-            ;; allowed to remove maintainers via "Remove maintainer:"
-            ;; directives, and they cannot remove themselves. Any active
-            ;; maintainer (lead or not) can add new maintainers via
-            ;; "Add maintainer:" directives.
-            ;;
-            ;; :since restricts a maintainer to emails dated on or after
-            ;; that date (useful when adding someone retroactively without
-            ;; granting privileges on older emails). Omit :since to be
-            ;; considered maintainer "since the beginning of time" — the
-            ;; usual default for a fresh deployment.
-            ;;
-            ;; This list only seeds the DB on first startup. Afterward,
-            ;; "Add maintainer:" / "Remove maintainer:" directives mutate
-            ;; the live tenure history in the DB, which then overrides this
-            ;; list. The full tenure history is exported into meta.json
-            ;; and docs.html so a new deployment can mirror command
-            ;; processing on archived emails.
+            ;; Maintainers seed initial tenures. The FIRST entry is the
+            ;; lead (can remove others, cannot self-remove). :since
+            ;; restricts privileges to emails dated on or after that day.
+            ;; After startup, "Add/Remove maintainer:" directives mutate
+            ;; the live tenure history in the DB (exported to meta.json
+            ;; and docs.html).
             ;;
             ;; :maintainers [{:email "lead@example.org"}
             ;;               {:email "co-maint@example.org" :since "2025-06-01"}]
             ;;
-            ;; Base URL where this source's public/ directory is served (optional)
-            :base-url "https://bark.example.org/public/public-list/"
-            ;;
-            ;; URL of the list archive (informational, used in HTML reports)
-            :list-archive "https://list.example.org"
-            ;;
-            ;; When the Archived-At header is not set, build archive
-            ;; URLs from message-ids (%s is replaced by the
-            ;; message-id).
-            :archive-format-string "https://list.example.org/%s"
-            ;;
-            ;; Per-source notification toggle (optional).
-            ;; Default: true (notifications sent if :notifications is configured).
-            ;; Set to false to silence notifications for this source.
-            ;; :notifications {:enable false}
+            ;; :notifications {:enable false}  ;; silence this source
             }
 
-           ;; --- Use-case 2: email alias ---
-           ;; Use :alias when the BARK mailbox receives mail via an alias.
-           ;; Matches X-Original-To, Envelope-To, X-Envelope-To, or Delivered-To.
-           {:name               "team-alias"
-            :alias              "security@example.com"}
+           ;; Alias — matches X-Original-To / Envelope-To / X-Envelope-To
+           ;; / Delivered-To.
+           {:name  "team-alias"
+            :alias "security@example.com"}
 
-           ;; --- Use-case 3: dedicated mailbox ---
-           ;; Use :to when the BARK mailbox is the final destination.
-           ;; Matches Delivered-To.
-           {:name               "direct-inbox"
-            :to                 "inbox@example.com"}
-           ]
+           ;; Dedicated mailbox — matches Delivered-To.
+           {:name "direct-inbox"
+            :to   "inbox@example.com"}]
 
  ;; ---- Ingestion -----------------------------------------------------------
 
- ;; :initial-fetch controls how many emails to fetch on first run
- ;; (when no watermark exists yet).  Accepted values:
- ;;   integer       — fetch the N most recent emails (e.g. 50)
- ;;   "Nd/w/m/y"   — fetch emails from the last N days/weeks/months/years (e.g. "30d", "6m")
- ;;   "yyyy-MM-dd"  — fetch emails since this date (e.g. "2025-01-15")
- ;; Can be overridden via CLI: clj -M:run -- --initial-fetch 4d
- ;;
- ;; :max-size skips emails larger than N bytes (optional, no limit by default).
+ ;; :initial-fetch — first-run fetch window (integer count, "Nd/w/m/y"
+ ;; duration, or "yyyy-MM-dd" date). CLI: --initial-fetch 4d.
+ ;; :max-size / :max-attachment-size — byte limits (optional).
  :ingest {:initial-fetch 50
           ;; :max-size 1048576
-          ;; :max-attachment-size 1048576  ;; max text data extracted from attachments (default: 1 MB)
+          ;; :max-attachment-size 1048576
           }
 
  ;; ---- Customization -------------------------------------------------------
 
- ;; Global labels (optional) — override built-in subject tag lists.
- ;; Merged on top of defaults; specify only the types you want to change.
- ;; When set per source, it overrides the global value.
- ;;
- ;; Example:
- ;; :labels {:bug ["BUG" "DEFECT"]
- ;;          :request ["POLL" "FR" "TODO" "RFE"]}
- ;; Defaults:
- ;;   :bug          ["BUG"]
- ;;   :patch        ["PATCH"]
- ;;   :request      ["POLL" "FR" "TODO"]
- ;;   :announcement ["ANN" "ANNOUNCEMENT"]
- ;;   :release      ["REL" "RELEASE"]
- ;;   :change       ["CHG" "CHANGE"]
+ ;; Global labels (optional) — subject tag overrides per report type.
+ ;; Merged over defaults; per-source overrides global.
+ ;; :labels {:bug ["BUG" "DEFECT"] :request ["POLL" "FR" "TODO" "RFE"]}
+ ;; Defaults: :bug ["BUG"]  :patch ["PATCH"]  :request ["POLL" "FR" "TODO"]
+ ;;           :announcement ["ANN" "ANNOUNCEMENT"]
+ ;;           :release ["REL" "RELEASE"]  :change ["CHG" "CHANGE"]
 
- ;; Global commands (optional) — override built-in body command keywords.
- ;; Merged on top of defaults; specify only the actions you want to change.
- ;; When set per source, it overrides the global value.
+ ;; Global commands (optional) — per-command overrides. Merged over
+ ;; defaults; per-source overrides global. Each entry is a map with
+ ;; any of :words, :scope, :report-types.
  ;;
- ;; Simple form — just override trigger words:
- ;; :commands {:closed ["Canceled" "Fixed" "Resolved" "Wontfix"]
- ;;            :acked  ["Approved" "Reviewed" "LGTM"]}
+ ;; :commands {:closed   {:words ["Canceled" "Fixed" "Wontfix"]}
+ ;;            :acked    {:words ["Approved" "LGTM"] :scope :maintainer}
+ ;;            :deadline {:report-types #{:bug :patch :request :change}}
+ ;;            :unclosed {:scope :setter-or-maintainer}}
  ;;
- ;; Extended form — override :words, :scope, and/or :report-types:
- ;; :commands {:acked    {:words ["Approved" "LGTM"]
- ;;                       :scope :maintainer}          ;; restrict to maintainers
- ;;            :deadline {:report-types #{:bug :patch :request :change}}  ;; widen types
- ;;            :unclosed {:scope :setter-or-maintainer} ;; only the user who closed can reopen
- ;;            :closed   ["Canceled" "Fixed" "Wontfix"]}  ;; simple form still works
- ;;
- ;; :scope values:
- ;;   :user                 — anyone
- ;;   :maintainer           — maintainer only
- ;;   :setter-or-maintainer — the address that previously set the
- ;;                           attribute, or any maintainer (maintainers
- ;;                           retain full override)
- ;;
- ;; :setter-or-maintainer is ONLY valid on unset directives whose
- ;; target attribute is tracked by a ref to the pose-email:
- ;;   :unacked :unowned :unclosed :unurgent :unimportant
- ;;   :untopic :undeadline :unexpiry :unsuperseded
- ;; It is rejected elsewhere because triggers have no setter to
- ;; compare against and `-by` directives credit a third party.
- ;;
- ;; :report-types replaces the default set for that command.
- ;; Both simple and extended forms can be mixed in the same map.
- ;; These overrides apply to any command ID (triggers and directives):
- ;;   :acked :owned :closed :urgent :important
- ;;   :acked-by :owned-by :closed-by :urgent-by :important-by
- ;;   :unacked :unowned :unclosed :unurgent :unimportant
- ;;   :deadline :undeadline :expiry :unexpiry
- ;;   :topic :untopic :superseded-by :unsuperseded
- ;;
- ;; Default trigger words:
- ;;   :acked     ["Acked" "Confirmed" "Reviewed" "Approved"]
- ;;   :owned     ["Owned" "Handled" "Assigned"]
- ;;   :closed    ["Canceled" "Cancelled" "Resolved" "Applied"
- ;;               "Done" "Fixed" "Closed" "Expired"]
- ;;   :urgent    ["Urgent"]
- ;;   :important ["Important"]
+ ;; :scope — :user, :maintainer, or :setter-or-maintainer.
+ ;; Last is only valid on :un* directives whose attr is ref-tracked
+ ;; (see the manual for the full list of command IDs and defaults).
 
- ;; Supported report types (optional) — restricts which report types
- ;; are detected and created during digest.  Emails matching a disabled
- ;; type are silently ignored (they still thread as descendants).
- ;; When set per source, it overrides the global value.
- ;; Default: all types (when absent).
+ ;; Restrict detected + exported report types (optional).
+ ;; Default: all types. Per-source overrides global.
  ;; :report-types #{:bug :patch :request :announcement :release :change}
- ;;
- ;; Example — a source that only tracks bugs and patches:
- ;; {:name "kernel-patches"
- ;;  :list "lkml.org"
- ;;  :report-types #{:bug :patch}}
 
  ;; ---- Lifecycle -----------------------------------------------------------
 
- ;; Expiry rules (optional) — auto-close open reports when age and state
- ;; match configured conditions. Applies to any report type.
- ;; When set per source, it overrides the global value.
+ ;; Expiry rules (optional) — auto-close open reports per report type.
+ ;; Per-source overrides global. Each rule:
+ ;;   :inactive-after — duration, ISO date, or :deadline  [required]
+ ;;   :max-status     — 0=none, 1=acked, 2=owned, 3=acked+owned [optional]
+ ;;   :max-priority   — 0..3 (urgent+important)           [optional]
+ ;; Conjunctive. The "Expiry: <date-or-duration>" directive overrides
+ ;; these rules per report.
  ;;
- ;; Each entry maps a report type to a rule map:
- ;;   :inactive-after — duration ("30d", "6w", "3m", "1y"), ISO date ("2026-06-01"),
- ;;                     or :deadline [required]
- ;;                     Duration is measured from the last email in the thread.
- ;;                     ISO date means "expire after that fixed date".
- ;;                     :deadline means "expire when the report's deadline is past".
- ;;   :max-status     — don't expire if activity score > this (0=none, 1=acked,
- ;;                     2=owned, 3=acked+owned) [optional]
- ;;   :max-priority   — don't expire if priority > this (0-3) [optional]
- ;;
- ;; All conditions are conjunctive (all must be true to expire).
- ;; Maintainers can also set a per-report expiry date via the
- ;; "Expiry: <date-or-duration>" directive, which overrides these rules.
- ;;
- ;; Example:
  ;; :expiry {:announcement {:inactive-after "30d"}
  ;;          :release      {:inactive-after "6w"}
  ;;          :change       {:inactive-after "3m"}
- ;;          :bug          {:inactive-after "1000d"
- ;;                         :max-status 0       ;; only open, unacked, unowned
- ;;                         :max-priority 0}    ;; only non-urgent, non-important
- ;;          :request      {:inactive-after "1000d"
- ;;                         :max-status 0}}
- ;;
- ;; Command aliases (optional) — maps old command syntax to the current form.
- ;; Useful for backward compatibility when re-parsing archived emails.
- ;;
- ;; :command-aliases {"Unacked"      "Not acked"
- ;;                   "Unowned"      "Not owned"
- ;;                   "Unclosed"     "Not closed"
- ;;                   "Unurgent"     "Not urgent"
- ;;                   "Unimportant"  "Not important"
- ;;                   "Undeadline"   "No deadline"
- ;;                   "Unexpiry"     "No expiry"
- ;;                   "Unsuperseded" "Not superseded"}
+ ;;          :bug          {:inactive-after "1000d" :max-status 0 :max-priority 0}
+ ;;          :request      {:inactive-after "1000d" :max-status 0}}
 
- ;; Awaiting-reply delay (optional) — flag reports where the last
- ;; email was sent by a maintainer and no reply has been received
- ;; within this duration. Reports matching this condition are shown
- ;; with an ⌚ indicator in the HTML dashboard.
- ;; Accepts a duration ("14d", "2w", "1m").  Default: "14d".
- ;; Can be set globally or per source (per source overrides global).
+ ;; Command aliases (optional) — old syntax → current form. Useful when
+ ;; re-parsing archives after a syntax change.
+ ;; :command-aliases {"Unacked"     "Not acked"
+ ;;                   "Undeadline"  "No deadline"
+ ;;                   "Unexpiry"    "No expiry"}
+
+ ;; Awaiting-reply delay (optional) — ⌚ flag when last email is from a
+ ;; maintainer and no reply within this duration. Default: "14d".
+ ;; Global or per-source (per-source wins).
  ;; :awaiting-delay "14d"
-
- ;; Maintenance (optional) — settings for `bb maintenance`.
- ;; Run only when the JVM daemon is stopped.
- ;;   :orphan-retention — keep orphan emails for this long, then delete.
- ;;                       An orphan is an email not referenced by any report
- ;;                       and not sent by a maintainer.
- ;;                       Accepts a duration ("30d", "6w", "3m", "1y")
- ;;                       or an ISO date ("2025-01-01"). Default: 90 days.
- ;; :maintenance {:orphan-retention "90d"}
 
  ;; ---- Exports -------------------------------------------------------------
 
- ;; Global export formats (optional) — controls which per-type feed files
- ;; are generated (e.g. bugs.json, patches.xml, announcements.org).
- ;; Also controls which of reports.json/org/rss are emitted during `bb export all`.
- ;; When set per source, it overrides the global value.
- ;; Default: ["json" "org" "rss"]
+ ;; Export formats (optional) — per-type feed files generated.
+ ;; Default: ["json" "org" "rss"]. Per-source overrides global.
  ;; :export-formats ["json" "rss"]
 
- ;; Page size for HTML pagination (optional).
- ;; When set, the report table is paginated client-side with this many
- ;; reports per page. 0 or absent means no pagination (all rows visible).
- ;; CLI override: bb export --page-size 100
- ;; :page-size 100
+ ;; The following are CLI-only (bb export):
+ ;;   --page-size 100           HTML pagination (0/absent = off)
+ ;;   --closed-retention 1y     drop reports closed before the cutoff
+ ;;                             (accepts duration or ISO date)
+ ;;   --topics-filter "a,b"     overrides any per-source :topics-filter.
 
- ;; Retention of closed reports in exports (optional).
- ;; Accepts a duration ("1y", "6m", "90d") or an ISO date ("2024-01-01").
- ;; Reports closed before the resolved date are excluded from all exports.
- ;; CLI override: bb export --closed-retention 1y
- ;; :closed-retention "1y"
+ ;; Per-source topics filter (optional, vector of strings, case-insensitive):
+ ;; {:name "community" :topics-filter ["event" "meetup"]}
 
- ;; Filter exports by topic(s) (optional).
- ;; Only reports matching one of the given topics are exported.
- ;; Accepts a vector of strings (case-insensitive).
- ;; Can be set globally here or per source (per source overrides global).
- ;; CLI override: bb export --topics-filter "event,security" (overrides all)
- ;; :topics-filter ["event" "security"]
- ;;
- ;; Per-source example:
- ;; {:name "community"
- ;;  :list "community.example.org"
- ;;  :topics-filter ["event" "meetup"]}
-
- ;; Global export reports (optional) — restricts which report types are
- ;; included in all exports (JSON, RSS, Org, HTML, stats, patches).
- ;; When set per source, it overrides the global value.
- ;; Default: all types (when absent).
- ;; :export-reports #{:bug :patch :request :announcement :release :change}
-
- ;; Theme for HTML pages (optional).
- ;; Resolved in this order:
- ;;   1. https:// URL        → external <link> stylesheet
- ;;   2. file:///path         → inline <style> from local file
- ;;   3. path ending in .css  → inline <style> (relative or absolute path)
- ;;   4. bare name            → pico-themes CDN (base + bark overlay)
- ;; Set to "none" to disable theming.
- ;;
- ;; Examples:
- ;; :theme "org"                                    ;; pico-themes shortname
- ;; :theme "https://example.com/custom.css"         ;; external URL
- ;; :theme "file:///home/user/my-theme.css"         ;; local file (inline)
- ;; :theme "themes/custom.css"                      ;; relative path (inline)
- ;;
- ;; CLI override: bb export --theme org
- ;;
+ ;; Theme for HTML pages (optional). Resolution order:
+ ;;   https://...  → external <link>
+ ;;   file:///...   → inline <style> from local file
+ ;;   path.css     → inline <style> (relative/absolute path)
+ ;;   bare name    → pico-themes CDN. "none" disables theming.
+ ;; CLI: bb export --theme org
  ;; :theme "org"
 
  ;; ---- Notifications -------------------------------------------------------
 
- ;; Notification settings (optional — notifications disabled if absent)
+ ;; Optional — notifications disabled if absent.
  :notifications {:enabled false
                  :smtp {:host     "smtp.example.com"
                         :port     587
@@ -303,12 +144,11 @@
 
  ;; ---- Logging -------------------------------------------------------------
 
- ;; :logging {:file     "logs/bark.log"    ;; path to log file (optional)
- ;;           :level    :warn              ;; minimum level for file (:debug :info :warn :error)
- ;;           :max-size "10MB"             ;; rotate when file exceeds this size (default: 10MB)
- ;;           :backlog  5                  ;; number of rotated files to keep (default: 5)
- ;;           ;; Email logging — requires :notifications :smtp to be configured.
- ;;           :email    {:to    "bark@example.com"   ;; recipient address
- ;;                      :level :error}}             ;; minimum level to email (default: :error)
+ ;; :logging {:file     "logs/bark.log"    ;; optional
+ ;;           :level    :warn              ;; :debug :info :warn :error
+ ;;           :max-size "10MB"             ;; rotate threshold (default 10MB)
+ ;;           :backlog  5                  ;; rotated files kept (default 5)
+ ;;           ;; Email logging requires :notifications :smtp.
+ ;;           :email    {:to "bark@example.com" :level :error}}
 
  }

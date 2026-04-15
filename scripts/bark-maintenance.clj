@@ -14,9 +14,8 @@
 ;;   bb maintenance -n my-source     — scope to a single source
 ;;   bb maintenance --verbose        — list individual orphan message-ids
 ;;   bb maintenance --failures       — list recent command failures
-;;
-;; Config (config.edn):
-;;   :maintenance {:orphan-retention "90d"}   ;; only delete orphans older than this
+;;   bb maintenance --retention DUR  — orphan retention (default: 90d).
+;;                                     Accepts "30d", "6m", "1y" or ISO date.
 ;;
 ;; Environment:
 ;;   BARK_DB — path to db (default: ./data/bark-db)
@@ -46,6 +45,7 @@
       (= a "--verbose")      (recur (assoc opts :verbose? true) more)
       (= a "--failures")     (recur (assoc opts :failures? true) more)
       (#{"-n" "--source"} a) (if v (recur (assoc opts :source-name v) r) opts)
+      (= a "--retention")    (if v (recur (assoc opts :retention v) r) opts)
       :else                  (recur opts more))))
 
 ;; ---------------------------------------------------------------------------
@@ -94,11 +94,16 @@
 
 (defn- find-orphans
   "Returns a seq of {:eid :source :from :date :mid} for orphan emails."
-  [db config source-map {:keys [source-name]}]
+  [db config source-map {:keys [source-name retention]}]
   (let [protected   (report-referenced-eids db)
         maintainers (maintainer-addresses db config source-map)
-        retention   (get-in config [:maintenance :orphan-retention])
-        cutoff-date (or (parse-cutoff-date retention)
+        parsed      (when retention (parse-cutoff-date retention))
+        _           (when (and retention (nil? parsed))
+                      (log/error "Invalid --retention value:" (pr-str retention)
+                                 "(expected duration like \"90d\", \"6m\", \"1y\""
+                                 "or ISO date \"yyyy-MM-dd\")")
+                      (System/exit 1))
+        cutoff-date (or parsed
                         (java.util.Date. (- (System/currentTimeMillis) (* 90 24 60 60 1000))))
         emails      (all-emails db)]
     (log/info "Total emails in DB:" (count emails))

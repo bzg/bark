@@ -56,22 +56,22 @@
    {:id :unurgent    :kind :directive :action :unset :attr :report/urgent   :scope :setter-or-maintainer :syntax "Not urgent"}
    {:id :unimportant :kind :directive :action :unset :attr :report/important :scope :setter-or-maintainer :syntax "Not important"}
    ;; Deadline / topic
-   {:id :deadline    :kind :directive :action :set-deadline   :attr :report/deadline :scope :maintainer
+   {:id :deadline    :kind :directive :action :set-deadline   :attr :report/deadline :scope :user
     :syntax "Deadline" :param :date-or-duration :report-types #{:bug :patch :request}}
-   {:id :undeadline  :kind :directive :action :unset-deadline :attr :report/deadline :scope :maintainer
+   {:id :undeadline  :kind :directive :action :unset-deadline :attr :report/deadline :scope :setter-or-maintainer
     :syntax "No deadline" :report-types #{:bug :patch :request}}
-   {:id :expiry      :kind :directive :action :set-expiry   :attr :report/expiry :scope :maintainer
+   {:id :expiry      :kind :directive :action :set-expiry   :attr :report/expiry :scope :user
     :syntax "Expiry" :param :date-or-duration :report-types #{:bug :patch :request}}
-   {:id :unexpiry    :kind :directive :action :unset-expiry :attr :report/expiry :scope :maintainer
+   {:id :unexpiry    :kind :directive :action :unset-expiry :attr :report/expiry :scope :setter-or-maintainer
     :syntax "No expiry" :report-types #{:bug :patch :request}}
    {:id :topic       :kind :directive :action :set-topic :attr :report/topic :scope :user
     :syntax "Topic" :param :word}
-   {:id :untopic     :kind :directive :action :unset-topic :attr :report/topic :scope :user
+   {:id :untopic     :kind :directive :action :unset-topic :attr :report/topic :scope :setter-or-maintainer
     :syntax "No topic"}
    ;; Supersede
    {:id :superseded-by  :kind :directive :action :set-superseded :attr :report/superseded-by :scope :user
     :syntax "Superseded-by" :param :message-id}
-   {:id :unsuperseded   :kind :directive :action :unset-superseded :attr :report/superseded-by :scope :user
+   {:id :unsuperseded   :kind :directive :action :unset-superseded :attr :report/superseded-by :scope :setter-or-maintainer
     :syntax "Not superseded"}])
 
 ;; Derived indexes

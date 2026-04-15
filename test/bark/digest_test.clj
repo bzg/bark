@@ -559,16 +559,16 @@
                  (commands/detect-directives :bug "Not urgent\n")))
           (is (= [{:action :unset :attr :report/important :scope :setter-or-maintainer :id :unimportant}]
                  (commands/detect-directives :bug "Not important\n")))
-          (is (= [{:action :set-deadline :date (parse-date-iso "2026-06-15") :scope :maintainer :id :deadline}]
+          (is (= [{:action :set-deadline :date (parse-date-iso "2026-06-15") :scope :user :id :deadline}]
                  (commands/detect-directives :bug "Deadline: 2026-06-15\n")))
-          (is (= [{:action :unset-deadline :scope :maintainer :id :undeadline}]
+          (is (= [{:action :unset-deadline :scope :setter-or-maintainer :id :undeadline}]
                  (commands/detect-directives :bug "No deadline\n")))
-          (is (= [{:action :unset-topic :scope :user :id :untopic}]
+          (is (= [{:action :unset-topic :scope :setter-or-maintainer :id :untopic}]
                  (commands/detect-directives :bug "No topic\n")))
           (is (= [{:action :set-topic :topic "my-topic" :scope :user :id :topic}]
                  (commands/detect-directives :bug "Topic: my-topic\n")))
           (is (= [{:action :set :attr :report/acked :email-address "a@b.com" :scope :maintainer :id :acked-by}
-                  {:action :set-deadline :date (parse-date-iso "2026-07-01") :scope :maintainer :id :deadline}
+                  {:action :set-deadline :date (parse-date-iso "2026-07-01") :scope :user :id :deadline}
                   {:action :set-topic :topic "urgent-fix" :scope :user :id :topic}]
                  (commands/detect-directives :bug "Acked-by: a@b.com\nDeadline: 2026-07-01\nTopic: urgent-fix\n")))
           (is (= [{:action :set :attr :report/owned :email-address "x@y.com" :scope :maintainer :id :owned-by}]
@@ -579,9 +579,9 @@
           (is (= [] (commands/detect-directives :bug "Just a normal reply.\n")))
           (is (nil? (commands/detect-directives :bug nil)))
           ;; Expiry directive
-          (is (= [{:action :set-expiry :date (parse-date-iso "2026-09-01") :scope :maintainer :id :expiry}]
+          (is (= [{:action :set-expiry :date (parse-date-iso "2026-09-01") :scope :user :id :expiry}]
                  (commands/detect-directives :bug "Expiry: 2026-09-01\n")))
-          (is (= [{:action :unset-expiry :scope :maintainer :id :unexpiry}]
+          (is (= [{:action :unset-expiry :scope :setter-or-maintainer :id :unexpiry}]
                  (commands/detect-directives :bug "No expiry\n")))
           ;; "Expiry: deadline" is no longer a valid command (use :inactive-after :deadline in config)
           (is (= [] (commands/detect-directives :bug "Expiry: deadline\n")))
@@ -782,7 +782,7 @@
                  (commands/detect-directives :bug "Superseded-by: msg@example.com\n"))))
 
         (testing "detect-directives: Not superseded"
-          (is (= [{:action :unset-superseded :scope :user :id :unsuperseded}]
+          (is (= [{:action :unset-superseded :scope :setter-or-maintainer :id :unsuperseded}]
                  (commands/detect-directives :bug "Not superseded\n"))))
 
         (testing "resolve-commands: superseded-by"

@@ -227,10 +227,10 @@
       (is (not (common/lead-maintainer? tenures "other@t.org"))))))
 
 ;; ---------------------------------------------------------------------------
-;; resolve-commands-map with extended form
+;; resolve-commands-map / resolve-command-overrides
 ;; ---------------------------------------------------------------------------
 
-(deftest resolve-commands-map-extended-form
+(deftest resolve-commands-map-test
   (let [cfg {:commands {:acked {:words ["LGTM" "Approved"]
                                 :scope :maintainer}}}
         m   (common/resolve-commands-map cfg)]

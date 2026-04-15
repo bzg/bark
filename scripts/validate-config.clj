@@ -87,10 +87,9 @@
   (s/and (s/keys :req-un [:source/name]
                  :opt-un [:source/list :source/alias :source/to
                           :source/list-archive :source/commands :source/labels
-                          :source/bark-path :source/export-reports
-                          :source/report-types :source/maintainers
-                          :source/notifications :source/expiry
-                          :source/awaiting-delay])
+                          :source/bark-path :source/report-types
+                          :source/maintainers :source/notifications
+                          :source/expiry :source/awaiting-delay])
          exactly-one-source-type?))
 
 (s/def :bark/sources
@@ -140,35 +139,28 @@
 (def valid-plain-scopes  #{:user :maintainer})
 (def valid-setter-scopes #{:user :maintainer :setter-or-maintainer})
 
-;; Per-source commands (optional)
-;; Values can be vectors (word lists) or maps with
-;; :words, :scope, :report-types overrides.
+;; Per-source commands (optional).
+;; Values are maps with any of :words, :scope, :report-types (at least one).
 (s/def ::trigger-words (s/coll-of ::non-blank-string :kind vector? :min-count 1))
 (s/def ::command-scope valid-setter-scopes)
 (s/def ::command-report-types (s/coll-of valid-report-types :kind set? :min-count 1))
-(s/def ::command-entry
-  (s/or :words-only ::trigger-words
-        :extended   (s/keys :opt-un [::trigger-words ::command-scope ::command-report-types])))
-;; Normalize keys: the extended map uses :words, :scope, :report-types
-(s/def ::command-entry-map
-  (s/and map?
-         (s/keys :opt-un [:cmd/words :cmd/scope :cmd/report-types])))
 
 (defn valid-command-value?
   "Validate a single command override. `cmd-id` is needed because
   :setter-or-maintainer is only allowed on the commands listed in
   `reg/setter-scoped-command-ids`."
   [cmd-id v]
-  (or (and (vector? v) (s/valid? ::trigger-words v))
-      (and (map? v)
-           (every? #{:words :scope :report-types} (keys v))
-           (if (:words v) (s/valid? ::trigger-words (:words v)) true)
-           (if-let [sc (:scope v)]
-             (if (contains? reg/setter-scoped-command-ids cmd-id)
-               (contains? valid-setter-scopes sc)
-               (contains? valid-plain-scopes sc))
-             true)
-           (if (:report-types v) (s/valid? ::command-report-types (:report-types v)) true))))
+  (and (map? v)
+       (seq v)
+       (every? #{:words :scope :report-types} (keys v))
+       (some #{:words :scope :report-types} (keys v))
+       (if (:words v) (s/valid? ::trigger-words (:words v)) true)
+       (if-let [sc (:scope v)]
+         (if (contains? reg/setter-scoped-command-ids cmd-id)
+           (contains? valid-setter-scopes sc)
+           (contains? valid-plain-scopes sc))
+         true)
+       (if (:report-types v) (s/valid? ::command-report-types (:report-types v)) true)))
 
 (s/def ::commands-map
   (s/and (s/map-of valid-command-ids any?)
@@ -193,14 +185,8 @@
 (s/def :source/labels ::labels)
 (s/def :bark/labels ::labels)
 
-;; Export reports: set of report type keywords to include in export
-(s/def ::export-reports
-  (s/coll-of valid-report-types :kind set? :min-count 1))
-(s/def :source/export-reports ::export-reports)
-(s/def :bark/export-reports ::export-reports)
-
-;; Report types: which report types are detected during digest.
-;; Default: all types. Per-source overrides global.
+;; Report types: filters which report types are detected at ingest
+;; AND exported. Default: all types. Per-source overrides global.
 (s/def ::report-types
   (s/coll-of valid-report-types :kind set? :min-count 1))
 (s/def :source/report-types ::report-types)
@@ -243,19 +229,13 @@
 (s/def :bark/awaiting-delay (s/and ::non-blank-string #(re-matches #"\d+[dwm]" %)))
 (s/def :source/awaiting-delay :bark/awaiting-delay)
 
-;; Maintenance
-(s/def :maintenance/orphan-retention (s/or :date (s/and ::non-blank-string #(re-matches #"\d{4}-\d{2}-\d{2}" %))
-                                          :str (s/and ::non-blank-string #(re-seq #"\d+\s*[ydwm]" %))))
-(s/def :bark/maintenance (s/keys :opt-un [:maintenance/orphan-retention]))
-
 ;; Top-level config
 (s/def ::config
   (s/keys :req-un [:bark/mailbox :bark/sources :bark/db]
           :opt-un [:bark/ingest :bark/notifications :bark/labels
                    :bark/commands :bark/command-aliases
-                   :bark/export-reports :bark/report-types
-                   :bark/awaiting-delay
-                   :bark/expiry :bark/logging :bark/maintenance]))
+                   :bark/report-types :bark/awaiting-delay
+                   :bark/expiry :bark/logging]))
 
 ;; ---------------------------------------------------------------------------
 ;; Validation
@@ -272,11 +252,13 @@
                        (not (contains? valid-command-ids cmd-id))
                        [(str "unknown command id " (pr-str cmd-id))]
 
-                       (vector? v) nil
-
                        (not (map? v))
-                       [(str "expected a vector of words or an extended "
-                             "map, got " (pr-str v))]
+                       [(str "expected a map with any of :words, :scope, "
+                             ":report-types, got " (pr-str v))]
+
+                       (empty? v)
+                       [(str "expected at least one of :words, :scope, "
+                             ":report-types")]
 
                        :else
                        (let [bad-keys   (remove #{:words :scope :report-types} (keys v))
@@ -287,7 +269,7 @@
                                               valid-plain-scopes)]
                          (concat
                           (when (seq bad-keys)
-                            [(str "unknown key(s) in extended form: "
+                            [(str "unknown key(s): "
                                   (str/join ", " (map pr-str bad-keys)))])
                           (when (and sc (not (contains? allowed-scopes sc)))
                             [(str ":scope " (pr-str sc)
