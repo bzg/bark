@@ -95,3 +95,61 @@
     (is (some? (re-find loose "!Add maintainer: x@y.z")))
     (is (nil?  (re-find strict "Add maintainer: x@y.z")))
     (is (some? (re-find strict "!Add maintainer: x@y.z")))))
+
+;; ---------------------------------------------------------------------------
+;; Time-windowed trigger words
+;; ---------------------------------------------------------------------------
+
+(defn- parse-date [s]
+  (.parse (java.text.SimpleDateFormat. "yyyy-MM-dd") s))
+
+(def ^:private windowed-src
+  ;; :closed accepts "Done" only in the 2020–2026 window; "Fixed" always.
+  (commands/build-source-commands
+   {:commands {:closed {:words ["Fixed"
+                                ["Done" {:since "2020-01-01"
+                                         :until "2026-01-01"}]]}}}))
+
+(deftest windowed-word-matches-inside-window
+  (let [r (commands/detect-triggers :bug "Done.\n" windowed-src
+                                    (parse-date "2023-06-15"))]
+    (is (= true (:report/closed r)))
+    (is (= :resolved (:report/close-reason r)))))
+
+(deftest windowed-word-rejected-before-window
+  (let [r (commands/detect-triggers :bug "Done.\n" windowed-src
+                                    (parse-date "2018-06-15"))]
+    (is (nil? (:report/closed r)))))
+
+(deftest windowed-word-rejected-after-window
+  (let [r (commands/detect-triggers :bug "Done.\n" windowed-src
+                                    (parse-date "2027-06-15"))]
+    (is (nil? (:report/closed r)))))
+
+(deftest always-active-word-matches-outside-window
+  (testing "Fixed stays active before, inside and after the Done window"
+    (doseq [d ["2018-06-15" "2023-06-15" "2027-06-15"]]
+      (is (some? (:report/closed (commands/detect-triggers
+                                  :bug "Fixed.\n" windowed-src (parse-date d))))
+          d))))
+
+(deftest windowed-word-uses-first-period-when-email-date-nil
+  ;; Email-date nil should not crash; falls back to the first period
+  ;; (which excludes Done in this fixture).
+  (let [r (commands/detect-triggers :bug "Done.\n" windowed-src nil)]
+    (is (nil? (:report/closed r)))))
+
+(deftest windowed-word-honors-strict-mode
+  (let [sc (commands/build-source-commands
+            {:command-syntax :strict
+             :commands {:closed {:words ["Fixed"
+                                         ["Done" {:since "2020-01-01"}]]}}})]
+    (testing "strict requires ! even in active window"
+      (is (nil? (:report/closed (commands/detect-triggers :bug "Done.\n" sc
+                                                          (parse-date "2023-06-15"))))))
+    (testing "!Done. matches in active window"
+      (is (some? (:report/closed (commands/detect-triggers :bug "!Done.\n" sc
+                                                           (parse-date "2023-06-15"))))))
+    (testing "!Done. rejected outside window even with !"
+      (is (nil? (:report/closed (commands/detect-triggers :bug "!Done.\n" sc
+                                                          (parse-date "2019-06-15"))))))))

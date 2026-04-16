@@ -82,18 +82,49 @@
                                "for alias" (pr-str old-syntax))))
                  aliases-map)))))
 
-(defn build-source-commands [source-cfg]
-  (let [merged         (common/resolve-commands-map source-cfg)
-        strict-syntax? (= :strict (:command-syntax source-cfg))
-        compiled       (if (and (not strict-syntax?)
-                                (= merged common/default-commands))
-                         default-compiled-commands
-                         (compile-trigger-words strict-syntax? merged))]
-    {:compiled       compiled
-     :words          merged
-     :overrides      (common/resolve-command-overrides source-cfg)
+(defn- compile-period
+  "Compile one timeline period's classic commands-map into a regex
+  map, reusing the pre-compiled default set when applicable."
+  [strict-syntax? {:keys [since until commands]}]
+  (let [compiled (if (and (not strict-syntax?)
+                          (= commands common/default-commands))
+                   default-compiled-commands
+                   (compile-trigger-words strict-syntax? commands))]
+    {:since since :until until :words commands :compiled compiled}))
+
+(defn build-source-commands
+  "Return a source-commands descriptor.
+  - :timeline         vec of {:since :until :words :compiled} periods
+                      (one entry when no :words is time-windowed).
+  - :strict-syntax?   whether the source requires `!` prefixes.
+  - :overrides        per-command :scope/:report-types overrides.
+  - :directives       precompiled [cmd pattern] pairs (shared across
+                      periods — directives are not time-windowed)."
+  [source-cfg]
+  (let [strict-syntax? (= :strict (:command-syntax source-cfg))
+        timeline       (common/resolve-commands-timeline source-cfg)]
+    {:timeline       (mapv #(compile-period strict-syntax? %) timeline)
      :strict-syntax? strict-syntax?
+     :overrides      (common/resolve-command-overrides source-cfg)
      :directives     (compile-directives strict-syntax?)}))
+
+(defn- date-in-period?
+  "Half-open [since, until) predicate.  nil date falls into the first
+  unbounded-since period; nil bounds mean unbounded in that direction."
+  [^Date email-date {:keys [^Date since ^Date until]}]
+  (let [t (if email-date (.getTime email-date) Long/MIN_VALUE)
+        s (if since (.getTime since) Long/MIN_VALUE)
+        u (if until (.getTime until) Long/MAX_VALUE)]
+    (and (>= t s) (< t u))))
+
+(defn- select-period
+  "Pick the period in a source-commands timeline that covers
+  `email-date`. Falls back to the first period when email-date is
+  nil (e.g. tests that don't supply a date)."
+  [source-commands ^Date email-date]
+  (let [timeline (:timeline source-commands)]
+    (or (some #(when (date-in-period? email-date %) %) timeline)
+        (first timeline))))
 
 ;; ---------------------------------------------------------------------------
 ;; Detection (pure)
@@ -101,10 +132,7 @@
 
 (defn- detect-close-reason [closed-words body-text strict-syntax?]
   (when (seq closed-words)
-    (let [pattern (re-pattern
-                   (str "(?m)^" (common/bang-prefix strict-syntax?)
-                        "(" (str/join "|" (map #(java.util.regex.Pattern/quote %) closed-words))
-                        ")(?:" trailing-punct "|\\s|$)"))]
+    (let [pattern (apply trigger-pattern false strict-syntax? closed-words)]
       (when-let [[_ matched] (re-find pattern body-text)]
         (get common/close-reasons matched :resolved)))))
 
@@ -134,30 +162,33 @@
 (defn- match-triggers [triggers body-text]
   (into {} (keep (fn [[k p]] (when (re-find p body-text) [(keyword "report" (name k)) true]))) triggers))
 
-(defn detect-triggers [report-type body-text source-commands]
-  (when body-text
-    (let [compiled   (:compiled source-commands)
-          overrides  (:overrides source-commands)
-          strict-sx? (:strict-syntax? source-commands)
-          all-sets   (match-triggers compiled body-text)
-          ;; Pre-compute close-reason from unfiltered triggers so it survives
-          ;; any future refactoring of the filter step.
-          reason   (when (:report/closed all-sets)
-                     (detect-close-reason (get-in source-commands [:words :closed])
-                                          body-text
-                                          strict-sx?))
-          filtered (into {}
+(defn detect-triggers
+  "Detect trigger matches in `body-text`.  When `email-date` is
+  provided, the period covering that date is selected from the
+  source-commands timeline, so time-windowed words are honored."
+  ([report-type body-text source-commands]
+   (detect-triggers report-type body-text source-commands nil))
+  ([report-type body-text source-commands ^Date email-date]
+   (when body-text
+     (let [{:keys [compiled words]} (select-period source-commands email-date)
+           {:keys [overrides strict-syntax?]} source-commands
+           all-sets (match-triggers compiled body-text)
+           ;; Pre-compute close-reason from unfiltered triggers so it survives
+           ;; any future refactoring of the filter step.
+           reason   (when (:report/closed all-sets)
+                      (detect-close-reason (:closed words) body-text strict-syntax?))
+           filtered (into {}
                          (keep (fn [[attr :as entry]]
                                  (let [cmd (attr->trigger-cmd attr)
                                        rt  (or (:report-types (get overrides (:id cmd)))
                                                (:report-types cmd))]
                                    (when (or (nil? rt) (contains? rt report-type)) entry))))
-                         all-sets)
-          ;; Only attach close-reason when :report/closed survived filtering.
-          result   (cond-> filtered
-                     (and reason (:report/closed filtered))
-                     (assoc :report/close-reason reason))]
-      (when (seq result) result))))
+                          all-sets)
+           ;; Only attach close-reason when :report/closed survived filtering.
+           result   (cond-> filtered
+                      (and reason (:report/closed filtered))
+                      (assoc :report/close-reason reason))]
+       (when (seq result) result)))))
 
 (def ^:private compiled-directives-loose (compile-directives false))
 
@@ -712,7 +743,8 @@
                          :from-addr  from-addr
                          :email-date (:email/date-sent email)
                          :report-mid report-mid})
-          trig-result (-> (detect-triggers report-type body-text src-cmds)
+          trig-result (-> (detect-triggers report-type body-text src-cmds
+                                           (:email/date-sent email))
                           (filter-triggers-by-scope overrides is-maint? fail-ctx))
           strict-sx?  (:strict-syntax? src-cmds)
           aliases     (compile-directive-aliases strict-sx? (:command-aliases source-cfg))
