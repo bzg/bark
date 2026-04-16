@@ -22,15 +22,12 @@
 
 (require '[clojure.string :as str]
          '[clojure.edn :as edn]
-         '[clojure.java.io :as io])
-
-;; Forward-declared for clj-kondo (provided at runtime by load-file below).
-(declare load-datalevin-pod! parse-delay parse-cutoff-date days-between ensure-set
-         load-config build-source-map bark-schema get-tenures format-date)
-
-(load-file "scripts/bark-common.clj")
-
-(require '[taoensso.timbre :as log])
+         '[clojure.java.io :as io]
+         '[taoensso.timbre :as log]
+         '[bark.common :refer [parse-delay parse-cutoff-date
+                               load-config build-source-map
+                               bark-schema format-date]]
+         '[bark.common-bb :refer [load-datalevin-pod! dq get-tenures]])
 
 ;; ---------------------------------------------------------------------------
 ;; CLI parsing

@@ -1,27 +1,13 @@
-;; bark-common.clj — Shared utilities for bark bb scripts (read-only).
-;;
-;; Loads bark.common (pure functions) from src/ via bb.edn :paths,
-;; then adds Datalevin pod functions needed by bb scripts.
-;;
-;; Usage: (load-file "scripts/bark-common.clj")
+;; Copyright (c) 2026 Bastien Guerry <bzg@gnu.org>
+;; SPDX-License-Identifier: EPL-2.0
+;; License-Filename: LICENSES/EPL-2.0.txt
 
-;; Import pure functions from bark.common — explicit list for clj-kondo
-(require 'bark.common)
-(refer 'bark.common :only '[bark-format bark-schema slugify mid-hash
-                            email-body-text ensure-set format-date format-date-iso
-                            days-between parse-delay parse-cutoff-date
-                            get-header source-type
-                            default-labels default-commands
-                            resolve-labels-map resolve-commands-map
-                            active-tenures lead-maintainer lead-maintainer?
-                            maintainer? load-config build-source-map
-                            report-priority report-status report-descendant-count
-                            report-pull-pattern attachment-pull-pattern
-                            tenure-pull-pattern tenure-map parse-cli-args
-                            votes-by-report vote-counts
-                            ics-file? text-attachment?])
-
-(require '[taoensso.timbre :as log])
+(ns bark.common-bb
+  "Babashka-only extensions to `bark.common`: Datalevin pod bindings
+  and DB queries that run via the pod.  Scripts require this ns
+  alongside `bark.common`; there is no more `load-file` dance."
+  (:require [bark.common :as common]
+            [taoensso.timbre :as log]))
 
 (log/merge-config! {:min-level :info})
 
@@ -48,7 +34,7 @@
 (defn all-reports
   "Fetch all reports. Must be called after load-datalevin-pod!."
   [db]
-  (->> (dq (list :find (list 'pull '?r report-pull-pattern)
+  (->> (dq (list :find (list 'pull '?r common/report-pull-pattern)
                  :where ['?r :report/type '_])
            db)
        (map first)))
@@ -58,7 +44,7 @@
   Returns the attachment-pull-pattern projection, or nil."
   [db message-id]
   (when message-id
-    (dpull db attachment-pull-pattern [:report/message-id message-id])))
+    (dpull db common/attachment-pull-pattern [:report/message-id message-id])))
 
 (defn get-tenures
   "Fetch all maintainer tenures (active and closed) for `source-name`.
@@ -68,8 +54,7 @@
                    :in $ ?src
                    :where [?e :maint-tenure/source ?src]]
                  db source-name)]
-    (mapv #(bark.common/tenure-map
-            (dpull db bark.common/tenure-pull-pattern %))
+    (mapv #(common/tenure-map (dpull db common/tenure-pull-pattern %))
           eids)))
 
 (defn tenures-snapshot
@@ -83,7 +68,7 @@
   The list is sorted active-first (by :from asc, nil first), then closed
   tenures by :to desc — matching how the HTML docs render them."
   [tenures]
-  (let [lead   (lead-maintainer tenures)
+  (let [lead   (common/lead-maintainer tenures)
         sort-k (fn [{:keys [from to]}]
                  [(if to 1 0)
                   (if to
@@ -93,8 +78,8 @@
          (sort-by sort-k)
          (mapv (fn [{:keys [email from to order]}]
                  (cond-> {:email email
-                          :from  (format-date-iso from)
-                          :to    (format-date-iso to)
+                          :from  (common/format-date-iso from)
+                          :to    (common/format-date-iso to)
                           :lead? (and (nil? to) (= email lead))}
                    order (assoc :order order)))))))
 
@@ -111,9 +96,9 @@
             (update m src (fnil conj #{}) rtype))
           {}
           (dq '[:find ?src ?t
-                 :in $ ?since
-                 :where
-                 [?r :report/updated-at ?u] [(> ?u ?since)]
-                 [?r :report/type ?t]
-                 [?r :report/email ?e] [?e :email/source ?src]]
-               db since-ts)))
+                :in $ ?since
+                :where
+                [?r :report/updated-at ?u] [(> ?u ?since)]
+                [?r :report/type ?t]
+                [?r :report/email ?e] [?e :email/source ?src]]
+              db since-ts)))
