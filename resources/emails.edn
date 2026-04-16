@@ -154,7 +154,7 @@
   :email/ingested-at #inst "2026-01-02T14:00:00"
   :email/in-reply-to "<07@test.org>"
   :email/references "<07@test.org>"
-  :email/body-text  "Reviewed.\nApplied.\n"}
+  :email/body-text  "Reviewed.\nPushed.\n"}
 
  ;; =========================================================================
  ;; 11 — POLL request
@@ -240,7 +240,7 @@
   :email/ingested-at #inst "2026-01-04T14:00:00"
   :email/in-reply-to "<15@test.org>"
   :email/references "<15@test.org>"
-  :email/body-text  "Done.\n"}
+  :email/body-text  "Fixed.\n"}
 
  ;; =========================================================================
  ;; 17 — Announcement (admin only)

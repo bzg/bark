@@ -363,8 +363,8 @@
 (def default-commands
   {:acked     ["Acked" "Confirmed" "Reviewed" "Approved"]
    :owned     ["Owned" "Handled" "Assigned"]
-   :closed    ["Canceled" "Cancelled" "Resolved" "Applied"
-               "Done" "Fixed" "Closed" "Expired"]
+   :closed    ["Canceled" "Cancelled" "Resolved" "Applied" "Pushed"
+               "Fixed" "Closed" "Expired"]
    :urgent    ["Urgent"]
    :important ["Important"]})
 
