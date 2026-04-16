@@ -23,7 +23,8 @@
          parse-cli-args load-config build-source-map format-date-iso
          load-datalevin-pod! bark-schema get-tenures lead-maintainer
          pico-cdn resolved-theme set-theme! bark-description footer-css bark-footer wrap-js
-         spit-html theme-toggle-btn theme-toggle-js nav-bar org-inline-links)
+         spit-html theme-toggle-btn theme-toggle-js nav-bar
+         org-inline-links org-inline parse-org-table)
 
 (load-file "scripts/bark-common.clj")
 (load-file "scripts/bark-html.clj")
@@ -177,44 +178,14 @@
 ;; Minimal org -> HTML conversion
 ;; ---------------------------------------------------------------------------
 
-(defn- org-inline [s]
-  (-> s
-      org-inline-links
-      (str/replace #"=([^=\n\"]+)="
-                   (fn [[_ inner]]
-                     (str "<code>"
-                          (-> inner
-                              (str/replace "&" "&amp;")
-                              (str/replace "<" "&lt;")
-                              (str/replace ">" "&gt;"))
-                          "</code>")))
-      (str/replace #"(?<=\s|^)\*([^*\n]+)\*(?=[\s.,;:!?)]|$)" "<strong>$1</strong>")
-      (str/replace "\\vert" "|")))
+;; org-inline is provided by bark-html.clj (HTML-escape aware).
 
 (defn- heading-id [text]
   (-> text str/lower-case str/trim
                           (str/replace #"[^a-z0-9 -]" "")
                           (str/replace #"\s+" "-")))
 
-(defn- parse-table [lines]
-  (let [rows (->> lines
-                  (remove #(re-matches #"\s*\|[-+]+\|\s*" %))
-                  (mapv (fn [line]
-                          (->> (str/split line #"\|" -1)
-                               (drop 1) butlast
-                                        (mapv str/trim)))))]
-    (when (seq rows)
-      (let [header (first rows)
-            body   (rest rows)]
-        (str "<table>\n<thead><tr>"
-             (str/join (map #(str "<th>" (org-inline %) "</th>") header))
-             "</tr></thead>\n<tbody>\n"
-             (str/join (map (fn [r]
-                              (str "<tr>"
-                                   (str/join (map #(str "<td>" (org-inline %) "</td>") r))
-                                   "</tr>\n"))
-                            body))
-             "</tbody></table>")))))
+;; parse-org-table is provided by bark-html.clj (shared with bark-stats).
 
 (defn org->html [org-text]
   (let [lines (str/split-lines org-text)]
@@ -279,7 +250,7 @@
                              (recur (inc j) (conj tl (nth lines j)))
                              [j tl]))
                   [next-i table-lines] tlines]
-              (recur next-i (conj! acc (parse-table table-lines)) false))
+              (recur next-i (conj! acc (parse-org-table table-lines)) false))
 
             (str/blank? trimmed)
             (let [acc (if in-para? (conj! acc "</p>") acc)]

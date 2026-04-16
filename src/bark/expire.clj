@@ -110,14 +110,17 @@
 
 (defn filter-expirable
   "Given candidates and a DB snapshot, return a seq of
-  {:rid :rtype :src :report-mid} maps for reports that should expire."
+  {:rid :rtype :src :report-mid} maps for reports that should expire.
+  Skips reports already closed between the query and this filter."
   [candidates db-snap source-map now]
   (keep (fn [[rid rtype src]]
           (let [report-data (d/pull db-snap [:report/acked :report/owned
                                              :report/urgent :report/important
+                                             :report/closed
                                              :report/expiry-value :report/deadline-value
                                              :report/last-activity] rid)]
-            (when (should-expire? report-data source-map src rtype now)
+            (when (and (nil? (:report/closed report-data))
+                       (should-expire? report-data source-map src rtype now))
               {:rid rid :rtype rtype :src src
                :report-mid (:report/message-id (d/entity db-snap rid))})))
         candidates))

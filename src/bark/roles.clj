@@ -119,8 +119,7 @@
   are recorded as `:insufficient-scope` failures (audience `:maintainers`)
   when `failure-ctx` is provided."
   [conn tenures source-name addresses email-date failure-ctx]
-  (let [lead (common/lead-maintainer tenures)
-        db   (d/db conn)]
+  (let [lead (common/lead-maintainer tenures)]
     (->> addresses
          (keep (fn [addr]
                  (let [a (str/lower-case addr)]
@@ -136,7 +135,10 @@
                                    :command  (str "Remove maintainer: " a))))
                          nil)
                      :else
-                     (when-let [eid (active-tenure-eid db source-name a)]
+                     ;; Refresh the snapshot per iteration: closing one
+                     ;; tenure mutates the DB and later lookups must see
+                     ;; the updated state.
+                     (when-let [eid (active-tenure-eid (d/db conn) source-name a)]
                        (d/transact! conn [[:db/add eid :maint-tenure/to email-date]])
                        a)))))
          vec)))

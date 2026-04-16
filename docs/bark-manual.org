@@ -554,6 +554,22 @@ Set globally or per source (per-source wins):
 :command-syntax :strict
 #+end_src
 
+*** Command aliases
+
+Use =:command-aliases= to map an old syntax to the current one when
+re-parsing archived emails whose wording has since changed.  Aliases
+are global and target the canonical =directive= syntax (they do not
+apply to plain triggers):
+
+#+begin_src edn
+:command-aliases {"Unacked"      "Not acked"
+                  "Unowned"      "Not owned"
+                  "Unclosed"     "Not closed"
+                  "Undeadline"   "No deadline"
+                  "Unexpiry"     "No expiry"
+                  "Unsuperseded" "Not superseded"}
+#+end_src
+
 ** All commands
 
 /Commands/ can all be sent publicly, by users or maintainers.  In the
@@ -698,22 +714,31 @@ A web interface lets you navigate BARK reports.
 
 The search field has a minimal syntax:
 
-| Long form                   | Short | Explanation                                           |
-|-----------------------------+-------+-------------------------------------------------------|
-| from:me@example.org         | f:    | Reports from me@example.org                           |
-| acked:me@example.org        | a:    | Reports acked by me@example.org                       |
-| owned:me@example.org        | o:    | Reports owned by me@example.org                       |
-| closed:me@example.org       | c:    | Reports closed by me@example.org                      |
-| urgent:me@example.org       | u:    | Reports marked urgent by me@example.org               |
-| important:me@example.org    | i:    | Reports marked important by me@example.org            |
-| subject:match               | s:    | Reports matching subject                              |
-| topic:match                 | t:    | Reports matching topic                                |
-| priority:[0-4]              | p:    | Reports matching priority level 0 to 4                |
-| mid:<messageid>             | m:    | Report with message-id <messageid>                    |
-| date:3d..                   | d:    | Reports from 3 days ago                               |
-| date:2023-01-01..2023-12-31 | d:    | Reports from 2023-01-01 to 2023-12-31                 |
-| match1 \vert match2             |       | Reports matching "match1" or "match2"                 |
-| *                           |       | Wildcard for from/acked/owned/closed/urgent/important |
+| Long form                       | Short         | Explanation                                           |
+|---------------------------------+---------------+-------------------------------------------------------|
+| from:me@example.org             | f:            | Reports from me@example.org                           |
+| acked:me@example.org            | a:            | Reports acked by me@example.org                       |
+| owned:me@example.org            | o:            | Reports owned by me@example.org                       |
+| closed:me@example.org           | c:            | Reports closed by me@example.org                      |
+| urgent:me@example.org           | u:            | Reports marked urgent by me@example.org               |
+| important:me@example.org        | i:            | Reports marked important by me@example.org            |
+| subject:match                   | s:            | Reports matching subject                              |
+| topic:match                     | t:            | Reports matching topic                                |
+| priority:[0-4]                  | p:            | Reports matching priority level 0 to 4                |
+| mid:<messageid>                 | m:            | Report with message-id <messageid>                    |
+| date:3d..                       | d:            | Reports from the last 3 days                          |
+| date:2023-01-01..2023-12-31     | d:            | Reports from 2023-01-01 to 2023-12-31                 |
+| deadline:2026-09-01             | D:            | Reports with deadline on 2026-09-01                   |
+| deadline:2026-01-01..2026-06-30 | D:            | Reports with deadline in that range                   |
+| deadline:2m                     | D:            | Reports due between now and 2 months from now         |
+| expired:10d                     | e:            | Reports expired between now and 10 days from now      |
+| expired:2026-01-01..2026-03-31  | e:            | Reports expired in that date range                    |
+| match1 \vert match2                 |               | Reports matching "match1" or "match2"                 |
+| from:* acked:* …                | f:* a:* …     | Wildcard for from/acked/owned/closed/urgent/important |
+
+Durations are =Nd= (days), =Nw= (weeks), =Nm= (months).  For =date:=
+they look backward from today; for =deadline:= and =expired:= they
+look forward.
 
 ** The =bone= CLI tool, =gnus-bone.el= and =notmuch-bone.el=
 
@@ -795,6 +820,19 @@ validate it.
  :sources [{:name        "my-list"
             :list        "my-list.example.org"
             :maintainers [{:email "lead@example.org"}]}]}
+#+end_src
+
+BARK also reads Maildir folders.  Point =:path= at the parent
+directory that contains =cur/=, =new/= and =tmp/=; =:folder= selects
+the subfolder to read.  =--watch= on a Maildir source uses filesystem
+events (no polling).
+
+#+begin_src edn
+{:mailbox {:type   :maildir
+           :path   "/home/me/Mail"
+           :folder "INBOX"}
+ :db {:path "data/bark-db"}
+ :sources [{:name "my-list" :list "my-list.example.org"}]}
 #+end_src
 
 ** Source types and matching
@@ -916,12 +954,19 @@ with =:max-attachment-size= in the =:ingest= config section.
 
 ** Maintenance
 
-Run =bb maintenance= when the daemon is stopped.  Use =--retention=
-to override the default orphan retention (90 days):
+Run =bb maintenance= when the daemon is stopped.
 
 #+begin_src shell
-bb maintenance --retention 6m   # accepts "30d", "6m", "1y" or ISO date
-bb maintenance --delete         # actually delete orphans (default = dry-run)
+bb maintenance                  # dry run, show orphan counts
+bb maintenance --delete         # actually delete orphan emails
+bb maintenance --verbose        # list individual orphan message-ids
+bb maintenance --failures       # list recent command failures recorded
+                                # for maintainers (denied actions, bad
+                                # syntax, etc.)
+bb maintenance --retention 6m   # override default orphan retention
+                                # (90 days). Accepts "30d", "6m", "1y"
+                                # or an ISO date.
+bb maintenance -n my-source     # scope to a single source
 #+end_src
 
 An orphan email is one not referenced by any report and not sent by a
@@ -967,11 +1012,15 @@ All tasks are run via [[https://babashka.org/][Babashka]]:
 | =bb export stats=                 | Export stats pages only                            |
 | =bb export --page-size 100=       | Paginate HTML table (100 reports/page)             |
 | =bb export --closed-retention 1y= | Keep only reports closed within the last year      |
+| =bb export --topics-filter "a,b"= | Only export reports whose topic is in the list     |
 | =bb export --only-open=           | Also export =-open= files (all-open.json, etc.)      |
 | =bb export root=                  | Regenerate top-level =index.html= only               |
 | =bb notify=                       | Send notification emails                           |
 | =bb notify --dry-run=             | Preview notifications without sending              |
+| =bb notify --force=               | Ignore per-subscriber interval                     |
 | =bb maintenance=                  | Show orphan emails (add =--delete= to purge)         |
+| =bb maintenance --retention 6m=   | Override orphan retention (default 90d)            |
+| =bb maintenance --failures=       | List recent command failures                       |
 | =bb clean=                        | Remove all files in =public/= (preserves =.org= files) |
 | =bb test-config=                  | Validate =config.edn=                                |
 | =bb test-smtp=                    | Test SMTP configuration (=--to addr=, =--dry-run=)     |

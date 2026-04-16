@@ -198,11 +198,14 @@
         n           (parse-version-number new-version)]
     (when (and n (>= n 1))
       (let [versions-to-close (cond-> #{new-version}
-                                (> n 1) (conj (str "v" (dec n))))
-            db (d/db conn)]
+                                (> n 1) (conj (str "v" (dec n))))]
         (doseq [rid nearest-report-eids]
-          (let [r (d/pull db [:report/type :report/version :report/topic-value :report/closed
-                              :report/message-id] rid)]
+          ;; Refresh the snapshot per-iteration so prior transacts in
+          ;; this loop are visible to the :report/closed check below.
+          (let [r (d/pull (d/db conn)
+                          [:report/type :report/version :report/topic-value :report/closed
+                           :report/message-id]
+                          rid)]
             (when (and (= :patch (:report/type r))
                        (contains? versions-to-close (:report/version r))
                        (not (:report/closed r))

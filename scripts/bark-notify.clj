@@ -40,11 +40,18 @@
 (def ^:private last-notify-file "public/.last-notify.edn")
 
 (defn- load-last-sent
-  "Read {notify-key -> epoch-millis} from .last-notify.edn, or {}."
+  "Read {notify-key -> epoch-millis} from .last-notify.edn, or {}.
+  A corrupt file would reset every subscriber silently and re-spam
+  them, so log at warn before returning the empty default."
   []
   (let [f (io/file last-notify-file)]
     (if (.exists f)
-      (try (edn/read-string (slurp f)) (catch Exception _ {}))
+      (try (edn/read-string (slurp f))
+           (catch Exception e
+             (log/warn "Could not parse" last-notify-file
+                       "— starting from empty state.  Subscribers may be"
+                       "re-notified at the next interval." (.getMessage e))
+             {}))
       {})))
 
 (defn- save-last-sent!
@@ -64,11 +71,15 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- load-failures
-  "Read the failures file, returning a vector of failure maps."
+  "Read the failures file, returning a vector of failure maps.
+  Log on parse failure instead of swallowing silently."
   []
   (let [f (io/file "public/.failures.edn")]
     (if (.exists f)
-      (try (edn/read-string (slurp f)) (catch Exception _ []))
+      (try (edn/read-string (slurp f))
+           (catch Exception e
+             (log/warn "Could not parse public/.failures.edn:" (.getMessage e))
+             []))
       [])))
 
 (defn- failures-for-subscriber
