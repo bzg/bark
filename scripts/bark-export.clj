@@ -73,12 +73,17 @@
 (def ^:private last-export-file "public/.last-export")
 
 (defn- get-last-export
-  "Read the last export timestamp from public/.last-export, or nil."
+  "Read the last export timestamp from public/.last-export, or nil.
+  A corrupt file forces a full export on the next run — log so the
+  operator knows why."
   []
   (let [f (io/file last-export-file)]
     (when (.exists f)
       (try (java.util.Date. ^long (parse-long (str/trim (slurp f))))
-           (catch Exception _ nil)))))
+           (catch Exception e
+             (log/warn "Could not parse" last-export-file "— forcing full export."
+                       (.getMessage e))
+             nil)))))
 
 (defn- save-last-export!
   "Write the export timestamp to public/.last-export."

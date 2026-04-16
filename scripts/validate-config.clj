@@ -70,6 +70,15 @@
 (s/def :source/to :match/to)
 (s/def :source/list-archive (s/and ::non-blank-string #(re-find #"^https?://" %)))
 (s/def :source/base-url ::non-blank-string)
+(s/def :source/archive-format-string (s/and ::non-blank-string #(str/includes? % "%s")))
+
+;; Per-source export overrides
+(s/def ::export-format #{"json" "rss" "org" "html" "stats" "patches" "text" "events"})
+(s/def :source/export-formats (s/coll-of ::export-format :kind vector? :min-count 1))
+(s/def :bark/export-formats :source/export-formats)
+
+;; Per-source topics filter
+(s/def :source/topics-filter (s/coll-of ::non-blank-string :kind vector? :min-count 1))
 
 ;; Per-source notifications (optional) — override global notification gate
 (s/def :source-notif/enable boolean?)
@@ -86,10 +95,13 @@
 (s/def ::source
   (s/and (s/keys :req-un [:source/name]
                  :opt-un [:source/list :source/alias :source/to
-                          :source/list-archive :source/commands :source/labels
-                          :source/bark-path :source/report-types
+                          :source/list-archive :source/base-url
+                          :source/archive-format-string
+                          :source/commands :source/labels
+                          :source/report-types
                           :source/maintainers :source/notifications
                           :source/expiry :source/awaiting-delay
+                          :source/export-formats :source/topics-filter
                           :source/command-syntax])
          exactly-one-source-type?))
 
@@ -106,7 +118,14 @@
   (s/or :count pos-int?
         :date  (s/and string? #(re-matches #"\d{4}-\d{2}-\d{2}" %))
         :duration (s/and string? #(re-seq #"\d+\s*[ydwm]" %))))
-(s/def :bark/ingest (s/keys :opt-un [:ingest/initial-fetch]))
+(s/def :ingest/max-size pos-int?)
+(s/def :ingest/max-attachment-size pos-int?)
+(s/def :bark/ingest (s/keys :opt-un [:ingest/initial-fetch
+                                     :ingest/max-size
+                                     :ingest/max-attachment-size]))
+
+;; Theme (optional, global only)
+(s/def :bark/theme ::non-blank-string)
 
 ;; SMTP
 (s/def :smtp/host ::non-blank-string)
@@ -226,8 +245,9 @@
 (s/def :bark/logging (s/keys :opt-un [:logging/file :logging/level :logging/max-size
                                       :logging/backlog :logging/email]))
 
-;; Awaiting-reply delay
-(s/def :bark/awaiting-delay (s/and ::non-blank-string #(re-matches #"\d+[dwm]" %)))
+;; Awaiting-reply delay — same units as parse-duration-str (d/w/m/y)
+(s/def :bark/awaiting-delay
+  (s/and ::non-blank-string #(re-matches #"\d+[dwmy](?:\s+\d+[dwmy])*" %)))
 (s/def :source/awaiting-delay :bark/awaiting-delay)
 
 ;; Command syntax mode: :loose (default — ! is optional on every Bark
@@ -242,7 +262,8 @@
                    :bark/commands :bark/command-aliases
                    :bark/report-types :bark/awaiting-delay
                    :bark/expiry :bark/logging
-                   :bark/command-syntax]))
+                   :bark/command-syntax :bark/theme
+                   :bark/export-formats]))
 
 ;; ---------------------------------------------------------------------------
 ;; Validation

@@ -23,7 +23,7 @@
          pico-cdn resolved-theme set-theme! bark-description bark-repo-url footer-css
          bark-footer wrap-js spit-html theme-toggle-js bark-schema
          votes-by-report vote-counts
-         nav-bar theme-toggle-btn html-head org-inline-links)
+         nav-bar theme-toggle-btn html-head org-inline-links org-inline parse-org-table)
 
 (load-file "scripts/bark-common.clj")
 (load-file "scripts/bark-html.clj")
@@ -461,27 +461,7 @@
 ;; data.org rendering (reuses org table parser from bark-docs logic)
 ;; ---------------------------------------------------------------------------
 
-(defn- parse-data-table
-  "Parse org table lines into an HTML table string."
-  [lines]
-  (let [rows (->> lines
-                  (remove #(re-matches #"\s*\|[-+]+\|\s*" %))
-                  (mapv (fn [line]
-                          (->> (str/split line #"\|" -1)
-                               (drop 1) butlast
-                               (mapv str/trim)))))]
-    (when (seq rows)
-      (let [header (first rows)
-            body   (rest rows)]
-        (str "<table>\n<thead><tr>"
-             (str/join (map #(str "<th>" (org-inline-links %) "</th>") header))
-             "</tr></thead>\n<tbody>\n"
-             (str/join (map (fn [r]
-                              (str "<tr>"
-                                   (str/join (map #(str "<td>" (org-inline-links %) "</td>") r))
-                                   "</tr>\n"))
-                            body))
-             "</tbody></table>")))))
+;; parse-org-table is provided by bark-html.clj (shared with bark-docs).
 
 (defn- strip-dead-data-links
   "Remove individual org links [[target][label]] whose file does not exist.
@@ -525,7 +505,7 @@
                    tlines)]
     (when (seq filtered)
       (str "<h3>Available data</h3>\n"
-           (parse-data-table filtered)))))
+           (parse-org-table filtered)))))
 
 ;; ---------------------------------------------------------------------------
 ;; HTML assembly

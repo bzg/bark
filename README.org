@@ -23,10 +23,12 @@ For a more extensive documentation, please read the [[docs/bark-manual.org][BARK
 
 * How it works
 
-- *JVM* (=clojure -M:run=) --- Connects to IMAP, fetches new emails
-  since the last run, digests them into reports, applies commands and
-  roles, expires stale reports, then exits.  Use =--watch= to keep the
-  process running with IMAP IDLE.  All database writes happen here.
+- *JVM* (=clojure -M:run=) --- Connects to an IMAP server or a local
+  Maildir directory, fetches new emails since the last run, digests
+  them into reports, applies commands and roles, expires stale
+  reports, then exits.  Use =--watch= to keep the process running
+  (IMAP IDLE for IMAP, filesystem events for Maildir).  All database
+  writes happen here.
 - *bb export* --- Exports reports as JSON, RSS, Org, ICS (calendar),
   and generates HTML and stats pages. Read-only (no database writes).
 - *bb notify* --- Sends notification emails to maintainers.
@@ -135,8 +137,12 @@ bb export [json|rss|org|html|stats|patches|text|events|root|all]
        [--only-open]                      Also export -open files (all-open.json, etc.)
        [--theme THEME]                    Override CSS theme (see below)
        [--topics-filter TOPICS]           Only export matching topics (comma-separated)
+       [--page-size N]                    Paginate HTML table (N rows/page)
+       [--closed-retention DUR]           Drop reports closed before the cutoff
 bb notify [--dry-run] [--force] [--debug] Send notification emails
 bb maintenance [--delete] [--verbose] [-n source]  Purge orphan emails
+       [--retention DUR]                  Orphan retention (default 90d)
+       [--failures]                       List recent command failures
 bb test-config [path]                     Validate config.edn
 bb test-smtp [--to addr] [--dry-run]      Test SMTP configuration
 bb clean                                  Remove all files in public/

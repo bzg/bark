@@ -256,6 +256,45 @@
       (str/replace #"\[\[([^\]]+)\]\[([^\]]+)\]\]" "<a href=\"$1\">$2</a>")
       (str/replace #"\[\[([^\]]+)\]\]" "<a href=\"$1\">$1</a>")))
 
+(defn org-inline
+  "Convert a single line of inline org markup to HTML, with HTML
+  escaping applied first so `&`, `<`, `>` in user text cannot break
+  the output.  Supports [[links]], =code=, *bold* and \\vert."
+  [s]
+  (-> s
+      (str/replace "&" "&amp;")
+      (str/replace "<" "&lt;")
+      (str/replace ">" "&gt;")
+      org-inline-links
+      (str/replace #"=([^=\n\"]+)=" "<code>$1</code>")
+      (str/replace #"(?<=\s|^)\*([^*\n]+)\*(?=[\s.,;:!?)]|$)" "<strong>$1</strong>")
+      (str/replace "\\vert" "|")))
+
+(defn parse-org-table
+  "Parse a seq of org-table lines (as strings) into an HTML table.
+  Hlines (|-----+---|) are dropped; the first surviving row becomes
+  <thead>, the rest <tbody>. Each cell is passed through org-inline
+  so links, =code=, *bold* are rendered and HTML characters escaped."
+  [lines]
+  (let [rows (->> lines
+                  (remove #(re-matches #"\s*\|[-+]+\|\s*" %))
+                  (mapv (fn [line]
+                          (->> (str/split line #"\|" -1)
+                               (drop 1) butlast
+                               (mapv str/trim)))))]
+    (when (seq rows)
+      (let [header (first rows)
+            body   (rest rows)]
+        (str "<table>\n<thead><tr>"
+             (str/join (map #(str "<th>" (org-inline %) "</th>") header))
+             "</tr></thead>\n<tbody>\n"
+             (str/join (map (fn [r]
+                              (str "<tr>"
+                                   (str/join (map #(str "<td>" (org-inline %) "</td>") r))
+                                   "</tr>\n"))
+                            body))
+             "</tbody></table>")))))
+
 ;; ---------------------------------------------------------------------------
 ;; HTML tidy (optional — graceful no-op when tidy is not installed)
 ;; ---------------------------------------------------------------------------

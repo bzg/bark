@@ -82,6 +82,7 @@ Important.
 | urgent:me@example.org           | =u:=        | Reports marked urgent by me@example.org               |
 | important:me@example.org        | =i:=        | Reports marked important by me@example.org            |
 | subject:match                   | =s:=        | Reports matching subject                              |
+| topic:match                     | =t:=        | Reports matching topic                                |
 | priority:[0-4]                  | =p:=        | Reports matching priority level 0 to 4                |
 | mid:<...>                       | =m:=        | Report open with message-id <...>                     |
 | date:3d..                       | =d:=        | Reports from 3 days ago                               |
