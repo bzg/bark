@@ -81,7 +81,10 @@
   #"(?m)^(Add maintainer|Remove maintainer):\s+(.+)$")
 
 (defn- parse-addresses [s]
-  (when s (remove str/blank? (str/split (str/trim s) #"\s+"))))
+  (when s
+    (->> (str/split (str/trim s) #"\s+")
+         (remove str/blank?)
+         (filter #(re-matches #"[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+" %)))))
 
 (defn parse-role-controls [body-text]
   (when body-text

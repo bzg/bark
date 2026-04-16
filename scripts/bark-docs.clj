@@ -430,11 +430,10 @@
   (when source-name
     (let [tenures     (get-tenures db source-name)
           lead        (lead-maintainer tenures)
-          ;; Sort: active first (earliest :from), then closed by :to desc.
-          sort-key    (fn [{:keys [from to]}]
-                        [(if to 1 0)
-                         (if-let [^java.util.Date d (or to from)]
-                           (- (.getTime d)) 0)])
+          ;; Sort: lead first, then alphabetical by email (case-insensitive).
+          sort-key    (fn [{:keys [email to]}]
+                        [(if (and (nil? to) (= email lead)) 0 1)
+                         (str/lower-case (or email ""))])
           ordered     (sort-by sort-key tenures)
           entries     (mapv
                        (fn [{:keys [email from to]}]
