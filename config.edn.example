@@ -80,6 +80,17 @@
  ;;                                "Applied" "Fixed" "Closed" "Expired"]}
  ;;            :urgent    {:words ["Urgent"]}
  ;;            :important {:words ["Important"]}}
+ ;;
+ ;; A single word in :words may be time-windowed by wrapping it in a
+ ;; [word {:since ISO :until ISO}] tuple.  It only triggers on emails
+ ;; whose :email/date-sent falls inside the half-open window
+ ;; [since, until).  Either bound may be omitted (open in that
+ ;; direction).  Example — accept "Done" only for 2020 → today:
+ ;;
+ ;; :commands {:closed {:words ["Canceled" "Cancelled" "Resolved" "Pushed"
+ ;;                             "Applied" "Fixed" "Closed" "Expired"
+ ;;                             ["Done" {:since "2020-01-01"
+ ;;                                      :until "2026-04-16"}]]}}
 
  ;; Command aliases (optional) — old syntax → current form. Useful when
  ;; re-parsing archives after a syntax change.

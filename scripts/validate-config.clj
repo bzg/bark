@@ -161,7 +161,20 @@
 
 ;; Per-source commands (optional).
 ;; Values are maps with any of :words, :scope, :report-types (at least one).
-(s/def ::trigger-words (s/coll-of ::non-blank-string :kind vector? :min-count 1))
+;; Each word in :words is either a bare string (always active) or a
+;; [string {:since "yyyy-MM-dd" :until "yyyy-MM-dd"}] tuple restricting
+;; it to a half-open date window. :since/:until can be omitted.
+(s/def ::iso-date (s/and ::non-blank-string #(re-matches #"\d{4}-\d{2}-\d{2}" %)))
+(s/def ::since ::iso-date)
+(s/def ::until ::iso-date)
+(s/def ::word-window
+  (s/and (s/keys :opt-un [::since ::until])
+         (fn [{s :since u :until}]
+           (or (nil? s) (nil? u) (neg? (compare s u))))))
+(s/def ::trigger-word
+  (s/or :bare     ::non-blank-string
+        :windowed (s/tuple ::non-blank-string ::word-window)))
+(s/def ::trigger-words (s/coll-of ::trigger-word :kind vector? :min-count 1))
 (s/def ::command-scope valid-setter-scopes)
 (s/def ::command-report-types (s/coll-of valid-report-types :kind set? :min-count 1))
 

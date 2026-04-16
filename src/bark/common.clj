@@ -384,24 +384,143 @@
     (:global-labels source-cfg) (merge (:global-labels source-cfg))
     (:labels source-cfg)        (merge (:labels source-cfg))))
 
-(defn resolve-commands-map [source-cfg]
-  (let [global (:global-commands source-cfg)
-        local  (:commands source-cfg)
-        extract-words (fn [m] (->> m (keep (fn [[k v]] (when-let [w (:words v)] [k w]))) (into {})))]
-    (cond-> default-commands
-      global (merge (extract-words global))
-      local  (merge (extract-words local)))))
+(defn- word-entry
+  "Normalize a :words entry to {:word str :since Date|nil :until Date|nil}.
+  Accepts either a bare string (always active) or a [string opts-map]
+  tuple where opts may contain :since and :until (ISO yyyy-MM-dd)."
+  [entry]
+  (cond
+    (string? entry)
+    {:word entry :since nil :until nil}
+
+    (and (vector? entry) (= 2 (count entry))
+         (string? (first entry)) (map? (second entry)))
+    (let [[w opts] entry]
+      {:word w
+       :since (parse-iso-date (:since opts))
+       :until (parse-iso-date (:until opts))})
+
+    :else
+    (throw (ex-info (str "Invalid :words entry: " (pr-str entry)
+                         " (expected string or [string {:since :until}])")
+                    {:entry entry}))))
+
+(defn- extract-words-map
+  "Return {cmd-id words} for entries that carry a :words vector."
+  [commands-map]
+  (reduce-kv (fn [acc k v]
+               (if-let [w (:words v)] (assoc acc k w) acc))
+             {} commands-map))
+
+(defn- merged-raw-words
+  "Return {cmd-id [entries]} where entries may be strings or
+  [string opts] vectors. Defaults are merged in first, then global,
+  then local commands."
+  [source-cfg]
+  (merge default-commands
+         (extract-words-map (:global-commands source-cfg))
+         (extract-words-map (:commands source-cfg))))
+
+(defn resolve-commands-map
+  "Flatten the merged :words into plain strings, dropping any window
+  metadata.  Used by docs rendering and simple callers that don't
+  care about temporality."
+  [source-cfg]
+  (update-vals (merged-raw-words source-cfg)
+               #(mapv (comp :word word-entry) %)))
+
+(defn- extract-overrides-map
+  "Keep only :scope and :report-types for each command, dropping entries
+  with no override."
+  [commands-map]
+  (reduce-kv (fn [acc k v]
+               (let [overrides (select-keys v [:scope :report-types])]
+                 (if (seq overrides) (assoc acc k overrides) acc)))
+             {} commands-map))
 
 (defn resolve-command-overrides [source-cfg]
-  (let [global (:global-commands source-cfg)
-        local  (:commands source-cfg)
-        extract (fn [m]
-                  (reduce-kv (fn [acc k v]
-                               (let [overrides (select-keys v [:scope :report-types])]
-                                 (if (seq overrides) (assoc acc k overrides) acc)))
-                             {} m))]
-    (merge (when global (extract global))
-           (when local (extract local)))))
+  (merge (extract-overrides-map (:global-commands source-cfg))
+         (extract-overrides-map (:commands source-cfg))))
+
+;; ---------------------------------------------------------------------------
+;; Temporal expansion of trigger words
+;;
+;; A :words entry may be time-windowed:
+;;   ["Fixed" {:since "2020-01-01" :until "2021-01-01"}]
+;; Windows are half-open [since, until) and interpreted in UTC.
+;; Either bound may be omitted (nil = unbounded in that direction).
+;; `expand-commands-timeline` collects all boundaries across a raw
+;; commands map (values = mixed string / [string opts] vectors) and
+;; returns a vector of periods, each carrying a classic
+;; {cmd-id [strings]} map with only the words active in that period.
+;; A commands-map with no windowed entries yields a single
+;; [nil, nil) period — callers not using timeline get zero overhead.
+;; ---------------------------------------------------------------------------
+
+(defn- word-active-in?
+  "True iff `w-entry` is active on the whole segment [seg-since, seg-until).
+  nil bounds on the segment or on the entry mean unbounded."
+  [{:keys [^Date since ^Date until]} ^Date seg-since ^Date seg-until]
+  (let [seg-start (if seg-since (.getTime seg-since) Long/MIN_VALUE)
+        seg-end   (if seg-until (.getTime seg-until) Long/MAX_VALUE)
+        w-start   (if since (.getTime since) Long/MIN_VALUE)
+        w-end     (if until (.getTime until) Long/MAX_VALUE)]
+    (and (<= w-start seg-start) (>= w-end seg-end))))
+
+(defn- collect-word-boundaries
+  "Return a sorted vector of distinct non-nil boundary Dates from all
+  windowed words in a {cmd-id [entries]} map."
+  [commands-raw]
+  (->> (vals commands-raw)
+       (mapcat identity)
+       (map word-entry)
+       (mapcat (juxt :since :until))
+       (remove nil?)
+       distinct
+       (sort-by #(.getTime ^Date %))
+       vec))
+
+(defn- period-segments
+  "From a sorted vector of boundary Dates, return
+  [[nil b1] [b1 b2] ... [bn nil]] — the half-open segments covering
+  the whole timeline. An empty boundary vector ⇒ a single period
+  [nil, nil)."
+  [boundaries]
+  (if (empty? boundaries)
+    [[nil nil]]
+    (mapv vec (partition 2 1 (concat [nil] boundaries [nil])))))
+
+(defn- commands-for-segment
+  "From {cmd-id [entries]} and a segment, return {cmd-id [strings]}
+  keeping only words whose window covers the segment. Drops commands
+  that have no active word in this segment."
+  [commands-raw seg-since seg-until]
+  (reduce-kv
+   (fn [acc cmd-id words]
+     (let [active (into [] (comp (map word-entry)
+                                 (filter #(word-active-in? % seg-since seg-until))
+                                 (map :word))
+                        words)]
+       (if (seq active) (assoc acc cmd-id active) acc)))
+   {} commands-raw))
+
+(defn expand-commands-timeline
+  "Expand a raw {cmd-id [entries]} map — entries may be strings or
+  [string opts] windowed tuples — into a vector of periods
+  [{:since Date|nil :until Date|nil :commands {cmd-id [strings]}}].
+  Periods are contiguous and cover the full timeline. A commands-map
+  with no windowed entries yields a single [nil, nil) period."
+  [commands-raw]
+  (mapv (fn [[s u]]
+          {:since s :until u :commands (commands-for-segment commands-raw s u)})
+        (period-segments (collect-word-boundaries commands-raw))))
+
+(defn resolve-commands-timeline
+  "Merge defaults + global + local :commands and expand any windowed
+  words into a timeline of periods. Each period carries a classic
+  {cmd-id [strings]} map ready for regex compilation."
+  [source-cfg]
+  (expand-commands-timeline (merged-raw-words source-cfg)))
 
 ;; ---------------------------------------------------------------------------
 ;; Maintainer tenures (pure — operate on a seq of tenure maps, no DB access)
