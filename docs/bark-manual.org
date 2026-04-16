@@ -140,7 +140,7 @@ punctuation (=.= =,= =;= =:= =?= =!=), whitespace, or end of line.
 
 For example, a reply to a bug report with a line starting with
 =Confirmed.= marks the bug as "acked"; a reply to a patch starting
-with =Applied in master= or just =Applied= marks the patch as "closed".
+with =Applied.= or =Pushed.= marks the patch as "closed".
 
 The =Urgent= and =Important= keywords are stricter: they require
 punctuation or end of line (not whitespace), because words like
@@ -426,13 +426,13 @@ punctuation (=.= =,= =;= =:= =?= =!=), whitespace, or end of line. Exception:
 
 ** Status commands
 
-| Command keyword                    | Effect on report  |
-|------------------------------------+-------------------|
-| =Acked= =Confirmed= =Reviewed= =Approved=  | acked             |
-| =Owned= =Handled= =Assigned=             | owned             |
-| =Canceled= =Cancelled=                 | closed (canceled) |
-| =Expired=                            | closed (expired)  |
-| =Resolved= =Applied= =Done= =Fixed= =Closed= | closed (resolved) |
+| Command keyword                      | Effect on report  |
+|--------------------------------------+-------------------|
+| =Acked= =Confirmed= =Reviewed= =Approved=    | acked             |
+| =Owned= =Handled= =Assigned=               | owned             |
+| =Canceled= =Cancelled=                   | closed (canceled) |
+| =Expired=                              | closed (expired)  |
+| =Resolved= =Applied= =Pushed= =Fixed= =Closed= | closed (resolved) |
 
 All reports can be in a combination of three states:
 
@@ -537,16 +537,16 @@ prefixed with =!=.  Accepts =:loose= (default) or =:strict=.
 
 The rule applies uniformly to all Bark instructions:
 
-| Form               | Loose                   | Strict               |
-|--------------------+-------------------------+----------------------|
-| Trigger            | =Closed.= / =!Closed.=      | =!Closed.=             |
-| Negative trigger   | =Not acked= / =!Not acked=  | =!Not acked=           |
-| =-by= directive      | =Acked-by: a@b=           | =!Acked-by: a@b=       |
-| Date directive     | =Deadline: 2026-06-01=    | =!Deadline: 2026-06-01=  |
-| Topic              | =Topic: event=            | =!Topic: event=        |
-| Supersede          | =Superseded-by: <mid>=    | =!Superseded-by: <mid>=  |
-| Role control       | =Add maintainer: a@b=     | =!Add maintainer: a@b= |
-| Notify             | =Notify: on=              | =!Notify: on=          |
+| Form             | Loose                  | Strict                |
+|------------------+------------------------+-----------------------|
+| Trigger          | =Closed.= / =!Closed.=     | =!Closed.=              |
+| Negative trigger | =Not acked= / =!Not acked= | =!Not acked=            |
+| =-by= directive    | =Acked-by: a@b=          | =!Acked-by: a@b=        |
+| Date directive   | =Deadline: 2026-06-01=   | =!Deadline: 2026-06-01= |
+| Topic            | =Topic: event=           | =!Topic: event=         |
+| Supersede        | =Superseded-by: <mid>=   | =!Superseded-by: <mid>= |
+| Role control     | =Add maintainer: a@b=    | =!Add maintainer: a@b=  |
+| Notify           | =Notify: on=             | =!Notify: on=           |
 
 Set globally or per source (per-source wins):
 
@@ -579,7 +579,7 @@ full override).
 
 | ID             | Syntax / Words                        | Permission           | Report types        |
 |----------------+---------------------------------------+----------------------+---------------------|
-| =:closed=        | Canceled, Applied, Fixed, Closed...   | any user             | all                 |
+| =:closed=        | Canceled, Applied, Pushed, Fixed...   | any user             | all                 |
 | =:urgent=        | Urgent                                | any user             | all                 |
 | =:important=     | Important                             | any user             | all                 |
 | =:acked=         | Acked, Confirmed, Reviewed, Approved  | any user             | bug, patch, request |
@@ -714,27 +714,27 @@ A web interface lets you navigate BARK reports.
 
 The search field has a minimal syntax:
 
-| Long form                       | Short         | Explanation                                           |
-|---------------------------------+---------------+-------------------------------------------------------|
-| from:me@example.org             | f:            | Reports from me@example.org                           |
-| acked:me@example.org            | a:            | Reports acked by me@example.org                       |
-| owned:me@example.org            | o:            | Reports owned by me@example.org                       |
-| closed:me@example.org           | c:            | Reports closed by me@example.org                      |
-| urgent:me@example.org           | u:            | Reports marked urgent by me@example.org               |
-| important:me@example.org        | i:            | Reports marked important by me@example.org            |
-| subject:match                   | s:            | Reports matching subject                              |
-| topic:match                     | t:            | Reports matching topic                                |
-| priority:[0-4]                  | p:            | Reports matching priority level 0 to 4                |
-| mid:<messageid>                 | m:            | Report with message-id <messageid>                    |
-| date:3d..                       | d:            | Reports from the last 3 days                          |
-| date:2023-01-01..2023-12-31     | d:            | Reports from 2023-01-01 to 2023-12-31                 |
-| deadline:2026-09-01             | D:            | Reports with deadline on 2026-09-01                   |
-| deadline:2026-01-01..2026-06-30 | D:            | Reports with deadline in that range                   |
-| deadline:2m                     | D:            | Reports due between now and 2 months from now         |
-| expired:10d                     | e:            | Reports expired between now and 10 days from now      |
-| expired:2026-01-01..2026-03-31  | e:            | Reports expired in that date range                    |
-| match1 \vert match2                 |               | Reports matching "match1" or "match2"                 |
-| from:* acked:* …                | f:* a:* …     | Wildcard for from/acked/owned/closed/urgent/important |
+| Long form                       | Short     | Explanation                                           |
+|---------------------------------+-----------+-------------------------------------------------------|
+| from:me@example.org             | f:        | Reports from me@example.org                           |
+| acked:me@example.org            | a:        | Reports acked by me@example.org                       |
+| owned:me@example.org            | o:        | Reports owned by me@example.org                       |
+| closed:me@example.org           | c:        | Reports closed by me@example.org                      |
+| urgent:me@example.org           | u:        | Reports marked urgent by me@example.org               |
+| important:me@example.org        | i:        | Reports marked important by me@example.org            |
+| subject:match                   | s:        | Reports matching subject                              |
+| topic:match                     | t:        | Reports matching topic                                |
+| priority:[0-4]                  | p:        | Reports matching priority level 0 to 4                |
+| mid:<messageid>                 | m:        | Report with message-id <messageid>                    |
+| date:3d..                       | d:        | Reports from the last 3 days                          |
+| date:2023-01-01..2023-12-31     | d:        | Reports from 2023-01-01 to 2023-12-31                 |
+| deadline:2026-09-01             | D:        | Reports with deadline on 2026-09-01                   |
+| deadline:2026-01-01..2026-06-30 | D:        | Reports with deadline in that range                   |
+| deadline:2m                     | D:        | Reports due between now and 2 months from now         |
+| expired:10d                     | e:        | Reports expired between now and 10 days from now      |
+| expired:2026-01-01..2026-03-31  | e:        | Reports expired in that date range                    |
+| match1 \vert match2                 |           | Reports matching "match1" or "match2"                 |
+| from:* acked:* …                | f:* a:* … | Wildcard for from/acked/owned/closed/urgent/important |
 
 Durations are =Nd= (days), =Nw= (weeks), =Nm= (months).  For =date:=
 they look backward from today; for =deadline:= and =expired:= they
@@ -883,11 +883,11 @@ match configured rules.  The close reason is set to "expired".
 
 Each entry under =:expiry= maps a report type keyword to a rule map:
 
-| Rule key        | Type                    | Description                                             |
-|-----------------+-------------------------+---------------------------------------------------------|
-| =:inactive-after= | string/date/=:deadline= | Duration ("30d"), ISO date ("2026-06-01"), or =:deadline= |
-| =:max-status=     | integer                 | Don't expire if activity score > this value (0--3)      |
-| =:max-priority=   | integer                 | Don't expire if priority > this value (0--3)            |
+| Rule key        | Type                      | Description                                             |
+|-----------------+---------------------------+---------------------------------------------------------|
+| =:inactive-after= | string / date / =:deadline= | Duration ("30d"), ISO date ("2026-06-01"), or =:deadline= |
+| =:max-status=     | integer                   | Don't expire if activity score > this value (0--3)      |
+| =:max-priority=   | integer                   | Don't expire if priority > this value (0--3)            |
 
 All rules are conjunctive: a report is only expired when *all*
 conditions are met.  Only =:inactive-after= is required; the others are
@@ -1072,7 +1072,7 @@ The maintainer applies:
 : From: eve@project.org
 : Subject: Re: [PATCH parser v2 0/2] Refactor tokenizer
 : 
-: Applied, thanks!
+: Pushed, thanks!
 
 The v2 series is now closed (resolved).
 
