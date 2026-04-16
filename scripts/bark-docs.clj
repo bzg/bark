@@ -15,19 +15,16 @@
          '[clojure.string :as str]
          '[clojure.pprint :as pp]
          '[hiccup2.core :as h]
-         '[taoensso.timbre :as log])
-
-;; Forward-declared for clj-kondo (provided at runtime by load-file calls below).
-(declare default-labels default-commands
-         resolve-labels-map resolve-commands-map
-         parse-cli-args load-config build-source-map format-date-iso
-         load-datalevin-pod! bark-schema get-tenures lead-maintainer
-         pico-cdn resolved-theme set-theme! bark-description footer-css bark-footer wrap-js
-         spit-html theme-toggle-btn theme-toggle-js nav-bar
-         org-inline-links org-inline parse-org-table)
-
-(load-file "scripts/bark-common.clj")
-(load-file "scripts/bark-html.clj")
+         '[taoensso.timbre :as log]
+         '[bark.common :refer [default-labels default-commands
+                               resolve-labels-map resolve-commands-map
+                               parse-cli-args load-config build-source-map
+                               format-date-iso bark-schema lead-maintainer]]
+         '[bark.common-bb :refer [load-datalevin-pod! get-tenures]]
+         '[bark.html-bb :refer [pico-cdn resolved-theme set-theme!
+                                bark-description footer-css bark-footer wrap-js
+                                spit-html theme-toggle-js nav-bar
+                                org-inline parse-org-table]])
 
 ;; ---------------------------------------------------------------------------
 ;; Defaults — canonical definitions in bark-common.clj

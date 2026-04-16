@@ -1,10 +1,14 @@
-;; bark-html.clj — Shared HTML utilities for bark-index.clj and bark-stats.clj.
-;;
-;; Usage: (load-file "scripts/bark-html.clj")
+;; Copyright (c) 2026 Bastien Guerry <bzg@gnu.org>
+;; SPDX-License-Identifier: EPL-2.0
+;; License-Filename: LICENSES/EPL-2.0.txt
 
-(require '[clojure.string :as str]
-         '[cheshire.core :as json]
-         '[hiccup2.core :as h])
+(ns bark.html-bb
+  "Shared HTML utilities for Babashka scripts: CDN theme resolution,
+  <head> builder, nav bar, org->HTML helpers, and an optional
+  `tidy` pretty-printer."
+  (:require [babashka.process]
+            [clojure.string :as str]
+            [hiccup2.core :as h]))
 
 ;; ---------------------------------------------------------------------------
 ;; Shared CDN

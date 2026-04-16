@@ -47,21 +47,21 @@
          '[cheshire.core :as json]
          '[clojure.string :as str]
          '[clojure.edn :as edn]
-         '[clojure.java.io :as io])
-
-;; Forward-declared for clj-kondo (provided at runtime by load-file below).
-(declare load-datalevin-pod! get-header slugify mid-hash email-body-text
-         ensure-set format-date format-date-iso report-priority report-status
-         report-descendant-count all-reports report-pull-pattern attachment-pull-pattern
-         parse-cli-args parse-cutoff-date load-config build-source-map bark-schema bark-format
-         fetch-attachment-data get-tenures tenures-snapshot
-         get-last-modified changed-source-types-since
-         set-theme! resolve-css-theme votes-by-report vote-counts
-         html-head footer-css bark-footer wrap-js spit-html theme-toggle-js bark-repo-url
-         ics-file? text-attachment?)
-
-(load-file "scripts/bark-common.clj")
-(load-file "scripts/bark-html.clj")
+         '[clojure.java.io :as io]
+         '[taoensso.timbre :as log]
+         '[bark.common :refer [get-header slugify mid-hash
+                               format-date format-date-iso
+                               report-priority report-status report-descendant-count
+                               parse-cli-args parse-delay parse-cutoff-date
+                               load-config build-source-map
+                               bark-schema bark-format
+                               votes-by-report vote-counts
+                               ics-file? text-attachment?]]
+         '[bark.common-bb :refer [load-datalevin-pod! all-reports dq
+                                  fetch-attachment-data get-tenures tenures-snapshot
+                                  get-last-modified changed-source-types-since]]
+         '[bark.html-bb :refer [set-theme! html-head footer-css bark-footer
+                                wrap-js spit-html theme-toggle-js bark-repo-url]])
 
 (load-datalevin-pod!)
 

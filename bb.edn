@@ -1,4 +1,4 @@
-{:paths ["src" "resources"]
+{:paths ["src" "scripts" "resources"]
  :tasks
  {;; The JVM daemon handles ingest, digest and expire:
  ;;   clojure -M:run                   (daemon)

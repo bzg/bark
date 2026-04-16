@@ -15,16 +15,14 @@
 (require '[babashka.process :as process]
          '[cheshire.core :as json]
          '[clojure.string :as str]
-         '[hiccup2.core :as h])
-
-;; Forward-declared for clj-kondo (provided at runtime by load-file calls below).
-(declare parse-cli-args load-config
-         pico-cdn resolved-theme set-theme! bark-description bark-repo-url
-         footer-css bark-footer wrap-js spit-html noscript-css
-         theme-toggle-btn theme-toggle-js nav-bar)
-
-(load-file "scripts/bark-common.clj")
-(load-file "scripts/bark-html.clj")
+         '[hiccup2.core :as h]
+         '[taoensso.timbre :as log]
+         '[bark.common :refer [parse-cli-args load-config]]
+         '[bark.html-bb :refer [pico-cdn resolved-theme set-theme!
+                                bark-description bark-repo-url
+                                footer-css bark-footer wrap-js spit-html
+                                noscript-css noscript-banner
+                                theme-toggle-js nav-bar]])
 
 ;; ---------------------------------------------------------------------------
 ;; Config

@@ -18,15 +18,13 @@
 (require '[babashka.pods :as pods]
          '[clojure.string :as str]
          '[clojure.edn :as edn]
-         '[clojure.java.io :as io])
-
-;; Forward-declared for clj-kondo (provided at runtime by load-file below).
-(declare load-datalevin-pod! get-header format-date format-date-iso
-         report-priority report-status report-descendant-count
-         all-reports report-pull-pattern load-config build-source-map bark-schema
-         get-tenures maintainer?)
-
-(load-file "scripts/bark-common.clj")
+         '[clojure.java.io :as io]
+         '[taoensso.timbre :as log]
+         '[bark.common :refer [get-header format-date format-date-iso
+                               report-priority report-status report-descendant-count
+                               load-config build-source-map
+                               bark-schema maintainer?]]
+         '[bark.common-bb :refer [load-datalevin-pod! dq all-reports get-tenures]])
 
 (load-datalevin-pod!)
 (pods/load-pod 'tzzh/mail "0.0.3")

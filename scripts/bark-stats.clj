@@ -14,19 +14,18 @@
          '[clojure.string :as str]
          '[clojure.edn :as edn]
          '[clojure.java.io :as io]
-         '[hiccup2.core :as h])
-
-;; Forward-declared for clj-kondo (provided at runtime by load-file calls below).
-(declare load-datalevin-pod! all-reports report-pull-pattern
-         report-priority report-status report-descendant-count
-         format-date format-date-iso parse-cli-args load-config
-         pico-cdn resolved-theme set-theme! bark-description bark-repo-url footer-css
-         bark-footer wrap-js spit-html theme-toggle-js bark-schema
-         votes-by-report vote-counts
-         nav-bar theme-toggle-btn html-head org-inline-links org-inline parse-org-table)
-
-(load-file "scripts/bark-common.clj")
-(load-file "scripts/bark-html.clj")
+         '[hiccup2.core :as h]
+         '[taoensso.timbre :as log]
+         '[bark.common :refer [report-priority report-status
+                               report-descendant-count format-date format-date-iso
+                               parse-cli-args load-config bark-schema
+                               votes-by-report vote-counts]]
+         '[bark.common-bb :refer [load-datalevin-pod! all-reports dq]]
+         '[bark.html-bb :refer [pico-cdn resolved-theme set-theme!
+                                bark-description bark-repo-url footer-css
+                                bark-footer wrap-js spit-html theme-toggle-js
+                                nav-bar html-head
+                                org-inline parse-org-table]])
 
 (load-datalevin-pod!)
 

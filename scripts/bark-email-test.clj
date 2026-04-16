@@ -12,9 +12,8 @@
 
 (require '[babashka.pods :as pods]
          '[clojure.edn :as edn]
-         '[clojure.string :as str])
-
-(load-file "scripts/bark-common.clj")
+         '[clojure.string :as str]
+         '[bark.common :refer [load-config]])
 
 ;; ---------------------------------------------------------------------------
 ;; Config validation
