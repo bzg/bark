@@ -50,34 +50,48 @@
  ;; :initial-fetch — first-run fetch window (integer count, "Nd/w/m/y"
  ;; duration, or "yyyy-MM-dd" date). CLI: --initial-fetch 4d.
  ;; :max-size / :max-attachment-size — byte limits (optional).
- :ingest {:initial-fetch 50
-          ;; :max-size 1048576
-          ;; :max-attachment-size 1048576
-          }
+ ;; :ingest {:initial-fetch 50
+ ;;          :max-size 1048576
+ ;;          :max-attachment-size 1048576
+ ;;          }
 
  ;; ---- Customization -------------------------------------------------------
 
  ;; Global labels (optional) — subject tag overrides per report type.
- ;; Merged over defaults; per-source overrides global.
- ;; :labels {:bug ["BUG" "DEFECT"] :request ["POLL" "FR" "TODO" "RFE"]}
- ;; Defaults: :bug ["BUG"]  :patch ["PATCH"]  :request ["POLL" "FR" "TODO"]
- ;;           :announcement ["ANN" "ANNOUNCEMENT"]
- ;;           :release ["REL" "RELEASE"]  :change ["CHG" "CHANGE"]
+ ;; Per-source overrides global. An override replaces the default list
+ ;; for that type entirely (not merged); start from the defaults below.
+ ;;
+ ;; :labels {:bug          ["BUG"]
+ ;;          :patch        ["PATCH"]
+ ;;          :request      ["POLL" "FR" "TODO"]
+ ;;          :announcement ["ANN" "ANNOUNCEMENT"]
+ ;;          :release      ["REL" "RELEASE"]
+ ;;          :change       ["CHG" "CHANGE"]}
 
- ;; Global commands (optional) — per-command overrides. Merged over
- ;; defaults; per-source overrides global. Each entry is a map with
- ;; any of :words, :scope, :report-types.
+ ;; Global commands (optional) — per-command overrides. Per-source
+ ;; overrides global. Each entry is a map with any of :words, :scope,
+ ;; :report-types. A :words override REPLACES the default list for
+ ;; that command (not merged word-by-word); start from the defaults
+ ;; below.
  ;;
- ;; :commands {:closed   {:words ["Canceled" "Fixed" "Wontfix"]}
- ;;            :acked    {:words ["Approved" "LGTM"] :scope :maintainer}
- ;;            :deadline {:report-types #{:bug :patch :request :change}}
- ;;            :unclosed {:scope :setter-or-maintainer}}
- ;;
+ ;; :commands {:acked     ["Acked" "Confirmed" "Reviewed" "Approved"]
+ ;;            :owned     ["Owned" "Handled" "Assigned"]
+ ;;            :closed    ["Canceled" "Cancelled" "Resolved" "Applied"
+ ;;                        "Done" "Fixed" "Closed" "Expired"]
+ ;;            :urgent    ["Urgent"]
+ ;;            :important ["Important"]}
+
+ ;; Command aliases (optional) — old syntax → current form. Useful when
+ ;; re-parsing archives after a syntax change.
+ ;; :command-aliases {"Unacked"     "Not acked"
+ ;;                   "Undeadline"  "No deadline"
+ ;;                   "Unexpiry"    "No expiry"}
+
  ;; :scope — :user, :maintainer, or :setter-or-maintainer.
  ;; Last is only valid on :un* directives whose attr is ref-tracked
  ;; (see the manual for the full list of command IDs and defaults).
 
- ;; Restrict detected + exported report types (optional).
+ ;; Restrict detected and exported report types.
  ;; Default: all types. Per-source overrides global.
  ;; :report-types #{:bug :patch :request :announcement :release :change}
 
@@ -96,12 +110,6 @@
  ;;          :change       {:inactive-after "3m"}
  ;;          :bug          {:inactive-after "1000d" :max-status 0 :max-priority 0}
  ;;          :request      {:inactive-after "1000d" :max-status 0}}
-
- ;; Command aliases (optional) — old syntax → current form. Useful when
- ;; re-parsing archives after a syntax change.
- ;; :command-aliases {"Unacked"     "Not acked"
- ;;                   "Undeadline"  "No deadline"
- ;;                   "Unexpiry"    "No expiry"}
 
  ;; Awaiting-reply delay (optional) — ⌚ flag when last email is from a
  ;; maintainer and no reply within this duration. Default: "14d".
@@ -134,13 +142,13 @@
  ;; ---- Notifications -------------------------------------------------------
 
  ;; Optional — notifications disabled if absent.
- :notifications {:enabled false
-                 :smtp {:host     "smtp.example.com"
-                        :port     587
-                        :tls      true
-                        :user     "notify@example.com"
-                        :password "secret"
-                        :from     "bark@example.com"}}
+ ;; :notifications {:enabled false
+ ;;                 :smtp {:host     "smtp.example.com"
+ ;;                        :port     587
+ ;;                        :tls      true
+ ;;                        :user     "notify@example.com"
+ ;;                        :password "secret"
+ ;;                        :from     "bark@example.com"}}
 
  ;; ---- Logging -------------------------------------------------------------
 
