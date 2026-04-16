@@ -373,6 +373,12 @@
    "Cancelled" :canceled
    "Expired"   :expired})
 
+(defn bang-prefix
+  "Regex fragment for the `!` prefix on Bark instructions.
+  Required when `strict-syntax?` is true, optional otherwise."
+  [strict-syntax?]
+  (if strict-syntax? "!" "!?"))
+
 (defn resolve-labels-map [source-cfg]
   (cond-> default-labels
     (:global-labels source-cfg) (merge (:global-labels source-cfg))
@@ -470,7 +476,8 @@
         global-aliases  (:command-aliases config)
         global-ef       (:export-formats config)
         global-expiry   (:expiry config)
-        global-rt       (:report-types config)]
+        global-rt       (:report-types config)
+        global-cs       (:command-syntax config)]
     (into {}
           (keep (fn [src]
                  (if-let [stype (source-type src)]
@@ -485,7 +492,8 @@
                            {:export-formats (set (or (:export-formats src) global-ef ["json" "org" "rss"]))
                             :report-types (when-let [rt (or (:report-types src) global-rt)]
                                             (set (map keyword rt)))
-                            :expiry (or (:expiry src) global-expiry)})]
+                            :expiry (or (:expiry src) global-expiry)
+                            :command-syntax (or (:command-syntax src) global-cs :loose)})]
                    (log/warn "Source has no :list, :alias, or :to key — skipping:" (:name src)))))
           (:sources config))))
 

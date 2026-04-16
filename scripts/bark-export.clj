@@ -110,19 +110,42 @@
                                 (into-array java.nio.file.CopyOption
                                             [java.nio.file.StandardCopyOption/REPLACE_EXISTING])))))
 
+(defn- clean-stale-old-dirs!
+  "Remove any leftover `<target>.old-*` directories from a previous
+  crashed swap so they don't accumulate."
+  [^java.io.File target]
+  (let [parent (.getParentFile target)
+        prefix (str (.getName target) ".old-")]
+    (when (.isDirectory parent)
+      (doseq [^java.io.File f (.listFiles parent)
+              :when (and (.isDirectory f)
+                         (str/starts-with? (.getName f) prefix))]
+        (delete-dir! f)))))
+
 (defn- atomic-swap-dir!
   "Replace `target-dir` with `staging-dir`.
   Moves the old target to a temp name, moves staging into place,
-  then deletes the old directory."
+  then deletes the old directory.  On failure of the second move,
+  restores the previous target so callers never see a missing dir."
   [staging-dir target-dir]
-  (let [target  (io/file target-dir)
-        staging (io/file staging-dir)
-        old     (io/file (str target-dir ".old-" (System/currentTimeMillis)))]
-    (when (.exists target)
+  (let [target      (io/file target-dir)
+        staging     (io/file staging-dir)
+        old         (io/file (str target-dir ".old-" (System/currentTimeMillis)))
+        had-target? (.exists target)]
+    (clean-stale-old-dirs! target)
+    (when had-target?
       (move-dir! target old))
-    (move-dir! staging target)
-    (when (.exists old)
-      (delete-dir! old))))
+    (try
+      (move-dir! staging target)
+      (when had-target?
+        (delete-dir! old))
+      (catch Exception e
+        (when (and had-target? (.exists old) (not (.exists target)))
+          (try (move-dir! old target)
+               (catch Exception _
+                 (log/error "Could not restore previous target from"
+                            (.getAbsolutePath old)))))
+        (throw e)))))
 
 ;; ---------------------------------------------------------------------------
 ;; --closed-retention: resolve a date or duration to a cutoff java.util.Date.
@@ -637,8 +660,8 @@
              (str "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
                   "<rss version=\"2.0\">\n"
                   "  <channel>\n"
-                  "    <title>BARK " source-name " " feed-label "</title>\n"
-                  "    <link>" list-url "</link>\n"
+                  "    <title>BARK " (xml-escape source-name) " " (xml-escape feed-label) "</title>\n"
+                  "    <link>" (xml-escape list-url) "</link>\n"
                   "    <description>Reports from the Bug And Report Keeper</description>\n"
                   items "\n"
                   "  </channel>\n"
@@ -658,34 +681,44 @@
 (defn- strip-angle-brackets [s]
   (when s (str/replace s #"^<|>$" "")))
 
+(defn- org-safe
+  "Strip characters that would break Org structure: newlines (which
+  would split a headline or property) and the :END: token (which
+  would close a PROPERTIES drawer prematurely)."
+  [s]
+  (when s
+    (-> (str s)
+        (str/replace #"[\r\n]+" " ")
+        (str/replace #":END:" ":END :"))))
+
 (defn- report->org-entry [m]
   (let [todo    (if (= (nth (:flags m "---") 2 \-) \C) "DONE" "TODO")
         prio    (case (:priority m 0)
                   3 "[#A] " 2 "[#B] " 1 "[#C] " "")
-        subject (:subject m "")
+        subject (org-safe (:subject m ""))
         tags    (when-let [t (:type m)] (str ":" t ":"))
         org-date (format-org-inactive-ts (:date-raw m))
         props   (remove nil?
-                        [(str ":FROM: " (:from m ""))
+                        [(str ":FROM: " (org-safe (:from m "")))
                          (str ":DATE: " org-date)
                          (when-let [mid (:message-id m)]
-                           (str ":MESSAGE-ID: " (strip-angle-brackets mid)))
-                         (when-let [a (:archived-at m)]  (str ":ARCHIVED-AT: " a))
+                           (str ":MESSAGE-ID: " (org-safe (strip-angle-brackets mid))))
+                         (when-let [a (:archived-at m)]  (str ":ARCHIVED-AT: " (org-safe a)))
                          (str ":FLAGS: " (:flags m "---"))
                          (str ":STATUS: " (:status m 0))
                          (str ":REPLIES: " (:replies m 0))
-                         (when-let [v (:version m)]      (str ":VERSION: " v))
-                         (when-let [t (:topic m)]        (str ":TOPIC: " t))
+                         (when-let [v (:version m)]      (str ":VERSION: " (org-safe v)))
+                         (when-let [t (:topic m)]        (str ":TOPIC: " (org-safe t)))
                          (when-let [v (:votes m)]        (str ":VOTES: " v))
                          (when-let [v (:votes-up m)]     (str ":VOTES-UP: " v))
                          (when-let [v (:votes-down m)]   (str ":VOTES-DOWN: " v))
                          (when-let [v (:votes-null m)]   (str ":VOTES-NULL: " v))
-                         (when-let [a (:acked m)]      (str ":ACKED: " a))
-                         (when-let [o (:owned m)]      (str ":OWNED: " o))
-                         (when-let [c (:closed m)]     (str ":CLOSED: " c))
+                         (when-let [a (:acked m)]      (str ":ACKED: " (org-safe a)))
+                         (when-let [o (:owned m)]      (str ":OWNED: " (org-safe o)))
+                         (when-let [c (:closed m)]     (str ":CLOSED: " (org-safe c)))
                          (when-let [cr (:close-reason m)] (str ":CLOSE-REASON: " cr))
-                         (when-let [u (:urgent m)]     (str ":URGENT: " u))
-                         (when-let [i (:important m)]  (str ":IMPORTANT: " i))
+                         (when-let [u (:urgent m)]     (str ":URGENT: " (org-safe u)))
+                         (when-let [i (:important m)]  (str ":IMPORTANT: " (org-safe i)))
                          (when-let [d (:deadline m)]     (str ":DEADLINE: " d))
                          (when-let [d (:expiry m)]      (str ":EXPIRY: " d))
                          (when-let [s (:series m)]

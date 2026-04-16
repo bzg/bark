@@ -74,12 +74,12 @@
  ;; that command (not merged word-by-word); start from the defaults
  ;; below.
  ;;
- ;; :commands {:acked     ["Acked" "Confirmed" "Reviewed" "Approved"]
- ;;            :owned     ["Owned" "Handled" "Assigned"]
- ;;            :closed    ["Canceled" "Cancelled" "Resolved" "Applied"
- ;;                        "Done" "Fixed" "Closed" "Expired"]
- ;;            :urgent    ["Urgent"]
- ;;            :important ["Important"]}
+ ;; :commands {:acked     {:words ["Acked" "Confirmed" "Reviewed" "Approved"]}
+ ;;            :owned     {:words ["Owned" "Handled" "Assigned"]}
+ ;;            :closed    {:words ["Canceled" "Cancelled" "Resolved" "Pushed"
+ ;;                                "Fixed" "Closed" "Expired"]}
+ ;;            :urgent    {:words ["Urgent"]}
+ ;;            :important {:words ["Important"]}}
 
  ;; Command aliases (optional) — old syntax → current form. Useful when
  ;; re-parsing archives after a syntax change.
@@ -115,6 +115,21 @@
  ;; maintainer and no reply within this duration. Default: "14d".
  ;; Global or per-source (per-source wins).
  ;; :awaiting-delay "14d"
+
+ ;; Command syntax mode — :loose (default) or :strict.
+ ;;   :loose — every Bark instruction can be written with or without
+ ;;            a "!" prefix. Useful on mailing lists where Bark
+ ;;            directives mingle with prose.
+ ;;   :strict — every Bark instruction MUST start with "!". Eliminates
+ ;;            false positives on common English words ("Done.",
+ ;;            "Closed.", "Applied."). Applies uniformly to triggers
+ ;;            (!Closed., !Urgent.), negatives (!Not acked), -by
+ ;;            directives (!Acked-by: x@y.com), date/topic directives
+ ;;            (!Deadline: 2026-06-01, !Topic: event), supersede
+ ;;            (!Superseded-by: <mid>), role controls
+ ;;            (!Add maintainer: x@y.com) and notifications (!Notify:).
+ ;; Global or per-source (per-source wins).
+ ;; :command-syntax :strict
 
  ;; ---- Exports -------------------------------------------------------------
 
