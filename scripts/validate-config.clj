@@ -89,7 +89,8 @@
                           :source/list-archive :source/commands :source/labels
                           :source/bark-path :source/report-types
                           :source/maintainers :source/notifications
-                          :source/expiry :source/awaiting-delay])
+                          :source/expiry :source/awaiting-delay
+                          :source/command-syntax])
          exactly-one-source-type?))
 
 (s/def :bark/sources
@@ -229,13 +230,19 @@
 (s/def :bark/awaiting-delay (s/and ::non-blank-string #(re-matches #"\d+[dwm]" %)))
 (s/def :source/awaiting-delay :bark/awaiting-delay)
 
+;; Command syntax mode: :loose (default — ! is optional on every Bark
+;; instruction) or :strict (! required on every Bark instruction).
+(s/def :bark/command-syntax #{:loose :strict})
+(s/def :source/command-syntax :bark/command-syntax)
+
 ;; Top-level config
 (s/def ::config
   (s/keys :req-un [:bark/mailbox :bark/sources :bark/db]
           :opt-un [:bark/ingest :bark/notifications :bark/labels
                    :bark/commands :bark/command-aliases
                    :bark/report-types :bark/awaiting-delay
-                   :bark/expiry :bark/logging]))
+                   :bark/expiry :bark/logging
+                   :bark/command-syntax]))
 
 ;; ---------------------------------------------------------------------------
 ;; Validation
@@ -335,6 +342,7 @@
                             (:to src)            (conj (str "(mailbox: " (:to src) ")"))
                             (:list-archive src)  (conj (str "archive: " (:list-archive src)))
                             (:report-types src)  (conj (str "report-types: " (pr-str (:report-types src))))
+                            (:command-syntax src) (conj (str "command-syntax: " (name (:command-syntax src))))
                             (seq (:maintainers src))
                             (conj (str "maintainers: "
                                        (str/join ", "
@@ -356,6 +364,8 @@
                 (log/info "  SMTP:" (str (:user smtp) "@" (:host smtp)))))
             (when-let [rt (:report-types config)]
               (log/info "  Report types:" (pr-str rt)))
+            (when-let [cs (:command-syntax config)]
+              (log/info "  Command syntax (global):" (name cs)))
             (when-let [logging (:logging config)]
               (when (:file logging)
                 (log/info "  Log file:" (:file logging)

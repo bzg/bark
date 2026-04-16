@@ -69,10 +69,11 @@
                 (map #(str "=[" % "]=") tags)))))
 
 (defn- fmt-command-words
-  "Format command words as org =code= entries."
-  [words]
+  "Format command words as org =code= entries, prefixed with the
+  source's instruction prefix (empty for :loose, '!' for :strict)."
+  [words prefix]
   (if (seq words)
-    (str/join " " (map #(str "=" % "=") words))
+    (str/join " " (map #(str "=" prefix % "=") words))
     ""))
 
 (defn build-labels-table-org
@@ -99,18 +100,20 @@
     (str/join "\n" (concat [header hline] upper [hline] lower))))
 
 (defn build-commands-table-org
-  "Build the merged status+priority commands org table (3 columns)."
-  [cmds]
-  (let [rows [["Mark as acked"             (fmt-command-words (:acked cmds))  "Status"]
-              ["Mark as owned"             (fmt-command-words (:owned cmds))  "Status"]
+  "Build the merged status+priority commands org table (3 columns).
+  `prefix` is the source's instruction prefix (\"\" for :loose, \"!\"
+  for :strict)."
+  [cmds prefix]
+  (let [rows [["Mark as acked"             (fmt-command-words (:acked cmds) prefix)  "Status"]
+              ["Mark as owned"             (fmt-command-words (:owned cmds) prefix)  "Status"]
               ["Mark as closed (canceled)" (fmt-command-words (filterv #(contains? #{"Canceled" "Cancelled"} %)
-                                                                       (:closed cmds))) "Status"]
+                                                                       (:closed cmds)) prefix) "Status"]
               ["Mark as closed (expired)"  (fmt-command-words (filterv #(= "Expired" %)
-                                                                       (:closed cmds))) "Status"]
+                                                                       (:closed cmds)) prefix) "Status"]
               ["Mark as closed (resolved)" (fmt-command-words (filterv #(not (contains? #{"Canceled" "Cancelled" "Expired"} %))
-                                                                       (:closed cmds))) "Status"]
-              ["Mark as urgent"            (fmt-command-words ["Urgent."])    "Priority"]
-              ["Mark as important"         (fmt-command-words ["Important."]) "Priority"]]
+                                                                       (:closed cmds)) prefix) "Status"]
+              ["Mark as urgent"            (fmt-command-words ["Urgent."] prefix)    "Priority"]
+              ["Mark as important"         (fmt-command-words ["Important."] prefix) "Priority"]]
         w-effect  (apply max (count "Effect on report")  (map #(count (nth % 0)) rows))
         w-command (apply max (count "Command keyword")   (map #(count (nth % 1)) rows))
         w-type    (apply max (count "Type")              (map #(count (nth % 2)) rows))
@@ -145,8 +148,10 @@
 
 (defn substitute-template
   "Replace the first two org table blocks in org-text:
-  the first with the resolved labels table, the second with the commands table."
-  [org-text labels cmds]
+  the first with the resolved labels table, the second with the
+  commands table.  `prefix` is prepended to every displayed keyword
+  (\"\" for :loose, \"!\" for :strict)."
+  [org-text labels cmds prefix]
   (let [lines  (str/split-lines org-text)
         blocks (find-table-blocks lines)]
     (if (>= (count blocks) 2)
@@ -157,7 +162,7 @@
                   (concat (take t1-start lines)
                           [(build-labels-table-org labels)]
                           (subvec (vec lines) (inc t1-end) t2-start)
-                          [(build-commands-table-org cmds)]
+                          [(build-commands-table-org cmds prefix)]
                           (drop (inc t2-end) lines))))
       ;; Fallback: only one table — replace with labels only
       (if (seq blocks)
@@ -475,6 +480,8 @@
       source-cfg  (get source-map source-name)
       labels      (if source-cfg (docs-labels source-cfg) default-labels)
       cmds        (if source-cfg (docs-commands source-cfg) default-commands)
+      strict?     (= :strict (:command-syntax source-cfg))
+      prefix      (if strict? "!" "")
       out-file    (or out-file
                       (if source-name
                         (str "public/" source-name "/web/docs.html")
@@ -489,7 +496,7 @@
       db          ((resolve 'pod.huahaiy.datalevin/db) conn)
       maint-html  (build-maintainers-html db source-name source-cfg)
       org-text    (-> (slurp "resources/docs-tpl.org")
-                      (substitute-template labels cmds)
+                      (substitute-template labels cmds prefix)
                       (filter-feed-links effective-dir))
       body-html   (cond-> (org->html org-text)
                     maint-html (str "\n" maint-html))

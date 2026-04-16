@@ -228,9 +228,9 @@ it:
 : Not superseded.
 
 All of these can be used by regular users, but only to retract their
-*own* actions (see [[#retracting-your-own-updates][Retracting your own updates]] above).  =No topic.=
-can be used by anyone.  Maintainers can override any unset, regardless
-of who posted the original attribute.
+*own* actions (see [[#retracting-your-own-updates][Retracting your own updates]] above).  Maintainers
+can override any unset, regardless of who posted the original
+attribute.
 
 ** Setting a deadline
 
@@ -448,9 +448,9 @@ When the status is represented as a number, it is computed like this:
 
 So an acked, unowned and open report is =1+0+4 = 5=.
 
-Note that only bugs, patches, and requests support the acked, owned,
-urgent, and important states. Announcements, releases, and changes can
-only be closed.
+Note that only bugs, patches, and requests support the acked and
+owned states. Announcements, releases, and changes cannot be acked or
+owned, but they can still be marked urgent or important and closed.
 
 ** Priority commands
 
@@ -517,13 +517,42 @@ Each entry is a map with any of =:words=, =:scope=, =:report-types=
   rejects this scope on any other command.
 - =:report-types= replaces the default set of report types the command
   applies to. When absent, the registry default is used.
-- Both simple (vector) and extended (map) forms can be mixed.
 - Any command ID from the table below can be overridden, both triggers
   and directives.
 - Controls (role and notify) cannot be overridden.
 
 Per-source settings take precedence over the global =:commands=, which
 in turn take precedence over the built-in defaults.
+
+*** Syntax mode: =:loose= vs =:strict=
+
+The =:command-syntax= key controls whether Bark instructions must be
+prefixed with =!=.  Accepts =:loose= (default) or =:strict=.
+
+- =:loose= — every Bark instruction can be written with or without a
+  =!= prefix.  Matches prose-style usage on mailing lists.
+- =:strict= — every Bark instruction MUST start with =!=.  Eliminates
+  false positives on common English words like "Done.", "Closed.",
+  "Applied." that appear naturally in conversation.
+
+The rule applies uniformly to all Bark instructions:
+
+| Form               | Loose                   | Strict               |
+|--------------------+-------------------------+----------------------|
+| Trigger            | =Closed.= / =!Closed.=      | =!Closed.=             |
+| Negative trigger   | =Not acked= / =!Not acked=  | =!Not acked=           |
+| =-by= directive      | =Acked-by: a@b=           | =!Acked-by: a@b=       |
+| Date directive     | =Deadline: 2026-06-01=    | =!Deadline: 2026-06-01=  |
+| Topic              | =Topic: event=            | =!Topic: event=        |
+| Supersede          | =Superseded-by: <mid>=    | =!Superseded-by: <mid>=  |
+| Role control       | =Add maintainer: a@b=     | =!Add maintainer: a@b= |
+| Notify             | =Notify: on=              | =!Notify: on=          |
+
+Set globally or per source (per-source wins):
+
+#+begin_src edn
+:command-syntax :strict
+#+end_src
 
 ** All commands
 
@@ -595,9 +624,9 @@ Running =bb export all= generates, for each source:
   (e.g. backtraces, log files).  Saved under =text/<mid-hash>/=.
 - =events/= --- a directory with =.ics= calendar files extracted from
   announcements.  Each report's =.ics= attachments are saved under
-  =events/<mid-hash>/=.  A combined =events/events.ics= aggregates all
-  =VEVENT= blocks from open announcements into a single subscribable
-  calendar feeds.
+  =events/<mid-hash>/=.  Combined =events/announcements.ics=,
+  =events/announcements-open.ics= and =events/announcements-closed.ics=
+  aggregate =VEVENT= blocks into subscribable calendar feeds.
 - =events.json=, =events.org=, =events.xml= --- open announcements that
   carry an =.ics= attachment or inline =VCALENDAR= content.
 - =events-closed.json=, =events-closed.org=, =events-closed.xml= ---

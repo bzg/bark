@@ -32,62 +32,78 @@
   (too many false positives with ordinary prose, e.g. \"Important note:\")."
   #{:urgent :important})
 
-(defn- trigger-pattern [strict? & words]
+(defn- trigger-pattern [strict-punct? strict-syntax? & words]
   (re-pattern
-   (str "(?m)^(" (str/join "|" (map #(java.util.regex.Pattern/quote %) words))
-        ")(?:" trailing-punct (when-not strict? "|\\s") "|$)")))
+   (str "(?m)^" (common/bang-prefix strict-syntax?)
+        "(" (str/join "|" (map #(java.util.regex.Pattern/quote %) words))
+        ")(?:" trailing-punct (when-not strict-punct? "|\\s") "|$)")))
 
-(defn- directive-pattern [{:keys [syntax param]}]
-  (let [qs (java.util.regex.Pattern/quote syntax)]
+(defn- directive-pattern [strict-syntax? {:keys [syntax param]}]
+  (let [qs     (java.util.regex.Pattern/quote syntax)
+        prefix (common/bang-prefix strict-syntax?)]
     (re-pattern
      (case param
-       :email-address (str "^" qs ":\\s+(?:.+<(\\S+@\\S+)>|(\\S+@\\S+))" trailing-punct "?\\s*$")
-       :date          (str "^" qs ":\\s+(\\d{4}-\\d{2}-\\d{2})" trailing-punct "?\\s*$")
-       :date-or-duration (str "^" qs ":\\s+(\\d{4}-\\d{2}-\\d{2}|\\d+[dwmy](?:\\s+\\d+[dwmy])*)" trailing-punct "?\\s*$")
-       :word          (str "^" qs ":\\s+([a-zA-Z0-9_-]+)" trailing-punct "?\\s*$")
-       :message-id    (str "^" qs ":\\s+<?([^<>\\s]+@[^<>\\s]+)>?" trailing-punct "?\\s*$")
-       (str "^" qs trailing-punct "?\\s*$")))))
+       :email-address (str "^" prefix qs ":\\s+(?:.+<(\\S+@\\S+)>|(\\S+@\\S+))" trailing-punct "?\\s*$")
+       :date          (str "^" prefix qs ":\\s+(\\d{4}-\\d{2}-\\d{2})" trailing-punct "?\\s*$")
+       :date-or-duration (str "^" prefix qs ":\\s+(\\d{4}-\\d{2}-\\d{2}|\\d+[dwmy](?:\\s+\\d+[dwmy])*)" trailing-punct "?\\s*$")
+       :word          (str "^" prefix qs ":\\s+([a-zA-Z0-9_-]+)" trailing-punct "?\\s*$")
+       :message-id    (str "^" prefix qs ":\\s+<?([^<>\\s]+@[^<>\\s]+)>?" trailing-punct "?\\s*$")
+       (str "^" prefix qs trailing-punct "?\\s*$")))))
 
-(defn- compile-trigger-words [action-map]
+(defn- compile-trigger-words [strict-syntax? action-map]
   (into {}
         (map (fn [[k words]]
-               [k (apply trigger-pattern (contains? strict-punct-actions k) words)]))
+               [k (apply trigger-pattern
+                         (contains? strict-punct-actions k)
+                         strict-syntax?
+                         words)]))
         action-map))
 
-(def default-compiled-commands (compile-trigger-words common/default-commands))
+(def default-compiled-commands
+  "Precompiled default trigger regex for :loose mode. Strict mode
+  recompiles on demand in build-source-commands."
+  (compile-trigger-words false common/default-commands))
 
-(defn build-source-commands [source-cfg]
-  (let [merged (common/resolve-commands-map source-cfg)]
-    {:compiled  (if (= merged common/default-commands)
-                  default-compiled-commands
-                  (compile-trigger-words merged))
-     :words     merged
-     :overrides (common/resolve-command-overrides source-cfg)}))
-
-(def ^:private compiled-directives
-  (mapv (fn [cmd] [cmd (directive-pattern cmd)]) directive-commands))
+(defn- compile-directives [strict-syntax?]
+  (mapv (fn [cmd] [cmd (directive-pattern strict-syntax? cmd)]) directive-commands))
 
 (defn compile-directive-aliases
-  "Compile a map of {\"OldSyntax\" \"New syntax\"} into additional [cmd pattern]
-  pairs that route alias patterns to the same commands as the canonical syntax."
-  [aliases-map]
+  "Compile a map of {\"OldSyntax\" \"New syntax\"} into additional
+  [cmd pattern] pairs that route alias patterns to the same commands
+  as the canonical syntax. The caller's syntax mode is used."
+  [strict-syntax? aliases-map]
   (when (seq aliases-map)
-    (let [syntax->cmd (into {} (map (fn [[cmd _]] [(:syntax cmd) cmd])) compiled-directives)]
+    (let [compiled    (compile-directives strict-syntax?)
+          syntax->cmd (into {} (map (fn [[cmd _]] [(:syntax cmd) cmd])) compiled)]
       (vec (keep (fn [[old-syntax new-syntax]]
                    (if-let [cmd (syntax->cmd new-syntax)]
-                     [cmd (directive-pattern (assoc cmd :syntax old-syntax))]
+                     [cmd (directive-pattern strict-syntax? (assoc cmd :syntax old-syntax))]
                      (log/warn "Command alias target not found:" (pr-str new-syntax)
                                "for alias" (pr-str old-syntax))))
                  aliases-map)))))
+
+(defn build-source-commands [source-cfg]
+  (let [merged         (common/resolve-commands-map source-cfg)
+        strict-syntax? (= :strict (:command-syntax source-cfg))
+        compiled       (if (and (not strict-syntax?)
+                                (= merged common/default-commands))
+                         default-compiled-commands
+                         (compile-trigger-words strict-syntax? merged))]
+    {:compiled       compiled
+     :words          merged
+     :overrides      (common/resolve-command-overrides source-cfg)
+     :strict-syntax? strict-syntax?
+     :directives     (compile-directives strict-syntax?)}))
 
 ;; ---------------------------------------------------------------------------
 ;; Detection (pure)
 ;; ---------------------------------------------------------------------------
 
-(defn- detect-close-reason [closed-words body-text]
+(defn- detect-close-reason [closed-words body-text strict-syntax?]
   (when (seq closed-words)
     (let [pattern (re-pattern
-                   (str "(?m)^(" (str/join "|" (map #(java.util.regex.Pattern/quote %) closed-words))
+                   (str "(?m)^" (common/bang-prefix strict-syntax?)
+                        "(" (str/join "|" (map #(java.util.regex.Pattern/quote %) closed-words))
                         ")(?:" trailing-punct "|\\s|$)"))]
       (when-let [[_ matched] (re-find pattern body-text)]
         (get common/close-reasons matched :resolved)))))
@@ -120,13 +136,16 @@
 
 (defn detect-triggers [report-type body-text source-commands]
   (when body-text
-    (let [compiled  (:compiled source-commands)
-          overrides (:overrides source-commands)
-          all-sets  (match-triggers compiled body-text)
+    (let [compiled   (:compiled source-commands)
+          overrides  (:overrides source-commands)
+          strict-sx? (:strict-syntax? source-commands)
+          all-sets   (match-triggers compiled body-text)
           ;; Pre-compute close-reason from unfiltered triggers so it survives
           ;; any future refactoring of the filter step.
           reason   (when (:report/closed all-sets)
-                     (detect-close-reason (get-in source-commands [:words :closed]) body-text))
+                     (detect-close-reason (get-in source-commands [:words :closed])
+                                          body-text
+                                          strict-sx?))
           filtered (into {}
                          (keep (fn [[attr :as entry]]
                                  (let [cmd (attr->trigger-cmd attr)
@@ -140,16 +159,23 @@
                      (assoc :report/close-reason reason))]
       (when (seq result) result))))
 
+(def ^:private compiled-directives-loose (compile-directives false))
+
 (defn detect-directives
-  ([report-type body-text] (detect-directives report-type body-text nil nil nil))
-  ([report-type body-text overrides] (detect-directives report-type body-text overrides nil nil))
-  ([report-type body-text overrides email-date] (detect-directives report-type body-text overrides email-date nil))
-  ([report-type body-text overrides email-date aliases]
+  "Detect directives in `body-text`. The optional `compiled-dirs`
+  arg provides the precompiled directive patterns (from
+  `build-source-commands`); if omitted, the loose-mode defaults are
+  used — used by the legacy arities consumed by tests."
+  ([report-type body-text] (detect-directives report-type body-text nil nil nil compiled-directives-loose))
+  ([report-type body-text overrides] (detect-directives report-type body-text overrides nil nil compiled-directives-loose))
+  ([report-type body-text overrides email-date] (detect-directives report-type body-text overrides email-date nil compiled-directives-loose))
+  ([report-type body-text overrides email-date aliases] (detect-directives report-type body-text overrides email-date aliases compiled-directives-loose))
+  ([report-type body-text overrides email-date aliases compiled-dirs]
    (when body-text
      (let [lines (str/split-lines body-text)
            all-directives (if (seq aliases)
-                            (into compiled-directives aliases)
-                            compiled-directives)]
+                            (into compiled-dirs aliases)
+                            compiled-dirs)]
        (->> lines
             (keep (fn [line]
                     (some (fn [[{:keys [id action attr _param scope report-types]} pattern]]
@@ -688,8 +714,12 @@
                          :report-mid report-mid})
           trig-result (-> (detect-triggers report-type body-text src-cmds)
                           (filter-triggers-by-scope overrides is-maint? fail-ctx))
-          aliases     (compile-directive-aliases (:command-aliases source-cfg))
-          directives  (detect-directives report-type body-text overrides (:email/date-sent email) aliases)
+          strict-sx?  (:strict-syntax? src-cmds)
+          aliases     (compile-directive-aliases strict-sx? (:command-aliases source-cfg))
+          directives  (detect-directives report-type body-text overrides
+                                         (:email/date-sent email)
+                                         aliases
+                                         (:directives src-cmds))
           closed?     (some? (:report/closed (d/pull db [:report/closed] report-eid)))]
 
       (if closed?

@@ -348,14 +348,15 @@
 
 (defn- apply-controls!
   "Apply role and notify controls from the email body."
-  [conn rroles source-name from-addr email via-channel?]
-  (let [body-text (common/email-body-text email)]
+  [conn rroles source-name source-cfg from-addr email via-channel?]
+  (let [body-text (common/email-body-text email)
+        strict?   (= :strict (:command-syntax source-cfg))]
     (when (and from-addr body-text source-name)
       (when via-channel?
         (roles/apply-role-controls! conn rroles source-name from-addr
-                                    body-text (:email/date-sent email)))
+                                    body-text (:email/date-sent email) strict?))
       (roles/apply-notify-controls! conn rroles source-name from-addr body-text
-                                    (:email/date-sent email)))))
+                                    (:email/date-sent email) strict?))))
 
 (defn- record-creation-denial!
   "Write a failure record for a report-creation attempt that was
@@ -482,7 +483,7 @@
             rroles       (roles/get-tenures (d/db conn) source-name)]
 
         ;; Phase 1: apply controls (may mutate roles)
-        (apply-controls! conn rroles source-name from-addr email via-channel?)
+        (apply-controls! conn rroles source-name source-cfg from-addr email via-channel?)
 
         ;; Phase 2: detect and maybe create report (re-fetch roles after controls)
         (let [rroles      (roles/get-tenures (d/db conn) source-name)

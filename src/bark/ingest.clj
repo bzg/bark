@@ -144,9 +144,7 @@
                                   raw-text (when (and (or is-patch is-ics is-text) data)
                                               (cond
                                                 (string? data) data
-                                                (bytes? data)  (try (String. ^bytes data "UTF-8")
-                                                    (catch Exception _
-                                                      (String. ^bytes data "ISO-8859-1")))
+                                                (bytes? data)  (String. ^bytes data "UTF-8")
                                                 :else          nil))
                                   too-large? (and raw-text
                                                   (> (count raw-text) max-att-size))

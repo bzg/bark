@@ -370,29 +370,43 @@
                                           (:notify/source p)))))
               sent     (atom 0)
               updated-map (atom last-sent-map)]
-          (if (empty? due)
-            (log/info "No notifications due.")
-            (doseq [notify due]
-              (let [addr     (:notify/email notify)
-                    since-ms (get last-sent-map (:notify/key notify))
-                    since    (when since-ms (java.util.Date. (long since-ms)))
-                    failures (failures-for-subscriber all-failures addr (:notify/source notify) since)
-                    body     (build-email-body db reports notify failures)]
-                (if body
-                  (do (log/info (if dry-run? "[dry-run]" "")
-                                "Notifying" addr (str "(source: " (:notify/source notify) ")"))
-                      (when-not dry-run?
-                        (send-notification! smtp addr body)
-                        (swap! updated-map assoc (:notify/key notify) (.getTime now))
-                        (swap! sent inc))
-                      (when dry-run?
-                        (println "---")
-                        (println body)
-                        (println "---")))
-                  (log/info "No open items for" addr
-                            (str "(source: " (:notify/source notify) "),") "skipping.")))))
-          (when-not dry-run?
-            (save-last-sent! @updated-map))
-          (log/info "Done." (if dry-run? "Dry run, no emails sent." (str @sent " email(s) sent."))))
+          (try
+            (if (empty? due)
+              (log/info "No notifications due.")
+              (doseq [notify due]
+                (let [addr     (:notify/email notify)
+                      since-ms (get last-sent-map (:notify/key notify))
+                      since    (when since-ms (java.util.Date. (long since-ms)))
+                      failures (failures-for-subscriber all-failures addr (:notify/source notify) since)
+                      body     (build-email-body db reports notify failures)]
+                  (if body
+                    (do (log/info (if dry-run? "[dry-run]" "")
+                                  "Notifying" addr (str "(source: " (:notify/source notify) ")"))
+                        (when-not dry-run?
+                          (try
+                            (send-notification! smtp addr body)
+                            (swap! updated-map assoc (:notify/key notify) (.getTime now))
+                            (swap! sent inc)
+                            (catch Exception e
+                              ;; Don't advance the timestamp on failure so this
+                              ;; subscriber is retried next run. Keep going so
+                              ;; one SMTP blip doesn't starve every other
+                              ;; recipient and so partial progress still lands
+                              ;; on disk via the finally below.
+                              (log/error "Failed to send to" addr
+                                         (str "(source: " (:notify/source notify) "):")
+                                         (.getMessage e)))))
+                        (when dry-run?
+                          (println "---")
+                          (println body)
+                          (println "---")))
+                    (log/info "No open items for" addr
+                              (str "(source: " (:notify/source notify) "),") "skipping.")))))
+            (log/info "Done." (if dry-run? "Dry run, no emails sent." (str @sent " email(s) sent.")))
+            (finally
+              (when-not dry-run?
+                (try (save-last-sent! @updated-map)
+                     (catch Exception e
+                       (log/error "Failed to persist last-sent timestamps:" (.getMessage e))))))))
         (finally
           (d/close conn))))))

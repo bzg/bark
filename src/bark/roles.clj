@@ -77,8 +77,11 @@
 ;; Role control parsing and application
 ;; ---------------------------------------------------------------------------
 
-(def role-control-pattern
-  #"(?m)^(Add maintainer|Remove maintainer):\s+(.+)$")
+(defn role-control-pattern
+  "Build the role-control regex for the given syntax mode."
+  [strict-syntax?]
+  (re-pattern (str "(?m)^" (common/bang-prefix strict-syntax?)
+                   "(Add maintainer|Remove maintainer):\\s+(.+)$")))
 
 (defn- parse-addresses [s]
   (when s
@@ -86,11 +89,13 @@
          (remove str/blank?)
          (filter #(re-matches #"[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+" %)))))
 
-(defn parse-role-controls [body-text]
-  (when body-text
-    (->> (re-seq role-control-pattern body-text)
-         (mapv (fn [[_ cmd addrs]]
-                 {:command cmd :addresses (parse-addresses addrs)})))))
+(defn parse-role-controls
+  ([body-text] (parse-role-controls body-text false))
+  ([body-text strict-syntax?]
+   (when body-text
+     (->> (re-seq (role-control-pattern strict-syntax?) body-text)
+          (mapv (fn [[_ cmd addrs]]
+                  {:command cmd :addresses (parse-addresses addrs)}))))))
 
 (defn- open-tenure!
   "Open a new tenure for each address that does not already have an active one.
@@ -140,20 +145,24 @@
   "Apply `Add maintainer:` / `Remove maintainer:` directives found in
   `body-text`. `tenures` is the pre-directive snapshot used for permission
   checks; the DB is re-read between operations so effects chain correctly.
+  `strict-syntax?` (default false) controls whether the `!` prefix is
+  required.
 
   Denied attempts are written to the failures file as
   `:insufficient-scope`/`:maintainers` so the lead maintainer (and any
   other notified maintainer) sees them in the next digest."
-  [conn tenures source-name from-addr body-text email-date]
-  (let [controls    (parse-role-controls body-text)
-        is-maint    (common/maintainer? tenures from-addr)
-        is-lead     (common/lead-maintainer? tenures from-addr)
-        failure-ctx (when (and from-addr source-name)
-                      {:source     source-name
-                       :from-addr  from-addr
-                       :email-date email-date
-                       :report-mid ""})]
-    (doseq [{:keys [command addresses]} controls]
+  ([conn tenures source-name from-addr body-text email-date]
+   (apply-role-controls! conn tenures source-name from-addr body-text email-date false))
+  ([conn tenures source-name from-addr body-text email-date strict-syntax?]
+   (let [controls    (parse-role-controls body-text strict-syntax?)
+         is-maint    (common/maintainer? tenures from-addr)
+         is-lead     (common/lead-maintainer? tenures from-addr)
+         failure-ctx (when (and from-addr source-name)
+                       {:source     source-name
+                        :from-addr  from-addr
+                        :email-date email-date
+                        :report-mid ""})]
+     (doseq [{:keys [command addresses]} controls]
       (case command
         "Add maintainer"
         (if is-maint
@@ -188,13 +197,16 @@
                         :audience :maintainers
                         :command  (str "Remove maintainer: " (str/join " " addresses)))))))
 
-        nil))))
+        nil)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Notify control parsing and application
 ;; ---------------------------------------------------------------------------
 
-(def ^:private notify-pattern #"(?m)^Notify:\s+(.+)$")
+(defn- notify-pattern
+  "Build the Notify: regex for the given syntax mode."
+  [strict-syntax?]
+  (re-pattern (str "(?m)^" (common/bang-prefix strict-syntax?) "Notify:\\s+(.+)$")))
 
 (defn- parse-notify-params [s]
   (let [s (str/trim s) lc (str/lower-case s)]
@@ -238,9 +250,12 @@
   maintainer attempt is logged and recorded as an
   `:insufficient-scope` failure (audience `:maintainers`), so it
   becomes visible to the lead maintainer — otherwise the attempt
-  would leave no trace at all."
-  [conn roles source-name from-addr body-text email-date]
-  (when-let [[_ params-str] (re-find notify-pattern (or body-text ""))]
+  would leave no trace at all. `strict-syntax?` (default false)
+  controls whether the `!` prefix is required."
+  ([conn roles source-name from-addr body-text email-date]
+   (apply-notify-controls! conn roles source-name from-addr body-text email-date false))
+  ([conn roles source-name from-addr body-text email-date strict-syntax?]
+   (when-let [[_ params-str] (re-find (notify-pattern strict-syntax?) (or body-text ""))]
     (if (common/maintainer? roles from-addr)
       (let [params (parse-notify-params params-str)
             k      (notify-key source-name from-addr)
@@ -265,7 +280,7 @@
               :report-mid ""
               :reason     :insufficient-scope
               :audience   :maintainers
-              :command    (str "Notify: " params-str)}))))))
+              :command    (str "Notify: " params-str)})))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Permission check for report creation (pure)
