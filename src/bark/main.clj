@@ -267,8 +267,14 @@
                   (log/error e "Failed to process id:" (:id msg))))))))
       ;; First run (or retry after crash): fetch limited set, then seal baseline
       (let [msgs (sort-chronologically (first-run-messages src folder fetch-opts))]
-        (if (empty? msgs)
+        (cond
+          (and (empty? msgs) (seq all-ids))
+          (log/warn "First-run filter matched 0 of" (count all-ids)
+                    "Maildir files — verify :initial-fetch and :folder"
+                    "(all" (count all-ids) "ids will be sealed as seen)")
+          (empty? msgs)
           (log/info "No new messages in Maildir")
+          :else
           (do (log/info "Fetched" (count msgs) "messages from Maildir (first run)")
               (doseq [msg msgs
                       :while (not (shutting-down?))]
@@ -299,14 +305,19 @@
 ;; Mail source connection
 ;; ---------------------------------------------------------------------------
 
+(defn- maildir-folder-path
+  "Resolve a :maildir mailbox config to its on-disk folder path."
+  [{:keys [path folder] :or {folder "INBOX"}}]
+  (str path "/" folder))
+
 (defn- mailbox->mailseq-cfg
   "Convert a bark :mailbox config map to the format expected by mailseq/open.
   Maps the single :folder key to the :folders map mailseq expects."
-  [{:keys [type folder path] :or {folder "INBOX"} :as cfg}]
+  [{:keys [type folder] :or {folder "INBOX"} :as cfg}]
   (let [base    (dissoc cfg :folder :path)
         folders (case type
                   :imap    {folder folder}
-                  :maildir {folder (str path "/" folder)})]
+                  :maildir {folder (maildir-folder-path cfg)})]
     (assoc base :folders folders)))
 
 (defn open-mailbox [mailbox-cfg]
@@ -314,7 +325,7 @@
     (log/info "Opening mailbox" (pr-str (:type mailbox-cfg))
               (case (:type mailbox-cfg)
                 :imap    (str (:user mailbox-cfg) "@" (:host mailbox-cfg))
-                :maildir (:path mailbox-cfg)
+                :maildir (maildir-folder-path mailbox-cfg)
                 ""))
     (mailseq/open (mailbox->mailseq-cfg mailbox-cfg))
     (catch Exception e
