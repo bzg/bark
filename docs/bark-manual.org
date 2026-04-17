@@ -432,7 +432,7 @@ punctuation (=.= =,= =;= =:= =?= =!=), whitespace, or end of line. Exception:
 | =Owned= =Handled= =Assigned=               | owned             |
 | =Canceled= =Cancelled=                   | closed (canceled) |
 | =Expired=                              | closed (expired)  |
-| =Resolved= =Applied= =Pushed= =Fixed= =Closed= | closed (resolved) |
+| =Resolved= =Applied= =Pushed= =Fixed= =Closed= =Completed= =Merged= =Implemented= | closed (resolved) |
 
 All reports can be in a combination of three states:
 
@@ -456,8 +456,8 @@ owned, but they can still be marked urgent or important and closed.
 
 | Command keyword | Effect on report  |
 |-----------------+-------------------|
-| =Urgent=          | Mark as urgent    |
-| =Important=       | Mark as important |
+| =Urgent.=         | Mark as urgent    |
+| =Important.=      | Mark as important |
 
 Unlike other triggers, =Urgent= and =Important= require punctuation
 (=.= =,= =;= =:= =?= =!=) or end of line --- a bare space is not
@@ -554,6 +554,29 @@ Set globally or per source (per-source wins):
 :command-syntax :strict
 #+end_src
 
+**** Time-windowed syntax mode
+
+=:command-syntax= also accepts a vector of =[:mode opts]= tuples for
+sources that switch mode over time — typically a mailing list that
+used to be =:loose= and tightened to =:strict= on a given date, where
+you still want to re-ingest the archive consistently.  Windows are
+half-open =[:since, :until)= and either bound may be omitted
+(unbounded in that direction).  Periods outside any entry default to
+=:loose=.
+
+#+begin_src edn
+:command-syntax [[:loose  {:until "2026-01-01"}]
+                 [:strict {:since "2026-01-01"}]]
+#+end_src
+
+Emails dated before =2026-01-01= accept bare and =!=-prefixed forms;
+emails on or after that date require the =!= prefix.  The mode is
+resolved per email against =:email/date-sent=, so re-ingesting an
+archive yields the historically correct behavior.
+
+Syntax windows and =:words= windows compose — the effective timeline
+covers every boundary from both.
+
 *** Time-windowed trigger words
 
 A single word in =:words= can be restricted to a date window by
@@ -570,6 +593,7 @@ today:
 #+begin_src edn
 :commands {:closed {:words ["Canceled" "Cancelled" "Resolved" "Applied"
                             "Pushed" "Fixed" "Closed" "Expired"
+                            "Completed" "Merged" "Implemented"
                             ["Done" {:since "2020-01-01"
                                      :until "2026-04-16"}]]}}
 #+end_src
@@ -601,37 +625,42 @@ apply to plain triggers):
 previously set the attribute — or any maintainer (maintainers retain a
 full override).
 
-| ID             | Syntax / Words                        | Permission           | Report types        |
-|----------------+---------------------------------------+----------------------+---------------------|
-| =:closed=        | Canceled, Applied, Pushed, Fixed...   | any user             | all                 |
-| =:urgent=        | Urgent                                | any user             | all                 |
-| =:important=     | Important                             | any user             | all                 |
-| =:acked=         | Acked, Confirmed, Reviewed, Approved  | any user             | bug, patch, request |
-| =:owned=         | Owned, Handled, Assigned              | any user             | bug, patch, request |
-| =:deadline=      | =Deadline: 2025-03-19= or =Deadline: 30d= | any user             | bug, patch, request |
-| =:expiry=        | =Expiry: 2025-06-15= or =Expiry: 30d=     | any user             | bug, patch, request |
-| =:topic=         | =Topic: word=                           | any user             | all                 |
-| =:superseded-by= | =Superseded-by: <msg-id>=               | any user             | all                 |
-|----------------+---------------------------------------+----------------------+---------------------|
-| vote up        | =+1= or =1+=                              | any user (once)      | request             |
-| vote down      | =-1= or =1-=                              | any user (once)      | request             |
-| vote null      | =+0= / =0+= / =-0= / =0-=                     | any user (once)      | request             |
-|----------------+---------------------------------------+----------------------+---------------------|
-| =:unclosed=      | =Not closed=                            | setter or maintainer | all                 |
-| =:unurgent=      | =Not urgent=                            | setter or maintainer | all                 |
-| =:unimportant=   | =Not important=                         | setter or maintainer | all                 |
-| =:unacked=       | =Not acked=                             | setter or maintainer | bug, patch, request |
-| =:unowned=       | =Not owned=                             | setter or maintainer | bug, patch, request |
-| =:undeadline=    | =No deadline=                           | setter or maintainer | bug, patch, request |
-| =:unexpiry=      | =No expiry=                             | setter or maintainer | bug, patch, request |
-| =:untopic=       | =No topic=                              | setter or maintainer | all                 |
-| =:unsuperseded=  | =Not superseded=                        | setter or maintainer | all                 |
-|----------------+---------------------------------------+----------------------+---------------------|
-| =:acked-by=      | =Acked-by: addr@host=                   | maintainer           | bug, patch, request |
-| =:owned-by=      | =Owned-by: addr@host=                   | maintainer           | bug, patch, request |
-| =:closed-by=     | =Closed-by: addr@host=                  | maintainer           | all                 |
-| =:urgent-by=     | =Urgent-by: addr@host=                  | maintainer           | all                 |
-| =:important-by=  | =Important-by: addr@host=               | maintainer           | all                 |
+| ID             | Syntax / Words                                 | Permission           | Report types        |
+|----------------+------------------------------------------------+----------------------+---------------------|
+| =:closed=        | =Canceled=, =Cancelled=, =Expired=, =Closed=, =Resolved= | any user             | all                 |
+| =:closed=        | =Fixed=                                          | any user             | bug                 |
+| =:closed=        | =Applied=, =Pushed=, =Merged=                        | any user             | patch               |
+| =:closed=        | =Completed=, =Inplemented=                         | any user             | request             |
+| =:acked=         | =Acked=, =Confirmed=, =Reviewed=, =Approved=           | any user             | bug, patch, request |
+| =:owned=         | =Owned=, =Handled=, =Assigned=                       | any user             | bug, patch, request |
+|----------------+------------------------------------------------+----------------------+---------------------|
+| =:urgent=        | =Urgent.=                                        | any user             | all                 |
+| =:important=     | =Important.=                                     | any user             | all                 |
+| =:topic=         | =Topic: word=                                    | any user             | all                 |
+| =:superseded-by= | =Superseded-by: <msg-id>=                        | any user             | all                 |
+| =:deadline=      | =Deadline: 2025-03-19= or =Deadline: 30d=          | any user             | bug, patch, request |
+| =:expiry=        | =Expiry: 2025-06-15= or =Expiry: 30d=              | any user             | bug, patch, request |
+|----------------+------------------------------------------------+----------------------+---------------------|
+| vote up        | =+1= or =1+=                                       | any user (once)      | request             |
+| vote down      | =-1= or =1-=                                       | any user (once)      | request             |
+| vote null      | =+0= / =0+= / =-0= / =0-=                              | any user (once)      | request             |
+|----------------+------------------------------------------------+----------------------+---------------------|
+| =:unclosed=      | =Not closed=                                     | setter or maintainer | all                 |
+| =:unurgent=      | =Not urgent=                                     | setter or maintainer | all                 |
+| =:unimportant=   | =Not important=                                  | setter or maintainer | all                 |
+| =:untopic=       | =No topic=                                       | setter or maintainer | all                 |
+| =:unsuperseded=  | =Not superseded=                                 | setter or maintainer | all                 |
+| =:unacked=       | =Not acked=                                      | setter or maintainer | bug, patch, request |
+| =:unowned=       | =Not owned=                                      | setter or maintainer | bug, patch, request |
+| =:undeadline=    | =No deadline=                                    | setter or maintainer | bug, patch, request |
+| =:unexpiry=      | =No expiry=                                      | setter or maintainer | bug, patch, request |
+|----------------+------------------------------------------------+----------------------+---------------------|
+| =:closed-by=     | =Closed-by: addr@host=                           | maintainer           | all                 |
+| =:urgent-by=     | =Urgent-by: addr@host=                           | maintainer           | all                 |
+| =:important-by=  | =Important-by: addr@host=                        | maintainer           | all                 |
+| =:acked-by=      | =Acked-by: addr@host=                            | maintainer           | bug, patch, request |
+| =:owned-by=      | =Owned-by: addr@host=                            | maintainer           | bug, patch, request |
+#+TBLFM: $1=:closed= (bug)
 
 ** All controls
 

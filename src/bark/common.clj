@@ -415,7 +415,7 @@
   {:acked     ["Acked" "Confirmed" "Reviewed" "Approved"]
    :owned     ["Owned" "Handled" "Assigned"]
    :closed    ["Canceled" "Cancelled" "Resolved" "Applied" "Pushed"
-               "Fixed" "Closed" "Expired"]
+               "Fixed" "Closed" "Expired" "Completed" "Merged" "Implemented"]
    :urgent    ["Urgent"]
    :important ["Important"]})
 
@@ -494,37 +494,35 @@
          (extract-overrides-map (:commands source-cfg))))
 
 ;; ---------------------------------------------------------------------------
-;; Temporal expansion of trigger words
+;; Temporal timeline
 ;;
-;; A :words entry may be time-windowed:
+;; Both :words and :command-syntax accept windowed entries:
 ;;   ["Fixed" {:since "2020-01-01" :until "2021-01-01"}]
+;;   [:strict {:since "2026-01-01"}]
 ;; Windows are half-open [since, until) and interpreted in UTC.
 ;; Either bound may be omitted (nil = unbounded in that direction).
-;; `expand-commands-timeline` collects all boundaries across a raw
-;; commands map (values = mixed string / [string opts] vectors) and
-;; returns a vector of periods, each carrying a classic
-;; {cmd-id [strings]} map with only the words active in that period.
-;; A commands-map with no windowed entries yields a single
-;; [nil, nil) period — callers not using timeline get zero overhead.
+;; `expand-commands-timeline` / `resolve-unified-timeline` collect all
+;; boundaries, split the timeline into contiguous periods, and return
+;; the set of active words (and syntax mode) for each period.  A config
+;; with no windows yields a single [nil, nil) period — callers not
+;; using timeline get zero overhead.
 ;; ---------------------------------------------------------------------------
 
-(defn- word-active-in?
-  "True iff `w-entry` is active on the whole segment [seg-since, seg-until).
-  nil bounds on the segment or on the entry mean unbounded."
+(defn- entry-covers-segment?
+  "True iff the entry's [since, until) window covers the whole segment
+  [seg-since, seg-until).  nil bounds on either side mean unbounded."
   [{:keys [^Date since ^Date until]} ^Date seg-since ^Date seg-until]
   (let [seg-start (if seg-since (.getTime seg-since) Long/MIN_VALUE)
         seg-end   (if seg-until (.getTime seg-until) Long/MAX_VALUE)
-        w-start   (if since (.getTime since) Long/MIN_VALUE)
-        w-end     (if until (.getTime until) Long/MAX_VALUE)]
-    (and (<= w-start seg-start) (>= w-end seg-end))))
+        e-start   (if since (.getTime since) Long/MIN_VALUE)
+        e-end     (if until (.getTime until) Long/MAX_VALUE)]
+    (and (<= e-start seg-start) (>= e-end seg-end))))
 
-(defn- collect-word-boundaries
-  "Return a sorted vector of distinct non-nil boundary Dates from all
-  windowed words in a {cmd-id [entries]} map."
-  [commands-raw]
-  (->> (vals commands-raw)
-       (mapcat identity)
-       (map word-entry)
+(defn- sorted-boundaries
+  "Return a sorted vector of distinct non-nil boundary Dates pulled
+  from the :since/:until of each entry."
+  [entries]
+  (->> entries
        (mapcat (juxt :since :until))
        (remove nil?)
        distinct
@@ -541,19 +539,23 @@
     [[nil nil]]
     (mapv vec (partition 2 1 (concat [nil] boundaries [nil])))))
 
+(defn- word-entries
+  "Map {cmd-id [raw-entries]} → {cmd-id [normalized-entries]}."
+  [commands-raw]
+  (update-vals commands-raw #(mapv word-entry %)))
+
 (defn- commands-for-segment
-  "From {cmd-id [entries]} and a segment, return {cmd-id [strings]}
-  keeping only words whose window covers the segment. Drops commands
-  that have no active word in this segment."
-  [commands-raw seg-since seg-until]
+  "From {cmd-id [normalized-entries]} and a segment, return
+  {cmd-id [strings]} keeping only words whose window covers the
+  segment. Drops commands that have no active word in this segment."
+  [cmds-by-id seg-since seg-until]
   (reduce-kv
-   (fn [acc cmd-id words]
-     (let [active (into [] (comp (map word-entry)
-                                 (filter #(word-active-in? % seg-since seg-until))
+   (fn [acc cmd-id entries]
+     (let [active (into [] (comp (filter #(entry-covers-segment? % seg-since seg-until))
                                  (map :word))
-                        words)]
+                        entries)]
        (if (seq active) (assoc acc cmd-id active) acc)))
-   {} commands-raw))
+   {} cmds-by-id))
 
 (defn expand-commands-timeline
   "Expand a raw {cmd-id [entries]} map — entries may be strings or
@@ -562,16 +564,104 @@
   Periods are contiguous and cover the full timeline. A commands-map
   with no windowed entries yields a single [nil, nil) period."
   [commands-raw]
-  (mapv (fn [[s u]]
-          {:since s :until u :commands (commands-for-segment commands-raw s u)})
-        (period-segments (collect-word-boundaries commands-raw))))
+  (let [cmds-by-id (word-entries commands-raw)]
+    (mapv (fn [[s u]]
+            {:since s :until u :commands (commands-for-segment cmds-by-id s u)})
+          (period-segments (sorted-boundaries (mapcat val cmds-by-id))))))
 
-(defn resolve-commands-timeline
-  "Merge defaults + global + local :commands and expand any windowed
-  words into a timeline of periods. Each period carries a classic
-  {cmd-id [strings]} map ready for regex compilation."
+;; ---------------------------------------------------------------------------
+;; :command-syntax normalization
+;;
+;; Accepts a bare keyword (:loose / :strict — always active) or a vector
+;; of [:mode opts-map] tuples.  Periods outside any entry default to :loose.
+;; ---------------------------------------------------------------------------
+
+(defn- syntax-entry
+  "Normalize a :command-syntax entry to {:mode kw :since Date|nil :until Date|nil}.
+  Accepts a bare keyword (always active) or a [keyword opts-map] tuple."
+  [entry]
+  (cond
+    (keyword? entry)
+    {:mode entry :since nil :until nil}
+
+    (and (vector? entry) (= 2 (count entry))
+         (keyword? (first entry)) (map? (second entry)))
+    (let [[m opts] entry]
+      {:mode m
+       :since (parse-iso-date (:since opts))
+       :until (parse-iso-date (:until opts))})
+
+    :else
+    (throw (ex-info (str "Invalid :command-syntax entry: " (pr-str entry)
+                         " (expected keyword or [keyword {:since :until}])")
+                    {:entry entry}))))
+
+(defn- normalize-syntax-cfg
+  "Normalize the :command-syntax config value into a vec of syntax
+  entries.  Accepts:
+    - nil                  → [{:mode :loose :since nil :until nil}]
+    - :loose / :strict     → single-entry vec, always active
+    - a vec of entries     → parsed via `syntax-entry`"
+  [cs]
+  (cond
+    (nil? cs)       [{:mode :loose :since nil :until nil}]
+    (keyword? cs)   [(syntax-entry cs)]
+    (vector? cs)    (mapv syntax-entry cs)
+    :else
+    (throw (ex-info (str "Invalid :command-syntax: " (pr-str cs)
+                         " (expected keyword or vector of entries)")
+                    {:value cs}))))
+
+(defn- mode-for-segment
+  "Return the :mode active on a segment.  Scans entries in order and
+  picks the first whose window covers the segment.  Falls back to
+  :loose when none matches."
+  [entries seg-since seg-until]
+  (or (some #(when (entry-covers-segment? % seg-since seg-until) (:mode %))
+            entries)
+      :loose))
+
+(defn resolve-unified-timeline
+  "Merge :words windows and :command-syntax windows into a single
+  timeline of periods.  Each period carries:
+    {:since :until :commands {cmd-id [strings]} :strict-syntax? bool}
+  A config with no windows yields a single [nil, nil) period."
   [source-cfg]
-  (expand-commands-timeline (merged-raw-words source-cfg)))
+  (let [cmds-by-id     (word-entries (merged-raw-words source-cfg))
+        syntax-entries (normalize-syntax-cfg (:command-syntax source-cfg))
+        all-bounds     (sorted-boundaries (concat (mapcat val cmds-by-id)
+                                                  syntax-entries))]
+    (mapv (fn [[s u]]
+            {:since          s
+             :until          u
+             :commands       (commands-for-segment cmds-by-id s u)
+             :strict-syntax? (= :strict (mode-for-segment syntax-entries s u))})
+          (period-segments all-bounds))))
+
+(defn- entry-covers? [^Date now {:keys [^Date since ^Date until]}]
+  (and (or (nil? since) (>= (.getTime now) (.getTime since)))
+       (or (nil? until) (<  (.getTime now) (.getTime until)))))
+
+(defn current-command-syntax
+  "Return the :command-syntax mode (:loose or :strict) active `now` for
+  a given source config.  Accepts both the scalar form (:loose /
+  :strict) and the timeline vec form.  `now` defaults to today (UTC)."
+  ([source-cfg] (current-command-syntax source-cfg (Date.)))
+  ([source-cfg ^Date now]
+   (let [entries (normalize-syntax-cfg (:command-syntax source-cfg))]
+     (or (some #(when (entry-covers? now %) (:mode %)) entries)
+         :loose))))
+
+(defn current-syntax-period
+  "Return the {:mode :since :until} entry covering `now` when
+  :command-syntax is time-windowed (vec form).  Returns nil when
+  :command-syntax is scalar or absent — callers use this to decide
+  whether to surface a \"temporalized\" note in generated docs."
+  ([source-cfg] (current-syntax-period source-cfg (Date.)))
+  ([source-cfg ^Date now]
+   (when (vector? (:command-syntax source-cfg))
+     (let [entries (normalize-syntax-cfg (:command-syntax source-cfg))]
+       (some #(when (entry-covers? now %) %) entries)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Maintainer tenures (pure — operate on a seq of tenure maps, no DB access)
