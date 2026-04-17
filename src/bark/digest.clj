@@ -512,5 +512,4 @@
                                         parent-eids nearest-eids patches plan)))
 
           ;; Mark email as fully digested so future re-fetches can skip it.
-          (when eid
-            (d/transact! conn [{:db/id eid :email/digested-at (Date.)}])))))))
+          (d/transact! conn [{:db/id eid :email/digested-at (Date.)}]))))))

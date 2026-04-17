@@ -375,12 +375,22 @@
    :fetch-opts   (parse-initial-fetch (or (:initial-fetch ingest-cfg) 50))
    :ingest-opts  (select-keys ingest-cfg [:max-size :max-attachment-size])})
 
+(defn- init-roles! [db-conn config]
+  (roles/ensure-source-roles! db-conn config)
+  (doseq [{:keys [name]} (:sources config)]
+    (roles/ensure-notify-defaults! db-conn name
+                                   (roles/get-tenures (d/db db-conn) name))))
+
 (defn- load-context
-  "Re-read config and derive source-map/sources.  Called once at startup
-  in batch mode, and on every reconnect in watch mode so edits to
-  config.edn take effect without a restart."
-  [config-path]
+  "Re-read config, seed any newly-added maintainers into the tenure
+  model, and derive source-map/sources.  Called once at startup in
+  batch mode, and on every reconnect in watch mode so edits to
+  config.edn — including new maintainers — take effect without a
+  restart.  `ensure-source-roles!` and `ensure-notify-defaults!` are
+  both idempotent, so re-running them on every reconnect is safe."
+  [db-conn config-path]
   (let [config (or (common/load-config config-path) {})]
+    (init-roles! db-conn config)
     {:source-map (common/build-source-map config)
      :sources    (or (:sources config) [])}))
 
@@ -398,7 +408,7 @@
     (loop [backoff-ms 1000
            last-expire-ms 0]
       (when-not (shutting-down?)
-        (let [{:keys [source-map sources]} (load-context config-path)
+        (let [{:keys [source-map sources]} (load-context db-conn config-path)
               src (open-mailbox mailbox-cfg)]
           (if-not src
             (do (log/error "Mailbox connection failed, retrying in" (/ backoff-ms 1000) "s")
@@ -430,7 +440,7 @@
   [mailbox-cfg db-conn ingest-cfg config-path]
   (let [{:keys [folder mailbox-type fetch-opts ingest-opts]}
         (run-opts mailbox-cfg ingest-cfg)
-        {:keys [source-map sources]} (load-context config-path)
+        {:keys [source-map sources]} (load-context db-conn config-path)
         src (open-mailbox mailbox-cfg)]
     (when-not src
       (log/error "Mailbox connection failed.")
@@ -478,12 +488,6 @@
              (log/debug "DB close failed:" (.getMessage e))))
       (log/info "Goodbye.")))))
 
-(defn- init-roles! [db-conn config]
-  (roles/ensure-source-roles! db-conn config)
-  (doseq [{:keys [name]} (:sources config)]
-    (roles/ensure-notify-defaults! db-conn name
-                                   (roles/get-tenures (d/db db-conn) name))))
-
 (defn -main [& args]
   (let [{:keys [watch? cli-fetch config-path]} (parse-main-args args)
         config (common/load-config config-path)]
@@ -497,7 +501,6 @@
       (validate-mailbox-cfg! mailbox-cfg)
       (let [db-conn (ingest/connect (:path (:db config)))]
         (log/info "Datalevin connected.")
-        (init-roles! db-conn config)
         (install-shutdown-hook! db-conn)
         (if watch?
           (watch-loop! mailbox-cfg db-conn ingest-cfg config-path)

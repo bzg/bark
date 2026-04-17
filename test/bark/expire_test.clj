@@ -2,7 +2,6 @@
   "Tests for bark.expire — rule-based report expiry."
   (:require [clojure.test :refer [deftest is testing]]
             [datalevin.core :as d]
-            [clojure.java.io :as io]
             [bark.common :as common]
             [bark.expire :as expire]
             [bark.test-helpers :as th])

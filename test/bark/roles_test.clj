@@ -78,3 +78,34 @@
                               "lead@x.org"))
       (is (= "lead@x.org"
              (common/lead-maintainer (roles/get-tenures (d/db conn) "s")))))))
+
+(deftest rfc5322-address-forms
+  (testing "plain bare address"
+    (let [conn (fresh-conn)
+          _    (seed-two-maintainers! conn "s" "lead@x.org" "co@x.org")
+          t0   (roles/get-tenures (d/db conn) "s")]
+      (roles/apply-role-controls! conn t0 "s" "co@x.org"
+                                  "Add maintainer: peer@x.org" t1)
+      (is (common/maintainer? (roles/get-tenures (d/db conn) "s")
+                              "peer@x.org"))))
+
+  (testing "Display Name <addr> form"
+    (let [conn (fresh-conn)
+          _    (seed-two-maintainers! conn "s" "lead@x.org" "co@x.org")
+          t0   (roles/get-tenures (d/db conn) "s")]
+      (roles/apply-role-controls! conn t0 "s" "co@x.org"
+                                  "Add maintainer: Peer User <peer@x.org>" t1)
+      (is (common/maintainer? (roles/get-tenures (d/db conn) "s")
+                              "peer@x.org"))))
+
+  (testing "mix of bracketed and bare addresses preserves order"
+    (let [conn (fresh-conn)
+          _    (seed-two-maintainers! conn "s" "lead@x.org" "co@x.org")
+          t0   (roles/get-tenures (d/db conn) "s")]
+      (roles/apply-role-controls!
+       conn t0 "s" "co@x.org"
+       "Add maintainer: alice@x.org Bob <bob@x.org> carol@x.org" t1)
+      (let [ts (roles/get-tenures (d/db conn) "s")]
+        (is (common/maintainer? ts "alice@x.org"))
+        (is (common/maintainer? ts "bob@x.org"))
+        (is (common/maintainer? ts "carol@x.org"))))))

@@ -297,10 +297,10 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- source-notify-enabled?
-  "True unless the source explicitly sets :notifications {:enable false}."
+  "True unless the source explicitly sets :notifications {:enabled false}."
   [source-map source-name]
   (let [src-cfg (get source-map source-name)]
-    (not (false? (get-in src-cfg [:notifications :enable])))))
+    (not (false? (get-in src-cfg [:notifications :enabled])))))
 
 ;; ---------------------------------------------------------------------------
 ;; SMTP
