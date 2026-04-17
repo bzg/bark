@@ -237,13 +237,29 @@
       id
       (str raw))))
 
+(defn extract-bracketed-id
+  "Extract the first `<addr@domain>` token from a header value.
+  Falls back to the trimmed input when no bracketed token is present,
+  so malformed headers are not silently dropped.  Returns nil for nil
+  or blank input.
+
+  Normalizes values that reference Message-Ids (Message-Id itself,
+  In-Reply-To) so that threading lookups match even when the raw
+  header carries parenthetical comments, folded whitespace, or extra
+  padding — cases that show up on the Maildir read path where raw
+  MIME bytes are parsed directly rather than via IMAP ENVELOPE."
+  [v]
+  (when v
+    (let [s (if (vector? v) (first v) (str v))]
+      (when-not (str/blank? s)
+        (or (first (re-seq #"<[^>]+>" s))
+            (str/trim s))))))
+
 (defn extract-in-reply-to
   "Extract In-Reply-To message-id from a headers map (raw or parsed).
   Handles both string and vector values."
   [headers]
-  (when-let [v (get-header headers "In-Reply-To")]
-    (let [s (str/trim (if (vector? v) (first v) (str v)))]
-      (when-not (str/blank? s) s))))
+  (extract-bracketed-id (get-header headers "In-Reply-To")))
 
 ;; ---------------------------------------------------------------------------
 ;; Source classification

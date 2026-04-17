@@ -175,7 +175,29 @@
   (let [hdrs (make-headers "In-Reply-To" " <msg@test> ")]
     (is (= "<msg@test>" (common/extract-in-reply-to hdrs))))
   (let [hdrs (make-headers "In-Reply-To" "  ")]
-    (is (nil? (common/extract-in-reply-to hdrs)))))
+    (is (nil? (common/extract-in-reply-to hdrs))))
+  (testing "parenthetical comment after bracketed id is stripped"
+    (let [hdrs (make-headers "In-Reply-To" "<msg@test> (in reply to Joe)")]
+      (is (= "<msg@test>" (common/extract-in-reply-to hdrs)))))
+  (testing "folded whitespace inside value is tolerated"
+    (let [hdrs (make-headers "In-Reply-To" "\n\t<msg@test>")]
+      (is (= "<msg@test>" (common/extract-in-reply-to hdrs))))))
+
+(deftest extract-bracketed-id-test
+  (testing "clean bracketed id returns unchanged"
+    (is (= "<abc@x>" (common/extract-bracketed-id "<abc@x>"))))
+  (testing "first bracketed token wins when value carries extra tokens"
+    (is (= "<abc@x>" (common/extract-bracketed-id "<abc@x> (comment) <ignored@y>"))))
+  (testing "padded input is trimmed to the bracketed token"
+    (is (= "<abc@x>" (common/extract-bracketed-id "   <abc@x>   "))))
+  (testing "vector values take the first element"
+    (is (= "<abc@x>" (common/extract-bracketed-id ["<abc@x>" "<other@y>"]))))
+  (testing "falls back to trimmed string when no bracketed token"
+    (is (= "abc@x" (common/extract-bracketed-id "  abc@x  "))))
+  (testing "blank and nil return nil"
+    (is (nil? (common/extract-bracketed-id nil)))
+    (is (nil? (common/extract-bracketed-id "")))
+    (is (nil? (common/extract-bracketed-id "   ")))))
 
 ;; ---------------------------------------------------------------------------
 ;; Role checks (pure)

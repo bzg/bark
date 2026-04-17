@@ -159,7 +159,7 @@
                                                                     (when data (count data)))}
                                 text-data (assoc :attachment/data text-data))))
                           (remove nil? (:attachments body)))]
-    (cond-> {:email/message-id   (:message-id msg)
+    (cond-> {:email/message-id   (common/extract-bracketed-id (:message-id msg))
              :email/subject      (let [s (or (:subject msg) "")]
                                     (str/replace (if (str/blank? s) "(no subject)" s)
                                                  #"[\r\n]+" " "))
@@ -199,7 +199,7 @@
   `opts` may contain :max-attachment-size to override the default (1 MB)."
   ([conn msg] (store-email! conn msg {}))
   ([conn msg opts]
-  (let [message-id (:message-id msg)
+  (let [message-id (common/extract-bracketed-id (:message-id msg))
         id         (:id msg)]
     (cond
       (nil? message-id)
