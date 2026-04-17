@@ -205,9 +205,19 @@
 (defn- catch-up-imap!
   "IMAP incremental fetch: use UID watermark to fetch only new messages.
   The batch is sorted chronologically before processing so parents are
-  ingested before their replies within the same fetch."
+  ingested before their replies within the same fetch.
+
+  Before fetching we check the folder's UIDVALIDITY: if it has changed
+  since the last run, the stored UID watermark points nowhere and must
+  be cleared — otherwise `by-id-range` would silently return nothing
+  forever. On reset we fall through to the first-run fetch path."
   [src db-conn folder fetch-opts source-map sources ingest-opts]
-  (let [watermark (ingest/max-imap-uid db-conn)
+  (let [live-uv   (try (mailseq/uid-validity src folder)
+                       (catch Exception e
+                         (log/debug "Could not read UIDVALIDITY:" (.getMessage e))
+                         nil))
+        _         (ingest/sync-uid-validity! db-conn live-uv)
+        watermark (ingest/max-imap-uid db-conn)
         msgs (sort-chronologically
               (if (zero? watermark)
                 (first-run-messages src folder fetch-opts)

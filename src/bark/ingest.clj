@@ -32,6 +32,44 @@
 (defn save-imap-uid! [conn imap-uid]
   (d/transact! conn [{:watermark/id "default" :watermark/imap-uid imap-uid}]))
 
+(defn stored-uid-validity
+  "Return the UIDVALIDITY recorded alongside the current UID watermark,
+  or nil if none has ever been stored (fresh DB or pre-upgrade)."
+  [conn]
+  (d/q '[:find ?uv .
+         :where [?e :watermark/id "default"] [?e :watermark/imap-uid-validity ?uv]]
+       (d/db conn)))
+
+(defn sync-uid-validity!
+  "Align the stored UIDVALIDITY with the mailbox's live value.
+  Returns :match, :stamped (first time), or :reset (changed — watermark
+  cleared). On :reset, the caller will see max-imap-uid return 0 and
+  fall through to the first-run fetch path.
+
+  `live-uv` may be nil if the backend cannot report UIDVALIDITY
+  (Maildir, non-UIDFolder IMAP). In that case we leave the stored
+  value untouched and return :unsupported."
+  [conn live-uv]
+  (if (nil? live-uv)
+    :unsupported
+    (let [stored (stored-uid-validity conn)]
+      (cond
+        (nil? stored)
+        (do (log/info "Stamping initial UIDVALIDITY:" live-uv)
+            (d/transact! conn [{:watermark/id "default"
+                                :watermark/imap-uid-validity live-uv}])
+            :stamped)
+
+        (not= stored live-uv)
+        (do (log/warn "UIDVALIDITY changed" stored "→" live-uv
+                      "— clearing UID watermark, re-running initial fetch")
+            (d/transact! conn [{:watermark/id "default"
+                                :watermark/imap-uid-validity live-uv
+                                :watermark/imap-uid 0}])
+            :reset)
+
+        :else :match))))
+
 (defn known-email-ids
   "Return the set of all :email/id values stored in the DB."
   [conn]
