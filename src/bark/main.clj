@@ -189,15 +189,31 @@
   (log-first-run fetch-opts)
   (mailseq/messages src folder (merge {:attachments? true} fetch-opts)))
 
+(defn- sort-chronologically
+  "Sort a batch of mailseq messages oldest-first by the Date: header,
+  falling back to server receive time then UID so messages without a
+  date do not reshuffle well-dated ones.  Ensures a parent is ingested
+  before its replies when both land in the same batch — descendant
+  threading relies on the parent already existing in the DB."
+  [msgs]
+  (sort-by (fn [msg]
+             [(or (some-> ^Date (:date-sent msg) .getTime) Long/MAX_VALUE)
+              (or (some-> ^Date (:date-received msg) .getTime) Long/MAX_VALUE)
+              (or (:uid msg) Long/MAX_VALUE)])
+           msgs))
+
 (defn- catch-up-imap!
-  "IMAP incremental fetch: use UID watermark to fetch only new messages."
+  "IMAP incremental fetch: use UID watermark to fetch only new messages.
+  The batch is sorted chronologically before processing so parents are
+  ingested before their replies within the same fetch."
   [src db-conn folder fetch-opts source-map sources ingest-opts]
   (let [watermark (ingest/max-imap-uid db-conn)
-        msgs (if (zero? watermark)
-               (first-run-messages src folder fetch-opts)
-               (do (log/info "Resuming — fetching UIDs >" watermark)
-                   (mailseq/by-id-range src folder
-                                        (str (inc watermark)) nil)))]
+        msgs (sort-chronologically
+              (if (zero? watermark)
+                (first-run-messages src folder fetch-opts)
+                (do (log/info "Resuming — fetching UIDs >" watermark)
+                    (mailseq/by-id-range src folder
+                                         (str (inc watermark)) nil))))]
     (log/info "Fetched" (count msgs) "messages")
     (when (and (seq msgs) (not (shutting-down?)))
       (let [safe-ids (reduce (fn [acc msg]
