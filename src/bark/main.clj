@@ -233,7 +233,9 @@
   On first run (maildir-init not yet done), uses mailseq/messages with
   fetch-opts to honour :limit/:since, then records all pre-existing ids
   as seen.  The init flag is set last so a crash mid-first-run safely
-  retries (store-and-process! is idempotent for already-stored emails)."
+  retries (store-and-process! is idempotent for already-stored emails).
+  Both paths sort the batch chronologically so parents are ingested
+  before their replies within the same fetch."
   [src db-conn folder fetch-opts source-map sources ingest-opts]
   (let [init-done? (ingest/maildir-init-done? db-conn)
         all-ids    (mailseq/list-ids src folder)]
@@ -244,7 +246,8 @@
             new-ids (remove known all-ids)]
         (if (empty? new-ids)
           (log/info "No new messages in Maildir")
-          (let [msgs (mailseq/by-ids src folder (vec new-ids))]
+          (let [msgs (sort-chronologically
+                      (mailseq/by-ids src folder (vec new-ids)))]
             (log/info "Fetched" (count msgs) "new messages from Maildir")
             (doseq [msg msgs
                     :while (not (shutting-down?))]
@@ -253,7 +256,7 @@
                 (catch Exception e
                   (log/error e "Failed to process id:" (:id msg))))))))
       ;; First run (or retry after crash): fetch limited set, then seal baseline
-      (let [msgs (first-run-messages src folder fetch-opts)]
+      (let [msgs (sort-chronologically (first-run-messages src folder fetch-opts))]
         (if (empty? msgs)
           (log/info "No new messages in Maildir")
           (do (log/info "Fetched" (count msgs) "messages from Maildir (first run)")
