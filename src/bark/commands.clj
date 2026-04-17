@@ -6,7 +6,6 @@
   "Unified command detection, resolution, and application."
   (:require [clojure.string :as str]
             [clojure.java.io :as io]
-            [clojure.edn :as edn]
             [datalevin.core :as d]
             [taoensso.timbre :as log]
             [bark.common :as common]
@@ -240,18 +239,15 @@
 ;; ---------------------------------------------------------------------------
 
 (def ^:dynamic *failures-file*
-  "Path to the failures EDN file. Bound to `public/.failures.edn` in
-  production; tests rebind it to a temp path so they don't pollute the
-  real file."
-  "public/.failures.edn")
+  "Path to the failures EDN file. Bound to `bark.common/failures-file-path`
+  in production; tests rebind it to a temp path so they don't pollute
+  the real file."
+  common/failures-file-path)
 
 (def ^:private max-failure-age-ms (* 365 24 60 60 1000))
 
 (defn- load-failures []
-  (let [f (io/file *failures-file*)]
-    (if (.exists f)
-      (try (edn/read-string (slurp f)) (catch Exception _ []))
-      [])))
+  (common/read-failures-file *failures-file*))
 
 (defn- save-failures! [failures]
   (io/make-parents (io/file *failures-file*))

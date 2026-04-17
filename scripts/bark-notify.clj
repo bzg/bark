@@ -23,7 +23,9 @@
          '[bark.common :refer [get-header format-date format-date-iso
                                report-priority report-status report-descendant-count
                                load-config build-source-map
-                               bark-schema maintainer?]]
+                               bark-schema maintainer?
+                               failures-file-path read-failures-file
+                               reason-labels]]
          '[bark.common-bb :refer [load-datalevin-pod! dq all-reports get-tenures]])
 
 (load-datalevin-pod!)
@@ -59,12 +61,6 @@
   (spit last-notify-file (pr-str m)))
 
 ;; ---------------------------------------------------------------------------
-;; Report queries (all-reports and report-pull-pattern loaded from bark-common.clj)
-;; ---------------------------------------------------------------------------
-
-;; format-date and format-date-iso are defined in bark-common.clj
-
-;; ---------------------------------------------------------------------------
 ;; Notification queries
 ;; ---------------------------------------------------------------------------
 
@@ -72,13 +68,10 @@
   "Read the failures file, returning a vector of failure maps.
   Log on parse failure instead of swallowing silently."
   []
-  (let [f (io/file "public/.failures.edn")]
-    (if (.exists f)
-      (try (edn/read-string (slurp f))
-           (catch Exception e
-             (log/warn "Could not parse public/.failures.edn:" (.getMessage e))
-             []))
-      [])))
+  (read-failures-file failures-file-path
+                      (fn [e]
+                        (log/warn "Could not parse" failures-file-path ":"
+                                  (.getMessage e)))))
 
 (defn- failures-for-subscriber
   "Return failures relevant to `email-addr` on `source` since `since-date`.
@@ -156,10 +149,6 @@
 
 (defn- unowned? [report]
   (nil? (:report/owned report)))
-
-(def ^:private reason-labels
-  {:unknown-target     "unknown target"
-   :insufficient-scope "insufficient permissions"})
 
 (defn- format-failure-line
   "Format a single command failure as a text line.

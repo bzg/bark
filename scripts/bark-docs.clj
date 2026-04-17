@@ -27,23 +27,6 @@
                                 org-inline parse-org-table]])
 
 ;; ---------------------------------------------------------------------------
-;; Defaults — canonical definitions in bark-common.clj
-;; ---------------------------------------------------------------------------
-
-;; default-labels and default-commands are defined in bark-common.clj
-
-;; ---------------------------------------------------------------------------
-;; Resolve labels & commands with config merge chain
-;; (using shared resolve-labels-map / resolve-commands-map from bark-common)
-;; ---------------------------------------------------------------------------
-
-(defn docs-labels [source-cfg]
-  (resolve-labels-map source-cfg))
-
-(defn docs-commands [source-cfg]
-  (resolve-commands-map source-cfg))
-
-;; ---------------------------------------------------------------------------
 ;; Build the org table from resolved labels + commands
 ;; ---------------------------------------------------------------------------
 
@@ -446,8 +429,8 @@
       _           (set-theme! (or theme (:theme config)))
       source-map  (when config (build-source-map config))
       source-cfg  (get source-map source-name)
-      labels      (if source-cfg (docs-labels source-cfg) default-labels)
-      cmds        (if source-cfg (docs-commands source-cfg) default-commands)
+      labels      (if source-cfg (resolve-labels-map source-cfg) default-labels)
+      cmds        (if source-cfg (resolve-commands-map source-cfg) default-commands)
       strict?     (= :strict (:command-syntax source-cfg))
       prefix      (if strict? "!" "")
       out-file    (or out-file

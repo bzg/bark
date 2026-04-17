@@ -26,6 +26,39 @@
 (def bark-schema
   (edn/read-string (slurp (io/resource "bark-schema.edn"))))
 
+(def failures-file-path
+  "Path to the shared command-failures EDN file.
+  Written by the JVM (`bark.commands/record-failure!`) and read by
+  `bark-notify` and `bark-maintenance` to surface denied/failed
+  commands to subscribers and operators."
+  "public/.failures.edn")
+
+(defn read-failures-file
+  "Read the failures EDN file at `path`, returning a vector.
+  Returns [] when the file does not exist. On parse failure, invokes
+  `on-error` with the exception (for logging) and returns []."
+  ([] (read-failures-file failures-file-path nil))
+  ([path] (read-failures-file path nil))
+  ([path on-error]
+   (let [f (io/file path)]
+     (if (.exists f)
+       (try (edn/read-string (slurp f))
+            (catch Exception e
+              (when on-error (on-error e))
+              []))
+       []))))
+
+;; ---------------------------------------------------------------------------
+;; Command failure labels
+;; ---------------------------------------------------------------------------
+
+(def reason-labels
+  "Human-readable labels for command-failure :reason keys.
+  Shared between the notifier and the maintenance CLI so both surface
+  the same phrasing."
+  {:unknown-target     "unknown target"
+   :insufficient-scope "insufficient permissions"})
+
 ;; ---------------------------------------------------------------------------
 ;; Pure utilities
 ;; ---------------------------------------------------------------------------

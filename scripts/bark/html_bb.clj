@@ -165,17 +165,20 @@
 
 (defn nav-bar
   "Render a <nav> with BARK logo, title, and Reports/Docs/Data links.
-  `current` is the id of the active page (bolded)."
+  `current` is the id of the active page (bolded).  When `current` is
+  nil, the per-source page links are omitted — useful on the root
+  index where those paths live one directory deeper."
   [title current]
   [:nav
    [:ul [:li [:a {:href "index.html" :style "display:flex;align-items:center;gap:0.5rem;text-decoration:none;color:inherit"}
               [:span.bark-logo (h/raw bark-logo-svg)]
               [:strong title]]]]
    [:ul
-    (for [[id label href] nav-pages]
-      [:li (if (= id current)
-             [:a {:href href} [:strong label]]
-             [:a {:href href} label])])
+    (when current
+      (for [[id label href] nav-pages]
+        [:li (if (= id current)
+               [:a {:href href} [:strong label]]
+               [:a {:href href} label])]))
     [:li (theme-toggle-btn)]]])
 
 ;; ---------------------------------------------------------------------------
@@ -231,21 +234,27 @@
   "footer.bark-footer { font-size:0.78rem; color:var(--pico-muted-color); text-align:center; padding:2rem 0 1rem; }")
 
 (defn bark-footer
+  "Footer with BARK repo + license link.
+  Options:
+    :feeds  when true (default), appends per-source RSS/JSON/Org links.
+            Set to false on the root index where those paths don't exist.
+    :ical   when true (default) and :feeds is on, appends an iCal link."
   ([] (bark-footer {}))
-  ([{:keys [ical] :or {ical true}}]
+  ([{:keys [ical feeds] :or {ical true feeds true}}]
    [:footer.bark-footer
     [:a {:href bark-repo-url} "BARK"]
     " is "
     [:a {:href "https://www.gnu.org/philosophy/free-sw.html"}
      "Free Software"]
-    " — "
-    [:a {:href "reports/all.xml"} "RSS"]
-    " — "
-    [:a {:href "reports/all.json"} "JSON"]
-    " — "
-    [:a {:href "reports/all.org"} "Org"]
-    (when ical
-      (list " — " [:a {:href "events/announcements.ics"} "iCal"]))]))
+    (when feeds
+      (list " — "
+            [:a {:href "reports/all.xml"} "RSS"]
+            " — "
+            [:a {:href "reports/all.json"} "JSON"]
+            " — "
+            [:a {:href "reports/all.org"} "Org"]
+            (when ical
+              (list " — " [:a {:href "events/announcements.ics"} "iCal"]))))]))
 
 ;; ---------------------------------------------------------------------------
 ;; Org-mode inline link conversion (shared by bark-docs, bark-stats)

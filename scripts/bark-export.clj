@@ -61,7 +61,8 @@
                                   fetch-attachment-data get-tenures tenures-snapshot
                                   get-last-modified changed-source-types-since]]
          '[bark.html-bb :refer [set-theme! html-head footer-css bark-footer
-                                wrap-js spit-html theme-toggle-js bark-repo-url]])
+                                wrap-js spit-html theme-toggle-js nav-bar]]
+         '[hiccup2.core :as h])
 
 (load-datalevin-pod!)
 
@@ -191,7 +192,7 @@
     reports))
 
 ;; ---------------------------------------------------------------------------
-;; DB queries (all-reports and report-pull-pattern loaded from bark-common.clj)
+;; DB queries
 ;; ---------------------------------------------------------------------------
 
 (defn all-reports-by-date [db]
@@ -203,6 +204,11 @@
 ;; ---------------------------------------------------------------------------
 ;; Formatting helpers
 ;; ---------------------------------------------------------------------------
+
+(defn- attachment-basename
+  "Return the basename of an attachment filename (handles absolute paths)."
+  [att]
+  (.getName (io/file (:attachment/filename att))))
 
 (defn- close-flag [report]
   (if (:report/closed report)
@@ -218,8 +224,6 @@
        (if (:report/owned report) "O" "-")
        (close-flag report)))
 
-;; format-date and format-date-iso are defined in bark-common.clj
-
 (defn- votes-str
   "Format vote counts as \"score/total\" from a seq of vote maps, or nil."
   [votes]
@@ -228,10 +232,6 @@
           total (+ up down null)]
       (when (pos? total)
         (str (- up down) "/" total)))))
-
-;; ---------------------------------------------------------------------------
-;; Config & source map — loaded from bark-common.clj
-;; ---------------------------------------------------------------------------
 
 (defn- build-maintainers
   "Gather per-source currently-active maintainer sets from DB tenures.
@@ -250,8 +250,6 @@
 ;; ---------------------------------------------------------------------------
 ;; Report -> map
 ;; ---------------------------------------------------------------------------
-
-;; get-header loaded from bark-common.clj
 
 (defn- archived-at [email]
   (get-header (:email/headers-edn email) "Archived-At"))
@@ -347,14 +345,12 @@
       (and (= :announcement (:report/type report))
            (:report/has-ics report))
       (assoc :events
-             (mapv (fn [att]
-                     {:file (str h "/" (.getName (clojure.java.io/file (:attachment/filename att))))})
+             (mapv (fn [att] {:file (str h "/" (attachment-basename att))})
                    (filter #(ics-file? (:attachment/filename %))
                            (:email/attachments @att-email))))
       (:report/has-text-attachments report)
       (assoc :texts
-             (mapv (fn [att]
-                     {:file (str h "/" (.getName (clojure.java.io/file (:attachment/filename att))))})
+             (mapv (fn [att] {:file (str h "/" (attachment-basename att))})
                    (filter #(text-attachment? %)
                            (:email/attachments @att-email)))))))
 
@@ -786,6 +782,11 @@
         (spit filename (json/generate-string entries {:pretty true}))
         (log/info "Wrote" (count entries) "report(s) with votes to" filename)))))
 
+(defn- patch-basename
+  "Return the basename of a :report/patches entry (handles absolute paths)."
+  [p]
+  (.getName (io/file (:patch/filename p))))
+
 (defn dump-patches!
   "Export patch files for a single source."
   [reports patches-dir]
@@ -793,11 +794,8 @@
                         (let [h   (mid-hash (:report/message-id report))
                               dir (io/file patches-dir h)]
                           (.mkdirs dir)
-                          (doseq [p (:report/patches report)
-                                  ;; patch/filename may be an absolute path;
-                                  ;; extract the basename so io/file stays relative.
-                                  :let [fname (.getName (io/file (:patch/filename p)))]]
-                            (spit (io/file dir fname) (:patch/text p)))
+                          (doseq [p (:report/patches report)]
+                            (spit (io/file dir (patch-basename p)) (:patch/text p)))
                           (+ n (count (:report/patches report)))))
                       0
                       (filter #(seq (:report/patches %)) reports))]
@@ -833,7 +831,7 @@
                                   dir (io/file text-dir h)]
                               (.mkdirs dir)
                               (doseq [att txt-atts]
-                                (spit (io/file dir (.getName (io/file (:attachment/filename att))))
+                                (spit (io/file dir (attachment-basename att))
                                       (:attachment/data att)))
                               (+ n (count txt-atts)))
                             n)))
@@ -876,7 +874,7 @@
                                   dir (io/file events-dir h)]
                               (.mkdirs dir)
                               (doseq [att ics-atts]
-                                (spit (io/file dir (.getName (io/file (:attachment/filename att))))
+                                (spit (io/file dir (attachment-basename att))
                                       (:attachment/data att)))
                               (+ n (count ics-atts)))
                             n)))
@@ -1165,11 +1163,8 @@
                                ".theme-toggle{cursor:pointer;background:none;border:none;font-size:1.2rem;padding:0.3rem}"
                                footer-css)})
          "<body>\n<main class=\"container\">\n"
-         "<nav><ul><li><strong>BARK</strong></li></ul>"
-         "<ul><li><button class=\"theme-toggle\" onclick=\"toggleTheme()\" "
-         "aria-label=\"Toggle theme\"><span id=\"theme-icon\">🌙</span>"
-         "</button></li></ul></nav>\n"
-         "<table role=\"grid\">\n"
+         (h/html (nav-bar "BARK" nil))
+         "\n<table role=\"grid\">\n"
          "<thead><tr>"
          "<th>Source</th>"
          "<th class=\"num\">Open</th>"
@@ -1179,11 +1174,8 @@
          "</tr></thead>\n<tbody>\n"
          (apply str (map row-html rows))
          "</tbody></table>\n"
-         "<footer class=\"bark-footer\">"
-         "<a href=\"" bark-repo-url "\">BARK</a> is "
-         "<a href=\"https://www.gnu.org/philosophy/free-sw.html\">Free Software</a>"
-         "</footer>\n"
-         "<script>\n" (wrap-js theme-toggle-js) "\n</script>\n"
+         (h/html (bark-footer {:feeds false}))
+         "\n<script>\n" (wrap-js theme-toggle-js) "\n</script>\n"
          "</main>\n</body>\n</html>\n")]
     (spit-html "public/index.html" page)
     (log/info "Wrote public/index.html with" (count rows) "source(s)")))
