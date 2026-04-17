@@ -6,7 +6,6 @@
 
   Ported from test/bark-digest-test.clj (bb version)."
   (:require [clojure.edn :as edn]
-            [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [datalevin.core :as d]
             [bark.commands :as commands]
@@ -378,7 +377,6 @@
             (is (= 3 (series-patch-count db "parser|user@test.org|3")))
             (is (some? (:series/closed v1))))
           (let [r35 (get-report db "<35@test.org>")
-                r36 (get-report db "<36@test.org>")
                 r37 (get-report db "<37@test.org>")]
             (is (some? (:report/series r35)))
             (is (= "1/3" (:report/patch-seq r35)))

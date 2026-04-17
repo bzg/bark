@@ -358,26 +358,31 @@
 
 (defn- build-directive-set-tx
   "Build assertion datoms for setting attributes via -by directives.
-  Points the attr to the real email and stores the designated address."
+  Points the attr to the real email and stores the designated address
+  in its lowercased form so downstream comparisons against
+  `:email/from-address` are case-insensitive."
   [report-eid email-eid set-map]
   (into []
         (mapcat (fn [[attr addr]]
                   [[:db/add report-eid attr email-eid]
-                   [:db/add report-eid (address-attrs attr) addr]]))
+                   [:db/add report-eid (address-attrs attr) (str/lower-case addr)]]))
         set-map))
 
 (defn build-trigger-tx
   "Build transaction data for trigger results.
   `current` is the report's current state (pulled with
-  `proxy-state-attrs`).
+  `proxy-state-attrs`).  The `-address` cache is stored lowercased
+  so downstream comparisons against `:email/from-address` are
+  case-insensitive.
   Returns [tx-data new-sets] or nil if nothing to do."
   [report-eid trig-result email-eid from-addr current]
   (let [close-reason (:report/close-reason trig-result)
         ref-result   (dissoc trig-result :report/close-reason)
         new-sets     (into {} (remove (fn [[k _]] (get current k))) ref-result)
+        addr-lc      (some-> from-addr str/lower-case)
         all-tx       (cond-> (when (seq new-sets)
                                (into [(into {:db/id report-eid} (map (fn [[k _]] [k email-eid])) new-sets)]
-                                     (map (fn [[k _]] [:db/add report-eid (address-attrs k) from-addr]))
+                                     (map (fn [[k _]] [:db/add report-eid (address-attrs k) addr-lc]))
                                      new-sets))
                        (and close-reason (:report/closed new-sets))
                        (conj [:db/add report-eid :report/close-reason close-reason]))]
@@ -521,7 +526,10 @@
 
   - :user                 — anyone
   - :setter-or-maintainer — the address that previously set `attr`, or any
-                            maintainer (maintainers retain full override)
+                            maintainer (maintainers retain full override).
+                            The setter comparison is case-insensitive so
+                            that historical records stored with mixed
+                            case still match.
   - :maintainer           — any maintainer
   Unknown scopes are rejected with a warning (defensive fallthrough for
   configs that bypassed the validator)."
@@ -529,7 +537,10 @@
   (case scope
     :user                 true
     :setter-or-maintainer (or (boolean is-maintainer?)
-                              (= (setter-address @current-d attr) from-addr))
+                              (when-let [setter (setter-address @current-d attr)]
+                                (and from-addr
+                                     (= (str/lower-case setter)
+                                        (str/lower-case from-addr)))))
     :maintainer           (boolean is-maintainer?)
     (do (log/warn "Unknown command scope on directive:" scope)
         false)))

@@ -83,11 +83,19 @@
   (re-pattern (str "(?m)^" (common/bang-prefix strict-syntax?)
                    "(Add maintainer|Remove maintainer):\\s+(.+)$")))
 
-(defn- parse-addresses [s]
+(defn- parse-addresses
+  "Extract email addresses from the argument to `Add maintainer:` or
+  `Remove maintainer:`.  Accepts bare addresses (`alice@example.com`)
+  as well as the RFC 5322 `Display Name <alice@example.com>` form;
+  words outside bracketed addresses that do not themselves look like
+  an address are ignored.  Returns addresses in the order they
+  appear."
+  [s]
   (when s
-    (->> (str/split (str/trim s) #"\s+")
-         (remove str/blank?)
-         (filter #(re-matches #"[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+" %)))))
+    (->> (re-seq #"<([^@\s<>]+@[^@\s<>]+\.[^@\s<>]+)>|([^@\s<>]+@[^@\s<>]+\.[^@\s<>]+)"
+                 s)
+         (keep (fn [[_ bracketed bare]] (or bracketed bare)))
+         vec)))
 
 (defn parse-role-controls
   ([body-text] (parse-role-controls body-text false))

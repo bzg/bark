@@ -698,7 +698,7 @@
                                          :attachment/size :attachment/data]}]}])
 
 ;; Pull pattern for maintainer tenures. Shared between JVM (roles.clj) and
-;; bb (bark-common.clj) so both sides consume the same attribute list.
+;; bb (scripts/bark/common_bb.clj) so both sides consume the same attribute list.
 (def tenure-pull-pattern
   '[:db/id :maint-tenure/email :maint-tenure/from :maint-tenure/to :maint-tenure/order])
 

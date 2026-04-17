@@ -220,7 +220,7 @@ one of the three type keys:
 | =:export-formats=        | no       | Output formats (default: =["json" "org" "rss"]=)                       |
 | =:topics-filter=         | no       | Only export reports with matching topics, e.g. =["event"]=             |
 | =:expiry=                | no       | Auto-close delays in days per type                                   |
-| =:notifications=         | no       | ={:enable false}= silences notifications for this source               |
+| =:notifications=         | no       | ={:enabled false}= silences notifications for this source              |
 | =:awaiting-delay=        | no       | Duration before "awaiting reply" flag, e.g. ="14d"= (default: 14 days) |
 
 All state-changing actions (commands, role controls) must be sent

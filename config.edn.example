@@ -33,7 +33,7 @@
             ;; :maintainers [{:email "lead@example.org"}
             ;;               {:email "co-maint@example.org" :since "2025-06-01"}]
             ;;
-            ;; :notifications {:enable false}  ;; silence this source
+            ;; :notifications {:enabled false}  ;; silence this source
             }
 
            ;; Alias — matches X-Original-To / Envelope-To / X-Envelope-To

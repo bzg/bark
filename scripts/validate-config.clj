@@ -81,8 +81,8 @@
 (s/def :source/topics-filter (s/coll-of ::non-blank-string :kind vector? :min-count 1))
 
 ;; Per-source notifications (optional) — override global notification gate
-(s/def :source-notif/enable boolean?)
-(s/def :source/notifications (s/keys :req-un [:source-notif/enable]))
+(s/def :source-notif/enabled boolean?)
+(s/def :source/notifications (s/keys :req-un [:source-notif/enabled]))
 
 ;; Per-source maintainers (optional) — seed maintainers with since-dates.
 ;; Directive "Add/Remove maintainer:" overrides these at runtime.
@@ -383,8 +383,8 @@
                                                  (map #(str (:email %)
                                                             (when (:since %) (str " (since " (:since %) ")")))
                                                       (:maintainers src)))))
-                            (some? (get-in src [:notifications :enable]))
-                            (conj (str "notify: " (get-in src [:notifications :enable]))))]
+                            (some? (get-in src [:notifications :enabled]))
+                            (conj (str "notify: " (get-in src [:notifications :enabled]))))]
                 (log/info "    -" (:name src) (str/join " " parts))))
             (log/info "  DB path:" (get-in config [:db :path]))
             (when-let [ingest (:ingest config)]

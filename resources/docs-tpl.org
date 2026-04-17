@@ -46,15 +46,15 @@ followed by a punctuation mark (=.= =,= =;= =:= =?= =!=).
 
 All status/priority command keywords work on all report types:
 
-| Effect on report          | Command keyword                    | Type     |
-|---------------------------+------------------------------------+----------|
-| Mark as acked             | =Acked= =Confirmed= =Reviewed= =Approved=  | Status   |
-| Mark as owned             | =Owned= =Handled= =Assigned=             | Status   |
-| Mark as closed (canceled) | =Canceled= =Cancelled=                 | Status   |
-| Mark as closed (expired)  | =Expired=                            | Status   |
-| Mark as closed (resolved) | =Resolved= =Applied= =Done= =Fixed= =Closed= | Status   |
-| Mark as urgent            | =Urgent.=                            | Priority |
-| Mark as important         | =Important.=                         | Priority |
+| Effect on report          | Command keyword                      | Type     |
+|---------------------------+--------------------------------------+----------|
+| Mark as acked             | =Acked= =Confirmed= =Reviewed= =Approved=    | Status   |
+| Mark as owned             | =Owned= =Handled= =Assigned=               | Status   |
+| Mark as closed (canceled) | =Canceled= =Cancelled=                   | Status   |
+| Mark as closed (expired)  | =Expired=                              | Status   |
+| Mark as closed (resolved) | =Resolved= =Applied= =Pushed= =Fixed= =Closed= | Status   |
+| Mark as urgent            | =Urgent.=                              | Priority |
+| Mark as important         | =Important.=                           | Priority |
 
 Users don't set the priority directly: it is computed as the sum of
 important (+1) and urgent (+2).

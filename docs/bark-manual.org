@@ -878,23 +878,23 @@ Emails that don't match any source are not stored.
 
 ** Source options
 
-| Key                    | Description                                                                 |
-|------------------------+-----------------------------------------------------------------------------|
-| =:name=                  | Source identifier (required)                                                |
-| =:list= / =:alias= / =:to=   | Exactly one (determines source type and header to match)                    |
-| =:maintainers=           | Initial maintainers, e.g. =[{:email "dev@example.org" :since "2025-01-01"}]=  |
-|                        | The first entry is the lead maintainer (see [[#managing-roles-and-permissions][Managing roles and permissions]]) |
-| =:list-archive=          | URL of the list archive (shown in HTML reports)                             |
-| =:archive-format-string= | URL template for message-ids (=%s= is replaced), used when the                |
-|                        | =Archived-At= header is absent                                                |
-| =:base-url=              | Base URL where this source's public directory is served                     |
-| =:labels=                | Per-source label overrides (see [[#customising-subject-labels][customising subject labels]])                 |
-| =:commands=              | Per-source command overrides (see [[#customising-commands][customising commands]])                     |
-| =:report-types=          | Restrict detected and exported types, e.g. =#{:bug :patch}=                   |
-| =:export-formats=        | Output formats, e.g. =["json" "rss"]=  (default: =["json" "org" "rss"]=)        |
-| =:expiry=                | Auto-close rules per report type (see below)                                |
-| =:notifications=         | ={:enable false}= to silence notifications for this source (default: enabled) |
-| =:awaiting-delay=        | Duration before flagging "awaiting reply", e.g. ="14d"= (default: 14 days)    |
+| Key                    | Description                                                                  |
+|------------------------+------------------------------------------------------------------------------|
+| =:name=                  | Source identifier (required)                                                 |
+| =:list= / =:alias= / =:to=   | Exactly one (determines source type and header to match)                     |
+| =:maintainers=           | Initial maintainers, e.g. =[{:email "dev@example.org" :since "2025-01-01"}]=   |
+|                        | The first entry is the lead maintainer (see [[#managing-roles-and-permissions][Managing roles and permissions]])  |
+| =:list-archive=          | URL of the list archive (shown in HTML reports)                              |
+| =:archive-format-string= | URL template for message-ids (=%s= is replaced), used when the                 |
+|                        | =Archived-At= header is absent                                                 |
+| =:base-url=              | Base URL where this source's public directory is served                      |
+| =:labels=                | Per-source label overrides (see [[#customising-subject-labels][customising subject labels]])                  |
+| =:commands=              | Per-source command overrides (see [[#customising-commands][customising commands]])                      |
+| =:report-types=          | Restrict detected and exported types, e.g. =#{:bug :patch}=                    |
+| =:export-formats=        | Output formats, e.g. =["json" "rss"]=  (default: =["json" "org" "rss"]=)         |
+| =:expiry=                | Auto-close rules per report type (see below)                                 |
+| =:notifications=         | ={:enabled false}= to silence notifications for this source (default: enabled) |
+| =:awaiting-delay=        | Duration before flagging "awaiting reply", e.g. ="14d"= (default: 14 days)     |
 
 The =:since= date on a maintainer entry restricts their privileges to
 emails dated on or after that date.  Omit =:since= for immediate
