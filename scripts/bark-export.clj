@@ -264,15 +264,21 @@
 
 (def ^:private address-fields
   "Report address attrs to extract into the output map."
-  [[:report/acked-address :acked] [:report/owned-address :owned]
-   [:report/closed-address :closed] [:report/urgent-address :urgent]
+  [[:report/acked-address     :acked]
+   [:report/owned-address     :owned]
+   [:report/closed-address    :closed]
+   [:report/urgent-address    :urgent]
    [:report/important-address :important]])
 
 (def ^:private proxy-address-pairs
-  "Triplets [ref-attr address-key proxy-key] for extracting maintainer from-address.
-  The proxy key is only emitted when it differs from the address key (i.e. a -by directive)."
-  [[:report/acked :acked :acked-proxy] [:report/owned :owned :owned-proxy]
-   [:report/closed :closed :closed-proxy] [:report/urgent :urgent :urgent-proxy]
+  "Triplets [ref-attr address-key proxy-key] for extracting the maintainer
+  from-address.  The proxy key is only emitted when it differs from the
+  corresponding address key (i.e. a `-by` directive pointed the attribute
+  at someone other than the pose email's sender)."
+  [[:report/acked     :acked     :acked-proxy]
+   [:report/owned     :owned     :owned-proxy]
+   [:report/closed    :closed    :closed-proxy]
+   [:report/urgent    :urgent    :urgent-proxy]
    [:report/important :important :important-proxy]])
 
 (defn- assoc-from-addresses

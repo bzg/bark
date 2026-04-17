@@ -182,23 +182,25 @@
 ;; Duration parsing
 ;; ---------------------------------------------------------------------------
 
+(def ^:private duration-unit-days
+  {"y" 365 "m" 30 "w" 7 "d" 1})
+
 (defn parse-duration-str
   "Parse \"2y 3m 10d 2w\" into a total number of days.
   Returns nil if no valid tokens. Throws on unrecognized units."
   [s]
-  (let [valid-parts   (re-seq #"(\d+)\s*(y|m|w|d)" s)
-        invalid-parts (re-seq #"(\d+)\s*([a-zA-Z]+)" s)
-        bad-units     (remove (fn [[_ _ u]] (#{"y" "m" "w" "d"} u)) invalid-parts)]
+  (let [valid     (re-seq #"(\d+)\s*(y|m|w|d)" s)
+        bad-units (->> (re-seq #"(\d+)\s*([a-zA-Z]+)" s)
+                       (remove (fn [[_ _ u]] (contains? duration-unit-days u)))
+                       (map #(nth % 2)))]
     (when (seq bad-units)
-      (throw (ex-info (str "Unknown duration unit(s): "
-                           (str/join ", " (map #(nth % 2) bad-units))
+      (throw (ex-info (str "Unknown duration unit(s): " (str/join ", " bad-units)
                            " (expected y, m, w, d)")
-                      {:value s :bad-units (mapv #(nth % 2) bad-units)})))
-    (when (seq valid-parts)
+                      {:value s :bad-units (vec bad-units)})))
+    (when (seq valid)
       (reduce (fn [acc [_ n unit]]
-                (+ acc (* (parse-long n)
-                          (case unit "y" 365 "m" 30 "w" 7 "d" 1))))
-              0 valid-parts))))
+                (+ acc (* (parse-long n) (duration-unit-days unit))))
+              0 valid))))
 
 (defn parse-delay
   "Parse a duration value into a number of days.
