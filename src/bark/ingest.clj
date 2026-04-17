@@ -199,8 +199,9 @@
                           (remove nil? (:attachments body)))]
     (cond-> {:email/message-id   (common/extract-bracketed-id (:message-id msg))
              :email/subject      (let [s (or (:subject msg) "")]
-                                    (str/replace (if (str/blank? s) "(no subject)" s)
-                                                 #"[\r\n]+" " "))
+                                    (if (str/blank? s)
+                                      "(no subject)"
+                                      (-> s (str/replace #"\s+" " ") str/trim)))
              :email/content-type (:content-type msg)
              :email/ingested-at  (Date.)}
 
