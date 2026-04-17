@@ -17,6 +17,7 @@
          '[hiccup2.core :as h]
          '[taoensso.timbre :as log]
          '[bark.common :refer [default-labels default-commands
+                               current-command-syntax current-syntax-period
                                resolve-labels-map resolve-commands-map
                                parse-cli-args load-config build-source-map
                                format-date-iso bark-schema lead-maintainer]]
@@ -127,32 +128,64 @@
           (recur (inc i) (conj blocks [start (dec i)]) false nil)
           (recur (inc i) blocks false nil))))))
 
+(defn- format-window-phrase
+  "Render the active window as a human-readable fragment.
+  Both bounds may be nil (always active)."
+  [since until]
+  (let [s (format-date-iso since)
+        u (format-date-iso until)]
+    (cond
+      (and s u) (str "in effect from " s " until " u)
+      u         (str "in effect until " u)
+      s         (str "in effect since " s)
+      :else     "always active")))
+
+(defn build-syntax-note-org
+  "Return an org-formatted note when :command-syntax is
+  time-windowed, or nil for the scalar case.  Surfaces the currently
+  active mode and its window so readers know the prefix convention
+  may change over time."
+  [source-cfg]
+  (when-let [period (current-syntax-period source-cfg)]
+    (str "/Note:/ this source uses a time-windowed command syntax.  "
+         "Currently =" (name (:mode period)) "=, "
+         (format-window-phrase (:since period) (:until period))
+         ".  See the [[https://codeberg.org/bzg/bark/src/branch/main/docs/bark-manual.org][manual]] "
+         "for the full timeline.")))
+
 (defn substitute-template
   "Replace the first two org table blocks in org-text:
   the first with the resolved labels table, the second with the
   commands table.  `prefix` is prepended to every displayed keyword
-  (\"\" for :loose, \"!\" for :strict)."
-  [org-text labels cmds prefix]
-  (let [lines  (str/split-lines org-text)
-        blocks (find-table-blocks lines)]
-    (if (>= (count blocks) 2)
-      (let [[t2-start t2-end] (nth blocks 1)
-            [t1-start t1-end] (nth blocks 0)]
-        ;; Replace second table first (so indices stay valid)
+  (\"\" for :loose, \"!\" for :strict).  When `syntax-note` is
+  non-nil, it is inserted as a paragraph immediately above the
+  commands table."
+  [org-text labels cmds prefix syntax-note]
+  (let [lines          (str/split-lines org-text)
+        blocks         (find-table-blocks lines)
+        labels-block   (build-labels-table-org labels)
+        commands-block (cond->> (build-commands-table-org cmds prefix)
+                         syntax-note (str syntax-note "\n\n"))]
+    (cond
+      (>= (count blocks) 2)
+      (let [[t1-start t1-end] (nth blocks 0)
+            [t2-start t2-end] (nth blocks 1)]
         (str/join "\n"
                   (concat (take t1-start lines)
-                          [(build-labels-table-org labels)]
+                          [labels-block]
                           (subvec (vec lines) (inc t1-end) t2-start)
-                          [(build-commands-table-org cmds prefix)]
+                          [commands-block]
                           (drop (inc t2-end) lines))))
-      ;; Fallback: only one table — replace with labels only
-      (if (seq blocks)
-        (let [[t1-start t1-end] (first blocks)]
-          (str/join "\n"
-                    (concat (take t1-start lines)
-                            [(build-labels-table-org labels)]
-                            (drop (inc t1-end) lines))))
-        org-text))))
+
+      ;; Only one table — replace with labels only
+      (seq blocks)
+      (let [[t1-start t1-end] (first blocks)]
+        (str/join "\n"
+                  (concat (take t1-start lines)
+                          [labels-block]
+                          (drop (inc t1-end) lines))))
+
+      :else org-text)))
 
 ;; ---------------------------------------------------------------------------
 ;; Minimal org -> HTML conversion
@@ -431,8 +464,7 @@
       source-cfg  (get source-map source-name)
       labels      (if source-cfg (resolve-labels-map source-cfg) default-labels)
       cmds        (if source-cfg (resolve-commands-map source-cfg) default-commands)
-      strict?     (= :strict (:command-syntax source-cfg))
-      prefix      (if strict? "!" "")
+      prefix      (if (= :strict (current-command-syntax source-cfg)) "!" "")
       out-file    (or out-file
                       (if source-name
                         (str "public/" source-name "/web/docs.html")
@@ -446,8 +478,9 @@
       conn        ((resolve 'pod.huahaiy.datalevin/get-conn) db-path bark-schema {:wal? false})
       db          ((resolve 'pod.huahaiy.datalevin/db) conn)
       maint-html  (build-maintainers-html db source-name source-cfg)
+      syntax-note (build-syntax-note-org source-cfg)
       org-text    (-> (slurp "resources/docs-tpl.org")
-                      (substitute-template labels cmds prefix)
+                      (substitute-template labels cmds prefix syntax-note)
                       (filter-feed-links effective-dir))
       body-html   (cond-> (org->html org-text)
                     maint-html (str "\n" maint-html))

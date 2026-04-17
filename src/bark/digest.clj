@@ -354,7 +354,9 @@
   "Apply role and notify controls from the email body."
   [conn rroles source-name source-cfg from-addr email via-channel?]
   (let [body-text (common/email-body-text email)
-        strict?   (= :strict (:command-syntax source-cfg))]
+        src-cmds  (commands/build-source-commands source-cfg)
+        period    (commands/select-period src-cmds (:email/date-sent email))
+        strict?   (:strict-syntax? period)]
     (when (and from-addr body-text source-name)
       (when via-channel?
         (roles/apply-role-controls! conn rroles source-name from-addr

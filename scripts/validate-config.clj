@@ -167,13 +167,15 @@
 (s/def ::iso-date (s/and ::non-blank-string #(re-matches #"\d{4}-\d{2}-\d{2}" %)))
 (s/def ::since ::iso-date)
 (s/def ::until ::iso-date)
-(s/def ::word-window
+;; Shared window spec: used for both :words entries and :command-syntax
+;; entries.  Enforces :since < :until when both are present.
+(s/def ::date-window
   (s/and (s/keys :opt-un [::since ::until])
          (fn [{s :since u :until}]
            (or (nil? s) (nil? u) (neg? (compare s u))))))
 (s/def ::trigger-word
   (s/or :bare     ::non-blank-string
-        :windowed (s/tuple ::non-blank-string ::word-window)))
+        :windowed (s/tuple ::non-blank-string ::date-window)))
 (s/def ::trigger-words (s/coll-of ::trigger-word :kind vector? :min-count 1))
 (s/def ::command-scope valid-setter-scopes)
 (s/def ::command-report-types (s/coll-of valid-report-types :kind set? :min-count 1))
@@ -265,7 +267,16 @@
 
 ;; Command syntax mode: :loose (default — ! is optional on every Bark
 ;; instruction) or :strict (! required on every Bark instruction).
-(s/def :bark/command-syntax #{:loose :strict})
+;; Can also be a timeline vec of [:mode {:since :until}] tuples; windows
+;; are half-open and either bound may be omitted. Periods outside any
+;; entry default to :loose.
+(s/def ::syntax-mode #{:loose :strict})
+(s/def ::syntax-entry
+  (s/or :bare     ::syntax-mode
+        :windowed (s/tuple ::syntax-mode ::date-window)))
+(s/def :bark/command-syntax
+  (s/or :scalar   ::syntax-mode
+        :timeline (s/coll-of ::syntax-entry :kind vector? :min-count 1)))
 (s/def :source/command-syntax :bark/command-syntax)
 
 ;; Top-level config
@@ -376,7 +387,9 @@
                             (:to src)            (conj (str "(mailbox: " (:to src) ")"))
                             (:list-archive src)  (conj (str "archive: " (:list-archive src)))
                             (:report-types src)  (conj (str "report-types: " (pr-str (:report-types src))))
-                            (:command-syntax src) (conj (str "command-syntax: " (name (:command-syntax src))))
+                            (:command-syntax src) (conj (str "command-syntax: "
+                                                              (let [cs (:command-syntax src)]
+                                                                (if (keyword? cs) (name cs) "timeline"))))
                             (seq (:maintainers src))
                             (conj (str "maintainers: "
                                        (str/join ", "
@@ -399,7 +412,8 @@
             (when-let [rt (:report-types config)]
               (log/info "  Report types:" (pr-str rt)))
             (when-let [cs (:command-syntax config)]
-              (log/info "  Command syntax (global):" (name cs)))
+              (log/info "  Command syntax (global):"
+                        (if (keyword? cs) (name cs) "timeline")))
             (when-let [logging (:logging config)]
               (when (:file logging)
                 (log/info "  Log file:" (:file logging)

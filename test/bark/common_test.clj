@@ -321,6 +321,60 @@
     (is (nil? (:until (first tl))))))
 
 ;; ---------------------------------------------------------------------------
+;; Unified timeline — :command-syntax windows combined with :words windows
+;; ---------------------------------------------------------------------------
+
+(deftest unified-timeline-scalar-syntax-single-period
+  (let [tl (common/resolve-unified-timeline {:command-syntax :strict})]
+    (is (= 1 (count tl)))
+    (is (true? (:strict-syntax? (first tl))))))
+
+(deftest unified-timeline-no-config-loose-single-period
+  (let [tl (common/resolve-unified-timeline {})]
+    (is (= 1 (count tl)))
+    (is (false? (:strict-syntax? (first tl))))))
+
+(deftest unified-timeline-syntax-windows-split-periods
+  (let [tl (common/resolve-unified-timeline
+            {:command-syntax [[:loose  {:until "2026-01-01"}]
+                              [:strict {:since "2026-01-01"}]]})]
+    (is (= 2 (count tl)))
+    (is (false? (:strict-syntax? (first tl))))
+    (is (true?  (:strict-syntax? (nth tl 1))))
+    (is (= (parse-date "2026-01-01") (:until (first tl))))
+    (is (= (parse-date "2026-01-01") (:since (nth tl 1))))))
+
+(deftest unified-timeline-merges-word-and-syntax-boundaries
+  (let [tl (common/resolve-unified-timeline
+            {:command-syntax [[:loose  {:until "2026-01-01"}]
+                              [:strict {:since "2026-01-01"}]]
+             :commands {:closed {:words ["Fixed"
+                                         ["Done" {:since "2020-01-01"
+                                                  :until "2026-01-01"}]]}}})]
+    (is (= 3 (count tl)))
+    (testing "(-, 2020): loose, no Done"
+      (is (false? (:strict-syntax? (first tl))))
+      (is (not (contains? (set (get-in (first tl) [:commands :closed])) "Done")))
+      (is (contains? (set (get-in (first tl) [:commands :closed])) "Fixed")))
+    (testing "[2020, 2026): loose, Done active"
+      (is (false? (:strict-syntax? (nth tl 1))))
+      (is (contains? (set (get-in (nth tl 1) [:commands :closed])) "Done")))
+    (testing "[2026, ∞): strict, no Done"
+      (is (true? (:strict-syntax? (nth tl 2))))
+      (is (not (contains? (set (get-in (nth tl 2) [:commands :closed])) "Done"))))))
+
+(deftest current-command-syntax-scalar
+  (is (= :loose  (common/current-command-syntax {})))
+  (is (= :loose  (common/current-command-syntax {:command-syntax :loose})))
+  (is (= :strict (common/current-command-syntax {:command-syntax :strict}))))
+
+(deftest current-command-syntax-timeline
+  (let [cfg {:command-syntax [[:loose  {:until "2026-01-01"}]
+                              [:strict {:since "2026-01-01"}]]}]
+    (is (= :loose  (common/current-command-syntax cfg (parse-date "2025-06-15"))))
+    (is (= :strict (common/current-command-syntax cfg (parse-date "2026-06-15"))))))
+
+;; ---------------------------------------------------------------------------
 ;; sent-via-source-channel?
 ;; ---------------------------------------------------------------------------
 

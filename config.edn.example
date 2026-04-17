@@ -77,7 +77,8 @@
  ;; :commands {:acked     {:words ["Acked" "Confirmed" "Reviewed" "Approved"]}
  ;;            :owned     {:words ["Owned" "Handled" "Assigned"]}
  ;;            :closed    {:words ["Canceled" "Cancelled" "Resolved" "Pushed"
- ;;                                "Applied" "Fixed" "Closed" "Expired"]}
+ ;;                                "Applied" "Fixed" "Closed" "Expired"
+ ;;                                "Completed" "Merged" "Implemented"]}
  ;;            :urgent    {:words ["Urgent"]}
  ;;            :important {:words ["Important"]}}
  ;;
@@ -89,6 +90,7 @@
  ;;
  ;; :commands {:closed {:words ["Canceled" "Cancelled" "Resolved" "Pushed"
  ;;                             "Applied" "Fixed" "Closed" "Expired"
+ ;;                             "Completed" "Merged" "Implemented"
  ;;                             ["Done" {:since "2020-01-01"
  ;;                                      :until "2026-04-16"}]]}}
 
@@ -142,6 +144,17 @@
 
  ;; Global or per-source (per-source wins).
  ;; :command-syntax :strict
+ ;;
+ ;; Time-windowed — accepts a vec of [:mode {:since :until}] tuples
+ ;; when the mode changes over time (e.g. a list that tightened from
+ ;; :loose to :strict on a given date).  Windows are half-open
+ ;; [since, until); either bound may be omitted.  Periods outside any
+ ;; entry default to :loose.  The effective mode is resolved per email
+ ;; against :email/date-sent, so re-ingesting an archive stays
+ ;; historically correct.
+ ;;
+ ;; :command-syntax [[:loose  {:until "2026-01-01"}]
+ ;;                  [:strict {:since "2026-01-01"}]]
 
  ;; ---- Exports -------------------------------------------------------------
 

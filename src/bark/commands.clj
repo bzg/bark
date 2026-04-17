@@ -63,8 +63,13 @@
   recompiles on demand in build-source-commands."
   (compile-trigger-words false common/default-commands))
 
-(defn- compile-directives [strict-syntax?]
-  (mapv (fn [cmd] [cmd (directive-pattern strict-syntax? cmd)]) directive-commands))
+(def ^:private compile-directives
+  "Memoized directive compilation keyed on strict-syntax? — only two
+  shapes exist (loose/strict), so memoizing collapses to at most two
+  calls per process."
+  (memoize
+   (fn [strict-syntax?]
+     (mapv (fn [cmd] [cmd (directive-pattern strict-syntax? cmd)]) directive-commands))))
 
 (defn compile-directive-aliases
   "Compile a map of {\"OldSyntax\" \"New syntax\"} into additional
@@ -72,8 +77,8 @@
   as the canonical syntax. The caller's syntax mode is used."
   [strict-syntax? aliases-map]
   (when (seq aliases-map)
-    (let [compiled    (compile-directives strict-syntax?)
-          syntax->cmd (into {} (map (fn [[cmd _]] [(:syntax cmd) cmd])) compiled)]
+    (let [syntax->cmd (into {} (map (fn [[cmd _]] [(:syntax cmd) cmd]))
+                            (compile-directives strict-syntax?))]
       (vec (keep (fn [[old-syntax new-syntax]]
                    (if-let [cmd (syntax->cmd new-syntax)]
                      [cmd (directive-pattern strict-syntax? (assoc cmd :syntax old-syntax))]
@@ -82,30 +87,29 @@
                  aliases-map)))))
 
 (defn- compile-period
-  "Compile one timeline period's classic commands-map into a regex
-  map, reusing the pre-compiled default set when applicable."
-  [strict-syntax? {:keys [since until commands]}]
-  (let [compiled (if (and (not strict-syntax?)
-                          (= commands common/default-commands))
-                   default-compiled-commands
-                   (compile-trigger-words strict-syntax? commands))]
-    {:since since :until until :words commands :compiled compiled}))
+  "Attach compiled trigger and directive patterns to one unified
+  timeline period, reusing the pre-compiled default trigger set when
+  applicable."
+  [{:keys [commands strict-syntax?] :as period}]
+  (assoc period
+         :compiled   (if (and (not strict-syntax?)
+                              (= commands common/default-commands))
+                       default-compiled-commands
+                       (compile-trigger-words strict-syntax? commands))
+         :directives (compile-directives strict-syntax?)))
 
 (defn build-source-commands
   "Return a source-commands descriptor.
-  - :timeline         vec of {:since :until :words :compiled} periods
-                      (one entry when no :words is time-windowed).
-  - :strict-syntax?   whether the source requires `!` prefixes.
-  - :overrides        per-command :scope/:report-types overrides.
-  - :directives       precompiled [cmd pattern] pairs (shared across
-                      periods — directives are not time-windowed)."
+  - :timeline   vec of per-period maps with keys:
+                  :since :until :commands :compiled
+                  :strict-syntax? :directives
+                (one entry when no :words and no :command-syntax is
+                time-windowed).
+  - :overrides  per-command :scope/:report-types overrides."
   [source-cfg]
-  (let [strict-syntax? (= :strict (:command-syntax source-cfg))
-        timeline       (common/resolve-commands-timeline source-cfg)]
-    {:timeline       (mapv #(compile-period strict-syntax? %) timeline)
-     :strict-syntax? strict-syntax?
-     :overrides      (common/resolve-command-overrides source-cfg)
-     :directives     (compile-directives strict-syntax?)}))
+  (let [timeline (common/resolve-unified-timeline source-cfg)]
+    {:timeline  (mapv compile-period timeline)
+     :overrides (common/resolve-command-overrides source-cfg)}))
 
 (defn- date-in-period?
   "Half-open [since, until) predicate.  nil date falls into the first
@@ -116,7 +120,7 @@
         u (if until (.getTime until) Long/MAX_VALUE)]
     (and (>= t s) (< t u))))
 
-(defn- select-period
+(defn select-period
   "Pick the period in a source-commands timeline that covers
   `email-date`. Falls back to the first period when email-date is
   nil (e.g. tests that don't supply a date)."
@@ -164,18 +168,19 @@
 (defn detect-triggers
   "Detect trigger matches in `body-text`.  When `email-date` is
   provided, the period covering that date is selected from the
-  source-commands timeline, so time-windowed words are honored."
+  source-commands timeline, so time-windowed words and per-period
+  syntax modes are honored."
   ([report-type body-text source-commands]
    (detect-triggers report-type body-text source-commands nil))
   ([report-type body-text source-commands ^Date email-date]
    (when body-text
-     (let [{:keys [compiled words]} (select-period source-commands email-date)
-           {:keys [overrides strict-syntax?]} source-commands
-           all-sets (match-triggers compiled body-text)
+     (let [{:keys [compiled commands strict-syntax?]} (select-period source-commands email-date)
+           overrides (:overrides source-commands)
+           all-sets  (match-triggers compiled body-text)
            ;; Pre-compute close-reason from unfiltered triggers so it survives
            ;; any future refactoring of the filter step.
            reason   (when (:report/closed all-sets)
-                      (detect-close-reason (:closed words) body-text strict-syntax?))
+                      (detect-close-reason (:closed commands) body-text strict-syntax?))
            filtered (into {}
                          (keep (fn [[attr :as entry]]
                                  (let [cmd (attr->trigger-cmd attr)
@@ -768,12 +773,13 @@
           trig-result (-> (detect-triggers report-type body-text src-cmds
                                            (:email/date-sent email))
                           (filter-triggers-by-scope overrides is-maint? fail-ctx))
-          strict-sx?  (:strict-syntax? src-cmds)
+          period      (select-period src-cmds (:email/date-sent email))
+          strict-sx?  (:strict-syntax? period)
           aliases     (compile-directive-aliases strict-sx? (:command-aliases source-cfg))
           directives  (detect-directives report-type body-text overrides
                                          (:email/date-sent email)
                                          aliases
-                                         (:directives src-cmds))
+                                         (:directives period))
           closed?     (some? (:report/closed (d/pull db [:report/closed] report-eid)))]
 
       (if closed?
