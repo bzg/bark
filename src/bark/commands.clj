@@ -434,12 +434,60 @@
       ref-cur (conj [:db/retract report-eid attr (ref-eid ref-cur)])
       val-cur (conj [:db/retract report-eid value-attr val-cur]))))
 
+(def ^:private paired-directive-attrs
+  "Directives that share the same {pose-email ref + paired `-value` scalar}
+  tx shape.  Each row maps [resolved-set-key resolved-unset-key attr]:
+    - set-key   — value in the resolved map that triggers an assertion
+    - unset-key — flag in the resolved map that triggers a retraction
+    - attr      — report attribute the pair targets"
+  [[:deadline :undeadline? :report/deadline]
+   [:expiry   :unexpiry?   :report/expiry]
+   [:topic    :untopic?    :report/topic]])
+
+(defn- build-paired-directive-tx
+  "Apply every set/unset from `paired-directive-attrs` to `tx`, reading
+  the value/flag pair from `resolved`."
+  [tx report-eid email-eid current resolved]
+  (reduce (fn [tx [set-k unset-k attr]]
+            (cond-> tx
+              (get resolved set-k)
+              (into (set-ref-value-tx report-eid email-eid attr (get resolved set-k)))
+              (get resolved unset-k)
+              (into (retract-ref-value-tx report-eid current attr))))
+          tx paired-directive-attrs))
+
+(defn- supersede-tx
+  "Extra tx datoms when applying a Supersede directive: close the report,
+  record the reason, and link it to the target bidirectionally."
+  [report-eid email-eid target-eid from-addr]
+  (into (set-ref-value-tx report-eid email-eid :report/superseded-by target-eid)
+        [[:db/add report-eid :report/closed email-eid]
+         [:db/add report-eid :report/closed-address from-addr]
+         [:db/add report-eid :report/close-reason :superseded]
+         [:db/add report-eid :report/related target-eid]
+         [:db/add target-eid :report/related report-eid]]))
+
+(defn- unsupersede-tx
+  "Tx datoms to undo a supersede: retract the ref and target, reopen the
+  report, clear the close reason."
+  [report-eid current]
+  (into (retract-ref-value-tx report-eid current :report/superseded-by)
+        (cond-> []
+          (:report/closed current)
+          (conj [:db/retract report-eid :report/closed
+                 (ref-eid (:report/closed current))])
+          (:report/closed-address current)
+          (conj [:db/retract report-eid :report/closed-address
+                 (:report/closed-address current)])
+          (:report/close-reason current)
+          (conj [:db/retract report-eid :report/close-reason
+                 (:report/close-reason current)]))))
+
 (defn build-directives-tx
   "Build transaction data from resolved commands and current report state.
   Returns the tx vector (may be empty)."
   [report-eid email-eid from-addr resolved current target-eid]
-  (let [{:keys [set unset deadline undeadline? expiry unexpiry?
-                topic untopic? unsuperseded?]} resolved]
+  (let [{:keys [set unset unsuperseded?]} resolved]
     (-> []
         (into (build-directive-set-tx report-eid email-eid set))
         (cond-> (and (contains? set :report/closed)
@@ -448,44 +496,11 @@
         (into (build-unset-tx report-eid current unset))
         (cond-> (and (contains? unset :report/closed) (:report/close-reason current))
           (conj [:db/retract report-eid :report/close-reason (:report/close-reason current)]))
-        ;; Deadline / expiry / topic all share the same set/retract
-        ;; shape: pose-email ref + paired `-value` scalar.
-        (cond-> deadline
-          (into (set-ref-value-tx report-eid email-eid :report/deadline deadline)))
-        (cond-> undeadline?
-          (into (retract-ref-value-tx report-eid current :report/deadline)))
-        (cond-> expiry
-          (into (set-ref-value-tx report-eid email-eid :report/expiry expiry)))
-        (cond-> unexpiry?
-          (into (retract-ref-value-tx report-eid current :report/expiry)))
-        (cond-> topic
-          (into (set-ref-value-tx report-eid email-eid :report/topic topic)))
-        (cond-> untopic?
-          (into (retract-ref-value-tx report-eid current :report/topic)))
-        ;; Supersede uses the same ref-and-target shape plus the
-        ;; side-effects of closing the report and linking it to
-        ;; the target bidirectionally.
+        (build-paired-directive-tx report-eid email-eid current resolved)
         (cond-> target-eid
-          (into (into (set-ref-value-tx report-eid email-eid
-                                        :report/superseded-by target-eid)
-                      [[:db/add report-eid :report/closed email-eid]
-                       [:db/add report-eid :report/closed-address from-addr]
-                       [:db/add report-eid :report/close-reason :superseded]
-                       [:db/add report-eid :report/related target-eid]
-                       [:db/add target-eid :report/related report-eid]])))
-        ;; Unsupersede: retract both ref and target, reopen, clear reason
+          (into (supersede-tx report-eid email-eid target-eid from-addr)))
         (cond-> (and unsuperseded? (:report/superseded-by current))
-          (into (into (retract-ref-value-tx report-eid current :report/superseded-by)
-                      (cond-> []
-                        (:report/closed current)
-                        (conj [:db/retract report-eid :report/closed
-                               (ref-eid (:report/closed current))])
-                        (:report/closed-address current)
-                        (conj [:db/retract report-eid :report/closed-address
-                               (:report/closed-address current)])
-                        (:report/close-reason current)
-                        (conj [:db/retract report-eid :report/close-reason
-                               (:report/close-reason current)]))))))))
+          (into (unsupersede-tx report-eid current))))))
 
 (defn describe-directives
   "Build a human-readable summary of applied directives."

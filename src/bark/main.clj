@@ -123,8 +123,7 @@
     (digest/process-email! db-conn source-map sources email)
     :ok
     (catch Exception e
-      (log/error e "Failed to digest email" mid
-                 (or (.getMessage e) (str (class e))))
+      (log/error e "Failed to digest email" mid (blog/exception-msg e))
       :retry)))
 
 (defn- store-and-process!
@@ -202,6 +201,38 @@
               (or (:uid msg) Long/MAX_VALUE)])
            msgs))
 
+(defn- safe-store-and-process!
+  "Run store-and-process! on `msg`, logging and swallowing exceptions.
+  Returns the result keyword (:ok/:skip/:retry) or nil on exception.
+  Honours `shutting-down?` — callers that iterate should also check it
+  via a `:while` clause to stop cleanly."
+  [db-conn source-map sources msg ingest-opts]
+  (try
+    (store-and-process! db-conn source-map sources msg ingest-opts)
+    (catch Exception e
+      (log/error e "Failed to process id:" (:id msg))
+      nil)))
+
+(defn- collect-safe-uids
+  "Process `msgs` and return the set of UIDs for messages that didn't
+  need a retry.  Used by the IMAP path to decide how far the UID
+  watermark may advance."
+  [db-conn source-map sources msgs ingest-opts]
+  (reduce (fn [acc msg]
+            (let [result (safe-store-and-process! db-conn source-map sources msg ingest-opts)]
+              (if (and (not= :retry result) (:uid msg))
+                (conj acc (:uid msg))
+                acc)))
+          #{} msgs))
+
+(defn- process-each!
+  "Ingest every message in `msgs` in order, stopping early on shutdown.
+  Exceptions from a single message are logged and don't abort the loop."
+  [db-conn source-map sources msgs ingest-opts]
+  (doseq [msg msgs
+          :while (not (shutting-down?))]
+    (safe-store-and-process! db-conn source-map sources msg ingest-opts)))
+
 (defn- catch-up-imap!
   "IMAP incremental fetch: use UID watermark to fetch only new messages.
   The batch is sorted chronologically before processing so parents are
@@ -226,16 +257,7 @@
                                          (str (inc watermark)) nil))))]
     (log/info "Fetched" (count msgs) "messages")
     (when (and (seq msgs) (not (shutting-down?)))
-      (let [safe-ids (reduce (fn [acc msg]
-                               (try
-                                 (let [result (store-and-process! db-conn source-map sources msg ingest-opts)]
-                                   (if (and (not= :retry result) (:uid msg))
-                                     (conj acc (:uid msg))
-                                     acc))
-                                 (catch Exception e
-                                   (log/error e "Failed to process id:" (:id msg))
-                                   acc)))
-                             #{} msgs)]
+      (let [safe-ids (collect-safe-uids db-conn source-map sources msgs ingest-opts)]
         (advance-watermark! db-conn msgs safe-ids)))))
 
 (defn- catch-up-maildir!
@@ -259,12 +281,7 @@
           (let [msgs (sort-chronologically
                       (mailseq/by-ids src folder (vec new-ids)))]
             (log/info "Fetched" (count msgs) "new messages from Maildir")
-            (doseq [msg msgs
-                    :while (not (shutting-down?))]
-              (try
-                (store-and-process! db-conn source-map sources msg ingest-opts)
-                (catch Exception e
-                  (log/error e "Failed to process id:" (:id msg))))))))
+            (process-each! db-conn source-map sources msgs ingest-opts))))
       ;; First run (or retry after crash): fetch limited set, then seal baseline
       (let [msgs (sort-chronologically (first-run-messages src folder fetch-opts))]
         (cond
@@ -276,12 +293,7 @@
           (log/info "No new messages in Maildir")
           :else
           (do (log/info "Fetched" (count msgs) "messages from Maildir (first run)")
-              (doseq [msg msgs
-                      :while (not (shutting-down?))]
-                (try
-                  (store-and-process! db-conn source-map sources msg ingest-opts)
-                  (catch Exception e
-                    (log/error e "Failed to process id:" (:id msg)))))))
+              (process-each! db-conn source-map sources msgs ingest-opts)))
         ;; Record all pre-existing ids not yet stored, then flag init done.
         ;; If we crash before this point, the next run retries the first-run
         ;; path — store-and-process! skips already-stored emails harmlessly.
@@ -329,7 +341,7 @@
                 ""))
     (mailseq/open (mailbox->mailseq-cfg mailbox-cfg))
     (catch Exception e
-      (log/error e "Mailbox connection failed:" (or (.getMessage e) (str (class e))))
+      (log/error e "Mailbox connection failed:" (blog/exception-msg e))
       nil)))
 
 ;; ---------------------------------------------------------------------------
@@ -349,7 +361,7 @@
         (expire/expire-reports! db-conn source-map)
         now
         (catch Exception e
-          (log/error e "Expire failed:" (or (.getMessage e) (str (class e))))
+          (log/error e "Expire failed:" (blog/exception-msg e))
           last-ms))
       last-ms)))
 
@@ -444,7 +456,7 @@
                         (start-watch! src db-conn folder source-map sources ingest-opts))
                       ts)
                     (catch Exception e
-                      (log/error e "Watch interrupted:" (or (.getMessage e) (str (class e))))
+                      (log/error e "Watch interrupted:" (blog/exception-msg e))
                       last-expire-ms))]
               (close-mailbox! src)
               (when-not (shutting-down?)
