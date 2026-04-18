@@ -79,26 +79,27 @@
   stamps :participant/contributor-since if not already set."
   [conn source-name from-addr from-name date-sent & {:keys [contributor?]}]
   (when (and source-name from-addr)
-    (let [k  (str (common/slugify source-name) ":" (str/lower-case from-addr))
-          db (d/db conn)
-          e  (d/entid db [:participant/key k])]
-      (if e
-        ;; Already a participant — stamp contributor-since if needed
+    (let [k     (str (common/slugify source-name) ":" (str/lower-case from-addr))
+          db    (d/db conn)
+          e     (d/entid db [:participant/key k])
+          since (or date-sent (Date.))]
+      (cond
+        ;; Already a participant — only act if we need to stamp contributor-since.
+        e
         (when (and contributor?
                    (not (d/q '[:find ?d . :in $ ?e
                                :where [?e :participant/contributor-since ?d]] db e)))
-          (d/transact! conn [{:db/id e
-                              :participant/contributor-since (or date-sent (Date.))}])
+          (d/transact! conn [{:db/id e :participant/contributor-since since}])
           (log/info "Participant promoted to contributor:" from-addr "on" source-name))
-        ;; New participant
-        (do
-          (d/transact! conn [(cond-> {:participant/key    k
-                                      :participant/source source-name
-                                      :participant/email  (str/lower-case from-addr)
-                                      :participant/name   (or from-name "")
-                                      :participant/since  (or date-sent (Date.))}
-                               contributor? (assoc :participant/contributor-since
-                                                   (or date-sent (Date.))))])
+
+        :else
+        (let [payload (cond-> {:participant/key    k
+                               :participant/source source-name
+                               :participant/email  (str/lower-case from-addr)
+                               :participant/name   (or from-name "")
+                               :participant/since  since}
+                        contributor? (assoc :participant/contributor-since since))]
+          (d/transact! conn [payload])
           (if contributor?
             (log/info "New participant:" from-addr "on" source-name "(contributor)")
             (log/info "New participant:" from-addr "on" source-name)))))))
@@ -380,15 +381,20 @@
                        " — " (name reason)
                        " (subject: " (:email/subject email) ")")})))
 
+(def ^:private denial-reason-labels
+  {:denied-channel "not via source channel"
+   :denied-role    "not maintainer"})
+
 (defn- maybe-create-report!
   "Detect report type, check permissions, create if allowed.
   Returns [report-eid report-info] or [nil report-info]."
   [conn eid message-id email from-addr source-name source-cfg via-channel? rroles]
   (let [subj-patterns (detect/resolve-labels (or source-cfg {}))
         allowed-types (:report-types source-cfg)
-        report-info   (detect/detect-report email subj-patterns allowed-types)]
-    (case (creation-decision report-info from-addr via-channel? rroles email
-                             source-cfg (report-exists? (d/db conn) message-id))
+        report-info   (detect/detect-report email subj-patterns allowed-types)
+        decision      (creation-decision report-info from-addr via-channel? rroles email
+                                         source-cfg (report-exists? (d/db conn) message-id))]
+    (case decision
       :create
       (do (log/info (str "[" (name (:type report-info)) "]") (:email/subject email))
           (let [rid (create-report! conn eid message-id report-info
@@ -399,16 +405,10 @@
             (tracking/bump-report-updated! conn rid)
             [rid report-info]))
 
-      :denied-channel
+      (:denied-channel :denied-role)
       (do (log/warn "Denied:" from-addr "cannot create" (name (:type report-info))
-                    "(not via source channel)")
-          (record-creation-denial! source-name from-addr email report-info :denied-channel)
-          [nil report-info])
-
-      :denied-role
-      (do (log/warn "Denied:" from-addr "cannot create" (name (:type report-info))
-                    "(not maintainer)")
-          (record-creation-denial! source-name from-addr email report-info :denied-role)
+                    (str "(" (denial-reason-labels decision) ")"))
+          (record-creation-denial! source-name from-addr email report-info decision)
           [nil report-info])
 
       ;; nil — no report detected

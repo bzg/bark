@@ -23,7 +23,9 @@
          '[bark.common :refer [get-header format-date format-date-iso
                                report-priority report-status report-descendant-count
                                load-config build-source-map
-                               bark-schema maintainer?]]
+                               bark-schema maintainer?
+                               failures-file-path read-failures-file
+                               reason-labels]]
          '[bark.common-bb :refer [load-datalevin-pod! dq all-reports get-tenures]])
 
 (load-datalevin-pod!)
@@ -59,12 +61,6 @@
   (spit last-notify-file (pr-str m)))
 
 ;; ---------------------------------------------------------------------------
-;; Report queries (all-reports and report-pull-pattern loaded from bark-common.clj)
-;; ---------------------------------------------------------------------------
-
-;; format-date and format-date-iso are defined in bark-common.clj
-
-;; ---------------------------------------------------------------------------
 ;; Notification queries
 ;; ---------------------------------------------------------------------------
 
@@ -72,13 +68,10 @@
   "Read the failures file, returning a vector of failure maps.
   Log on parse failure instead of swallowing silently."
   []
-  (let [f (io/file "public/.failures.edn")]
-    (if (.exists f)
-      (try (edn/read-string (slurp f))
-           (catch Exception e
-             (log/warn "Could not parse public/.failures.edn:" (.getMessage e))
-             []))
-      [])))
+  (read-failures-file failures-file-path
+                      (fn [e]
+                        (log/warn "Could not parse" failures-file-path ":"
+                                  (.getMessage e)))))
 
 (defn- failures-for-subscriber
   "Return failures relevant to `email-addr` on `source` since `since-date`.
@@ -157,10 +150,6 @@
 (defn- unowned? [report]
   (nil? (:report/owned report)))
 
-(def ^:private reason-labels
-  {:unknown-target     "unknown target"
-   :insufficient-scope "insufficient permissions"})
-
 (defn- format-failure-line
   "Format a single command failure as a text line.
   `subjects` is a pre-loaded {message-id -> subject} map."
@@ -204,93 +193,102 @@
          (str/join "\n\n" (map format-report-line reports))
          "\n")))
 
+(defn- filter-relevant-reports
+  "Filter the full report set down to those that match a subscriber's
+  preferences: actionable type, open, on-source, meets min-priority and
+  min-status, and (optionally) the :subject-match / :topic substring
+  filters."
+  [reports {:keys [source min-pri min-sts subj-match topic]}]
+  (let [subj-lc (some-> subj-match str/lower-case)
+        topic-lc (some-> topic str/lower-case)]
+    (cond->> reports
+      true       (filter #(contains? actionable-types (:report/type %)))
+      true       (filter open?)
+      true       (filter #(= source (get-in % [:report/email :email/source])))
+      true       (filter #(>= (report-priority %) min-pri))
+      true       (filter #(>= (report-status %) min-sts))
+      subj-lc    (filter #(some-> (get-in % [:report/email :email/subject])
+                                  str/lower-case
+                                  (str/includes? subj-lc)))
+      topic-lc   (filter #(some-> (:report/topic-value %)
+                                  str/lower-case
+                                  (str/includes? topic-lc))))))
+
+(defn- build-sections
+  "Group relevant reports into the three body sections. Returns a map
+  with :dl (owned with deadline), :owned (owned, no deadline), and
+  :unacked (not yet acked, not owned)."
+  [relevant email]
+  (let [owned (filter #(owned-by? % email) relevant)]
+    {:dl      (->> owned
+                   (filter :report/deadline-value)
+                   (sort-by #(.getTime ^java.util.Date (:report/deadline-value %))))
+     :owned   (->> owned
+                   (remove :report/deadline-value)
+                   (sort-by #(- (report-priority %))))
+     :unacked (->> relevant
+                   (filter unacked?)
+                   (filter unowned?))}))
+
+(defn- failure-subjects-map
+  "Build {message-id -> subject} for the message-ids referenced by
+  `failures`.  Skips mids whose report is missing from the DB."
+  [db failures]
+  (when (seq failures)
+    (->> failures
+         (map :report-mid)
+         distinct
+         (reduce (fn [m mid]
+                   (if-let [s (report-subject-by-mid db mid)]
+                     (assoc m mid s) m))
+                 {}))))
+
+(defn- failures-section
+  "Build the failures section text, or nil when there are no failures."
+  [db source failures]
+  (when (seq failures)
+    (let [subjects (failure-subjects-map db failures)]
+      (str "== Failed commands (" source ") ==\n"
+           (str/join "\n\n" (map #(format-failure-line subjects %) failures))
+           "\n"))))
+
+(defn- join-sections
+  "Concatenate the non-nil sections with blank-line separators and append
+  the unsubscribe footer.  Returns nil when every section is nil."
+  [sections]
+  (let [present (filter some? sections)]
+    (when (seq present)
+      (str (str/join "\n" present)
+           "\n--\nSent by Bark. Reply with \"Notify: off\" to unsubscribe."))))
+
 (defn build-email-body
   "Build the notification email body for a given subscriber.
   `failures` is a seq of cmd-failure entities to include."
   [db reports notify failures]
   (let [email      (:notify/email notify)
         source     (:notify/source notify)
-        min-pri    (:notify/min-priority notify 0)
-        min-sts    (:notify/min-status notify 0)
-        subj-match (:notify/subject-match notify)
-        topic      (:notify/topic notify)
-        by-type    (filter #(contains? actionable-types (:report/type %)) reports)
-        by-open    (filter open? by-type)
-        by-source  (filter #(= source (get-in % [:report/email :email/source])) by-open)
-        by-pri     (filter #(>= (report-priority %) min-pri) by-source)
-        by-sts     (filter #(>= (report-status %) min-sts) by-pri)
-        by-subj    (if subj-match
-                     (let [lc (str/lower-case subj-match)]
-                       (filter #(some-> (get-in % [:report/email :email/subject])
-                                        str/lower-case
-                                        (str/includes? lc))
-                               by-sts))
-                     by-sts)
-        by-topic   (if topic
-                     (let [lc (str/lower-case topic)]
-                       (filter #(some-> (:report/topic-value %)
-                                        str/lower-case
-                                        (str/includes? lc))
-                               by-subj))
-                     by-subj)
-        _          (do (log/debug "build-email-body for" email (str "(source: " source ")"))
-                       (log/debug "  all reports:" (count reports))
-                       (log/debug "  by type (bug/patch/request):" (count by-type))
-                       (log/debug "  by open:" (count by-open))
-                       (log/debug "  by source =" (pr-str source) ":" (count by-source))
-                       (when (and (pos? (count by-open)) (zero? (count by-source)))
-                         (log/debug "  report sources:"
-                                    (pr-str (set (map #(get-in % [:report/email :email/source]) by-open)))))
-                       (log/debug "  by min-priority>=" min-pri ":" (count by-pri))
-                       (log/debug "  by min-status>=" min-sts ":" (count by-sts))
-                       (when subj-match
-                         (log/debug "  by subject-match" (pr-str subj-match) ":" (count by-subj)))
-                       (when topic
-                         (log/debug "  by topic" (pr-str topic) ":" (count by-topic))))
-        relevant   (sort-by (juxt report-priority report-descendant-count)
-                            #(compare %2 %1) by-topic)
-        owned      (filter #(owned-by? % email) relevant)
-        owned-dl   (->> owned
-                        (filter :report/deadline-value)
-                        (sort-by #(.getTime ^java.util.Date (:report/deadline-value %))))
-        owned-rest (->> owned
-                        (remove :report/deadline-value)
-                        (sort-by #(- (report-priority %))))
-        unacked    (->> relevant
-                        (filter unacked?)
-                        (filter unowned?))
+        prefs      {:source     source
+                    :min-pri    (:notify/min-priority notify 0)
+                    :min-sts    (:notify/min-status notify 0)
+                    :subj-match (:notify/subject-match notify)
+                    :topic      (:notify/topic notify)}
+        relevant   (->> (filter-relevant-reports reports prefs)
+                        (sort-by (juxt report-priority report-descendant-count)
+                                 #(compare %2 %1)))
+        {:keys [dl owned unacked]} (build-sections relevant email)
+        sec-fail   (failures-section db source failures)
         sec-dl     (section
                     (str "== Upcoming deadlines — owned by you (" source ") ==")
-                    owned-dl)
+                    dl)
         sec-owned  (section
                     (str "== Open bugs/patches/requests owned by you (" source ") ==")
-                    owned-rest)
+                    owned)
         sec-unack  (section
                     (str "== Unacked & unowned bugs/patches/requests (" source ") ==")
-                    unacked)
-        fail-subjects (when (seq failures)
-                       (->> failures
-                            (map :report-mid)
-                            distinct
-                            (reduce (fn [m mid]
-                                      (if-let [s (report-subject-by-mid db mid)]
-                                        (assoc m mid s) m))
-                                    {})))
-        sec-fail   (when (seq failures)
-                     (str "== Failed commands (" source ") ==\n"
-                          (str/join "\n\n"
-                                   (map #(format-failure-line fail-subjects %) failures))
-                          "\n"))]
-    (if (or sec-dl sec-owned sec-unack sec-fail)
-      (str (or sec-fail "")
-           (when (and sec-fail (or sec-dl sec-owned sec-unack)) "\n")
-           (or sec-dl "")
-           (when (and sec-dl (or sec-owned sec-unack)) "\n")
-           (or sec-owned "")
-           (when (and sec-owned sec-unack) "\n")
-           (or sec-unack "")
-           "\n--\nSent by Bark. Reply with \"Notify: off\" to unsubscribe.")
-      nil)))
+                    unacked)]
+    (log/debug "build-email-body for" email (str "(source: " source ")"))
+    (log/debug "  total reports:" (count reports) "— relevant:" (count relevant))
+    (join-sections [sec-fail sec-dl sec-owned sec-unack])))
 
 ;; ---------------------------------------------------------------------------
 ;; Per-source notification gate

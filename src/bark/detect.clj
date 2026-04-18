@@ -67,23 +67,36 @@
    {:key :release :type :release :versioned true}
    {:key :change  :type :change  :versioned true}])
 
+(defn- detect-tag-with-topic
+  "Non-versioned subject tag: the inner text (if any) becomes the topic,
+  falling back to the colon-based topic after the closing bracket."
+  [rtype subject inner]
+  (let [topic (or inner (extract-colon-topic subject))]
+    (cond-> {:type rtype} topic (assoc :topic topic))))
+
+(defn- detect-versioned-tag
+  "Versioned subject tag ([REL], [CHG]): the last space-separated token
+  in the bracket is the version; preceding tokens form the topic,
+  again falling back to the colon-based topic."
+  [rtype subject inner]
+  (let [tokens       (when inner (str/split inner #"\s+"))
+        version      (when (seq tokens) (last tokens))
+        topic-tokens (when (> (count tokens) 1) (butlast tokens))
+        topic        (or (when (seq topic-tokens) (str/join " " topic-tokens))
+                         (extract-colon-topic subject))]
+    (cond-> {:type rtype}
+      version (assoc :version version)
+      topic   (assoc :topic topic))))
+
 (defn- detect-simple-tag
-  "Detect a report type from a subject tag. Handles topic extraction
-  and optional version parsing for :versioned types."
+  "Detect a report type from a subject tag.  Dispatches to the versioned
+  or topic-only parser based on `versioned?`."
   [rtype subject pattern versioned?]
   (when-let [m (re-find pattern subject)]
     (let [inner (extract-inner m)]
       (if versioned?
-        (let [tokens (when inner (str/split inner #"\s+"))
-              version (when (seq tokens) (last tokens))
-              topic-tokens (when (> (count tokens) 1) (butlast tokens))
-              topic (or (when (seq topic-tokens) (str/join " " topic-tokens))
-                        (extract-colon-topic subject))]
-          (cond-> {:type rtype}
-            version (assoc :version version)
-            topic   (assoc :topic topic)))
-        (let [topic (or inner (extract-colon-topic subject))]
-          (cond-> {:type rtype} topic (assoc :topic topic)))))))
+        (detect-versioned-tag rtype subject inner)
+        (detect-tag-with-topic rtype subject inner)))))
 
 (defn detect-patch-subject [subject patterns]
   (when subject

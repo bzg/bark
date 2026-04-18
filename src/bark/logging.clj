@@ -9,6 +9,17 @@
             [taoensso.timbre :as log]))
 
 ;; ---------------------------------------------------------------------------
+;; Exception message helper
+;; ---------------------------------------------------------------------------
+
+(defn exception-msg
+  "Return `(.getMessage e)` when present, else the exception's class name.
+  Avoids the `nil` that some exception types (NPE, AssertionError with no
+  message) would otherwise render in log output."
+  [^Throwable e]
+  (or (.getMessage e) (str (class e))))
+
+;; ---------------------------------------------------------------------------
 ;; Size parsing
 ;; ---------------------------------------------------------------------------
 

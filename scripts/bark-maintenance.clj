@@ -21,12 +21,12 @@
 ;;   BARK_DB — path to db (default: ./data/bark-db)
 
 (require '[clojure.string :as str]
-         '[clojure.edn :as edn]
-         '[clojure.java.io :as io]
          '[taoensso.timbre :as log]
          '[bark.common :refer [parse-delay parse-cutoff-date
                                load-config build-source-map
-                               bark-schema format-date]]
+                               bark-schema format-date
+                               failures-file-path read-failures-file
+                               reason-labels]]
          '[bark.common-bb :refer [load-datalevin-pod! dq get-tenures]])
 
 ;; ---------------------------------------------------------------------------
@@ -122,18 +122,10 @@
 ;; Command failures
 ;; ---------------------------------------------------------------------------
 
-#_{:clj-kondo/ignore [:redefined-var]}
-(def ^:private reason-labels
-  {:unknown-target     "unknown target"
-   :insufficient-scope "insufficient permissions"})
-
 (defn- show-failures
   "Display command failures from the failures file, optionally filtered by source."
   [source-name]
-  (let [f    (io/file "public/.failures.edn")
-        all  (if (.exists f)
-               (try (edn/read-string (slurp f)) (catch Exception _ []))
-               [])
+  (let [all      (read-failures-file failures-file-path)
         failures (->> all
                       (filter #(or (nil? source-name) (= source-name (:source %))))
                       (sort-by :date #(compare %2 %1)))]
