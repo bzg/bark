@@ -6,6 +6,7 @@ data/
 .lsp/
 .clj-kondo/
 config.edn
+configs/
 todo.org
 public/
 logs/

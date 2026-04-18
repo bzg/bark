@@ -27,6 +27,9 @@
   maintenance {:doc  "Purge orphan emails: bb maintenance [--delete] [--verbose] [-n source]"
                :task (apply shell "bb scripts/bark-maintenance.clj" *command-line-args*)}
 
+  rebuild-history {:doc  "Replay a mail archive across era configs: bb rebuild-history [--history PATH] [--fresh] [--dry-run]"
+                   :task (apply shell "bb scripts/bark-rebuild-history.clj" *command-line-args*)}
+
   ;; Integration tests: clojure -M:test
 
   test-smtp  {:doc  "Test SMTP config: bb test-smtp [--to addr] [--dry-run]"

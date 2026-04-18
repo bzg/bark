@@ -991,6 +991,40 @@ bb maintenance -n my-source     # scope to a single source
 An orphan email is one not referenced by any report and not sent by a
 maintainer.
 
+** Rebuilding history across era configs
+
+When the command vocabulary or syntax mode of a source changed over
+time, replay the archive by maintaining one static config per era and
+driving them in sequence with =bb rebuild-history=.  Each run digests
+the slice of mail covered by its own =:fetch= window, so the full
+archive ends up consistent without any per-email timeline logic.
+
+The plan lives in =configs/history.edn= by default: a vector of
+entries, each pointing to a config and bounding it with =:since= and
+=:until= (ISO dates).  Windows are half-open =[since, until)= and must
+be *contiguous* — =:until= of one entry equals =:since= of the next.
+The first entry may omit =:since= (unbounded past), the last entry may
+omit =:until= (the currently-living config).
+
+#+begin_src edn
+[{:config "configs/2020-strict.edn"    :until "2021-01-01"}
+ {:config "configs/2021-loose.edn"     :since "2021-01-01" :until "2022-01-01"}
+ {:config "configs/2022-with-done.edn" :since "2022-01-01" :until "2023-01-01"}
+ {:config "configs/current.edn"        :since "2023-01-01"}]
+#+end_src
+
+#+begin_src shell
+bb rebuild-history                  # run the full plan
+bb rebuild-history --dry-run        # validate the plan, no execution
+bb rebuild-history --fresh          # wipe the DB first (interactive confirm)
+bb rebuild-history --history PATH   # use a different history file
+#+end_src
+
+The validator refuses gaps, overlaps, missing intermediate bounds,
+bad ISO dates, and missing/unparsable configs.  The DB path is read
+from the first config; all era configs must share the same =:db=
+target.
+
 ** Notifications (SMTP)
 
 #+begin_src edn

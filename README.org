@@ -143,6 +143,9 @@ bb notify [--dry-run] [--force] [--debug] Send notification emails
 bb maintenance [--delete] [--verbose] [-n source]  Purge orphan emails
        [--retention DUR]                  Orphan retention (default 90d)
        [--failures]                       List recent command failures
+bb rebuild-history [--history PATH] [--fresh] [--dry-run]
+                                          Replay a mail archive across multiple
+                                          era configs (see bark-manual.org)
 bb test-config [path]                     Validate config.edn
 bb test-smtp [--to addr] [--dry-run]      Test SMTP configuration
 bb clean                                  Remove all files in public/
