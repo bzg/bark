@@ -270,109 +270,25 @@
     (is (= #{:bug} (:report-types (:acked ov))))))
 
 ;; ---------------------------------------------------------------------------
-;; Time-windowed words — expand-commands-timeline
+;; resolve-command-syntax
 ;; ---------------------------------------------------------------------------
 
-(defn- parse-date [s]
-  (.parse (java.text.SimpleDateFormat. "yyyy-MM-dd") s))
+(deftest resolve-command-syntax-accepts-keywords
+  (is (= :loose  (common/resolve-command-syntax {})))
+  (is (= :loose  (common/resolve-command-syntax {:command-syntax :loose})))
+  (is (= :strict (common/resolve-command-syntax {:command-syntax :strict}))))
 
-(deftest timeline-no-windows-yields-single-period
-  (let [tl (common/expand-commands-timeline {:closed ["Fixed" "Done"]})]
-    (is (= 1 (count tl)))
-    (is (= {:since nil :until nil :commands {:closed ["Fixed" "Done"]}}
-           (first tl)))))
+(deftest resolve-command-syntax-rejects-legacy-timeline
+  (is (thrown? clojure.lang.ExceptionInfo
+               (common/resolve-command-syntax
+                {:command-syntax [[:loose {:until "2026-01-01"}]
+                                  [:strict {:since "2026-01-01"}]]}))))
 
-(deftest timeline-one-window-splits-into-three-periods
-  (let [tl (common/expand-commands-timeline
-            {:closed ["Fixed"
-                      ["Done" {:since "2020-01-01" :until "2026-01-01"}]]})]
-    (is (= 3 (count tl)))
-    (testing "period before 2020 excludes Done"
-      (is (= {:closed ["Fixed"]} (:commands (first tl))))
-      (is (nil? (:since (first tl))))
-      (is (= (parse-date "2020-01-01") (:until (first tl)))))
-    (testing "period 2020–2026 includes Done"
-      (is (= {:closed ["Fixed" "Done"]} (:commands (nth tl 1))))
-      (is (= (parse-date "2020-01-01") (:since (nth tl 1))))
-      (is (= (parse-date "2026-01-01") (:until (nth tl 1)))))
-    (testing "period after 2026 excludes Done again"
-      (is (= {:closed ["Fixed"]} (:commands (nth tl 2))))
-      (is (= (parse-date "2026-01-01") (:since (nth tl 2))))
-      (is (nil? (:until (nth tl 2)))))))
-
-(deftest timeline-open-ended-windows
-  (testing ":since only — active from 2020 onwards"
-    (let [tl (common/expand-commands-timeline
-              {:closed ["Fixed" ["Pushed" {:since "2020-01-01"}]]})]
-      (is (= 2 (count tl)))
-      (is (= {:closed ["Fixed"]} (:commands (first tl))))
-      (is (= {:closed ["Fixed" "Pushed"]} (:commands (nth tl 1))))))
-  (testing ":until only — active up to 2026"
-    (let [tl (common/expand-commands-timeline
-              {:closed ["Fixed" ["Done" {:until "2026-01-01"}]]})]
-      (is (= 2 (count tl)))
-      (is (= {:closed ["Fixed" "Done"]} (:commands (first tl))))
-      (is (= {:closed ["Fixed"]} (:commands (nth tl 1)))))))
-
-(deftest timeline-bare-string-yields-single-period
-  (let [tl (common/expand-commands-timeline {:closed ["Fixed"]})]
-    (is (= 1 (count tl)))
-    (is (nil? (:since (first tl))))
-    (is (nil? (:until (first tl))))))
-
-;; ---------------------------------------------------------------------------
-;; Unified timeline — :command-syntax windows combined with :words windows
-;; ---------------------------------------------------------------------------
-
-(deftest unified-timeline-scalar-syntax-single-period
-  (let [tl (common/resolve-unified-timeline {:command-syntax :strict})]
-    (is (= 1 (count tl)))
-    (is (true? (:strict-syntax? (first tl))))))
-
-(deftest unified-timeline-no-config-loose-single-period
-  (let [tl (common/resolve-unified-timeline {})]
-    (is (= 1 (count tl)))
-    (is (false? (:strict-syntax? (first tl))))))
-
-(deftest unified-timeline-syntax-windows-split-periods
-  (let [tl (common/resolve-unified-timeline
-            {:command-syntax [[:loose  {:until "2026-01-01"}]
-                              [:strict {:since "2026-01-01"}]]})]
-    (is (= 2 (count tl)))
-    (is (false? (:strict-syntax? (first tl))))
-    (is (true?  (:strict-syntax? (nth tl 1))))
-    (is (= (parse-date "2026-01-01") (:until (first tl))))
-    (is (= (parse-date "2026-01-01") (:since (nth tl 1))))))
-
-(deftest unified-timeline-merges-word-and-syntax-boundaries
-  (let [tl (common/resolve-unified-timeline
-            {:command-syntax [[:loose  {:until "2026-01-01"}]
-                              [:strict {:since "2026-01-01"}]]
-             :commands {:closed {:words ["Fixed"
-                                         ["Done" {:since "2020-01-01"
-                                                  :until "2026-01-01"}]]}}})]
-    (is (= 3 (count tl)))
-    (testing "(-, 2020): loose, no Done"
-      (is (false? (:strict-syntax? (first tl))))
-      (is (not (contains? (set (get-in (first tl) [:commands :closed])) "Done")))
-      (is (contains? (set (get-in (first tl) [:commands :closed])) "Fixed")))
-    (testing "[2020, 2026): loose, Done active"
-      (is (false? (:strict-syntax? (nth tl 1))))
-      (is (contains? (set (get-in (nth tl 1) [:commands :closed])) "Done")))
-    (testing "[2026, ∞): strict, no Done"
-      (is (true? (:strict-syntax? (nth tl 2))))
-      (is (not (contains? (set (get-in (nth tl 2) [:commands :closed])) "Done"))))))
-
-(deftest current-command-syntax-scalar
-  (is (= :loose  (common/current-command-syntax {})))
-  (is (= :loose  (common/current-command-syntax {:command-syntax :loose})))
-  (is (= :strict (common/current-command-syntax {:command-syntax :strict}))))
-
-(deftest current-command-syntax-timeline
-  (let [cfg {:command-syntax [[:loose  {:until "2026-01-01"}]
-                              [:strict {:since "2026-01-01"}]]}]
-    (is (= :loose  (common/current-command-syntax cfg (parse-date "2025-06-15"))))
-    (is (= :strict (common/current-command-syntax cfg (parse-date "2026-06-15"))))))
+(deftest resolve-commands-map-rejects-windowed-words
+  (is (thrown? clojure.lang.ExceptionInfo
+               (common/resolve-commands-map
+                {:commands {:closed {:words ["Fixed"
+                                             ["Done" {:since "2020-01-01"}]]}}}))))
 
 ;; ---------------------------------------------------------------------------
 ;; sent-via-source-channel?

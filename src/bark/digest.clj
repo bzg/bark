@@ -356,8 +356,7 @@
   [conn rroles source-name source-cfg from-addr email via-channel?]
   (let [body-text (common/email-body-text email)
         src-cmds  (commands/build-source-commands source-cfg)
-        period    (commands/select-period src-cmds (:email/date-sent email))
-        strict?   (:strict-syntax? period)]
+        strict?   (:strict-syntax? src-cmds)]
     (when (and from-addr body-text source-name)
       (when via-channel?
         (roles/apply-role-controls! conn rroles source-name from-addr

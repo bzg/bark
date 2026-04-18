@@ -554,52 +554,15 @@ Set globally or per source (per-source wins):
 :command-syntax :strict
 #+end_src
 
-**** Time-windowed syntax mode
+**** Replaying archives under a different convention
 
-=:command-syntax= also accepts a vector of =[:mode opts]= tuples for
-sources that switch mode over time — typically a mailing list that
-used to be =:loose= and tightened to =:strict= on a given date, where
-you still want to re-ingest the archive consistently.  Windows are
-half-open =[:since, :until)= and either bound may be omitted
-(unbounded in that direction).  Periods outside any entry default to
-=:loose=.
-
-#+begin_src edn
-:command-syntax [[:loose  {:until "2026-01-01"}]
-                 [:strict {:since "2026-01-01"}]]
-#+end_src
-
-Emails dated before =2026-01-01= accept bare and =!=-prefixed forms;
-emails on or after that date require the =!= prefix.  The mode is
-resolved per email against =:email/date-sent=, so re-ingesting an
-archive yields the historically correct behavior.
-
-Syntax windows and =:words= windows compose — the effective timeline
-covers every boundary from both.
-
-*** Time-windowed trigger words
-
-A single word in =:words= can be restricted to a date window by
-wrapping it in a =[word {:since ISO :until ISO}]= tuple.  The word
-only triggers on emails whose =:email/date-sent= falls inside the
-half-open window =[since, until)=.  Either bound may be omitted
-(unbounded in that direction).
-
-Use this to accept a legacy keyword on archived emails without
-accepting it on future traffic.  For instance, on a mailing list
-that historically used =Done.= but wants to stop recognizing it
-today:
-
-#+begin_src edn
-:commands {:closed {:words ["Canceled" "Cancelled" "Closed" "Expired"
-                            "Resolved" "Applied" "Completed" "Fixed"
-                            ["Done" {:since "2020-01-01"
-                                     :until "2026-04-16"}]]}}
-#+end_src
-
-Emails dated before =:since= or on/after =:until= ignore =Done.=;
-bare-string words stay active across all periods.  The validator
-rejects an empty window (=:since >= :until=).
+Each config is static: one vocabulary and one syntax mode per file.
+To replay an archive where the convention changed over time (a list
+that tightened from =:loose= to =:strict=, or accepted =Done.= only
+during a specific era), maintain one config per era and replay with
+=bb rebuild-history=.  Each run digests the slice of mail covered by
+its config, so the full archive ends up historically correct without
+any per-email timeline logic in the core.
 
 *** Command aliases
 

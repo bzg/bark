@@ -168,22 +168,10 @@
 
 ;; Per-source commands (optional).
 ;; Values are maps with any of :words, :scope, :report-types (at least one).
-;; Each word in :words is either a bare string (always active) or a
-;; [string {:since "yyyy-MM-dd" :until "yyyy-MM-dd"}] tuple restricting
-;; it to a half-open date window. :since/:until can be omitted.
-(s/def ::iso-date (s/and ::non-blank-string #(re-matches #"\d{4}-\d{2}-\d{2}" %)))
-(s/def ::since ::iso-date)
-(s/def ::until ::iso-date)
-;; Shared window spec: used for both :words entries and :command-syntax
-;; entries.  Enforces :since < :until when both are present.
-(s/def ::date-window
-  (s/and (s/keys :opt-un [::since ::until])
-         (fn [{s :since u :until}]
-           (or (nil? s) (nil? u) (neg? (compare s u))))))
-(s/def ::trigger-word
-  (s/or :bare     ::non-blank-string
-        :windowed (s/tuple ::non-blank-string ::date-window)))
-(s/def ::trigger-words (s/coll-of ::trigger-word :kind vector? :min-count 1))
+;; Each word in :words is a bare string.  Time-windowed forms are no
+;; longer supported — replay archives under a different vocabulary via
+;; multiple configs and bb rebuild-history.
+(s/def ::trigger-words (s/coll-of ::non-blank-string :kind vector? :min-count 1))
 (s/def ::command-scope valid-setter-scopes)
 (s/def ::command-report-types (s/coll-of valid-report-types :kind set? :min-count 1))
 
@@ -274,16 +262,9 @@
 
 ;; Command syntax mode: :loose (default — ! is optional on every Bark
 ;; instruction) or :strict (! required on every Bark instruction).
-;; Can also be a timeline vec of [:mode {:since :until}] tuples; windows
-;; are half-open and either bound may be omitted. Periods outside any
-;; entry default to :loose.
-(s/def ::syntax-mode #{:loose :strict})
-(s/def ::syntax-entry
-  (s/or :bare     ::syntax-mode
-        :windowed (s/tuple ::syntax-mode ::date-window)))
-(s/def :bark/command-syntax
-  (s/or :scalar   ::syntax-mode
-        :timeline (s/coll-of ::syntax-entry :kind vector? :min-count 1)))
+;; Time-windowed forms are no longer supported — replay under a
+;; different prefix convention via multiple configs + bb rebuild-history.
+(s/def :bark/command-syntax #{:loose :strict})
 (s/def :source/command-syntax :bark/command-syntax)
 
 ;; Top-level config

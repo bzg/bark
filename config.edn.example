@@ -85,16 +85,9 @@
  ;;            :urgent    {:words ["Urgent"]}
  ;;            :important {:words ["Important"]}}
  ;;
- ;; A single word in :words may be time-windowed by wrapping it in a
- ;; [word {:since ISO :until ISO}] tuple.  It only triggers on emails
- ;; whose :email/date-sent falls inside the half-open window
- ;; [since, until).  Either bound may be omitted (open in that
- ;; direction).  Example — accept "Done" only for 2020 → today:
- ;;
- ;; :commands {:closed {:words ["Canceled" "Cancelled" "Closed" "Expired"
- ;;                             "Resolved" "Applied" "Completed" "Fixed"
- ;;                             ["Done" {:since "2020-01-01"
- ;;                                      :until "2026-04-16"}]]}}
+ ;; To replay an archive under a different vocabulary (e.g. accept "Done"
+ ;; for 2020 → today), maintain multiple static configs and replay with
+ ;; `bb rebuild-history` instead of time-windowing entries.
 
  ;; Command aliases (optional) — old syntax → current form. Useful when
  ;; re-parsing archives after a syntax change.
@@ -147,16 +140,9 @@
  ;; Global or per-source (per-source wins).
  ;; :command-syntax :strict
  ;;
- ;; Time-windowed — accepts a vec of [:mode {:since :until}] tuples
- ;; when the mode changes over time (e.g. a list that tightened from
- ;; :loose to :strict on a given date).  Windows are half-open
- ;; [since, until); either bound may be omitted.  Periods outside any
- ;; entry default to :loose.  The effective mode is resolved per email
- ;; against :email/date-sent, so re-ingesting an archive stays
- ;; historically correct.
- ;;
- ;; :command-syntax [[:loose  {:until "2026-01-01"}]
- ;;                  [:strict {:since "2026-01-01"}]]
+ ;; To replay an archive where the convention changed over time (e.g.
+ ;; a list that tightened from :loose to :strict), maintain one config
+ ;; per era and replay with `bb rebuild-history`.
 
  ;; ---- Exports -------------------------------------------------------------
 

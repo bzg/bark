@@ -38,9 +38,8 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- detect-with [strict? body]
-  (let [sc     (src-cmds strict?)
-        period (commands/select-period sc nil)]
-    (commands/detect-directives :bug body nil nil nil (:directives period))))
+  (let [sc (src-cmds strict?)]
+    (commands/detect-directives :bug body nil nil nil (:directives sc))))
 
 (deftest directive-loose-accepts-both-forms
   (testing "-by directive"
@@ -98,139 +97,21 @@
     (is (some? (re-find strict "!Add maintainer: x@y.z")))))
 
 ;; ---------------------------------------------------------------------------
-;; Time-windowed trigger words
+;; build-source-commands shape
 ;; ---------------------------------------------------------------------------
 
-(defn- parse-date [s]
-  (.parse (java.text.SimpleDateFormat. "yyyy-MM-dd") s))
-
-(def ^:private windowed-src
-  ;; :closed accepts "Done" only in the 2020–2026 window; "Fixed" always.
-  (commands/build-source-commands
-   {:commands {:closed {:words ["Fixed"
-                                ["Done" {:since "2020-01-01"
-                                         :until "2026-01-01"}]]}}}))
-
-(deftest windowed-word-matches-inside-window
-  (let [r (commands/detect-triggers :bug "Done.\n" windowed-src
-                                    (parse-date "2023-06-15"))]
-    (is (= true (:report/closed r)))
-    (is (= :resolved (:report/close-reason r)))))
-
-(deftest windowed-word-rejected-before-window
-  (let [r (commands/detect-triggers :bug "Done.\n" windowed-src
-                                    (parse-date "2018-06-15"))]
-    (is (nil? (:report/closed r)))))
-
-(deftest windowed-word-rejected-after-window
-  (let [r (commands/detect-triggers :bug "Done.\n" windowed-src
-                                    (parse-date "2027-06-15"))]
-    (is (nil? (:report/closed r)))))
-
-(deftest always-active-word-matches-outside-window
-  (testing "Fixed stays active before, inside and after the Done window"
-    (doseq [d ["2018-06-15" "2023-06-15" "2027-06-15"]]
-      (is (some? (:report/closed (commands/detect-triggers
-                                  :bug "Fixed.\n" windowed-src (parse-date d))))
-          d))))
-
-(deftest windowed-word-uses-first-period-when-email-date-nil
-  ;; Email-date nil should not crash; falls back to the first period
-  ;; (which excludes Done in this fixture).
-  (let [r (commands/detect-triggers :bug "Done.\n" windowed-src nil)]
-    (is (nil? (:report/closed r)))))
-
-(deftest windowed-word-honors-strict-mode
-  (let [sc (commands/build-source-commands
-            {:command-syntax :strict
-             :commands {:closed {:words ["Fixed"
-                                         ["Done" {:since "2020-01-01"}]]}}})]
-    (testing "strict requires ! even in active window"
-      (is (nil? (:report/closed (commands/detect-triggers :bug "Done.\n" sc
-                                                          (parse-date "2023-06-15"))))))
-    (testing "!Done. matches in active window"
-      (is (some? (:report/closed (commands/detect-triggers :bug "!Done.\n" sc
-                                                           (parse-date "2023-06-15"))))))
-    (testing "!Done. rejected outside window even with !"
-      (is (nil? (:report/closed (commands/detect-triggers :bug "!Done.\n" sc
-                                                          (parse-date "2019-06-15"))))))))
-
-;; ---------------------------------------------------------------------------
-;; Time-windowed :command-syntax
-;; ---------------------------------------------------------------------------
-
-(def ^:private timelined-syntax-src
-  ;; :loose until 2026-01-01, :strict from then on.
-  (commands/build-source-commands
-   {:command-syntax [[:loose  {:until "2026-01-01"}]
-                     [:strict {:since "2026-01-01"}]]}))
-
-(deftest syntax-timeline-loose-period-accepts-bare
-  (let [r (commands/detect-triggers :bug "Closed.\n" timelined-syntax-src
-                                    (parse-date "2025-06-15"))]
-    (is (some? (:report/closed r)))))
-
-(deftest syntax-timeline-strict-period-rejects-bare
-  (let [r (commands/detect-triggers :bug "Closed.\n" timelined-syntax-src
-                                    (parse-date "2026-06-15"))]
-    (is (nil? (:report/closed r)))))
-
-(deftest syntax-timeline-strict-period-accepts-bang
-  (let [r (commands/detect-triggers :bug "!Closed.\n" timelined-syntax-src
-                                    (parse-date "2026-06-15"))]
-    (is (some? (:report/closed r)))))
-
-(deftest syntax-timeline-directives-per-period
-  (testing "directive bare form accepted in loose period"
-    (let [period (commands/select-period timelined-syntax-src (parse-date "2025-06-15"))]
-      (is (seq (commands/detect-directives :bug "Acked-by: a@b.com\n" nil nil nil
-                                           (:directives period))))))
-  (testing "directive bare form rejected in strict period"
-    (let [period (commands/select-period timelined-syntax-src (parse-date "2026-06-15"))]
-      (is (empty? (commands/detect-directives :bug "Acked-by: a@b.com\n" nil nil nil
-                                              (:directives period)))))))
-
-(deftest syntax-timeline-word-windows-compose
-  ;; Combine a word window (Done active 2020→2026) with a syntax flip
-  ;; (loose until 2026-01-01, strict after). Resulting periods:
-  ;;   (-, 2020-01-01)    loose, no Done
-  ;;   [2020-01-01, 2026) loose, Done active  → bare "Done." matches
-  ;;   [2026, ∞)          strict, no Done
-  (let [sc (commands/build-source-commands
-            {:command-syntax [[:loose  {:until "2026-01-01"}]
-                              [:strict {:since "2026-01-01"}]]
-             :commands {:closed {:words ["Fixed"
-                                         ["Done" {:since "2020-01-01"
-                                                  :until "2026-01-01"}]]}}})]
-    (testing "Done matches bare inside shared loose+window period"
-      (is (some? (:report/closed (commands/detect-triggers :bug "Done.\n" sc
-                                                           (parse-date "2023-06-15"))))))
-    (testing "Done gone after strict flip"
-      (is (nil? (:report/closed (commands/detect-triggers :bug "Done.\n" sc
-                                                          (parse-date "2026-06-15")))))
-      (is (nil? (:report/closed (commands/detect-triggers :bug "!Done.\n" sc
-                                                          (parse-date "2026-06-15"))))))
-    (testing "Fixed still matches bare in early loose period"
-      (is (some? (:report/closed (commands/detect-triggers :bug "Fixed.\n" sc
-                                                           (parse-date "2010-06-15"))))))
-    (testing "Fixed requires bang in strict period"
-      (is (nil? (:report/closed (commands/detect-triggers :bug "Fixed.\n" sc
-                                                          (parse-date "2026-06-15")))))
-      (is (some? (:report/closed (commands/detect-triggers :bug "!Fixed.\n" sc
-                                                           (parse-date "2026-06-15"))))))))
-
-(deftest syntax-scalar-form-still-works
-  (testing "scalar :strict produces a single strict period"
+(deftest build-source-commands-shape
+  (testing "scalar :strict produces strict-syntax? true"
     (let [sc (commands/build-source-commands {:command-syntax :strict})]
-      (is (= 1 (count (:timeline sc))))
-      (is (true? (:strict-syntax? (first (:timeline sc)))))))
-  (testing "scalar :loose produces a single loose period"
+      (is (true? (:strict-syntax? sc)))
+      (is (some? (:compiled sc)))
+      (is (some? (:directives sc)))))
+  (testing "scalar :loose produces strict-syntax? false"
     (let [sc (commands/build-source-commands {:command-syntax :loose})]
-      (is (= 1 (count (:timeline sc))))
-      (is (false? (:strict-syntax? (first (:timeline sc)))))))
+      (is (false? (:strict-syntax? sc)))))
   (testing "no :command-syntax defaults to loose"
     (let [sc (commands/build-source-commands {})]
-      (is (false? (:strict-syntax? (first (:timeline sc))))))))
+      (is (false? (:strict-syntax? sc))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Case-insensitive address caches
