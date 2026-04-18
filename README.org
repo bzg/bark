@@ -188,11 +188,11 @@ Single mail source (IMAP or Maildir) shared by all sources.
 
 ** Ingest settings (=:ingest=)
 
-| Field                  | Default   | Description                                                  |
-|------------------------+-----------+--------------------------------------------------------------|
-| =:initial-fetch=         | =50=        | First-run fetch: count, duration (="30d"=), or ISO date        |
-| =:max-size=              | none      | Skip emails larger than N bytes (e.g. =1048576=)               |
-| =:max-attachment-size=   | =1048576=   | Max text data extracted from attachments (.patch, .ics, etc) |
+| Field                | Default | Description                                                                |
+|----------------------+---------+----------------------------------------------------------------------------|
+| =:fetch=               | =50=      | First-run fetch: count, duration (="30d"=), ISO date, or =:since=/=:until= map |
+| =:max-size=            | none    | Skip emails larger than N bytes (e.g. =1048576=)                             |
+| =:max-attachment-size= | =1048576= | Max text data extracted from attachments (.patch, .ics, etc)               |
 
 ** Sources (=:sources=)
 
@@ -264,7 +264,7 @@ since the beginning of time" (the usual default for a fresh deploy).
            {:name "direct-inbox"
             :to "inbox@example.com"}]
  :db {:path "data/bark-db"}
- :ingest {:initial-fetch 50
+ :ingest {:fetch 50
           :max-size 1048576}
  :notifications {:enabled true
                  :smtp {:host "smtp.example.com" :port 587 :tls true

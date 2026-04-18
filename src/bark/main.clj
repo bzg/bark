@@ -68,21 +68,62 @@
 (defn shutting-down? [] @shutdown?)
 
 ;; ---------------------------------------------------------------------------
-;; Initial-fetch parsing
+;; Fetch parsing
 ;; ---------------------------------------------------------------------------
 
-(defn- parse-initial-fetch [v]
+(defn- parse-fetch-boundary
+  "Parse a :since/:until boundary into a java.util.Date.
+  Accepts an ISO date string (\"yyyy-MM-dd\") or a Date instance."
+  [v]
+  (cond
+    (instance? Date v) v
+    (and (string? v) (re-matches #"\d{4}-\d{2}-\d{2}" v))
+    (Date/from (Instant/parse (str v "T00:00:00Z")))
+    :else
+    (throw (ex-info (str "Invalid :fetch boundary: " (pr-str v)
+                         " (expected \"yyyy-MM-dd\" date)")
+                    {:value v}))))
+
+(defn- parse-fetch
+  "Parse a :fetch value into mailseq fetch-opts.
+  Accepted forms:
+    - integer N       → {:limit N}        (fetch latest N messages)
+    - \"Nd/w/m/y\"    → {:since date}     (relative duration)
+    - \"yyyy-MM-dd\"  → {:since date}     (absolute date)
+    - {:since D :until D}                 (half-open window [since, until);
+                                           :until is translated to mailseq's
+                                           :before)
+
+  A bare numeric string (\"50\"), a :limit key in map form, and any
+  other shape are rejected with an explicit error."
+  [v]
   (cond
     (integer? v) {:limit v}
+
     (string? v)
     (or (when (re-matches #"\d{4}-\d{2}-\d{2}" v)
           {:since (Date/from (Instant/parse (str v "T00:00:00Z")))})
         (when-let [days (common/parse-duration-str v)]
           {:since (Date/from (.minus (Instant/now) days ChronoUnit/DAYS))})
-        (throw (ex-info (str "Invalid :initial-fetch value: " (pr-str v)
-                             " (expected integer, \"Nd/w/m/y\" duration, or \"yyyy-MM-dd\" date)")
+        (throw (ex-info (str "Invalid :fetch value: " (pr-str v)
+                             " (expected integer, \"Nd/w/m/y\" duration, \"yyyy-MM-dd\" date, "
+                             "or {:since ... :until ...} map)")
                         {:value v})))
-    :else {:limit 50}))
+
+    (map? v)
+    (let [extra (remove #{:since :until} (keys v))]
+      (when (seq extra)
+        (throw (ex-info (str "Invalid :fetch map keys: " (pr-str (vec extra))
+                             " (only :since and :until are accepted — use a bare integer for count)")
+                        {:value v})))
+      (cond-> {}
+        (:since v) (assoc :since  (parse-fetch-boundary (:since v)))
+        (:until v) (assoc :before (parse-fetch-boundary (:until v)))))
+
+    :else
+    (throw (ex-info (str "Invalid :fetch value: " (pr-str v)
+                         " (expected integer, string, or map)")
+                    {:value v}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Watermark management
@@ -287,7 +328,7 @@
         (cond
           (and (empty? msgs) (seq all-ids))
           (log/warn "First-run filter matched 0 of" (count all-ids)
-                    "Maildir files — verify :initial-fetch and :folder"
+                    "Maildir files — verify :fetch and :folder"
                     "(all" (count all-ids) "ids will be sealed as seen)")
           (empty? msgs)
           (log/info "No new messages in Maildir")
@@ -405,7 +446,7 @@
   [mailbox-cfg ingest-cfg]
   {:folder       (or (:folder mailbox-cfg) "INBOX")
    :mailbox-type (:type mailbox-cfg)
-   :fetch-opts   (parse-initial-fetch (or (:initial-fetch ingest-cfg) 50))
+   :fetch-opts   (parse-fetch (or (:fetch ingest-cfg) 50))
    :ingest-opts  (select-keys ingest-cfg [:max-size :max-attachment-size])})
 
 (defn- init-roles! [db-conn config]
@@ -488,7 +529,7 @@
   (let [arg-set (set args)
         pairs   (partition 2 args)]
     {:watch?      (arg-set "--watch")
-     :cli-fetch   (some (fn [[a b]] (when (= "--initial-fetch" a) b)) pairs)
+     :cli-fetch   (some (fn [[a b]] (when (= "--fetch" a) b)) pairs)
      :config-path (or (some (fn [[a b]] (when (= "-c" a) b)) pairs) "config.edn")}))
 
 (defn- setup-logging! [config]
@@ -529,7 +570,7 @@
       (System/exit 1))
     (let [mailbox-cfg (:mailbox config)
           ingest-cfg  (cond-> (or (:ingest config) {})
-                        cli-fetch (assoc :initial-fetch cli-fetch))]
+                        cli-fetch (assoc :fetch cli-fetch))]
       (setup-logging! config)
       (validate-mailbox-cfg! mailbox-cfg)
       (let [db-conn (ingest/connect (:path (:db config)))]

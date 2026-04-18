@@ -47,10 +47,14 @@
 
  ;; ---- Ingestion -----------------------------------------------------------
 
- ;; :initial-fetch — first-run fetch window (integer count, "Nd/w/m/y"
- ;; duration, or "yyyy-MM-dd" date). CLI: --initial-fetch 4d.
+ ;; :fetch — first-run fetch window.  Four forms:
+ ;;   - integer N          → latest N messages
+ ;;   - "Nd" / "Nw" / "Nm" / "Ny" → relative duration (since N ago)
+ ;;   - "yyyy-MM-dd"        → since that date
+ ;;   - {:since "…" :until "…"} → explicit half-open window [since, until)
+ ;; CLI: --fetch 4d (scalar only; map form must live in config.edn).
  ;; :max-size / :max-attachment-size — byte limits (optional).
- ;; :ingest {:initial-fetch 50
+ ;; :ingest {:fetch 50
  ;;          :max-size 1048576
  ;;          :max-attachment-size 1048576
  ;;          }

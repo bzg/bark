@@ -988,14 +988,18 @@ report has an explicit expiry date, only that date is checked.
 ** Ingestion
 
 #+begin_src edn
-:ingest {:initial-fetch 50       ;; or "30d", "2025-01-15"
-         :max-size      1048576} ;; skip emails > 1 MB (optional)
+:ingest {:fetch    50             ;; or "30d", "2025-01-15", or {:since … :until …}
+         :max-size 1048576}       ;; skip emails > 1 MB (optional)
 #+end_src
 
-- =:initial-fetch= — how many emails to fetch on first run (no watermark
-  yet).  Accepts an integer (count), a duration string (="30d"=, ="6m"=,
-  ="1y"=), or an ISO date (="2025-01-15"=).  Default: =50=.  CLI override:
-  =clj -M:run -- --initial-fetch 4d=.
+- =:fetch= — first-run fetch window (no watermark yet).  Four forms:
+  - integer (count), e.g. =50= — fetch the latest N messages.
+  - duration string (="30d"=, ="6w"=, ="6m"=, ="1y"=) — fetch since N ago.
+  - ISO date (="2025-01-15"=) — fetch since that date.
+  - map ={:since "yyyy-MM-dd" :until "yyyy-MM-dd"}= — half-open window
+    =[since, until)=; either bound may be omitted.
+  Default: =50=.  CLI override: =clj -M:run -- --fetch 4d= (scalar only;
+  map form must live in =config.edn=).
 - =:max-size= — skip emails larger than N bytes.  No limit by default.
 
 Text content of =.patch=, =.diff=, =.ics=, =text/plain= and =text/x-log=

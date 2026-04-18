@@ -2,7 +2,7 @@
  :tasks
  {;; The JVM daemon handles ingest, digest and expire:
  ;;   clojure -M:run                   (daemon)
- ;;   clojure -M:run -- --initial-fetch 4d  (recovery)
+ ;;   clojure -M:run -- --fetch 4d  (recovery)
  ;;
  ;; Export and notify are read-only bb scripts:
 
