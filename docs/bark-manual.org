@@ -140,7 +140,7 @@ punctuation (=.= =,= =;= =:= =?= =!=), whitespace, or end of line.
 
 For example, a reply to a bug report with a line starting with
 =Confirmed.= marks the bug as "acked"; a reply to a patch starting
-with =Applied.= or =Pushed.= marks the patch as "closed".
+with =Applied.= or =Fixed.= marks the patch as "closed".
 
 The =Urgent= and =Important= keywords are stricter: they require
 punctuation or end of line (not whitespace), because words like
@@ -428,11 +428,11 @@ punctuation (=.= =,= =;= =:= =?= =!=), whitespace, or end of line. Exception:
 
 | Command keyword                      | Effect on report  |
 |--------------------------------------+-------------------|
-| =Acked= =Confirmed= =Reviewed= =Approved=    | acked             |
-| =Owned= =Handled= =Assigned=               | owned             |
+| =Acked= =Confirmed= =Approved=           | acked             |
+| =Owned=                                | owned             |
 | =Canceled= =Cancelled=                   | closed (canceled) |
 | =Expired=                              | closed (expired)  |
-| =Resolved= =Applied= =Pushed= =Fixed= =Closed= =Completed= =Merged= =Implemented= | closed (resolved) |
+| =Resolved= =Applied= =Fixed= =Closed= =Completed= | closed (resolved) |
 
 All reports can be in a combination of three states:
 
@@ -591,9 +591,8 @@ that historically used =Done.= but wants to stop recognizing it
 today:
 
 #+begin_src edn
-:commands {:closed {:words ["Canceled" "Cancelled" "Resolved" "Applied"
-                            "Pushed" "Fixed" "Closed" "Expired"
-                            "Completed" "Merged" "Implemented"
+:commands {:closed {:words ["Canceled" "Cancelled" "Closed" "Expired"
+                            "Resolved" "Applied" "Completed" "Fixed"
                             ["Done" {:since "2020-01-01"
                                      :until "2026-04-16"}]]}}
 #+end_src
@@ -629,10 +628,10 @@ full override).
 |----------------+------------------------------------------------+----------------------+---------------------|
 | =:closed=        | =Canceled=, =Cancelled=, =Expired=, =Closed=, =Resolved= | any user             | all                 |
 | =:closed=        | =Fixed=                                          | any user             | bug                 |
-| =:closed=        | =Applied=, =Pushed=, =Merged=                        | any user             | patch               |
-| =:closed=        | =Completed=, =Inplemented=                         | any user             | request             |
-| =:acked=         | =Acked=, =Confirmed=, =Reviewed=, =Approved=           | any user             | bug, patch, request |
-| =:owned=         | =Owned=, =Handled=, =Assigned=                       | any user             | bug, patch, request |
+| =:closed=        | =Applied=                                        | any user             | patch               |
+| =:closed=        | =Completed=                                      | any user             | request             |
+| =:acked=         | =Acked=, =Confirmed=, =Approved=                   | any user             | bug, patch, request |
+| =:owned=         | =Owned=                                          | any user             | bug, patch, request |
 |----------------+------------------------------------------------+----------------------+---------------------|
 | =:urgent=        | =Urgent.=                                        | any user             | all                 |
 | =:important=     | =Important.=                                     | any user             | all                 |
@@ -1125,7 +1124,7 @@ The maintainer applies:
 : From: eve@project.org
 : Subject: Re: [PATCH parser v2 0/2] Refactor tokenizer
 : 
-: Pushed, thanks!
+: Applied, thanks!
 
 The v2 series is now closed (resolved).
 

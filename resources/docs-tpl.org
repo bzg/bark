@@ -46,15 +46,15 @@ followed by a space or a punctuation mark (=.= =,= =;= =:= =?= =!=).
 
 All status/priority command keywords work on all report types:
 
-| Effect on report          | Command keyword                                                   | Type     |
-|---------------------------+-------------------------------------------------------------------+----------|
-| Mark as acked             | =Acked= =Confirmed= =Reviewed= =Approved=                                 | Status   |
-| Mark as owned             | =Owned= =Handled= =Assigned=                                            | Status   |
-| Mark as closed (canceled) | =Canceled= =Cancelled=                                                | Status   |
-| Mark as closed (expired)  | =Expired=                                                           | Status   |
-| Mark as closed (resolved) | =Resolved= =Applied= =Pushed= =Fixed= =Closed= =Completed= =Merged= =Implemented= | Status   |
-| Mark as urgent            | =Urgent.=                                                           | Priority |
-| Mark as important         | =Important.=                                                        | Priority |
+| Effect on report          | Command keyword                         | Type     |
+|---------------------------+-----------------------------------------+----------|
+| Mark as acked             | =Acked= =Confirmed= =Approved=                | Status   |
+| Mark as owned             | =Owned=                                   | Status   |
+| Mark as closed (canceled) | =Canceled= =Cancelled=                      | Status   |
+| Mark as closed (expired)  | =Expired=                                 | Status   |
+| Mark as closed (resolved) | =Resolved= =Applied= =Fixed= =Closed= =Completed= | Status   |
+| Mark as urgent            | =Urgent.=                                 | Priority |
+| Mark as important         | =Important.=                              | Priority |
 
 Users don't set the priority directly: it is computed as the sum of
 important (+1) and urgent (+2).
@@ -66,7 +66,7 @@ You can combine several status/priority commands in a single email:
 
 #+begin_example
 Confirmed.
-Handled.
+Owned.
 Urgent.
 Important.
 #+end_example

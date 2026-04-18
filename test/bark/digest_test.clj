@@ -352,7 +352,7 @@
             (is (= "<112@test.org>"
                     (:email/message-id (first (:report/descendants r)))))
             ;; Only public commands apply: 112 → acked (Confirmed.)
-            ;; Private commands (113 → Handled.) are now blocked.
+            ;; Private commands (113 → Owned.) are now blocked.
             (is (some? (:report/acked r)))
             (is (nil? (:report/owned r)))))
 

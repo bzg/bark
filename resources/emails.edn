@@ -82,7 +82,7 @@
   :email/ingested-at #inst "2026-01-01T13:00:00"
   :email/in-reply-to "<04@test.org>"
   :email/references "<02@test.org> <04@test.org>"
-  :email/body-text  "Handled.\n"}
+  :email/body-text  "Owned.\n"}
 
  ;; =========================================================================
  ;; 06 — Reply to bug 02: mark fixed (closes the bug)
@@ -154,7 +154,7 @@
   :email/ingested-at #inst "2026-01-02T14:00:00"
   :email/in-reply-to "<07@test.org>"
   :email/references "<07@test.org>"
-  :email/body-text  "Reviewed.\nPushed.\n"}
+  :email/body-text  "Approved.\nFixed.\n"}
 
  ;; =========================================================================
  ;; 11 — POLL request
@@ -755,7 +755,7 @@
   :email/ingested-at #inst "2026-01-20T11:00:00"
   :email/in-reply-to "<54@test.org>"
   :email/references "<54@test.org>"
-  :email/body-text  "Approved.\nHandled.\nUrgent.\n"}
+  :email/body-text  "Approved.\nOwned.\nUrgent.\n"}
 
  ;; =========================================================================
  ;; 56 — Notify: off (unsubscribe)
@@ -1522,7 +1522,7 @@
 
  ;; =========================================================================
  ;; 113 — Private reply to list bug 30, sent directly (no List-Id).
- ;;       Should NOT be a descendant, but commands (Handled → owned) still apply.
+ ;;       Should NOT be a descendant, but commands (Owned.) still apply.
  ;; =========================================================================
  {:email/id        "113"
   :email/source      "public-list"
@@ -1533,7 +1533,7 @@
   :email/ingested-at #inst "2026-02-22T11:00:00"
   :email/in-reply-to "<30@test.org>"
   :email/references  "<30@test.org>"
-  :email/body-text  "Handled.\n"}
+  :email/body-text  "Owned.\n"}
 
  ;; =========================================================================
  ;; 114 — Bug report (will be superseded then reopened via "Not closed")

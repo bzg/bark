@@ -74,11 +74,10 @@
  ;; that command (not merged word-by-word); start from the defaults
  ;; below.
  ;;
- ;; :commands {:acked     {:words ["Acked" "Confirmed" "Reviewed" "Approved"]}
- ;;            :owned     {:words ["Owned" "Handled" "Assigned"]}
- ;;            :closed    {:words ["Canceled" "Cancelled" "Resolved" "Pushed"
- ;;                                "Applied" "Fixed" "Closed" "Expired"
- ;;                                "Completed" "Merged" "Implemented"]}
+ ;; :commands {:acked     {:words ["Acked" "Confirmed" "Approved"]}
+ ;;            :owned     {:words ["Owned"]}
+ ;;            :closed    {:words ["Canceled" "Cancelled" "Closed" "Expired"
+ ;;                                "Resolved" "Applied" "Completed" "Fixed"]}
  ;;            :urgent    {:words ["Urgent"]}
  ;;            :important {:words ["Important"]}}
  ;;
@@ -88,9 +87,8 @@
  ;; [since, until).  Either bound may be omitted (open in that
  ;; direction).  Example — accept "Done" only for 2020 → today:
  ;;
- ;; :commands {:closed {:words ["Canceled" "Cancelled" "Resolved" "Pushed"
- ;;                             "Applied" "Fixed" "Closed" "Expired"
- ;;                             "Completed" "Merged" "Implemented"
+ ;; :commands {:closed {:words ["Canceled" "Cancelled" "Closed" "Expired"
+ ;;                             "Resolved" "Applied" "Completed" "Fixed"
  ;;                             ["Done" {:since "2020-01-01"
  ;;                                      :until "2026-04-16"}]]}}
 

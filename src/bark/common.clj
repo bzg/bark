@@ -412,10 +412,10 @@
    :change       ["CHG" "CHANGE"]})
 
 (def default-commands
-  {:acked     ["Acked" "Confirmed" "Reviewed" "Approved"]
-   :owned     ["Owned" "Handled" "Assigned"]
-   :closed    ["Canceled" "Cancelled" "Resolved" "Applied" "Pushed"
-               "Fixed" "Closed" "Expired" "Completed" "Merged" "Implemented"]
+  {:acked     ["Acked" "Confirmed" "Approved"]
+   :owned     ["Owned"]
+   :closed    ["Canceled" "Cancelled" "Closed" "Expired"
+               "Resolved" "Applied" "Completed" "Fixed"]
    :urgent    ["Urgent"]
    :important ["Important"]})
 
