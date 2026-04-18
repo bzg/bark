@@ -42,9 +42,16 @@
 ;; Queries (all-reports and report-pull-pattern loaded from bark-common.clj)
 ;; ---------------------------------------------------------------------------
 
-(defn total-emails [db]
-  (-> (d/q '[:find (count ?e) :where [?e :email/message-id _]] db)
-      ffirst (or 0)))
+(defn emails-last-year [db]
+  (let [threshold (java.util.Date. (- (System/currentTimeMillis) one-year-ms))]
+    (-> (d/q '[:find (count ?e)
+               :in $ ?threshold
+               :where
+               [?e :email/message-id _]
+               [?e :email/date-sent ?date]
+               [(>= ?date ?threshold)]]
+             db threshold)
+        ffirst (or 0))))
 
 (defn all-participants
   "Fetch all participant entities from the database."
@@ -240,12 +247,12 @@
                    frequencies)]
     (cumulative-by-month by-ym n-always)))
 
-(defn email-vs-reports-ratio [reports total-email-count]
+(defn email-vs-reports-ratio [reports emails-last-year-count]
   (let [n (count (filter #(within-last-year? (report-date %)) reports))]
     {:reports-last-year n
-     :total-emails      total-email-count
-     :ratio             (when (pos? total-email-count)
-                          (round2 (/ n (double total-email-count))))}))
+     :emails-last-year  emails-last-year-count
+     :ratio             (when (pos? emails-last-year-count)
+                          (round2 (/ n (double emails-last-year-count))))}))
 
 (defn time-to-close-stats [reports]
   (let [durations (->> reports
@@ -315,7 +322,7 @@
   ([reports db source-name]
    (let [last-year     (filter #(within-last-year? (report-date %)) reports)
          open-yr       (remove :report/closed last-year)
-         total-emails  (when db (total-emails db))
+         emails-yr     (when db (emails-last-year db))
          contributors  (when db (cond->> (all-contributors db)
                                   source-name (filter #(= source-name (second %)))))
          participants  (when db (cond->> (all-participants db)
@@ -345,7 +352,7 @@
         :top-openers       (top-openers reports 10)
         :vote-leaders      (vote-leaders reports all-votes 10)
         :closed-cancel     (closed-cancel-breakdown reports)}
-       total-emails  (assoc :email-ratio (email-vs-reports-ratio reports total-emails))
+       emails-yr     (assoc :email-ratio (email-vs-reports-ratio reports emails-yr))
        contributors  (assoc :contributors-by-month (contributors-by-month contributors)
                             :total-contributors (count contributors))
        participants  (assoc :participants-by-month (participants-by-month participants)
@@ -551,9 +558,9 @@
        (kpi (str (:median-days time-to-close) "d") "Median to close"
             (str "avg " (:avg-days time-to-close) "d")))
      (when email-ratio
-       (kpi (or (:ratio email-ratio) "—") "Report/email ratio"
+       (kpi (or (:ratio email-ratio) "—") "Report/email ratio (last year)"
             (str (:reports-last-year email-ratio) " reports / "
-                 (:total-emails email-ratio) " emails")))
+                 (:emails-last-year email-ratio) " emails")))
      (when total-participants
        (kpi total-participants "Participants"
             (when total-contributors (str total-contributors " contributors"))))
