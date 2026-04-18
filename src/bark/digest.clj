@@ -26,6 +26,7 @@
   '[:db/id :email/id :email/source :email/subject :email/message-id
     :email/in-reply-to :email/references
     :email/from-address :email/from-name :email/date-sent :email/ingested-at
+    :email/digested-at
     :email/body-text :email/body-text-from-html :email/headers-edn
     {:email/attachments [:attachment/filename :attachment/content-type :attachment/data]}])
 
