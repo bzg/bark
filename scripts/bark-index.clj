@@ -190,7 +190,7 @@
           (str "Generated " generated-at)]
          [:div.toolbar
           [:input#si {:type        "search"
-                      :placeholder "Press / to search"
+                      :placeholder "Press / to search — see Docs for syntax"
                       :oninput     "onSearchInput()"}]
           [:div.filters
            (for [t types]

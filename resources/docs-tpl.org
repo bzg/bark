@@ -16,15 +16,15 @@ You can also highlight BARK with [[codeberg.org/bzg/gnus-bone][gnus-bone.el]] an
 
 Subject labels create reports, optionally with a topic/version:
 
-| Type         | Subject label             |
-|--------------+---------------------------|
-| bug          | =[BUG <topic>]=             |
-| patch        | =[PATCH <topic> <version> <n/m>]= |
+| Type         | Subject label                    |
+|--------------+----------------------------------|
+| bug          | =[BUG <topic>]=                    |
+| patch        | =[PATCH <topic> <version> <n/m>]=  |
 | request      | =[POLL <topic>]= or =[TODO <topic>]= |
-|--------------+---------------------------|
-| announcement | =[ANN <topic>]=             |
-| release      | =[REL <topic> <version>]=   |
-| change       | =[CHG <topic> <version>]=   |
+|--------------+----------------------------------|
+| announcement | =[ANN <topic>]=                    |
+| release      | =[REL <topic> <version>]=          |
+| change       | =[CHG <topic> <version>]=          |
 
 All =<…>= parts are optional and positional.
 
@@ -50,15 +50,15 @@ followed by a space or a punctuation mark (=.= =,= =;= =:= =?= =!=).
 Recommended keyword per action, with the form to retract your own
 action on the same line:
 
-| Effect on report  | Keyword (recommended)                                          | To retract         |
-|-------------------+----------------------------------------------------------------+--------------------|
-| Mark as acked     | =Confirmed.= (bug), =Approved.= (patch), =Acked.= (request)          | =Not acked.=         |
-| Mark as owned     | =Owned.=                                                         | =Not owned.=         |
-| Mark as closed    | =Fixed.= (bug), =Applied.= (patch), =Completed.= (request)           | =Not closed.=        |
-| Mark as canceled  | =Canceled.=                                                      | =Not closed.=        |
-| Mark as expired   | =Expired.=                                                       | =Not closed.=        |
-| Mark as urgent    | =Urgent.=                                                        | =Not urgent.=        |
-| Mark as important | =Important.=                                                     | =Not important.=   |
+| Effect on report  | Keyword (recommended)                                 | To retract     |
+|-------------------+-------------------------------------------------------+----------------|
+| Mark as acked     | =Confirmed.= (bug), =Approved.= (patch), =Acked.= (request) | =Not acked.=     |
+| Mark as owned     | =Owned.=                                                | =Not owned.=     |
+| Mark as closed    | =Fixed.= (bug), =Applied.= (patch), =Completed.= (request)  | =Not closed.=    |
+| Mark as canceled  | =Canceled.=                                             | =Not closed.=    |
+| Mark as expired   | =Expired.=                                              | =Not closed.=    |
+| Mark as urgent    | =Urgent.=                                               | =Not urgent.=    |
+| Mark as important | =Important.=                                            | =Not important.= |
 
 Announcements, releases, and changes cannot be acked or owned, but
 they can be marked closed, urgent, or important.

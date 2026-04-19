@@ -596,7 +596,7 @@ full override).
 | =:closed=        | =Fixed=                                          | any user             | bug                 |
 | =:closed=        | =Applied=                                        | any user             | patch               |
 | =:closed=        | =Completed=                                      | any user             | request             |
-| =:acked=         | =Acked=, =Confirmed=, =Approved=                   | any user             | bug, patch, request |
+| =:acked=         | =Acked=, =Confirmed=, =Approved=                     | any user             | bug, patch, request |
 | =:owned=         | =Owned=                                          | any user             | bug, patch, request |
 |----------------+------------------------------------------------+----------------------+---------------------|
 | =:urgent=        | =Urgent.=                                        | any user             | all                 |
