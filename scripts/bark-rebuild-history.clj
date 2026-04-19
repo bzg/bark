@@ -24,6 +24,7 @@
          '[clojure.string :as str]
          '[bark.common :refer [bark-schema]]
          '[bark.common-bb :refer [load-datalevin-pod! dq]]
+         '[bark.history :refer [validate-history merge-fetch-window]]
          '[taoensso.timbre :as log])
 
 (log/merge-config! {:min-level :info})
@@ -47,64 +48,8 @@
                             (System/exit 1)))))
 
 ;; ---------------------------------------------------------------------------
-;; Validation
-;; ---------------------------------------------------------------------------
-
-(defn- iso-date? [s]
-  (and (string? s) (re-matches #"\d{4}-\d{2}-\d{2}" s)))
-
-(defn- validate-entry [idx entry]
-  (if-not (map? entry)
-    [(str "entry " idx ": not a map — " (pr-str entry))]
-    (cond-> []
-      (not (:config entry))
-      (conj (str "entry " idx ": missing :config"))
-      (and (:config entry) (not (.exists (io/file (:config entry)))))
-      (conj (str "entry " idx ": config file not found — " (:config entry)))
-      (and (:start entry) (not (iso-date? (:start entry))))
-      (conj (str "entry " idx ": :start not ISO yyyy-MM-dd — " (pr-str (:start entry))))
-      (and (:end entry) (not (iso-date? (:end entry))))
-      (conj (str "entry " idx ": :end not ISO yyyy-MM-dd — " (pr-str (:end entry))))
-      (and (iso-date? (:start entry)) (iso-date? (:end entry))
-           (not (neg? (compare (:start entry) (:end entry)))))
-      (conj (str "entry " idx ": :start must be strictly before :end")))))
-
-(defn- validate-contiguity [entries]
-  (->> (partition 2 1 (map-indexed vector entries))
-       (reduce (fn [errs [[ai a] [bi b]]]
-                 (cond
-                   (nil? (:end a))
-                   (conj errs (str "entry " ai ": missing :end "
-                                   "(only the last entry may omit it)"))
-                   (nil? (:start b))
-                   (conj errs (str "entry " bi ": missing :start "
-                                   "(only the first entry may omit it)"))
-                   (not= (:end a) (:start b))
-                   (conj errs (str "gap/overlap between entries " ai " and " bi ": "
-                                   ":end " (:end a)
-                                   " ≠ :start " (:start b)))
-                   :else errs))
-               [])))
-
-(defn- validate-history [entries]
-  (let [entry-errs (into [] (mapcat validate-entry (range) entries))
-        cont-errs  (if (>= (count entries) 2)
-                     (validate-contiguity entries)
-                     [])]
-    (seq (concat entry-errs cont-errs))))
-
-;; ---------------------------------------------------------------------------
 ;; Config injection
 ;; ---------------------------------------------------------------------------
-
-(defn- merge-fetch-window
-  "Return `cfg` with :ingest :fetch overridden to reflect the era's
-  window.  The era's :start/:end become the :fetch :start/:end."
-  [cfg {:keys [start end]}]
-  (assoc-in cfg [:ingest :fetch]
-            (cond-> {}
-              start (assoc :start start)
-              end   (assoc :end   end))))
 
 (defn- write-temp-config!
   "Write `cfg` to a temp EDN file and return its absolute path.
@@ -183,25 +128,25 @@
   final per-era summary can be logged."
   [entries db-path]
   (load-datalevin-pod!)
-  (let [start (db-snapshot db-path)
-        acc   (loop [remaining entries
-                     prev      start
-                     acc       []]
-                (if (empty? remaining)
-                  acc
-                  (let [entry  (first remaining)
-                        result (run-era! entry)]
-                    (when-not (zero? (:exit result))
-                      (log/error "Run failed with exit" (:exit result)
-                                 "— aborting history rebuild")
-                      (System/exit (:exit result)))
-                    (let [snap (db-snapshot db-path)]
-                      (log/info (format "  +%d emails, +%d reports"
-                                        (- (:emails snap) (:emails prev))
-                                        (- (:reports snap) (:reports prev))))
-                      (recur (rest remaining) snap (conj acc [entry snap]))))))]
+  (let [baseline  (db-snapshot db-path)
+        era-snaps (loop [remaining entries
+                         prev      baseline
+                         snaps     []]
+                    (if (empty? remaining)
+                      snaps
+                      (let [entry  (first remaining)
+                            result (run-era! entry)]
+                        (when-not (zero? (:exit result))
+                          (log/error "Run failed with exit" (:exit result)
+                                     "— aborting history rebuild")
+                          (System/exit (:exit result)))
+                        (let [snap (db-snapshot db-path)]
+                          (log/info (format "  +%d emails, +%d reports"
+                                            (- (:emails snap) (:emails prev))
+                                            (- (:reports snap) (:reports prev))))
+                          (recur (rest remaining) snap (conj snaps [entry snap]))))))]
     (log/info "─── Summary")
-    (summarize! "baseline" start)
+    (summarize! "baseline" baseline)
     (reduce (fn [prev [entry snap]]
               (log/info (format "  %s [%s..%s]: +%d emails, +%d reports"
                                 (:config entry)
@@ -210,9 +155,9 @@
                                 (- (:emails snap) (:emails prev))
                                 (- (:reports snap) (:reports prev))))
               snap)
-            start
-            acc)
-    (summarize! "final" (or (some-> acc last second) start))))
+            baseline
+            era-snaps)
+    (summarize! "final" (or (some-> era-snaps last second) baseline))))
 
 ;; ---------------------------------------------------------------------------
 ;; Main
