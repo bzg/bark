@@ -39,6 +39,26 @@
   (or (System/getenv "BARK_DB") "./data/bark-db"))
 
 ;; ---------------------------------------------------------------------------
+;; Time helpers
+;; ---------------------------------------------------------------------------
+
+(defn now-ms [] (System/currentTimeMillis))
+(def one-year-ms (* 365 24 60 60 1000))
+
+(defn within-last-year? [inst]
+  (when inst (> (.getTime inst) (- (now-ms) one-year-ms))))
+
+;; days-between (integer, shared) is in bark-common.clj.
+;; This variant returns fractional days for statistical averaging.
+(defn- days-between-frac [a b]
+  (when (and a b)
+    (/ (Math/abs (- (.getTime b) (.getTime a)))
+       (* 24.0 60 60 1000))))
+
+(defn round2 [x]
+  (when x (/ (Math/round (* x 100.0)) 100.0)))
+
+;; ---------------------------------------------------------------------------
 ;; Queries (all-reports and report-pull-pattern loaded from bark-common.clj)
 ;; ---------------------------------------------------------------------------
 
@@ -115,26 +135,6 @@
   (->> (all-active-tenures db)
        (filter #(nil? (:from %)))
        count))
-
-;; ---------------------------------------------------------------------------
-;; Time helpers
-;; ---------------------------------------------------------------------------
-
-(defn now-ms [] (System/currentTimeMillis))
-(def one-year-ms (* 365 24 60 60 1000))
-
-(defn within-last-year? [inst]
-  (when inst (> (.getTime inst) (- (now-ms) one-year-ms))))
-
-;; days-between (integer, shared) is in bark-common.clj.
-;; This variant returns fractional days for statistical averaging.
-(defn- days-between-frac [a b]
-  (when (and a b)
-    (/ (Math/abs (- (.getTime b) (.getTime a)))
-       (* 24.0 60 60 1000))))
-
-(defn round2 [x]
-  (when x (/ (Math/round (* x 100.0)) 100.0)))
 
 ;; ---------------------------------------------------------------------------
 ;; Stat helpers

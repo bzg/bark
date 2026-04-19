@@ -63,6 +63,15 @@
 ;; Pure utilities
 ;; ---------------------------------------------------------------------------
 
+(defn expand-home
+  "Expand a leading ~/ to the user's home directory.
+  Returns the string unchanged when no leading ~/ is present, or when
+  the value is nil."
+  [p]
+  (if (and (string? p) (str/starts-with? p "~/"))
+    (str (System/getProperty "user.home") (subs p 1))
+    p))
+
 (defn slugify
   "Normalize a source name for use as a directory name."
   [s]

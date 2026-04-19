@@ -394,7 +394,7 @@
               (log/info "  Mailbox:" (pr-str (:type mb))
                         (case (:type mb)
                           :imap    (str (:user mb) "@" (:host mb) "/" (or (:folder mb) "INBOX"))
-                          :maildir (str (:path mb) "/" (or (:folder mb) "INBOX"))
+                          :maildir (str (str/replace (common/expand-home (:path mb)) #"/+$" "") "/" (or (:folder mb) "INBOX"))
                           "")))
             (log/info "  Sources:" (count (:sources config)))
             (doseq [src (:sources config)]
@@ -414,7 +414,8 @@
                             (some? (get-in src [:notifications :enabled]))
                             (conj (str "notify: " (get-in src [:notifications :enabled]))))]
                 (log/info "    -" (:name src) (str/join " " parts))))
-            (log/info "  DB path:" (or (get-in config [:db :path]) "data/bark-db (default)"))
+            (log/info "  DB path:" (or (common/expand-home (get-in config [:db :path]))
+                                        "data/bark-db (default)"))
             (when-let [ingest (:ingest config)]
               (when-let [v (:fetch ingest)]
                 (log/info "  Fetch:" (pr-str v))))

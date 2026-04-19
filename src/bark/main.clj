@@ -387,7 +387,7 @@
 (defn- maildir-folder-path
   "Resolve a :maildir mailbox config to its on-disk folder path."
   [{:keys [path folder] :or {folder "INBOX"}}]
-  (str path "/" folder))
+  (str (str/replace (common/expand-home path) #"/+$" "") "/" folder))
 
 (defn- mailbox->mailseq-cfg
   "Convert a bark :mailbox config map to the format expected by mailseq/open.
@@ -615,7 +615,8 @@
     (let [mailbox-cfg (:mailbox config)
           ingest-cfg  (cond-> (or (:ingest config) {})
                         cli-fetch (assoc :fetch (cli-fetch->map cli-fetch)))
-          db-path     (or (:path (:db config)) "data/bark-db")]
+          db-path     (common/expand-home
+                       (or (:path (:db config)) "data/bark-db"))]
       (setup-logging! config)
       (validate-mailbox-cfg! mailbox-cfg)
       (when fresh? (maybe-wipe-db! db-path))
