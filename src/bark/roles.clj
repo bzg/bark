@@ -9,7 +9,9 @@
             [taoensso.timbre :as log]
             [bark.common :as common]
             [bark.commands :as commands]
-            [bark.tracking :as tracking]))
+            [bark.periods :as periods]
+            [bark.tracking :as tracking])
+  (:import [java.util Date]))
 
 ;; ---------------------------------------------------------------------------
 ;; Tenure queries
@@ -34,44 +36,93 @@
          :eid)))
 
 ;; ---------------------------------------------------------------------------
-;; Config seeding
+;; Config seeding — per-period sync
 ;; ---------------------------------------------------------------------------
 
-(defn ensure-source-roles!
-  "Seed tenures from `config` for any source/email pair that does not yet
-  have any tenure in the DB. Each maintainer gets a new open tenure with
-  :from derived from :since (absent :since → :from = nil, meaning active
-  since the beginning of time). The :order field is the index of the entry
-  in the config :maintainers vector — used as a tie-break when computing
-  the lead maintainer."
-  [conn config]
-  (doseq [{:keys [name maintainers]} (:sources config)]
-    (when (seq maintainers)
-      (let [db       (d/db conn)
-            existing (set (map :email (get-tenures db name)))
-            tx       (into []
-                           (keep-indexed
-                            (fn [idx {:keys [email since]}]
-                              (when (and email
-                                         (not (contains? existing (str/lower-case email))))
-                                (let [addr (str/lower-case email)
-                                      from (when since
-                                             (cond
-                                               (inst? since) since
-                                               (string? since)
-                                               (try (common/parse-iso-date since)
-                                                    (catch Exception _ nil))))]
-                                  (cond-> {:maint-tenure/source name
-                                           :maint-tenure/email  addr
+(defn- active-as-of
+  "Tenures whose half-open window [:from, :to) contains `as-of`. A nil
+  `as-of` (dawn of time, first period without :start) has no active
+  state yet — returns []."
+  [tenures ^Date as-of]
+  (when as-of
+    (filter (fn [{:keys [^Date from ^Date to]}]
+              (and (or (nil? from) (not (.after from as-of)))
+                   (or (nil? to)   (.after to as-of))))
+            tenures)))
+
+(defn- covering-tenure
+  "Return the tenure for `email` whose window contains `as-of`, or nil."
+  [tenures email ^Date as-of]
+  (first (filter (fn [{:keys [^Date from ^Date to] e :email}]
+                   (and (= e email)
+                        (or (nil? from) (not (.after from as-of)))
+                        (or (nil? to)   (.after to as-of))))
+                 tenures)))
+
+(defn- existing-tenure-with-from
+  "Any tenure for `email` whose :from matches `from` (regardless of :to)."
+  [tenures email from]
+  (some #(and (= email (:email %)) (= from (:from %)) %) tenures))
+
+(defn- sync-period-boundary!
+  "Reconcile tenures with `period` at its start.
+  - Opens declared emails that have no tenure matching this boundary's
+    :from yet. Idempotent: re-running does not create duplicates, and
+    does NOT reinstate emails closed by a mail directive — the mail
+    action is authoritative. Use --fresh to replay from scratch.
+  - Closes active emails absent from the declared list at :from.
+    When :from is nil (first unbounded-past period), closures are
+    skipped with a warning since no close date is available."
+  [conn source-name {:keys [^Date from maintainers]}]
+  (let [all       (get-tenures (d/db conn) source-name)
+        declared  (into [] (distinct (map str/lower-case (or maintainers []))))
+        declared? (set declared)
+        active?   (set (map :email (active-as-of all from)))
+        adds      (into []
+                        (keep (fn [[idx email]]
+                                (when-not (or (active? email)
+                                              (existing-tenure-with-from all email from))
+                                  (cond-> {:maint-tenure/source source-name
+                                           :maint-tenure/email  email
                                            :maint-tenure/order  idx}
-                                    from (assoc :maint-tenure/from from))))))
-                           maintainers)]
-        (when (seq tx)
-          (d/transact! conn tx)
-          (doseq [{addr :maint-tenure/email from :maint-tenure/from} tx]
-            (log/info (str "Config maintainer: " addr
-                           (when from (str " (since " from ")"))
-                           " (for " name ")"))))))))
+                                    from (assoc :maint-tenure/from from)))))
+                        (map-indexed vector declared))
+        drops     (remove declared? active?)
+        closes    (when from
+                    (into []
+                          (keep (fn [email]
+                                  (when-let [t (covering-tenure all email from)]
+                                    [[:db/add (:eid t) :maint-tenure/to from] email])))
+                          drops))]
+    (when (and (seq drops) (nil? from))
+      (doseq [email drops]
+        (log/warn "Cannot close tenure for" email "on" source-name
+                  "— period has no :start")))
+    (when (seq adds)
+      (d/transact! conn adds)
+      (doseq [{email :maint-tenure/email f :maint-tenure/from} adds]
+        (log/info (str "Config maintainer: " email
+                       (when f (str " (since " (common/format-date-iso f) ")"))
+                       " (for " source-name ")"))))
+    (when (seq closes)
+      (d/transact! conn (mapv first closes))
+      (doseq [[_ email] closes]
+        (log/info (str "Config sync: closed tenure for " email
+                       " (for " source-name " at "
+                       (common/format-date-iso from) ")"))))))
+
+(defn sync-source-tenures!
+  "Iterate `source`'s periods chronologically and sync tenures at each
+  boundary. See `sync-period-boundary!` for the reconciliation rules."
+  [conn source]
+  (doseq [period (periods/source-periods source)]
+    (sync-period-boundary! conn (:name source) period)))
+
+(defn sync-all-sources!
+  "Sync tenures for every source in `config`."
+  [conn config]
+  (doseq [src (:sources config)]
+    (sync-source-tenures! conn src)))
 
 ;; ---------------------------------------------------------------------------
 ;; Role control parsing and application

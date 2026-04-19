@@ -25,15 +25,28 @@
             :list-archive          "https://list.example.org"
             :archive-format-string "https://list.example.org/%s"
             ;;
-            ;; Maintainers seed initial tenures. The FIRST entry is the
-            ;; lead (can remove others, cannot self-remove). :since
-            ;; restricts privileges to emails dated on or after that day.
-            ;; After startup, "Add/Remove maintainer:" directives mutate
-            ;; the live tenure history in the DB (exported to meta.json
-            ;; and docs.html).
+            ;; Maintainers seed initial tenures (plain list of email
+            ;; strings). The FIRST entry is the lead (can remove others,
+            ;; cannot self-remove). After startup, "Add/Remove maintainer:"
+            ;; directives mutate the live tenure history in the DB
+            ;; (exported to meta.json and docs.html).
             ;;
-            ;; :maintainers [{:email "lead@example.org"}
-            ;;               {:email "co-maint@example.org" :since "2025-06-01"}]
+            ;; :maintainers ["lead@example.org" "co-maint@example.org"]
+            ;;
+            ;; For sources whose maintainer list / vocabulary evolved
+            ;; over time, declare time-windowed overrides with :periods:
+            ;;
+            ;; :periods
+            ;; [{:end "2020-01-01"
+            ;;   :maintainers ["old-lead@example.org"]
+            ;;   :commands    {:closed {:words ["Done" "Fixed"]}}}
+            ;;  {:start "2020-01-01"
+            ;;   :maintainers ["current-lead@example.org"]}]
+            ;;
+            ;; Periods must be contiguous (:end of N = :start of N+1).
+            ;; Fields omitted in a period inherit from the source level.
+            ;; `bb test-config` validates the periods; `clj -M:run -- --fresh`
+            ;; wipes the DB for a full replay.
             ;;
             ;; :notifications {:enabled false}  ;; silence this source
             }
@@ -96,14 +109,8 @@
  ;;            :important {:words ["Important"]}}
  ;;
  ;; To replay an archive under a different vocabulary (e.g. accept "Done"
- ;; for 2020 → today), maintain multiple static configs and replay with
- ;; `bb rebuild-history` instead of time-windowing entries.
-
- ;; Command aliases (optional) — old syntax → current form. Useful when
- ;; re-parsing archives after a syntax change.
- ;; :command-aliases {"Unacked"     "Not acked"
- ;;                   "Undeadline"  "No deadline"
- ;;                   "Unexpiry"    "No expiry"}
+ ;; for 2020 → today), declare multiple :periods entries on the source
+ ;; (see below) — each period carries its own :commands override.
 
  ;; :scope — :user, :maintainer, or :setter-or-maintainer.
  ;; Last is only valid on :un* directives whose attr is ref-tracked
@@ -151,8 +158,8 @@
  ;; :command-syntax :strict
  ;;
  ;; To replay an archive where the convention changed over time (e.g.
- ;; a list that tightened from :loose to :strict), maintain one config
- ;; per era and replay with `bb rebuild-history`.
+ ;; a list that tightened from :loose to :strict), declare :periods on
+ ;; the source — each period can override :command-syntax.
 
  ;; ---- Exports -------------------------------------------------------------
 

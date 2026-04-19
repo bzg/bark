@@ -565,29 +565,13 @@ Set globally or per source (per-source wins):
 
 **** Replaying archives under a different convention
 
-Each config is static: one vocabulary and one syntax mode per file.
-To replay an archive where the convention changed over time (a list
-that tightened from =:loose= to =:strict=, or accepted =Done.= only
-during a specific era), maintain one config per era and replay with
-=bb rebuild-history=.  Each run digests the slice of mail covered by
-its config, so the full archive ends up historically correct without
-any per-email timeline logic in the core.
-
-*** Command aliases
-
-Use =:command-aliases= to map an old syntax to the current one when
-re-parsing archived emails whose wording has since changed.  Aliases
-are global and target the canonical =directive= syntax (they do not
-apply to plain triggers):
-
-#+begin_src edn
-:command-aliases {"Unacked"      "Not acked"
-                  "Unowned"      "Not owned"
-                  "Unclosed"     "Not closed"
-                  "Undeadline"   "No deadline"
-                  "Unexpiry"     "No expiry"
-                  "Unsuperseded" "Not superseded"}
-#+end_src
+When a source's vocabulary or syntax mode has changed over time (a
+list that tightened from =:loose= to =:strict=, or accepted =Done.=
+only during a specific era), declare the history inline with =:periods=
+(see [[#source-periods][Source periods]]).  Each period carries its own overrides for
+=:commands=, =:command-syntax= and =:maintainers=; the core resolves
+the effective config at each email's date without any per-email
+timeline logic.
 
 ** All commands
 
@@ -841,7 +825,7 @@ validate it.
 
  :sources [{:name        "my-list"
             :list        "my-list.example.org"
-            :maintainers [{:email "lead@example.org"}]}]}
+            :maintainers ["lead@example.org"]}]}
 #+end_src
 
 =:db=, =:logging= and =:ingest= are optional; omitted they default to
@@ -884,7 +868,7 @@ Emails that don't match any source are not stored.
 |------------------------+------------------------------------------------------------------------------|
 | =:name=                  | Source identifier (required)                                                 |
 | =:list= / =:alias= / =:to=   | Exactly one (determines source type and header to match)                     |
-| =:maintainers=           | Initial maintainers, e.g. =[{:email "dev@example.org" :since "2025-01-01"}]=   |
+| =:maintainers=           | Initial maintainers as a vector of email strings, e.g. =["dev@example.org"]=   |
 |                        | The first entry is the lead maintainer (see [[#managing-roles-and-permissions][Managing roles and permissions]])  |
 | =:list-archive=          | URL of the list archive (shown in HTML reports)                              |
 | =:archive-format-string= | URL template for message-ids (=%s= is replaced), used when the                 |
@@ -897,10 +881,49 @@ Emails that don't match any source are not stored.
 | =:expiry=                | Auto-close rules per report type (see below)                                 |
 | =:notifications=         | ={:enabled false}= to silence notifications for this source (default: enabled) |
 | =:awaiting-delay=        | Duration before flagging "awaiting reply", e.g. ="14d"= (default: 14 days)     |
+| =:periods=               | Time-windowed overrides for maintainers/commands (see [[#source-periods][Source periods]])        |
 
-The =:since= date on a maintainer entry restricts their privileges to
-emails dated on or after that date.  Omit =:since= for immediate
-effect on all emails.
+** Source periods
+:PROPERTIES:
+:CUSTOM_ID: source-periods
+:END:
+
+When a source's vocabulary or maintainer list has evolved over time,
+declare the history inline with =:periods= --- a vector of time-windowed
+overrides.  Each entry may declare =:start= / =:end= (ISO =yyyy-MM-dd=)
+plus any of =:maintainers=, =:commands=, =:command-syntax=, =:labels=.
+Fields omitted in a period inherit from the source level, which
+represents the current state.
+
+#+begin_src edn
+{:name "orgmode"
+ :list "emacs-orgmode@gnu.org"
+ :maintainers ["current-lead@example.org"]    ;; default + current era
+ :periods
+ [{:end "2020-01-01"
+   :maintainers ["old-lead@example.org"]
+   :commands    {:closed {:words ["Done" "Fixed"]}}}
+  {:start "2020-01-01" :end "2024-01-01"
+   :maintainers ["mid-lead@example.org" "co@example.org"]}
+  {:start "2024-01-01"                         ;; last era, no :end
+   :maintainers ["current-lead@example.org"]}]}
+#+end_src
+
+Rules:
+- Periods must be /contiguous/: =:end= of era /N/ equals =:start= of era /N+1/.
+- Only the /first/ period may omit =:start= (unbounded past).
+- Only the /last/ period may omit =:end= (still active).
+- =bb test-config= validates the periods and rejects gaps or overlaps.
+- Maintainer tenure at each boundary is computed via /sync/:
+  declared maintainers missing at the boundary are added,
+  previously-active maintainers absent from the declared list are
+  closed at the boundary's =:start=.
+- =Add/Remove maintainer:= directives in emails continue to mutate
+  tenures in real time /between/ boundaries.
+- Sync is /idempotent/: re-running on an existing DB never duplicates
+  tenures and does not reinstate maintainers closed by a past mail
+  directive.  To replay from scratch (wiping mail-directive history
+  along with everything else), run =clj -M:run -- --fresh=.
 
 ** Report expiry
 
@@ -1026,39 +1049,23 @@ Both modes can be backed by an uberjar instead of =clj -M:run= to
 avoid paying the Clojure startup cost on every invocation; see the
 *Quick start* section of =README.org=.
 
-** Rebuilding history across era configs
+** Rebuilding history
 
-When the command vocabulary or syntax mode of a source changed over
-time, replay the archive by maintaining one static config per era and
-driving them in sequence with =bb rebuild-history=.  Each run digests
-the slice of mail covered by its own =:fetch= window, so the full
-archive ends up consistent without any per-email timeline logic.
+Historical evolution (vocabulary, syntax, maintainers) is declared
+per-source via =:periods= entries --- see [[#source-periods][Source periods]] for the full
+format and rules.  At startup, =bark= materialises the tenure history
+by syncing at each period boundary, and resolves the effective config
+for every email based on its date.
 
-The plan lives in =config_history/history.edn= by default: a vector
-of entries, each pointing to a config and bounding it with =:start=
-and =:end= (ISO dates).  Windows are half-open =[start, end)= and must
-be *contiguous* — =:end= of one entry equals =:start= of the next.
-The first entry may omit =:start= (unbounded past), the last entry may
-omit =:end= (the currently-living config).
-
-#+begin_src edn
-[{:config "config_history/2020-strict.edn"    :end "2021-01-01"}
- {:config "config_history/2021-loose.edn"     :start "2021-01-01" :end "2022-01-01"}
- {:config "config_history/2022-with-done.edn" :start "2022-01-01" :end "2023-01-01"}
- {:config "config_history/current.edn"        :start "2023-01-01"}]
-#+end_src
+To replay from scratch after editing periods (or after any config
+change you want reflected retroactively), wipe the DB:
 
 #+begin_src shell
-bb rebuild-history                  # run the full plan
-bb rebuild-history --dry-run        # validate the plan, no execution
-bb rebuild-history --fresh          # wipe the DB first (interactive confirm)
-bb rebuild-history --history PATH   # use a different history file
+clj -M:run -- --fresh   # interactive confirm, then full replay
 #+end_src
 
-The validator refuses gaps, overlaps, missing intermediate bounds,
-bad ISO dates, and missing/unparsable configs.  The DB path is read
-from the first config; all era configs must share the same =:db=
-target.
+=bb test-config= validates the =:periods= on each source: contiguity,
+ISO date format, =:start= strictly before =:end=.
 
 ** Notifications (SMTP)
 

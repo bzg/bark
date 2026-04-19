@@ -159,12 +159,19 @@
  ;; and re-added over time.
  ;;
  ;; :maint-tenure/from absent = active since the beginning of time
- ;;   (used for config-seeded tenures without an explicit :since).
+ ;;   (used for tenures seeded from a source without :periods, or from
+ ;;   the first :periods entry that omits :start).
  ;; :maint-tenure/to   absent = tenure is currently active.
- ;; :maint-tenure/order encodes the order of appearance in config.edn
- ;;   for tenures seeded from config (used only as a tie-break when
- ;;   computing the lead maintainer). Absent for tenures opened at
+ ;; :maint-tenure/order encodes the index within a period's :maintainers
+ ;;   vector at the time the tenure was opened (used only as a tie-break
+ ;;   when computing the lead maintainer). Absent for tenures opened at
  ;;   runtime via "Add maintainer:" directives.
+ ;;
+ ;; Config :periods sync at each boundary:
+ ;;   - declared maintainers missing at the boundary are opened with
+ ;;     :from = period :start (nil for the first unbounded-past period);
+ ;;   - active tenures absent from the declared list are closed with
+ ;;     :to = period :start (skipped with a warning when :start is nil).
  ;;
  ;; The "lead maintainer" for a source is the currently-active tenure
  ;; (no :to) with the earliest :from (absent sorts first), tie-broken

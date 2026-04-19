@@ -12,6 +12,7 @@
             [bark.commands.registry :refer [commands-by-id directive-commands
                                             attr->trigger-cmd proxy-state-attrs
                                             address-attrs setter-ref-attrs]]
+            [bark.periods :as periods]
             [bark.tracking :as tracking])
   (:import [java.time LocalDate ZoneOffset]
            [java.util Date]))
@@ -70,21 +71,6 @@
   (memoize
    (fn [strict-syntax?]
      (mapv (fn [cmd] [cmd (directive-pattern strict-syntax? cmd)]) directive-commands))))
-
-(defn compile-directive-aliases
-  "Compile a map of {\"OldSyntax\" \"New syntax\"} into additional
-  [cmd pattern] pairs that route alias patterns to the same commands
-  as the canonical syntax. The caller's syntax mode is used."
-  [strict-syntax? aliases-map]
-  (when (seq aliases-map)
-    (let [syntax->cmd (into {} (map (fn [[cmd _]] [(:syntax cmd) cmd]))
-                            (compile-directives strict-syntax?))]
-      (vec (keep (fn [[old-syntax new-syntax]]
-                   (if-let [cmd (syntax->cmd new-syntax)]
-                     [cmd (directive-pattern strict-syntax? (assoc cmd :syntax old-syntax))]
-                     (log/warn "Command alias target not found:" (pr-str new-syntax)
-                               "for alias" (pr-str old-syntax))))
-                 aliases-map)))))
 
 (defn build-source-commands
   "Return a source-commands descriptor with keys:
@@ -170,17 +156,14 @@
   "Detect directives in `body-text`. The optional `compiled-dirs`
   arg provides the precompiled directive patterns (from
   `build-source-commands`); if omitted, the loose-mode defaults are
-  used — used by the legacy arities consumed by tests."
-  ([report-type body-text] (detect-directives report-type body-text nil nil nil compiled-directives-loose))
-  ([report-type body-text overrides] (detect-directives report-type body-text overrides nil nil compiled-directives-loose))
-  ([report-type body-text overrides email-date] (detect-directives report-type body-text overrides email-date nil compiled-directives-loose))
-  ([report-type body-text overrides email-date aliases] (detect-directives report-type body-text overrides email-date aliases compiled-directives-loose))
-  ([report-type body-text overrides email-date aliases compiled-dirs]
+  used."
+  ([report-type body-text] (detect-directives report-type body-text nil nil compiled-directives-loose))
+  ([report-type body-text overrides] (detect-directives report-type body-text overrides nil compiled-directives-loose))
+  ([report-type body-text overrides email-date] (detect-directives report-type body-text overrides email-date compiled-directives-loose))
+  ([report-type body-text overrides email-date compiled-dirs]
    (when body-text
      (let [lines (str/split-lines body-text)
-           all-directives (if (seq aliases)
-                            (into compiled-dirs aliases)
-                            compiled-dirs)]
+           all-directives compiled-dirs]
        (->> lines
             (keep (fn [line]
                     (some (fn [[{:keys [id action attr _param scope report-types]} pattern]]
@@ -731,7 +714,8 @@
           report-mid  (:report/message-id (d/entity db report-eid))
           src-name    (d/q '[:find ?src . :in $ ?rid
                              :where [?rid :report/email ?e] [?e :email/source ?src]] db report-eid)
-          source-cfg  (get source-map src-name)
+          source-cfg  (when-let [cfg (get source-map src-name)]
+                          (periods/source-cfg-at-date cfg (:email/date-sent email)))
           src-cmds    (build-source-commands source-cfg)
           overrides   (:overrides src-cmds)
           is-maint?   (common/maintainer? roles from-addr (:email/date-sent email))
@@ -742,11 +726,8 @@
                          :report-mid report-mid})
           trig-result (-> (detect-triggers report-type body-text src-cmds)
                           (filter-triggers-by-scope overrides is-maint? fail-ctx))
-          strict-sx?  (:strict-syntax? src-cmds)
-          aliases     (compile-directive-aliases strict-sx? (:command-aliases source-cfg))
           directives  (detect-directives report-type body-text overrides
                                          (:email/date-sent email)
-                                         aliases
                                          (:directives src-cmds))
           closed?     (some? (:report/closed (d/pull db [:report/closed] report-eid)))]
 

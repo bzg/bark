@@ -14,6 +14,7 @@
             [bark.tracking :as tracking]
             [bark.detect :as detect]
             [bark.commands :as commands]
+            [bark.periods :as periods]
             [bark.roles :as roles]
             [bark.series :as series])
   (:import [java.util Date]))
@@ -483,7 +484,8 @@
         [source-name email delivery] (resolve-email-source! conn email sources)]
     (if-not source-name
       (log/debug "No matching source for" message-id "— skipping")
-      (let [source-cfg   (get source-map source-name)
+      (let [source-cfg   (when-let [cfg (get source-map source-name)]
+                             (periods/source-cfg-at-date cfg (:email/date-sent email)))
             via-channel? (common/sent-via-source-channel? delivery source-cfg)
             rroles       (roles/get-tenures (d/db conn) source-name)]
 

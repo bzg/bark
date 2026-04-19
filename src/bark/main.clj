@@ -476,7 +476,7 @@
    :ingest-opts  (select-keys ingest-cfg [:max-size :max-attachment-size])})
 
 (defn- init-roles! [db-conn config]
-  (roles/ensure-source-roles! db-conn config)
+  (roles/sync-all-sources! db-conn config)
   (doseq [{:keys [name]} (:sources config)]
     (roles/ensure-notify-defaults! db-conn name
                                    (roles/get-tenures (d/db db-conn) name))))
@@ -486,7 +486,7 @@
   model, and derive source-map/sources.  Called once at startup in
   batch mode, and on every reconnect in watch mode so edits to
   config.edn — including new maintainers — take effect without a
-  restart.  `ensure-source-roles!` and `ensure-notify-defaults!` are
+  restart.  `sync-all-sources!` and `ensure-notify-defaults!` are
   both idempotent, so re-running them on every reconnect is safe."
   [db-conn config-path]
   (let [config (or (common/load-config config-path) {})]
@@ -555,8 +555,26 @@
   (let [arg-set (set args)
         pairs   (partition 2 args)]
     {:watch?      (arg-set "--watch")
+     :fresh?      (arg-set "--fresh")
      :cli-fetch   (some (fn [[a b]] (when (= "--fetch" a) b)) pairs)
      :config-path (or (some (fn [[a b]] (when (= "-c" a) b)) pairs) "config.edn")}))
+
+(defn- confirm-fresh! [db-path]
+  (print (str "Wipe DB at " db-path "? [y/N] ")) (flush)
+  (#{"y" "Y" "yes" "YES"} (some-> (read-line) clojure.string/trim)))
+
+(defn- delete-recursively! [^java.io.File f]
+  (when (.isDirectory f)
+    (doseq [child (.listFiles f)] (delete-recursively! child)))
+  (.delete f))
+
+(defn- maybe-wipe-db! [db-path]
+  (let [f (java.io.File. ^String db-path)]
+    (when (.exists f)
+      (if (confirm-fresh! db-path)
+        (do (log/info "Wiping" (.getAbsolutePath f))
+            (delete-recursively! f))
+        (do (log/info "Aborted.") (System/exit 0))))))
 
 (defn- setup-logging! [config]
   (when-let [logging (:logging config)]
@@ -589,17 +607,19 @@
       (log/info "Goodbye.")))))
 
 (defn -main [& args]
-  (let [{:keys [watch? cli-fetch config-path]} (parse-main-args args)
+  (let [{:keys [watch? fresh? cli-fetch config-path]} (parse-main-args args)
         config (common/load-config config-path)]
     (when (nil? config)
       (log/error "Config file not found:" config-path)
       (System/exit 1))
     (let [mailbox-cfg (:mailbox config)
           ingest-cfg  (cond-> (or (:ingest config) {})
-                        cli-fetch (assoc :fetch (cli-fetch->map cli-fetch)))]
+                        cli-fetch (assoc :fetch (cli-fetch->map cli-fetch)))
+          db-path     (or (:path (:db config)) "data/bark-db")]
       (setup-logging! config)
       (validate-mailbox-cfg! mailbox-cfg)
-      (let [db-conn (ingest/connect (or (:path (:db config)) "data/bark-db"))]
+      (when fresh? (maybe-wipe-db! db-path))
+      (let [db-conn (ingest/connect db-path)]
         (log/info "Datalevin connected.")
         (install-shutdown-hook! db-conn)
         (if watch?

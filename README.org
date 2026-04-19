@@ -136,10 +136,8 @@ bb notify [--dry-run] [--force] [--debug] Send notification emails
 bb maintenance [--delete] [--verbose] [-n source]  Purge orphan emails
        [--retention DUR]                  Orphan retention (default 90d)
        [--failures]                       List recent command failures
-bb rebuild-history [--history PATH] [--fresh] [--dry-run]
-                                          Replay a mail archive across multiple
-                                          era configs (see bark-manual.org)
 bb test-config [path]                     Validate config.edn
+clj -M:run -- --fresh                     Wipe DB + full replay (interactive)
 bb test-smtp [--to addr] [--send]         Test SMTP config (default = dry-run)
 bb clean                                  Remove all files in public/
 #+end_example
@@ -184,11 +182,11 @@ Single mail source (IMAP or Maildir) shared by all sources.
 
 ** Ingest settings (=:ingest=)
 
-| Field                | Default | Description                                                                |
-|----------------------+---------+----------------------------------------------------------------------------|
-| =:fetch=               | ={:limit 50}= | First-run fetch: ={:limit N}= or ={:since "30d"}= or ={:start "…" :end "…"}=  |
-| =:max-size=            | none    | Skip emails larger than N bytes (e.g. =1048576=)                             |
-| =:max-attachment-size= | =1048576= | Max text data extracted from attachments (.patch, .ics, etc)               |
+| Field                | Default     | Description                                                            |
+|----------------------+-------------+------------------------------------------------------------------------|
+| =:fetch=               | ={:limit 50}= | First-run fetch: ={:limit N}= or ={:since "30d"}= or ={:start "…" :end "…"}= |
+| =:max-size=            | none        | Skip emails larger than N bytes (e.g. =1048576=)                         |
+| =:max-attachment-size= | =1048576=     | Max text data extracted from attachments (.patch, .ics, etc)           |
 
 ** Sources (=:sources=)
 
@@ -240,8 +238,9 @@ The full tenure history (active and closed) is exported in
 command processing on archived emails even when maintainers have
 changed over time.
 
-The per-maintainer =:since= field is optional; omitting it means "active
-since the beginning of time" (the usual default for a fresh deploy).
+For sources whose maintainer list or vocabulary evolved over time,
+declare the history inline via =:periods= on the source (see
+=docs/bark-manual.org §Source periods=).
 
 ** Example config
 
@@ -252,8 +251,7 @@ since the beginning of time" (the usual default for a fresh deploy).
  :sources [{:name "public-list"
             :list "bugs.example.org"
             ;; First entry = lead maintainer.
-            :maintainers [{:email "lead@example.org"}
-                          {:email "co-maint@example.org"}]
+            :maintainers ["lead@example.org" "co-maint@example.org"]
             :list-archive "https://lists.example.org/bugs/"}
            {:name "team-alias"
             :alias "team@example.com"}

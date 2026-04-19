@@ -39,7 +39,7 @@
 
 (defn- detect-with [strict? body]
   (let [sc (src-cmds strict?)]
-    (commands/detect-directives :bug body nil nil nil (:directives sc))))
+    (commands/detect-directives :bug body nil nil (:directives sc))))
 
 (deftest directive-loose-accepts-both-forms
   (testing "-by directive"

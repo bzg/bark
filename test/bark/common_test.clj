@@ -278,18 +278,6 @@
   (is (= :loose  (common/resolve-command-syntax {:command-syntax :loose})))
   (is (= :strict (common/resolve-command-syntax {:command-syntax :strict}))))
 
-(deftest resolve-command-syntax-rejects-legacy-timeline
-  (is (thrown? clojure.lang.ExceptionInfo
-               (common/resolve-command-syntax
-                {:command-syntax [[:loose {:until "2026-01-01"}]
-                                  [:strict {:since "2026-01-01"}]]}))))
-
-(deftest resolve-commands-map-rejects-windowed-words
-  (is (thrown? clojure.lang.ExceptionInfo
-               (common/resolve-commands-map
-                {:commands {:closed {:words ["Fixed"
-                                             ["Done" {:since "2020-01-01"}]]}}}))))
-
 ;; ---------------------------------------------------------------------------
 ;; sent-via-source-channel?
 ;; ---------------------------------------------------------------------------

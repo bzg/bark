@@ -81,7 +81,7 @@
         ;; --- Resolve recipient: --to <addr>, else the lead maintainer
         ;; (first entry of the first source's :maintainers). ---
         (let [to-addr (or to-arg
-                          (some-> config :sources first :maintainers first :email))]
+                          (some-> config :sources first :maintainers first))]
           (when-not to-addr
             (println "\n✗ No recipient: add a :maintainers entry on the first source,"
                      "or use --to <addr>.")

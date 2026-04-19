@@ -436,15 +436,12 @@
     (:labels source-cfg)        (merge (:labels source-cfg))))
 
 (defn- validate-word-entry
-  "Validate a :words entry. Must be a bare string; vector/time-windowed
-  forms are no longer supported — replay archives under a different
-  vocabulary via multiple configs and bb rebuild-history instead."
+  "Validate a :words entry. Must be a bare string."
   [entry]
   (if (string? entry)
     entry
     (throw (ex-info (str "Invalid :words entry: " (pr-str entry)
-                         " (expected a bare string; time-windowed entries are "
-                         "no longer supported)")
+                         " (expected a bare string)")
                     {:entry entry}))))
 
 (defn- extract-words-map
@@ -482,8 +479,7 @@
          (extract-overrides-map (:commands source-cfg))))
 
 (defn resolve-command-syntax
-  "Return :loose or :strict for the source.  Any other shape (including
-  the legacy time-windowed vector form) is rejected with a clear error."
+  "Return :loose or :strict for the source."
   [source-cfg]
   (case (:command-syntax source-cfg)
     nil     :loose
@@ -491,8 +487,7 @@
     :strict :strict
     (throw (ex-info (str "Invalid :command-syntax: "
                          (pr-str (:command-syntax source-cfg))
-                         " (expected :loose or :strict; time-windowed "
-                         "forms are no longer supported)")
+                         " (expected :loose or :strict)")
                     {:value (:command-syntax source-cfg)}))))
 
 ;; ---------------------------------------------------------------------------
@@ -565,7 +560,6 @@
   [config]
   (let [global-st       (:labels config)
         global-cmd      (:commands config)
-        global-aliases  (:command-aliases config)
         global-ef       (:export-formats config)
         global-expiry   (:expiry config)
         global-rt       (:report-types config)
@@ -577,10 +571,9 @@
                     (merge {:source-type stype}
                            (select-keys src [:list :alias :to :commands :labels :notifications
                                              :archive-format-string :list-archive :base-url
-                                             :maintainers :awaiting-delay :topics-filter])
+                                             :maintainers :awaiting-delay :topics-filter :periods])
                            (when global-st {:global-labels global-st})
                            (when global-cmd {:global-commands global-cmd})
-                           (when global-aliases {:command-aliases global-aliases})
                            {:export-formats (set (or (:export-formats src) global-ef ["json" "org" "rss"]))
                             :report-types (when-let [rt (or (:report-types src) global-rt)]
                                             (set (map keyword rt)))

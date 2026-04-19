@@ -13,7 +13,8 @@
          '[clojure.string :as str]
          '[taoensso.timbre :as log]
          '[bark.common :as common]
-         '[bark.commands.registry :as reg])
+         '[bark.commands.registry :as reg]
+         '[bark.periods :as periods])
 
 ;; ---------------------------------------------------------------------------
 ;; Specs
@@ -84,13 +85,11 @@
 (s/def :source-notif/enabled boolean?)
 (s/def :source/notifications (s/keys :req-un [:source-notif/enabled]))
 
-;; Per-source maintainers (optional) — seed maintainers with since-dates.
-;; Directive "Add/Remove maintainer:" overrides these at runtime.
-(s/def :maintainer/email ::email)
-(s/def :maintainer/since (s/and ::non-blank-string #(re-matches #"\d{4}-\d{2}-\d{2}" %)))
-(s/def ::maintainer-entry (s/keys :req-un [:maintainer/email]
-                                  :opt-un [:maintainer/since]))
-(s/def :source/maintainers (s/coll-of ::maintainer-entry :kind vector? :min-count 1))
+;; Per-source maintainers (optional) — plain list of email strings.
+;; The first entry is the lead. "Add/Remove maintainer:" directives
+;; mutate the live tenure history at runtime; for historical evolution,
+;; use :periods (defined further down, after ::commands-map / ::labels).
+(s/def :source/maintainers (s/coll-of ::email :kind vector? :min-count 1))
 
 (s/def ::source
   (s/and (s/keys :req-un [:source/name]
@@ -102,7 +101,7 @@
                           :source/maintainers :source/notifications
                           :source/expiry :source/awaiting-delay
                           :source/export-formats :source/topics-filter
-                          :source/command-syntax])
+                          :source/command-syntax :source/periods])
          exactly-one-source-type?))
 
 (s/def :bark/sources
@@ -174,9 +173,8 @@
 
 ;; Per-source commands (optional).
 ;; Values are maps with any of :words, :scope, :report-types (at least one).
-;; Each word in :words is a bare string.  Time-windowed forms are no
-;; longer supported — replay archives under a different vocabulary via
-;; multiple configs and bb rebuild-history.
+;; Each word in :words is a bare string. For historical vocabulary
+;; evolution, declare multiple :periods entries on the source.
 (s/def ::trigger-words (s/coll-of ::non-blank-string :kind vector? :min-count 1))
 (s/def ::command-scope valid-setter-scopes)
 (s/def ::command-report-types (s/coll-of valid-report-types :kind set? :min-count 1))
@@ -206,11 +204,6 @@
 
 ;; Global commands (optional) — same shape as per-source
 (s/def :bark/commands ::commands-map)
-
-;; Command aliases (optional) — maps old syntax to new for backward compatibility
-;; e.g. {"Unacked" "Not acked", "Unexpiry" "No expiry"}
-(s/def ::command-aliases (s/map-of ::non-blank-string ::non-blank-string))
-(s/def :bark/command-aliases ::command-aliases)
 
 ;; Subject triggers: map of report-type keyword -> vector of tag strings
 ;; e.g. {:bug ["BUG" "DEFECT"] :request ["POLL" "TODO" "FR"]}
@@ -268,16 +261,35 @@
 
 ;; Command syntax mode: :loose (default — ! is optional on every Bark
 ;; instruction) or :strict (! required on every Bark instruction).
-;; Time-windowed forms are no longer supported — replay under a
-;; different prefix convention via multiple configs + bb rebuild-history.
+;; For historical evolution of this setting, declare multiple periods
+;; on the source.
 (s/def :bark/command-syntax #{:loose :strict})
 (s/def :source/command-syntax :bark/command-syntax)
+
+;; Per-source periods (optional) — time-windowed overrides for
+;; :maintainers / :commands / :command-syntax / :labels.
+;; Each period is a map with optional :start, :end (ISO yyyy-MM-dd) and
+;; any subset of the overridable keys. Periods must be contiguous.
+;; Only the first may omit :start (unbounded past); only the last may
+;; omit :end (still active). Defined here, below ::commands-map and
+;; ::labels, so spec resolution succeeds under bb.
+(s/def :period/start (s/and ::non-blank-string #(re-matches #"\d{4}-\d{2}-\d{2}" %)))
+(s/def :period/end :period/start)
+(s/def :period/maintainers :source/maintainers)
+(s/def :period/commands ::commands-map)
+(s/def :period/command-syntax :bark/command-syntax)
+(s/def :period/labels ::labels)
+(s/def ::period-entry
+  (s/keys :opt-un [:period/start :period/end
+                   :period/maintainers :period/commands
+                   :period/command-syntax :period/labels]))
+(s/def :source/periods (s/coll-of ::period-entry :kind vector? :min-count 1))
 
 ;; Top-level config
 (s/def ::config
   (s/keys :req-un [:bark/mailbox :bark/sources]
           :opt-un [:bark/db :bark/ingest :bark/notifications :bark/labels
-                   :bark/commands :bark/command-aliases
+                   :bark/commands
                    :bark/report-types :bark/awaiting-delay
                    :bark/expiry :bark/logging
                    :bark/command-syntax :bark/theme
@@ -338,8 +350,19 @@
                              (:sources config)))]
     (seq errs)))
 
+(defn- pre-check-periods
+  "Validate :periods on each source via bark.periods/validate-periods."
+  [config]
+  (seq
+   (mapcat (fn [src]
+             (map (fn [err]
+                    (str ":sources [" (pr-str (:name src)) "] " err))
+                  (periods/validate-periods src)))
+           (:sources config))))
+
 (defn validate-config [config]
-  (if-let [errs (pre-check-commands config)]
+  (if-let [errs (or (pre-check-commands config)
+                    (pre-check-periods config))]
     {:valid? false
      :explanation (str/join "\n" errs)}
     (if (s/valid? ::config config)
@@ -382,14 +405,12 @@
                             (:list-archive src)  (conj (str "archive: " (:list-archive src)))
                             (:report-types src)  (conj (str "report-types: " (pr-str (:report-types src))))
                             (:command-syntax src) (conj (str "command-syntax: "
-                                                              (let [cs (:command-syntax src)]
-                                                                (if (keyword? cs) (name cs) "timeline"))))
+                                                              (name (:command-syntax src))))
                             (seq (:maintainers src))
                             (conj (str "maintainers: "
-                                       (str/join ", "
-                                                 (map #(str (:email %)
-                                                            (when (:since %) (str " (since " (:since %) ")")))
-                                                      (:maintainers src)))))
+                                       (str/join ", " (:maintainers src))))
+                            (seq (:periods src))
+                            (conj (str "periods: " (count (:periods src))))
                             (some? (get-in src [:notifications :enabled]))
                             (conj (str "notify: " (get-in src [:notifications :enabled]))))]
                 (log/info "    -" (:name src) (str/join " " parts))))
@@ -404,8 +425,7 @@
             (when-let [rt (:report-types config)]
               (log/info "  Report types:" (pr-str rt)))
             (when-let [cs (:command-syntax config)]
-              (log/info "  Command syntax (global):"
-                        (if (keyword? cs) (name cs) "timeline")))
+              (log/info "  Command syntax (global):" (name cs)))
             (when-let [logging (:logging config)]
               (when (:file logging)
                 (log/info "  Log file:" (:file logging)

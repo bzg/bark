@@ -109,3 +109,87 @@
         (is (common/maintainer? ts "alice@x.org"))
         (is (common/maintainer? ts "bob@x.org"))
         (is (common/maintainer? ts "carol@x.org"))))))
+
+;; ---------------------------------------------------------------------------
+;; sync-source-tenures! — per-period reconciliation
+;; ---------------------------------------------------------------------------
+
+(defn- emails [tenures]
+  (set (map :email tenures)))
+
+(defn- active [conn src]
+  (emails (filter #(nil? (:to %)) (roles/get-tenures (d/db conn) src))))
+
+(deftest sync-no-period-opens-with-nil-from
+  (let [conn (fresh-conn)]
+    (roles/sync-source-tenures! conn {:name "s" :maintainers ["a@x.org" "b@x.org"]})
+    (is (= #{"a@x.org" "b@x.org"} (active conn "s")))
+    (testing "all tenures open with :from = nil (unbounded past)"
+      (is (every? #(nil? (:from %))
+                  (roles/get-tenures (d/db conn) "s"))))))
+
+(deftest sync-multi-period-opens-and-closes-at-boundaries
+  (let [conn (fresh-conn)]
+    (roles/sync-source-tenures!
+     conn
+     {:name    "s"
+      :periods [{:end "2020-01-01" :maintainers ["a@x.org" "b@x.org"]}
+                {:start "2020-01-01" :maintainers ["a@x.org" "c@x.org"]}]})
+    (let [ts (roles/get-tenures (d/db conn) "s")]
+      (is (= #{"a@x.org" "c@x.org"} (emails (filter #(nil? (:to %)) ts)))
+          "active at end-of-run = declared by last period")
+      (is (some #(and (= "b@x.org" (:email %))
+                      (nil? (:from %))
+                      (= (common/parse-iso-date "2020-01-01") (:to %))) ts)
+          "b@x.org opened in era-1 then closed at era-2 start"))))
+
+(deftest sync-is-idempotent
+  (let [conn (fresh-conn)
+        src  {:name "s"
+              :periods [{:end "2020-01-01" :maintainers ["a@x.org"]}
+                        {:start "2020-01-01" :maintainers ["b@x.org"]}]}]
+    (roles/sync-source-tenures! conn src)
+    (let [before (roles/get-tenures (d/db conn) "s")]
+      (roles/sync-source-tenures! conn src)
+      (let [after (roles/get-tenures (d/db conn) "s")]
+        (is (= (count before) (count after))
+            "re-running sync does not create duplicate tenures")
+        (is (= (emails before) (emails after)))))))
+
+(deftest sync-warm-restart-preserves-mail-removal
+  ;; A mail directive closed bob's tenure. A warm re-sync with config
+  ;; still declaring bob does NOT reinstate bob — the mail action is
+  ;; authoritative. To replay from scratch (ignoring historical mail
+  ;; actions), the operator must use --fresh.
+  (let [conn (fresh-conn)]
+    (roles/sync-source-tenures!
+     conn {:name "s" :maintainers ["lead@x.org" "bob@x.org"]})
+    (let [t0 (roles/get-tenures (d/db conn) "s")]
+      (roles/apply-role-controls!
+       conn t0 "s" "lead@x.org" "Remove maintainer: bob@x.org" t1))
+    (roles/sync-source-tenures!
+     conn {:name "s" :maintainers ["lead@x.org" "bob@x.org"]})
+    (is (not (contains? (active conn "s") "bob@x.org"))
+        "bob stays removed — warm re-sync is append-only here")))
+
+(deftest sync-no-period-cannot-close-undeclared
+  ;; Without :periods, sync is append-only (F=nil cannot carry a close
+  ;; date). A pre-seeded maintainer absent from the declared list stays
+  ;; active — operator must use --fresh or add :periods.
+  (let [conn (fresh-conn)]
+    (seed-two-maintainers! conn "s" "lead@x.org" "bob@x.org")
+    (roles/sync-source-tenures!
+     conn {:name "s" :maintainers ["lead@x.org"]})
+    (is (contains? (active conn "s") "bob@x.org")
+        "bob stays active — no :periods means no close date available")))
+
+(deftest sync-with-started-first-period-can-close
+  ;; First period has :start, so a pre-existing mail-added maintainer
+  ;; absent from the declared list IS closed.
+  (let [conn (fresh-conn)]
+    (seed-two-maintainers! conn "s" "lead@x.org" "bob@x.org")
+    (roles/sync-source-tenures!
+     conn {:name    "s"
+           :periods [{:start "2020-01-01" :maintainers ["lead@x.org"]}]})
+    (is (not (contains? (active conn "s") "bob@x.org"))
+        "bob is closed at the first period's :start")))
