@@ -1006,7 +1006,7 @@ Two practical ways to keep BARK running:
 
 - *Watch mode under systemd* — the daemon stays up, reacts to IMAP
   IDLE or Maildir filesystem events, reconnects on failure.  A
-  ready-to-edit unit file lives in =deploy/bark.service=.  Install to
+  ready-to-edit unit file lives in =docs/deploy/bark.service=.  Install to
   =/etc/systemd/system/bark.service= (root) or =~/.config/systemd/user/=
   (user), then =systemctl [--user] daemon-reload && systemctl [--user]
   enable --now bark=.
@@ -1014,7 +1014,7 @@ Two practical ways to keep BARK running:
 - *Batch mode under cron* — =clj -M:run= is a one-shot: connect,
   fetch new mail since the watermark, digest, expire, exit.  Chain
   =bb export= and =bb notify= after it.  An example crontab lives in
-  =deploy/crontab.example=.
+  =docs/deploy/crontab.example=.
 
 Both modes can be backed by an uberjar instead of =clj -M:run= to
 avoid paying the Clojure startup cost on every invocation; see the
