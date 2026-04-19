@@ -387,7 +387,7 @@
   Deduplication is intentionally NOT applied: the goal is to let an
   operator reproduce command processing in another deployment, which
   requires the full tenure history."
-  [db source-name source-cfg]
+  [db source-name]
   (when source-name
     (let [tenures     (get-tenures db source-name)
           lead        (lead-maintainer tenures)
@@ -413,17 +413,22 @@
                            (str escaped range badge)))
                        ordered)]
       (when (seq entries)
-        (let [maint-cfg (:maintainers source-cfg)
-              config-snippet (when (seq maint-cfg)
-                               (str "\n<p>If you run BARK, add this to your <code>config.edn</code>"
-                                    " to declare maintainers correctly:</p>\n"
-                                    "<pre><code>"
-                                    (html-escape (str/trim (with-out-str (pp/pprint {:maintainers maint-cfg}))))
-                                    "</code></pre>"))]
-          (str "<h2 id=\"maintainers\">Maintainers</h2>\n<ul>\n"
-               (str/join "\n" (map #(str "<li>" % "</li>") entries))
-               "\n</ul>"
-               config-snippet))))))
+        (str "<h2 id=\"maintainers\">Maintainers</h2>\n<ul>\n"
+             (str/join "\n" (map #(str "<li>" % "</li>") entries))
+             "\n</ul>")))))
+
+(defn build-configuration-html
+  "Build an HTML section displaying the raw source entry from config.edn
+  so operators can reproduce this source in their own BARK instance."
+  [config source-name]
+  (when-let [src (and source-name
+                      (some #(when (= (:name %) source-name) %)
+                            (:sources config)))]
+    (str "<h2 id=\"configuration\">Configuration</h2>\n"
+         "<p>Here is how to configure this source in your BARK instance:</p>\n"
+         "<pre><code>"
+         (html-escape (str/trim (with-out-str (pp/pprint src))))
+         "</code></pre>")))
 
 ;; ---------------------------------------------------------------------------
 ;; Main
@@ -449,12 +454,14 @@
       _           (load-datalevin-pod!)
       conn        ((resolve 'pod.huahaiy.datalevin/get-conn) db-path bark-schema {:wal? false})
       db          ((resolve 'pod.huahaiy.datalevin/db) conn)
-      maint-html  (build-maintainers-html db source-name source-cfg)
+      maint-html  (build-maintainers-html db source-name)
+      config-html (build-configuration-html config source-name)
       org-text    (-> (slurp "resources/docs-tpl.org")
                       (substitute-template labels cmds prefix)
                       (filter-feed-links effective-dir))
       body-html   (cond-> (org->html org-text)
-                    maint-html (str "\n" maint-html))
+                    maint-html  (str "\n" maint-html)
+                    config-html (str "\n" config-html))
       has-ical?   (.exists (io/file effective-dir "events" "announcements.ics"))
       html        (docs-page body-html {:ical has-ical?})]
   ((resolve 'pod.huahaiy.datalevin/close) conn)
