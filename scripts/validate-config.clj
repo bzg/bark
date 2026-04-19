@@ -207,7 +207,7 @@
 (s/def :bark/command-aliases ::command-aliases)
 
 ;; Subject triggers: map of report-type keyword -> vector of tag strings
-;; e.g. {:bug ["BUG" "DEFECT"] :request ["POLL" "FR" "TODO"]}
+;; e.g. {:bug ["BUG" "DEFECT"] :request ["POLL" "TODO" "FR"]}
 (s/def ::label-tags (s/coll-of ::non-blank-string :kind vector? :min-count 1))
 (s/def ::labels
   (s/map-of #{:bug :patch :request :announcement :release :change}

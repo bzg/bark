@@ -112,7 +112,7 @@ requests:
 - You create a bug report by adding =[BUG]= to the subject.
 - You send a patch by adding an inline or attached patch, usually with
   [PATCH] in the subject.
-- You can also create a =[POLL]=, share a feature request =[FR]= or a =[TODO]=.
+- You can also create a =[POLL]= or a =[TODO]=.
 
 See below the list of [[#report-types][report types]].
 
@@ -181,7 +181,7 @@ undo it.
 
 ** Voting on requests
 
-Requests (=[POLL]=, =[FR]=, =[TODO]=, etc.) support voting:
+Requests (=[POLL]=, =[TODO]=, etc.) support voting:
 
 - =+1= or =1+= means "I support"
 - =-1= or =1-= means "I don't support"
@@ -369,7 +369,7 @@ Reports are detected from email subject labels:
 |-----------------------------------------------------+--------------|
 | =[BUG <topic>]=                                       | bug          |
 | =[PATCH <topic> <version> <n/m>]=                     | patch        |
-| =[POLL <topic>]= =[FR <topic>]= =[TODO <topic>]=          | request      |
+| =[POLL <topic>]= =[TODO <topic>]=                         | request      |
 | =[ANN <topic>]= =[ANNOUNCEMENT <topic>]=                | announcement |
 | =[REL <topic> <version>]= =[RELEASE <topic> <version>]= | release      |
 | =[CHG <topic> <version>]= =[CHANGE <topic> <version>]=  | change       |

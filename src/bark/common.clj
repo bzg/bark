@@ -406,7 +406,7 @@
 (def default-labels
   {:bug          ["BUG"]
    :patch        ["PATCH"]
-   :request      ["POLL" "FR" "TODO"]
+   :request      ["POLL" "TODO"]
    :announcement ["ANN" "ANNOUNCEMENT"]
    :release      ["REL" "RELEASE"]
    :change       ["CHG" "CHANGE"]})
