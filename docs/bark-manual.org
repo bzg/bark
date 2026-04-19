@@ -427,6 +427,12 @@ punctuation (=.= =,= =;= =:= =?= =!=), whitespace, or end of line. Exception:
 =Urgent= and =Important= only accept punctuation or end of line (see
 [[#priority-commands][priority commands]]).
 
+Directives that take a parameter (=Topic:=, =Deadline:=, =Expiry:=,
+=Acked-by:=, =Owned-by:=, =Closed-by:=, =Urgent-by:=, =Important-by:=,
+=Superseded-by:=) require **at least one whitespace character between
+the colon and the value**.  =Topic: parser= is recognised; =Topic:parser=
+(no space) is silently ignored.
+
 ** Status commands
 
 | Command keyword                         | Effect on report  |

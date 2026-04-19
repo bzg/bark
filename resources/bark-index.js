@@ -635,6 +635,10 @@ function buildRowElement(rpt) {
   }
 
   var priLabel = priority === 3 ? 'A' : priority === 2 ? 'B' : priority === 1 ? 'C' : ' ';
+  var priTitle = priority === 3 ? 'Priority A — urgent and important'
+               : priority === 2 ? 'Priority B — urgent'
+               : priority === 1 ? 'Priority C — important'
+               : 'No priority';
   var isMaint = role === 'maintainer';
   var authorInner = isMaint ? '<strong>' + escHtml(author) + '</strong>' : escHtml(author);
   var authorHtml = '<a href="javascript:void(0)" onclick="setSearch(\'f:' + escAttr(from) + '\')" title="' + escAttr(from) + '">' + authorInner + '</a>';
@@ -658,7 +662,7 @@ function buildRowElement(rpt) {
   var tr = document.createElement('tr');
   tr.innerHTML =
     '<td title="Filter by type"><mark data-type="' + escAttr(type) + '" style="cursor:pointer" onclick="isolateType(\'' + escAttr(type) + '\')">' + escHtml(label) + '</mark></td>' +
-    '<td style="text-align:center">' + priLabel + '</td>' +
+    '<td title="' + priTitle + '" style="text-align:center">' + priLabel + '</td>' +
     '<td style="text-align:center;' + dueStyle + '">' + dueHtml + '</td>' +
     '<td title="' + escAttr(flagsTitle) + '" style="text-align:center;font-family:monospace;font-size:0.8rem;letter-spacing:0.1em">' + flagsStr + '</td>' +
     '<td>' + seriesHtml + patchHtml + eventsHtml + textsHtml + relatedHtml + votesHtml + (awaitingFlag ? '<span title="Awaiting reply" style="font-size:0.75rem">\u231A </span>' : '') + subjectHtml + '</td>' +
