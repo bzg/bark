@@ -390,7 +390,7 @@
        :y {:field "count" :type "quantitative" :title "Reports"}}))
 
 (defn chart-per-type [per-type]
-  (vl "Report types (last year)" "arc"
+  (vl "Report types (last 12 months)" "arc"
       (map (fn [[t c]] {"type" t "count" c}) per-type)
       {:theta {:field "count" :type "quantitative"}
        :color {:field "type"  :type "nominal" :title "Type"}}
@@ -411,7 +411,7 @@
   (let [data (->> openers
                   (map (fn [{:keys [address name count]}]
                          {"user" (or (when (seq name) name) address) "count" count})))]
-    (vl "Top 10 openers (last year)" "bar" data
+    (vl "Top 10 openers (last 12 months)" "bar" data
         {:y {:field "user"  :type "ordinal" :title nil
              :sort {:field "count" :order "descending"}
              :axis  {:labelLimit 180}}
@@ -549,7 +549,7 @@
      "<h3>Statistics</h3>\n"
      "<div id=\"kpi-area\" class=\"kpis\">\n"
      ;; Baked fallback (replaced by stats.json fetch when served over HTTP)
-     (kpi n-yr "Reports (last year)"
+     (kpi n-yr "Reports (last 12 months)"
           (str open-last-year " still open"))
      (kpi (:open open-closed-ratio) "Open (all time)"
           (str (pct (:ratio open-closed-ratio)) " of all"))
@@ -558,7 +558,7 @@
        (kpi (str (:median-days time-to-close) "d") "Median to close"
             (str "avg " (:avg-days time-to-close) "d")))
      (when email-ratio
-       (kpi (or (:ratio email-ratio) "—") "Report/email ratio (last year)"
+       (kpi (or (:ratio email-ratio) "—") "Report/email ratio (last 12 months)"
             (str (:reports-last-year email-ratio) " reports / "
                  (:emails-last-year email-ratio) " emails")))
      (when total-participants

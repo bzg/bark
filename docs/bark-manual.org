@@ -682,7 +682,7 @@ improving browser responsiveness on large trackers.
 Use =--closed-retention <date-or-duration>= to exclude old closed reports
 from all exports.  Accepts an ISO date (=2024-01-01=) or a duration
 (=1y=, =6m=, =90d=).  For instance, =bb export --closed-retention 1y=
-keeps only reports closed within the last year.
+keeps only reports closed within the last 12 months.
 
 Use =--topics-filter <topics>= to export only reports matching given
 topics (comma-separated, case-insensitive).  For instance,
@@ -1103,7 +1103,7 @@ All tasks are run via [[https://babashka.org/][Babashka]]:
 | =bb export --force=               | Full rebuild, ignore timestamps                                |
 | =bb export --index-only=          | Regenerate top-level =index.html= only                           |
 | =bb export --page-size 100=       | Paginate HTML table (100 reports/page)                         |
-| =bb export --closed-retention 1y= | Keep only reports closed within the last year                  |
+| =bb export --closed-retention 1y= | Keep only reports closed within the last 12 months             |
 | =bb export --topics-filter "a,b"= | Only export reports whose topic is in the list                 |
 | =bb export --only-open=           | Also export =-open= files (all-open.json, etc.)                  |
 | =bb export FORMAT=                | Individual formats: json, rss, org, html, stats,               |
