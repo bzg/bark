@@ -6,6 +6,11 @@
 ;; producing a historically consistent ingest for archives whose
 ;; command vocabulary or syntax mode changed over time.
 ;;
+;; IMPORTANT: stop the JVM daemon (watch mode) before running this — the
+;; spawned `clojure -M:run` subprocesses need exclusive access to the
+;; Datalevin LMDB lock, and --fresh deletes the DB files underneath a
+;; running process.
+;;
 ;; Usage:
 ;;   bb rebuild-history                  — run the plan in config_history/history.edn
 ;;   bb rebuild-history --history PATH   — use a different history file
