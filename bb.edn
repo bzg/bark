@@ -16,8 +16,7 @@
               :task (let [dir (clojure.java.io/file "public")]
                      (when (.exists dir)
                       (doseq [f (reverse (file-seq dir))]
-                       (when-not (or (= f dir)
-                                  (.endsWith (.getPath f) ".org"))
+                       (when-not (= f dir)
                         (.delete f)
                         (println "Deleted" (.getPath f))))))}
 
