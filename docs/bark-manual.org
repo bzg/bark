@@ -365,14 +365,17 @@ privately.
 
 Reports are detected from email subject labels:
 
-| Tag                                                 | Type         |
-|-----------------------------------------------------+--------------|
-| =[BUG <topic>]=                                       | bug          |
-| =[PATCH <topic> <version> <n/m>]=                     | patch        |
-| =[POLL <topic>]= =[TODO <topic>]=                         | request      |
-| =[ANN <topic>]= =[ANNOUNCEMENT <topic>]=                | announcement |
-| =[REL <topic> <version>]= =[RELEASE <topic> <version>]= | release      |
-| =[CHG <topic> <version>]= =[CHANGE <topic> <version>]=  | change       |
+| Tag                               | Type         |
+|-----------------------------------+--------------|
+| =[BUG <topic>]=                     | bug          |
+| =[PATCH <topic> <version> <n/m>]=   | patch        |
+| =[POLL <topic>]= or =[TODO <topic>]=  | request      |
+| =[ANN <topic>]=                     | announcement |
+| =[REL <topic> <version>]=           | release      |
+| =[CHG <topic> <version>]=           | change       |
+
+Long-form aliases are also accepted: =[ANNOUNCEMENT]=, =[RELEASE]=,
+=[CHANGE]=.
 
 Announcements, releases and changes require maintainer permission.
 
