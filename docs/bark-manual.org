@@ -840,7 +840,7 @@ validate it.
 
 =:db=, =:logging= and =:ingest= are optional; omitted they default to
 =:db {:path "data/bark-db"}=, stderr-only logging at =:info= level,
-and =:ingest {:fetch 50}=.  See =config.edn.example= for the full
+and =:ingest {:fetch {:limit 50}}=.  See =config.edn.example= for the full
 annotated reference.
 
 BARK also reads Maildir folders.  Point =:path= at the parent
@@ -956,18 +956,22 @@ report has an explicit expiry date, only that date is checked.
 ** Ingestion
 
 #+begin_src edn
-:ingest {:fetch    50             ;; or "30d", "2025-01-15", or {:since … :until …}
+:ingest {:fetch    {:limit 50}    ;; or {:since "30d"} or {:start "…" :end "…"}
          :max-size 1048576}       ;; skip emails > 1 MB (optional)
 #+end_src
 
-- =:fetch= — first-run fetch window (no watermark yet).  Four forms:
-  - integer (count), e.g. =50= — fetch the latest N messages.
-  - duration string (="30d"=, ="6w"=, ="6m"=, ="1y"=) — fetch since N ago.
-  - ISO date (="2025-01-15"=) — fetch since that date.
-  - map ={:since "yyyy-MM-dd" :until "yyyy-MM-dd"}= — half-open window
-    =[since, until)=; either bound may be omitted.
-  Default: =50=.  CLI override: =clj -M:run -- --fetch 4d= (scalar only;
-  map form must live in =config.edn=).
+- =:fetch= — first-run fetch window (no watermark yet).  Exactly one of
+  three disjoint map shapes (strict; no key mixing, empty map rejected):
+  - ={:limit N}= — fetch the latest N messages (positive integer).
+  - ={:since "30d"}= — relative duration from now.  Accepts =Nd=, =Nw=, =Nm=, =Ny=.
+  - ={:start "yyyy-MM-dd" :end "yyyy-MM-dd"}= — absolute half-open window
+    =[start, end)=.  Both =:start= and =:end= are optional (at least one
+    must be present); ISO dates only.
+  Default when =:fetch= is omitted: ={:limit 50}=.  CLI shortcut
+  (=--fetch=), the scalar is lifted to one of the three map shapes:
+  - =--fetch 50=          → ={:limit 50}=
+  - =--fetch 30d=         → ={:since "30d"}=
+  - =--fetch 2020-01-01=  → ={:start "2020-01-01"}=
 - =:max-size= — skip emails larger than N bytes.  No limit by default.
 
 Text content of =.patch=, =.diff=, =.ics=, =text/plain= and =text/x-log=
@@ -1025,17 +1029,17 @@ the slice of mail covered by its own =:fetch= window, so the full
 archive ends up consistent without any per-email timeline logic.
 
 The plan lives in =config_history/history.edn= by default: a vector
-of entries, each pointing to a config and bounding it with =:since=
-and =:until= (ISO dates).  Windows are half-open =[since, until)= and must
-be *contiguous* — =:until= of one entry equals =:since= of the next.
-The first entry may omit =:since= (unbounded past), the last entry may
-omit =:until= (the currently-living config).
+of entries, each pointing to a config and bounding it with =:start=
+and =:end= (ISO dates).  Windows are half-open =[start, end)= and must
+be *contiguous* — =:end= of one entry equals =:start= of the next.
+The first entry may omit =:start= (unbounded past), the last entry may
+omit =:end= (the currently-living config).
 
 #+begin_src edn
-[{:config "config_history/2020-strict.edn"    :until "2021-01-01"}
- {:config "config_history/2021-loose.edn"     :since "2021-01-01" :until "2022-01-01"}
- {:config "config_history/2022-with-done.edn" :since "2022-01-01" :until "2023-01-01"}
- {:config "config_history/current.edn"        :since "2023-01-01"}]
+[{:config "config_history/2020-strict.edn"    :end "2021-01-01"}
+ {:config "config_history/2021-loose.edn"     :start "2021-01-01" :end "2022-01-01"}
+ {:config "config_history/2022-with-done.edn" :start "2022-01-01" :end "2023-01-01"}
+ {:config "config_history/current.edn"        :start "2023-01-01"}]
 #+end_src
 
 #+begin_src shell

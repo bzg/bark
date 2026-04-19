@@ -69,61 +69,102 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Fetch parsing
+;;
+;; `:fetch` accepts exactly one of three disjoint map shapes — strict,
+;; no key mixing, empty map rejected:
+;;
+;;   {:limit N}              — latest N messages (pos-int)
+;;   {:since "Nd"|"Nw"|...}  — relative duration from now (duration-only)
+;;   {:start "yyyy-MM-dd"
+;;    :end   "yyyy-MM-dd"?}  — absolute window; :start alone, :end alone,
+;;                             or both are all valid (ISO dates only).
+;;
+;; Mailseq's wire vocabulary is :since/:before; this function translates
+;; :start → :since and :end → :before at the boundary.
 ;; ---------------------------------------------------------------------------
 
-(defn- parse-fetch-boundary
-  "Parse a :since/:until boundary into a java.util.Date.
-  Accepts an ISO date string (\"yyyy-MM-dd\") or a Date instance."
-  [v]
-  (cond
-    (instance? Date v) v
-    (and (string? v) (re-matches #"\d{4}-\d{2}-\d{2}" v))
-    (Date/from (Instant/parse (str v "T00:00:00Z")))
-    :else
-    (throw (ex-info (str "Invalid :fetch boundary: " (pr-str v)
-                         " (expected \"yyyy-MM-dd\" date)")
-                    {:value v}))))
+(defn- iso->date [s]
+  (when (and (string? s) (re-matches #"\d{4}-\d{2}-\d{2}" s))
+    (Date/from (Instant/parse (str s "T00:00:00Z")))))
 
-(defn- parse-fetch
-  "Parse a :fetch value into mailseq fetch-opts.
-  Accepted forms:
-    - integer N       → {:limit N}        (fetch latest N messages)
-    - \"Nd/w/m/y\"    → {:since date}     (relative duration)
-    - \"yyyy-MM-dd\"  → {:since date}     (absolute date)
-    - {:since D :until D}                 (half-open window [since, until);
-                                           :until is translated to mailseq's
-                                           :before)
+(defn- duration->days [s]
+  (when (and (string? s) (re-matches #"\d+[dwmy]" s))
+    (common/parse-duration-str s)))
 
-  A bare numeric string (\"50\"), a :limit key in map form, and any
-  other shape are rejected with an explicit error."
-  [v]
-  (cond
-    (integer? v) {:limit v}
-
-    (string? v)
-    (or (when (re-matches #"\d{4}-\d{2}-\d{2}" v)
-          {:since (Date/from (Instant/parse (str v "T00:00:00Z")))})
-        (when-let [days (common/parse-duration-str v)]
-          {:since (Date/from (.minus (Instant/now) days ChronoUnit/DAYS))})
-        (throw (ex-info (str "Invalid :fetch value: " (pr-str v)
-                             " (expected integer, \"Nd/w/m/y\" duration, \"yyyy-MM-dd\" date, "
-                             "or {:since ... :until ...} map)")
-                        {:value v})))
-
-    (map? v)
-    (let [extra (remove #{:since :until} (keys v))]
-      (when (seq extra)
-        (throw (ex-info (str "Invalid :fetch map keys: " (pr-str (vec extra))
-                             " (only :since and :until are accepted — use a bare integer for count)")
-                        {:value v})))
-      (cond-> {}
-        (:since v) (assoc :since  (parse-fetch-boundary (:since v)))
-        (:until v) (assoc :before (parse-fetch-boundary (:until v)))))
-
-    :else
+(defn- parse-fetch [v]
+  (when-not (map? v)
     (throw (ex-info (str "Invalid :fetch value: " (pr-str v)
-                         " (expected integer, string, or map)")
-                    {:value v}))))
+                         " (expected a map with :limit, :since, or :start/:end)")
+                    {:value v})))
+  (let [ks (set (keys v))]
+    (cond
+      (empty? ks)
+      (throw (ex-info "Invalid :fetch value: empty map (expected :limit, :since, or :start/:end)"
+                      {:value v}))
+
+      ;; {:limit N} — exclusive
+      (contains? ks :limit)
+      (do (when-not (= ks #{:limit})
+            (throw (ex-info (str "Invalid :fetch value: " (pr-str v)
+                                 " (:limit cannot be combined with other keys)")
+                            {:value v})))
+          (when-not (pos-int? (:limit v))
+            (throw (ex-info (str "Invalid :fetch :limit: " (pr-str (:limit v))
+                                 " (expected a positive integer)")
+                            {:value v})))
+          {:limit (:limit v)})
+
+      ;; {:since "30d"} — exclusive, duration only
+      (contains? ks :since)
+      (do (when-not (= ks #{:since})
+            (throw (ex-info (str "Invalid :fetch value: " (pr-str v)
+                                 " (:since cannot be combined with other keys)")
+                            {:value v})))
+          (if-let [days (duration->days (:since v))]
+            {:since (Date/from (.minus (Instant/now) days ChronoUnit/DAYS))}
+            (throw (ex-info (str "Invalid :fetch :since: " (pr-str (:since v))
+                                 " (expected duration like \"30d\", \"6w\", \"3m\", \"1y\")")
+                            {:value v}))))
+
+      ;; {:start … :end? …} — ISO only, :end optional, :start optional (but at least one)
+      :else
+      (let [extra (disj ks :start :end)]
+        (when (seq extra)
+          (throw (ex-info (str "Invalid :fetch keys: " (pr-str (vec extra))
+                               " (expected :start and/or :end)")
+                          {:value v})))
+        (let [start (when (:start v)
+                      (or (iso->date (:start v))
+                          (throw (ex-info (str "Invalid :fetch :start: " (pr-str (:start v))
+                                               " (expected \"yyyy-MM-dd\")")
+                                          {:value v}))))
+              end   (when (:end v)
+                      (or (iso->date (:end v))
+                          (throw (ex-info (str "Invalid :fetch :end: " (pr-str (:end v))
+                                               " (expected \"yyyy-MM-dd\")")
+                                          {:value v}))))]
+          (when (and start end (not (.before ^Date start ^Date end)))
+            (throw (ex-info (str "Invalid :fetch window: " (pr-str v)
+                                 " (:start must be strictly before :end)")
+                            {:value v})))
+          (cond-> {}
+            start (assoc :since  start)
+            end   (assoc :before end)))))))
+
+(defn- cli-fetch->map
+  "Convert a scalar --fetch CLI arg into the canonical map form.
+   \"50\"           → {:limit 50}
+   \"30d\" etc.     → {:since \"30d\"}
+   \"2020-01-01\"   → {:start \"2020-01-01\"}"
+  [s]
+  (cond
+    (re-matches #"\d+" s)          {:limit (Long/parseLong s)}
+    (re-matches #"\d+[dwmy]" s)    {:since s}
+    (re-matches #"\d{4}-\d{2}-\d{2}" s) {:start s}
+    :else
+    (throw (ex-info (str "Invalid --fetch CLI value: " (pr-str s)
+                         " (expected integer count, duration like \"30d\", or ISO date)")
+                    {:value s}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Watermark management
@@ -446,7 +487,7 @@
   [mailbox-cfg ingest-cfg]
   {:folder       (or (:folder mailbox-cfg) "INBOX")
    :mailbox-type (:type mailbox-cfg)
-   :fetch-opts   (parse-fetch (or (:fetch ingest-cfg) 50))
+   :fetch-opts   (parse-fetch (or (:fetch ingest-cfg) {:limit 50}))
    :ingest-opts  (select-keys ingest-cfg [:max-size :max-attachment-size])})
 
 (defn- init-roles! [db-conn config]
@@ -570,7 +611,7 @@
       (System/exit 1))
     (let [mailbox-cfg (:mailbox config)
           ingest-cfg  (cond-> (or (:ingest config) {})
-                        cli-fetch (assoc :fetch cli-fetch))]
+                        cli-fetch (assoc :fetch (cli-fetch->map cli-fetch)))]
       (setup-logging! config)
       (validate-mailbox-cfg! mailbox-cfg)
       (let [db-conn (ingest/connect (or (:path (:db config)) "data/bark-db"))]

@@ -2,7 +2,7 @@
 
 ;; bark-rebuild-history.clj — Replay a mail archive across multiple
 ;; static configs, one per era.  Each config is run in batch mode with
-;; its :fetch window overridden by the era's :since/:until bounds,
+;; its :fetch window overridden by the era's :start/:end bounds,
 ;; producing a historically consistent ingest for archives whose
 ;; command vocabulary or syntax mode changed over time.
 ;;
@@ -49,35 +49,35 @@
   (and (string? s) (re-matches #"\d{4}-\d{2}-\d{2}" s)))
 
 (defn- validate-entry [idx entry]
-  (cond-> []
-    (not (map? entry))
-    (conj (str "entry " idx ": not a map — " (pr-str entry)))
-    (and (map? entry) (not (:config entry)))
-    (conj (str "entry " idx ": missing :config"))
-    (and (:config entry) (not (.exists (io/file (:config entry)))))
-    (conj (str "entry " idx ": config file not found — " (:config entry)))
-    (and (:since entry) (not (iso-date? (:since entry))))
-    (conj (str "entry " idx ": :since not ISO yyyy-MM-dd — " (pr-str (:since entry))))
-    (and (:until entry) (not (iso-date? (:until entry))))
-    (conj (str "entry " idx ": :until not ISO yyyy-MM-dd — " (pr-str (:until entry))))
-    (and (iso-date? (:since entry)) (iso-date? (:until entry))
-         (not (neg? (compare (:since entry) (:until entry)))))
-    (conj (str "entry " idx ": :since must be strictly before :until"))))
+  (if-not (map? entry)
+    [(str "entry " idx ": not a map — " (pr-str entry))]
+    (cond-> []
+      (not (:config entry))
+      (conj (str "entry " idx ": missing :config"))
+      (and (:config entry) (not (.exists (io/file (:config entry)))))
+      (conj (str "entry " idx ": config file not found — " (:config entry)))
+      (and (:start entry) (not (iso-date? (:start entry))))
+      (conj (str "entry " idx ": :start not ISO yyyy-MM-dd — " (pr-str (:start entry))))
+      (and (:end entry) (not (iso-date? (:end entry))))
+      (conj (str "entry " idx ": :end not ISO yyyy-MM-dd — " (pr-str (:end entry))))
+      (and (iso-date? (:start entry)) (iso-date? (:end entry))
+           (not (neg? (compare (:start entry) (:end entry)))))
+      (conj (str "entry " idx ": :start must be strictly before :end")))))
 
 (defn- validate-contiguity [entries]
   (->> (partition 2 1 (map-indexed vector entries))
        (reduce (fn [errs [[ai a] [bi b]]]
                  (cond
-                   (nil? (:until a))
-                   (conj errs (str "entry " ai ": missing :until "
+                   (nil? (:end a))
+                   (conj errs (str "entry " ai ": missing :end "
                                    "(only the last entry may omit it)"))
-                   (nil? (:since b))
-                   (conj errs (str "entry " bi ": missing :since "
+                   (nil? (:start b))
+                   (conj errs (str "entry " bi ": missing :start "
                                    "(only the first entry may omit it)"))
-                   (not= (:until a) (:since b))
+                   (not= (:end a) (:start b))
                    (conj errs (str "gap/overlap between entries " ai " and " bi ": "
-                                   ":until " (:until a)
-                                   " ≠ :since " (:since b)))
+                                   ":end " (:end a)
+                                   " ≠ :start " (:start b)))
                    :else errs))
                [])))
 
@@ -94,13 +94,12 @@
 
 (defn- merge-fetch-window
   "Return `cfg` with :ingest :fetch overridden to reflect the era's
-  window.  An empty window ({}) means \"no bound\" — mailseq fetches
-  everything the source has."
-  [cfg {:keys [since until]}]
-  (let [window (cond-> {}
-                 since (assoc :since since)
-                 until (assoc :until until))]
-    (assoc-in cfg [:ingest :fetch] window)))
+  window.  The era's :start/:end become the :fetch :start/:end."
+  [cfg {:keys [start end]}]
+  (assoc-in cfg [:ingest :fetch]
+            (cond-> {}
+              start (assoc :start start)
+              end   (assoc :end   end))))
 
 (defn- write-temp-config!
   "Write `cfg` to a temp EDN file and return its absolute path.
@@ -168,7 +167,7 @@
         tmp    (write-temp-config! merged)]
     (log/info "─── Running" config
               (str "window="
-                   (or (:since entry) "-") ".." (or (:until entry) "-")))
+                   (or (:start entry) "-") ".." (or (:end entry) "-")))
     (p/shell {:continue true} "clojure" "-M:run" "-c" tmp)))
 
 (defn- summarize! [label {:keys [emails reports] :as _snap}]
@@ -201,8 +200,8 @@
     (reduce (fn [prev [entry snap]]
               (log/info (format "  %s [%s..%s]: +%d emails, +%d reports"
                                 (:config entry)
-                                (or (:since entry) "-")
-                                (or (:until entry) "-")
+                                (or (:start entry) "-")
+                                (or (:end entry) "-")
                                 (- (:emails snap) (:emails prev))
                                 (- (:reports snap) (:reports prev))))
               snap)
@@ -220,8 +219,8 @@
     (log/info (format "  %d. %s  [%s..%s]"
                       idx
                       (:config e)
-                      (or (:since e) "-")
-                      (or (:until e) "-")))))
+                      (or (:start e) "-")
+                      (or (:end e) "-")))))
 
 (defn -main [& args]
   (let [{:keys [history fresh? dry-run?]} (parse-args args)

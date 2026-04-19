@@ -48,20 +48,25 @@
 
  ;; ---- Ingestion -----------------------------------------------------------
 
- ;; :ingest is optional.  Omitted → {:fetch 50} (latest 50 messages on
- ;; first run, then watermarked resume).
+ ;; :ingest is optional.  Omitted → {:fetch {:limit 50}}.
  ;;
- ;; :fetch — first-run fetch window.  Four forms:
- ;;   - integer N          → latest N messages
- ;;   - "Nd" / "Nw" / "Nm" / "Ny" → relative duration (since N ago)
- ;;   - "yyyy-MM-dd"        → since that date
- ;;   - {:since "…" :until "…"} → explicit half-open window [since, until)
- ;; CLI: --fetch 4d (scalar only; map form must live in config.edn).
+ ;; :fetch — first-run fetch window.  Exactly one of three map shapes
+ ;; (strict: no key mixing, empty map rejected):
+ ;;
+ ;;   {:limit N}                        latest N messages (pos-int)
+ ;;   {:since "30d"}                    relative duration from now;
+ ;;                                     accepts "Nd", "Nw", "Nm", "Ny"
+ ;;   {:start "2020-01-01"              absolute window, ISO only;
+ ;;    :end   "2022-01-01"}             :start and :end both optional
+ ;;                                     (at least one must be present)
+ ;;
+ ;; CLI: --fetch 50 | --fetch 30d | --fetch 2020-01-01 (the scalar form
+ ;; is lifted to {:limit …}, {:since …}, or {:start …} respectively).
  ;; :max-size / :max-attachment-size — byte limits (optional).
- ;; :ingest {:fetch 50
+ ;;
+ ;; :ingest {:fetch {:limit 50}
  ;;          :max-size 1048576
- ;;          :max-attachment-size 1048576
- ;;          }
+ ;;          :max-attachment-size 1048576}
 
  ;; ---- Customization -------------------------------------------------------
 

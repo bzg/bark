@@ -1,6 +1,6 @@
 ;; Minimal BARK config — fills in sensible defaults for :db (data/bark-db),
-;; :logging (stderr :info) and :ingest (:fetch 50).  See config.edn.example
-;; for the fully annotated template.
+;; :logging (stderr :info) and :ingest ({:fetch {:limit 50}}).  See
+;; config.edn.example for the fully annotated template.
 
 {:mailbox {:type :maildir
            :path "/path/to/your/Maildir"

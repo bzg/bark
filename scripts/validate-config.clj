@@ -113,18 +113,24 @@
 (s/def :db/path ::non-blank-string)
 (s/def :bark/db (s/keys :req-un [:db/path]))
 
-;; Ingest
+;; Ingest — :fetch accepts exactly one of three disjoint map shapes.
+(s/def :ingest.fetch/limit pos-int?)
 (s/def :ingest.fetch/since
+  (s/and string? #(re-matches #"\d+[dwmy]" %)))
+(s/def :ingest.fetch/start
   (s/and string? #(re-matches #"\d{4}-\d{2}-\d{2}" %)))
-(s/def :ingest.fetch/until
+(s/def :ingest.fetch/end
   (s/and string? #(re-matches #"\d{4}-\d{2}-\d{2}" %)))
 (s/def :ingest/fetch
-  (s/or :count pos-int?
-        :date  (s/and string? #(re-matches #"\d{4}-\d{2}-\d{2}" %))
-        :duration (s/and string? #(re-seq #"\d+\s*[ydwm]" %))
-        :window (s/and (s/keys :opt-un [:ingest.fetch/since
-                                        :ingest.fetch/until])
-                       #(every? #{:since :until} (keys %)))))
+  (s/or :count  (s/and (s/keys :req-un [:ingest.fetch/limit])
+                       #(= #{:limit} (set (keys %))))
+        :since  (s/and (s/keys :req-un [:ingest.fetch/since])
+                       #(= #{:since} (set (keys %))))
+        :window (s/and (s/keys :opt-un [:ingest.fetch/start :ingest.fetch/end])
+                       #(seq %)
+                       #(every? #{:start :end} (keys %))
+                       (fn [{:keys [start end]}]
+                         (or (nil? start) (nil? end) (neg? (compare start end)))))))
 (s/def :ingest/max-size pos-int?)
 (s/def :ingest/max-attachment-size pos-int?)
 (s/def :bark/ingest (s/keys :opt-un [:ingest/fetch
@@ -389,11 +395,8 @@
                 (log/info "    -" (:name src) (str/join " " parts))))
             (log/info "  DB path:" (or (get-in config [:db :path]) "data/bark-db (default)"))
             (when-let [ingest (:ingest config)]
-              (let [v (or (:fetch ingest) 50)]
-                (log/info "  Fetch:" (cond
-                                       (int? v)    (str v " msgs")
-                                       (string? v) v
-                                       (map? v)    (pr-str v)))))
+              (when-let [v (:fetch ingest)]
+                (log/info "  Fetch:" (pr-str v))))
             (when-let [notif (:notifications config)]
               (log/info "  Notifications:" (if (:enabled notif) "enabled" "disabled"))
               (when-let [smtp (:smtp notif)]
