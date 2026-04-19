@@ -2,6 +2,11 @@
 # Install as /etc/systemd/system/bark.service (root) or
 # ~/.config/systemd/user/bark.service (user).
 #
+# For the root install, create the service user first:
+#   useradd -r -d /opt/bark -s /usr/sbin/nologin bark
+#   chown -R bark: /opt/bark
+# (Omit this step and the User= line below for a --user install.)
+#
 # After editing paths below:
 #   systemctl [--user] daemon-reload
 #   systemctl [--user] enable --now bark

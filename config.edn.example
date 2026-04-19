@@ -11,8 +11,9 @@
  ;; Maildir alternative:
  ;; :mailbox {:type :maildir :path "/home/me/Mail" :folder "INBOX"}
 
- ;; :db is optional.  Omitted → defaults to {:path "data/bark-db"}.
- ;; :db {:path "data/bark-db"}
+ ;; :db is optional.  Omitted → {:path "data/bark-db"}.  Override to
+ ;; place the Datalevin directory outside the source tree, e.g.:
+ ;; :db {:path "/var/lib/bark/db"}
 
  ;; ---- Who monitors what --------------------------------------------------
 
