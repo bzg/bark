@@ -91,65 +91,50 @@
   (when (and (string? s) (re-matches #"\d+[dwmy]" s))
     (common/parse-duration-str s)))
 
+(defn- fetch-err [msg v]
+  (throw (ex-info (str "Invalid :fetch " msg) {:value v})))
+
+(defn- parse-fetch-limit [{:keys [limit] :as v}]
+  (when-not (pos-int? limit)
+    (fetch-err (str ":limit: " (pr-str limit) " (expected a positive integer)") v))
+  {:limit limit})
+
+(defn- parse-fetch-since [{:keys [since] :as v}]
+  (if-let [days (duration->days since)]
+    {:since (Date/from (.minus (Instant/now) days ChronoUnit/DAYS))}
+    (fetch-err (str ":since: " (pr-str since)
+                    " (expected duration like \"30d\", \"6w\", \"3m\", \"1y\")")
+               v)))
+
+(defn- parse-fetch-window [{:keys [start end] :as v}]
+  (let [start-d (when start
+                  (or (iso->date start)
+                      (fetch-err (str ":start: " (pr-str start)
+                                      " (expected \"yyyy-MM-dd\")") v)))
+        end-d   (when end
+                  (or (iso->date end)
+                      (fetch-err (str ":end: " (pr-str end)
+                                      " (expected \"yyyy-MM-dd\")") v)))]
+    (when (and start-d end-d (not (.before ^Date start-d ^Date end-d)))
+      (fetch-err (str "window: " (pr-str v)
+                      " (:start must be strictly before :end)") v))
+    (cond-> {}
+      start-d (assoc :since  start-d)
+      end-d   (assoc :before end-d))))
+
 (defn- parse-fetch [v]
   (when-not (map? v)
-    (throw (ex-info (str "Invalid :fetch value: " (pr-str v)
-                         " (expected a map with :limit, :since, or :start/:end)")
-                    {:value v})))
+    (fetch-err (str "value: " (pr-str v)
+                    " (expected a map with :limit, :since, or :start/:end)") v))
   (let [ks (set (keys v))]
     (cond
-      (empty? ks)
-      (throw (ex-info "Invalid :fetch value: empty map (expected :limit, :since, or :start/:end)"
-                      {:value v}))
-
-      ;; {:limit N} — exclusive
-      (contains? ks :limit)
-      (do (when-not (= ks #{:limit})
-            (throw (ex-info (str "Invalid :fetch value: " (pr-str v)
-                                 " (:limit cannot be combined with other keys)")
-                            {:value v})))
-          (when-not (pos-int? (:limit v))
-            (throw (ex-info (str "Invalid :fetch :limit: " (pr-str (:limit v))
-                                 " (expected a positive integer)")
-                            {:value v})))
-          {:limit (:limit v)})
-
-      ;; {:since "30d"} — exclusive, duration only
-      (contains? ks :since)
-      (do (when-not (= ks #{:since})
-            (throw (ex-info (str "Invalid :fetch value: " (pr-str v)
-                                 " (:since cannot be combined with other keys)")
-                            {:value v})))
-          (if-let [days (duration->days (:since v))]
-            {:since (Date/from (.minus (Instant/now) days ChronoUnit/DAYS))}
-            (throw (ex-info (str "Invalid :fetch :since: " (pr-str (:since v))
-                                 " (expected duration like \"30d\", \"6w\", \"3m\", \"1y\")")
-                            {:value v}))))
-
-      ;; {:start … :end? …} — ISO only, :end optional, :start optional (but at least one)
+      (= ks #{:limit})                          (parse-fetch-limit v)
+      (= ks #{:since})                          (parse-fetch-since v)
+      (and (seq ks) (every? #{:start :end} ks)) (parse-fetch-window v)
       :else
-      (let [extra (disj ks :start :end)]
-        (when (seq extra)
-          (throw (ex-info (str "Invalid :fetch keys: " (pr-str (vec extra))
-                               " (expected :start and/or :end)")
-                          {:value v})))
-        (let [start (when (:start v)
-                      (or (iso->date (:start v))
-                          (throw (ex-info (str "Invalid :fetch :start: " (pr-str (:start v))
-                                               " (expected \"yyyy-MM-dd\")")
-                                          {:value v}))))
-              end   (when (:end v)
-                      (or (iso->date (:end v))
-                          (throw (ex-info (str "Invalid :fetch :end: " (pr-str (:end v))
-                                               " (expected \"yyyy-MM-dd\")")
-                                          {:value v}))))]
-          (when (and start end (not (.before ^Date start ^Date end)))
-            (throw (ex-info (str "Invalid :fetch window: " (pr-str v)
-                                 " (:start must be strictly before :end)")
-                            {:value v})))
-          (cond-> {}
-            start (assoc :since  start)
-            end   (assoc :before end)))))))
+      (fetch-err (str "value: " (pr-str v)
+                      " (expected exactly one of {:limit N}, {:since \"30d\"}, "
+                      "or {:start/:end ISO} — no key mixing, no empty map)") v))))
 
 (defn- cli-fetch->map
   "Convert a scalar --fetch CLI arg into the canonical map form.

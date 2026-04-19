@@ -124,40 +124,31 @@
   (log/info (format "  %s: %d emails, %d reports" label emails reports)))
 
 (defn- run-history!
-  "Iterate through `entries`, snapshotting the DB between runs so a
-  final per-era summary can be logged."
+  "Run each era in sequence, snapshotting the DB between runs so the
+  per-era delta is reported live (and the final snapshot is the sum).
+  Aborts on any non-zero exit from the spawned subprocess."
   [entries db-path]
   (load-datalevin-pod!)
-  (let [baseline  (db-snapshot db-path)
-        era-snaps (loop [remaining entries
-                         prev      baseline
-                         snaps     []]
-                    (if (empty? remaining)
-                      snaps
-                      (let [entry  (first remaining)
-                            result (run-era! entry)]
-                        (when-not (zero? (:exit result))
-                          (log/error "Run failed with exit" (:exit result)
-                                     "— aborting history rebuild")
-                          (System/exit (:exit result)))
-                        (let [snap (db-snapshot db-path)]
-                          (log/info (format "  +%d emails, +%d reports"
-                                            (- (:emails snap) (:emails prev))
-                                            (- (:reports snap) (:reports prev))))
-                          (recur (rest remaining) snap (conj snaps [entry snap]))))))]
-    (log/info "─── Summary")
+  (let [baseline (db-snapshot db-path)]
     (summarize! "baseline" baseline)
-    (reduce (fn [prev [entry snap]]
-              (log/info (format "  %s [%s..%s]: +%d emails, +%d reports"
-                                (:config entry)
-                                (or (:start entry) "-")
-                                (or (:end entry) "-")
-                                (- (:emails snap) (:emails prev))
-                                (- (:reports snap) (:reports prev))))
-              snap)
-            baseline
-            era-snaps)
-    (summarize! "final" (or (some-> era-snaps last second) baseline))))
+    (let [final (reduce (fn [prev entry]
+                          (let [result (run-era! entry)]
+                            (when-not (zero? (:exit result))
+                              (log/error "Run failed with exit" (:exit result)
+                                         "— aborting history rebuild")
+                              (System/exit (:exit result)))
+                            (let [snap (db-snapshot db-path)]
+                              (log/info (format "  %s [%s..%s]: +%d emails, +%d reports"
+                                                (:config entry)
+                                                (or (:start entry) "-")
+                                                (or (:end entry) "-")
+                                                (- (:emails snap) (:emails prev))
+                                                (- (:reports snap) (:reports prev))))
+                              snap)))
+                        baseline
+                        entries)]
+      (log/info "─── Summary")
+      (summarize! "final" final))))
 
 ;; ---------------------------------------------------------------------------
 ;; Main

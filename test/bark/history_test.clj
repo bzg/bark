@@ -23,6 +23,17 @@
       (f (.getAbsolutePath tmp))
       (finally (.delete tmp)))))
 
+(defn- with-tmp-cfgs
+  "Call `f` with a vector of temp-file paths, each containing the
+  corresponding EDN content string from `contents`."
+  [contents f]
+  (let [files (mapv (fn [_] (java.io.File/createTempFile "bark-test-" ".edn")) contents)]
+    (try
+      (doseq [[file content] (map vector files contents)]
+        (spit file content))
+      (f (mapv #(.getAbsolutePath %) files))
+      (finally (doseq [f files] (.delete f))))))
+
 (deftest validate-entry-happy-path
   (with-tmp-config
     (fn [cfg]
@@ -100,6 +111,47 @@
                  {:config "b"}])]
       (is (seq (filter #(re-find #"missing :start" %) errs))))))
 
+(deftest validate-contiguity-3-entries-gap-in-the-middle
+  (testing "3-entry plan with a gap between entries 1 and 2"
+    (let [errs (h/validate-contiguity
+                [{:config "a" :end "2020-01-01"}
+                 {:config "b" :start "2020-01-01" :end "2021-01-01"}
+                 {:config "c" :start "2022-01-01"}])]
+      (is (seq errs))
+      (is (some #(re-find #"entries 1 and 2" %) errs)))))
+
+(deftest validate-db-paths-all-match
+  (with-tmp-cfgs
+    ["{:db {:path \"/tmp/shared\"}}"
+     "{:db {:path \"/tmp/shared\"}}"]
+    (fn [[a b]]
+      (is (nil? (h/validate-db-paths [{:config a} {:config b}]))))))
+
+(deftest validate-db-paths-detects-divergence
+  (with-tmp-cfgs
+    ["{:db {:path \"/tmp/alpha\"}}"
+     "{:db {:path \"/tmp/beta\"}}"]
+    (fn [[a b]]
+      (let [errs (h/validate-db-paths [{:config a} {:config b}])]
+        (is (seq errs))
+        (is (re-find #"different :db :path" (first errs)))))))
+
+(deftest validate-db-paths-default-path-matches-explicit
+  (with-tmp-cfgs
+    ["{}"                                   ;; no :db → default "data/bark-db"
+     "{:db {:path \"data/bark-db\"}}"]
+    (fn [[a b]]
+      (is (nil? (h/validate-db-paths [{:config a} {:config b}]))))))
+
+(deftest validate-db-paths-skips-unreadable
+  ;; An entry whose config file can't be parsed is skipped — validate-entry
+  ;; surfaces that kind of problem separately.
+  (with-tmp-cfgs
+    ["{:db {:path \"/tmp/x\"}}"]
+    (fn [[a]]
+      (is (nil? (h/validate-db-paths
+                 [{:config a} {:config "definitely-missing.edn"}]))))))
+
 (deftest validate-history-composes-entry-and-contiguity
   (with-tmp-config
     (fn [cfg]
@@ -126,6 +178,10 @@
   (testing ":end only → empty :start in fetch"
     (is (= {:ingest {:fetch {:end "2020-01-01"}}}
            (h/merge-fetch-window {} {:end "2020-01-01"}))))
-  (testing "no bounds → empty :fetch map"
-    (is (= {:ingest {:fetch {}}}
-           (h/merge-fetch-window {} {})))))
+  (testing "no bounds → :fetch dropped (era config's own default applies)"
+    (is (= {} (h/merge-fetch-window {} {})))
+    (is (= {:ingest {}}
+           (h/merge-fetch-window {:ingest {:fetch {:limit 50}}} {})))
+    (is (= {:ingest {:max-size 1048576}}
+           (h/merge-fetch-window {:ingest {:fetch {:limit 50} :max-size 1048576}}
+                                 {})))))

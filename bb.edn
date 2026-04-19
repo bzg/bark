@@ -33,7 +33,14 @@
               :task (do
                       (let [classes (clojure.java.io/file "classes")
                             bin     (clojure.java.io/file "bin")
-                            wrapper (clojure.java.io/file "bin/bark")]
+                            wrapper (clojure.java.io/file "bin/bark")
+                            rm-rf   (fn rm [^java.io.File f]
+                                      (when (.isDirectory f)
+                                        (doseq [c (.listFiles f)] (rm c)))
+                                      (.delete f))]
+                        ;; Wipe stale .class files so a Clojure version bump
+                        ;; doesn't carry forward incompatible AOT artefacts.
+                        (when (.exists classes) (rm-rf classes))
                         (.mkdirs classes)
                         (.mkdirs bin)
                         (shell "clojure" "-M" "-e" "(compile 'bark.main)")

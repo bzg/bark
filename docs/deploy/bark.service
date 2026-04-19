@@ -34,5 +34,14 @@ RestartSec=30s
 StandardOutput=journal
 StandardError=journal
 
+# Sandboxing — safe baseline for a JVM service reading a Maildir and
+# writing a single LMDB directory.  Adjust ReadWritePaths= to match
+# your :db :path and any log/export directories.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/bark/data /opt/bark/public /opt/bark/logs
+
 [Install]
 WantedBy=multi-user.target

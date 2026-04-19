@@ -78,3 +78,13 @@
   (testing "invalid rejected"
     (is (thrown? Exception (cli-fetch->map "foo")))
     (is (thrown? Exception (cli-fetch->map "30 days")))))
+
+(deftest cli-fetch-round-trips-through-parse-fetch
+  (testing "every CLI shape lifts into a map that parse-fetch accepts"
+    (is (= {:limit 50} (parse-fetch (cli-fetch->map "50"))))
+    (let [{:keys [since before]} (parse-fetch (cli-fetch->map "30d"))]
+      (is (instance? Date since))
+      (is (nil? before)))
+    (let [{:keys [since before]} (parse-fetch (cli-fetch->map "2020-01-01"))]
+      (is (instance? Date since))
+      (is (nil? before)))))

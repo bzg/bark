@@ -3,11 +3,17 @@
 ;; License-Filename: LICENSES/EPL-2.0.txt
 
 (ns bark.history
-  "Pure helpers for the multi-era history workflow driven by
+  "Helpers for the multi-era history workflow driven by
   `scripts/bark-rebuild-history.clj`.  Split out so they can be unit
   tested under `clj -M:test` (the executable script depends on
-  Babashka-only libraries)."
-  (:require [clojure.java.io :as io]))
+  Babashka-only libraries).
+
+  Everything here is pure except `validate-entry` (uses `.exists`) and
+  `validate-db-paths` (reads each entry's config file) — both do
+  validation-level I/O only."
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
+            [clojure.string :as str]))
 
 (defn iso-date?
   "True when `s` is a string matching yyyy-MM-dd."
@@ -55,22 +61,58 @@
                    :else errs))
                [])))
 
+(def ^:private default-db-path "data/bark-db")
+
+(defn- read-config-file
+  "Read and parse `path` as EDN, or nil on any failure.  Used by
+  `validate-db-paths` to inspect era configs without the caller having
+  to handle I/O errors — entry-level validation already catches
+  missing/unparsable files."
+  [path]
+  (try (edn/read-string (slurp (io/file path)))
+       (catch Exception _ nil)))
+
+(defn validate-db-paths
+  "Return error strings when the entries point to different =:db :path=
+  values, which would silently split writes across two LMDB
+  directories.  A missing =:db= or =:path= defaults to \"data/bark-db\".
+  Entries whose config file can't be read are skipped here —
+  `validate-entry` catches them separately."
+  [entries]
+  (let [pairs (keep (fn [{:keys [config]}]
+                      (when-let [cfg (and config (read-config-file config))]
+                        [config (or (get-in cfg [:db :path]) default-db-path)]))
+                    entries)
+        seen  (distinct (map second pairs))]
+    (when (> (count seen) 1)
+      [(str "eras point to different :db :path values "
+            "(would silently split writes across LMDB dirs): "
+            (str/join ", " (for [[c p] pairs] (str c " → " p))))])))
+
 (defn validate-history
-  "Run `validate-entry` on every entry, then `validate-contiguity` if
-  there are at least two entries.  Returns a non-empty seq of error
-  strings, or nil when the plan is valid."
+  "Run `validate-entry` on every entry, then `validate-contiguity` (when
+  there are ≥ 2 entries) and `validate-db-paths`.  Returns a non-empty
+  seq of error strings, or nil when the plan is valid."
   [entries]
   (let [entry-errs (into [] (mapcat validate-entry (range) entries))
         cont-errs  (if (>= (count entries) 2)
                      (validate-contiguity entries)
-                     [])]
-    (seq (concat entry-errs cont-errs))))
+                     [])
+        db-errs    (validate-db-paths entries)]
+    (seq (concat entry-errs cont-errs db-errs))))
 
 (defn merge-fetch-window
   "Return `cfg` with :ingest :fetch overridden to reflect the era's
-  window.  The era's :start/:end map 1:1 to the :fetch :start/:end."
+  window.  The era's :start/:end map 1:1 to the :fetch :start/:end.
+  When the era carries neither bound, drop :fetch entirely so the
+  era config's own default (or the hard-coded {:limit 50}) applies —
+  posting an empty :fetch map would hit parse-fetch's empty-map
+  rejection downstream."
   [cfg {:keys [start end]}]
-  (assoc-in cfg [:ingest :fetch]
-            (cond-> {}
-              start (assoc :start start)
-              end   (assoc :end   end))))
+  (if (or start end)
+    (assoc-in cfg [:ingest :fetch]
+              (cond-> {}
+                start (assoc :start start)
+                end   (assoc :end   end)))
+    (cond-> cfg
+      (contains? (:ingest cfg) :fetch) (update :ingest dissoc :fetch))))
