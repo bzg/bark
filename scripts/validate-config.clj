@@ -269,8 +269,8 @@
 
 ;; Top-level config
 (s/def ::config
-  (s/keys :req-un [:bark/mailbox :bark/sources :bark/db]
-          :opt-un [:bark/ingest :bark/notifications :bark/labels
+  (s/keys :req-un [:bark/mailbox :bark/sources]
+          :opt-un [:bark/db :bark/ingest :bark/notifications :bark/labels
                    :bark/commands :bark/command-aliases
                    :bark/report-types :bark/awaiting-delay
                    :bark/expiry :bark/logging
@@ -387,7 +387,7 @@
                             (some? (get-in src [:notifications :enabled]))
                             (conj (str "notify: " (get-in src [:notifications :enabled]))))]
                 (log/info "    -" (:name src) (str/join " " parts))))
-            (log/info "  DB path:" (get-in config [:db :path]))
+            (log/info "  DB path:" (or (get-in config [:db :path]) "data/bark-db (default)"))
             (when-let [ingest (:ingest config)]
               (let [v (or (:fetch ingest) 50)]
                 (log/info "  Fetch:" (cond

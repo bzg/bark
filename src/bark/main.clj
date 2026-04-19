@@ -573,7 +573,7 @@
                         cli-fetch (assoc :fetch cli-fetch))]
       (setup-logging! config)
       (validate-mailbox-cfg! mailbox-cfg)
-      (let [db-conn (ingest/connect (:path (:db config)))]
+      (let [db-conn (ingest/connect (or (:path (:db config)) "data/bark-db"))]
         (log/info "Datalevin connected.")
         (install-shutdown-hook! db-conn)
         (if watch?

@@ -7,7 +7,7 @@
 ;; command vocabulary or syntax mode changed over time.
 ;;
 ;; Usage:
-;;   bb rebuild-history                  — run the plan in configs/history.edn
+;;   bb rebuild-history                  — run the plan in config_history/history.edn
 ;;   bb rebuild-history --history PATH   — use a different history file
 ;;   bb rebuild-history --fresh          — wipe the DB first (interactive confirm)
 ;;   bb rebuild-history --dry-run        — validate only, no execution
@@ -28,7 +28,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- parse-args [args]
-  (loop [opts {:history "configs/history.edn" :fresh? false :dry-run? false}
+  (loop [opts {:history "config_history/history.edn" :fresh? false :dry-run? false}
          [a & r] args]
     (cond
       (nil? a)          opts
@@ -242,10 +242,7 @@
         (log/info "Dry run — exiting without execution.")
         (System/exit 0))
       (let [first-cfg (edn/read-string (slurp (:config (first entries))))
-            db-path   (get-in first-cfg [:db :path])]
-        (when-not db-path
-          (log/error "First config has no :db :path")
-          (System/exit 1))
+            db-path   (or (get-in first-cfg [:db :path]) "data/bark-db")]
         (when fresh?
           (if (confirm! (str "Wipe DB at " db-path "? [y/N] "))
             (wipe-db! db-path)

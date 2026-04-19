@@ -11,7 +11,8 @@
  ;; Maildir alternative:
  ;; :mailbox {:type :maildir :path "/home/me/Mail" :folder "INBOX"}
 
- :db {:path "data/bark-db"}
+ ;; :db is optional.  Omitted → defaults to {:path "data/bark-db"}.
+ ;; :db {:path "data/bark-db"}
 
  ;; ---- Who monitors what --------------------------------------------------
 
@@ -47,6 +48,9 @@
 
  ;; ---- Ingestion -----------------------------------------------------------
 
+ ;; :ingest is optional.  Omitted → {:fetch 50} (latest 50 messages on
+ ;; first run, then watermarked resume).
+ ;;
  ;; :fetch — first-run fetch window.  Four forms:
  ;;   - integer N          → latest N messages
  ;;   - "Nd" / "Nw" / "Nm" / "Ny" → relative duration (since N ago)
@@ -180,6 +184,7 @@
 
  ;; ---- Logging -------------------------------------------------------------
 
+ ;; :logging is optional.  Omitted → stderr only, level :info.
  ;; :logging {:file     "logs/bark.log"    ;; optional
  ;;           :level    :warn              ;; :debug :info :warn :error
  ;;           :max-size "10MB"             ;; rotate threshold (default 10MB)

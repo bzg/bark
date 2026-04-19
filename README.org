@@ -43,8 +43,8 @@ For a more extensive documentation, please read the [[docs/bark-manual.org][BARK
 * Quick start
 
 #+begin_src sh
-# 1. Copy and edit config
-cp config.edn.example config.edn
+# 1. Copy and edit config (minimal = 8 lines; example = annotated reference)
+cp config.edn.minimal config.edn
 
 # 2a. Run once (fetch new emails, expire, exit)
 clj -M:run
@@ -53,30 +53,20 @@ clj -M:run
 clj -M:run -- --watch
 
 # 2c. Or build an uberjar and run it (production)
-mkdir -p classes
-clj -M -e "(compile 'bark.main)"
-clj -M:uberdeps --main-class bark.main
-java --add-opens=java.base/java.nio=ALL-UNNAMED \
-     --add-opens=java.base/sun.nio.ch=ALL-UNNAMED \
-     --enable-native-access=ALL-UNNAMED \
-     -jar target/bark.jar
+bb build-jar        # produces target/bark.jar + bin/bark wrapper
+bin/bark --watch
 #+end_src
 
 #+begin_example
 # 3. Export reports
-bb export          # incremental (skips if nothing changed)
-bb export all      # all formats
-bb export json     # JSON only
-bb export rss      # RSS only
-bb export org      # Org only
-bb export html     # HTML + JSON
-bb export stats    # stats.json
-bb export patches  # patch files
-bb export text     # text attachments (text/plain, text/x-log)
-bb export events   # ICS event files and calendar feeds
-bb export all --force  # ignore timestamps, full export
-bb export all --topics-filter "event"  # only reports with topic "event"
-bb export root         # regenerate top-level index.html only
+bb export                   # incremental (skips if nothing changed)
+bb export --force           # full rebuild, ignore timestamps
+bb export --index-only      # regenerate top-level public/index.html only
+bb export --topics-filter "event"  # only reports with topic "event"
+#
+# Individual formats (json|rss|org|html|stats|patches|text|events) remain
+# available as positional args for power users:
+#   bb export json, bb export rss, bb export stats, …
 
 # 4. Send notification emails
 bb notify              # send due notifications
@@ -84,8 +74,8 @@ bb notify --dry-run    # preview without sending
 bb notify --force      # ignore intervals
 bb notify --debug      # verbose filtering diagnostics
 
-# 5. Test SMTP configuration
-bb test-smtp --dry-run
+# 5. Test SMTP configuration (dry-run by default; --send to actually send)
+bb test-smtp
 
 # 6. Maintenance (purge orphan emails)
 bb maintenance --verbose  # show orphans
@@ -131,14 +121,17 @@ Read-only bb scripts live under =scripts/=:
 * bb tasks
 
 #+begin_example
-bb export [json|rss|org|html|stats|patches|text|events|root|all]
-       [-n source] [-p 1|2|3] [-s 1-7]   Filter by source, priority, status
-       [--force]                          Ignore timestamps, full export
-       [--only-open]                      Also export -open files (all-open.json, etc.)
+bb export [--force] [--index-only]        Incremental export of all formats
+                                          (individual formats still accept
+                                           a positional arg for power users:
+                                           json|rss|org|html|stats|patches|
+                                           text|events)
+       [-n source] [-p 1|2|3] [-s 1-7]    Filter by source, priority, status
+       [--only-open]                      Also export -open files
        [--theme THEME]                    Override CSS theme (see below)
-       [--topics-filter TOPICS]           Only export matching topics (comma-separated)
+       [--topics-filter TOPICS]           Only export matching topics (csv)
        [--page-size N]                    Paginate HTML table (N rows/page)
-       [--closed-retention DUR]           Drop reports closed before the cutoff
+       [--closed-retention DUR]           Drop reports closed before cutoff
 bb notify [--dry-run] [--force] [--debug] Send notification emails
 bb maintenance [--delete] [--verbose] [-n source]  Purge orphan emails
        [--retention DUR]                  Orphan retention (default 90d)
@@ -147,7 +140,7 @@ bb rebuild-history [--history PATH] [--fresh] [--dry-run]
                                           Replay a mail archive across multiple
                                           era configs (see bark-manual.org)
 bb test-config [path]                     Validate config.edn
-bb test-smtp [--to addr] [--dry-run]      Test SMTP configuration
+bb test-smtp [--to addr] [--send]         Test SMTP config (default = dry-run)
 bb clean                                  Remove all files in public/
 #+end_example
 
@@ -327,8 +320,9 @@ SMTP fields:
 | =:password= | yes      | SMTP password             |
 | =:from=     | yes      | Sender address for emails |
 
-Use =bb test-smtp --dry-run= to validate the configuration without
-sending, or =bb test-smtp= to send a test email to the lead maintainer.
+Use =bb test-smtp= to validate the configuration (no email sent by
+default), or =bb test-smtp --send= to actually send a test email to
+the lead maintainer.
 
 * Contributing
 

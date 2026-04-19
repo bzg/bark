@@ -6,9 +6,9 @@
 ;; to the lead maintainer of the first source (or to a custom address via --to).
 ;;
 ;; Usage:
-;;   bb test-smtp                    — send test email to lead maintainer
-;;   bb test-smtp --to me@example.com — send to a specific address
-;;   bb test-smtp --dry-run          — validate config without sending
+;;   bb test-smtp                    — validate config, no email sent (default)
+;;   bb test-smtp --send             — actually send the test email
+;;   bb test-smtp --to me@example.com --send — send to a specific address
 
 (require '[babashka.pods :as pods]
          '[clojure.edn :as edn]
@@ -50,7 +50,7 @@
 
 (when (= (System/getProperty "babashka.file") *file*)
   (let [args     *command-line-args*
-        dry-run? (some #{"--dry-run"} args)
+        send?    (some #{"--send"} args)
         to-idx   (some #(when (= "--to" (nth args % nil)) %) (range (count args)))
         to-arg   (when to-idx (nth args (inc to-idx) nil))
         config   (load-config)]
@@ -89,8 +89,8 @@
 
           (println (str "\nRecipient: " to-addr))
 
-          (if dry-run?
-            (println "\n✓ Dry run — config looks good, no email sent.")
+          (if-not send?
+            (println "\n✓ Config looks good.  Re-run with --send to actually send the test email.")
 
             ;; --- Send test email ---
             (do

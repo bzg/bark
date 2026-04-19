@@ -733,6 +733,7 @@
       (nil? a)                        opts
       (= "--force" a)                 (recur (assoc opts :force-all? true) more)
       (= "--only-open" a)             (recur (assoc opts :only-open? true) more)
+      (= "--index-only" a)            (recur (assoc opts :format "root") more)
       (contains? valued-flags a)      (let [[k xf] (valued-flags a)]
                                         (case (check-flag-value a v)
                                           :ok            (recur (assoc opts k (xf v)) r)

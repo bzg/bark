@@ -426,12 +426,12 @@ punctuation (=.= =,= =;= =:= =?= =!=), whitespace, or end of line. Exception:
 
 ** Status commands
 
-| Command keyword                      | Effect on report  |
-|--------------------------------------+-------------------|
-| =Acked= =Confirmed= =Approved=           | acked             |
-| =Owned=                                | owned             |
-| =Canceled= =Cancelled=                   | closed (canceled) |
-| =Expired=                              | closed (expired)  |
+| Command keyword                         | Effect on report  |
+|-----------------------------------------+-------------------|
+| =Acked= =Confirmed= =Approved=                | acked             |
+| =Owned=                                   | owned             |
+| =Canceled= =Cancelled=                      | closed (canceled) |
+| =Expired=                                 | closed (expired)  |
 | =Resolved= =Applied= =Fixed= =Closed= =Completed= | closed (resolved) |
 
 All reports can be in a combination of three states:
@@ -830,12 +830,15 @@ validate it.
            :password "secret"
            :folder   "INBOX"}
 
- :db {:path "data/bark-db"}
-
  :sources [{:name        "my-list"
             :list        "my-list.example.org"
             :maintainers [{:email "lead@example.org"}]}]}
 #+end_src
+
+=:db=, =:logging= and =:ingest= are optional; omitted they default to
+=:db {:path "data/bark-db"}=, stderr-only logging at =:info= level,
+and =:ingest {:fetch 50}=.  See =config.edn.example= for the full
+annotated reference.
 
 BARK also reads Maildir folders.  Point =:path= at the parent
 directory that contains =cur/=, =new/= and =tmp/=; =:folder= selects
@@ -846,7 +849,6 @@ events (no polling).
 {:mailbox {:type   :maildir
            :path   "/home/me/Mail"
            :folder "INBOX"}
- :db {:path "data/bark-db"}
  :sources [{:name "my-list" :list "my-list.example.org"}]}
 #+end_src
 
@@ -991,6 +993,26 @@ bb maintenance -n my-source     # scope to a single source
 An orphan email is one not referenced by any report and not sent by a
 maintainer.
 
+** Running BARK in production
+
+Two practical ways to keep BARK running:
+
+- *Watch mode under systemd* — the daemon stays up, reacts to IMAP
+  IDLE or Maildir filesystem events, reconnects on failure.  A
+  ready-to-edit unit file lives in =deploy/bark.service=.  Install to
+  =/etc/systemd/system/bark.service= (root) or =~/.config/systemd/user/=
+  (user), then =systemctl [--user] daemon-reload && systemctl [--user]
+  enable --now bark=.
+
+- *Batch mode under cron* — =clj -M:run= is a one-shot: connect,
+  fetch new mail since the watermark, digest, expire, exit.  Chain
+  =bb export= and =bb notify= after it.  An example crontab lives in
+  =deploy/crontab.example=.
+
+Both modes can be backed by an uberjar instead of =clj -M:run= to
+avoid paying the Clojure startup cost on every invocation; see the
+*Quick start* section of =README.org=.
+
 ** Rebuilding history across era configs
 
 When the command vocabulary or syntax mode of a source changed over
@@ -999,18 +1021,18 @@ driving them in sequence with =bb rebuild-history=.  Each run digests
 the slice of mail covered by its own =:fetch= window, so the full
 archive ends up consistent without any per-email timeline logic.
 
-The plan lives in =configs/history.edn= by default: a vector of
-entries, each pointing to a config and bounding it with =:since= and
-=:until= (ISO dates).  Windows are half-open =[since, until)= and must
+The plan lives in =config_history/history.edn= by default: a vector
+of entries, each pointing to a config and bounding it with =:since=
+and =:until= (ISO dates).  Windows are half-open =[since, until)= and must
 be *contiguous* — =:until= of one entry equals =:since= of the next.
 The first entry may omit =:since= (unbounded past), the last entry may
 omit =:until= (the currently-living config).
 
 #+begin_src edn
-[{:config "configs/2020-strict.edn"    :until "2021-01-01"}
- {:config "configs/2021-loose.edn"     :since "2021-01-01" :until "2022-01-01"}
- {:config "configs/2022-with-done.edn" :since "2022-01-01" :until "2023-01-01"}
- {:config "configs/current.edn"        :since "2023-01-01"}]
+[{:config "config_history/2020-strict.edn"    :until "2021-01-01"}
+ {:config "config_history/2021-loose.edn"     :since "2021-01-01" :until "2022-01-01"}
+ {:config "config_history/2022-with-done.edn" :since "2022-01-01" :until "2023-01-01"}
+ {:config "config_history/current.edn"        :since "2023-01-01"}]
 #+end_src
 
 #+begin_src shell
@@ -1055,28 +1077,27 @@ configured.
 
 All tasks are run via [[https://babashka.org/][Babashka]]:
 
-| Task                            | Description                                        |
-|---------------------------------+----------------------------------------------------|
-| =bb export all=                   | Export all formats for all sources                 |
-| =bb export html=                  | Export HTML pages only                             |
-| =bb export json=                  | Export JSON feeds only                             |
-| =bb export rss=                   | Export RSS feeds only                              |
-| =bb export org=                   | Export Org feeds only                              |
-| =bb export stats=                 | Export stats pages only                            |
-| =bb export --page-size 100=       | Paginate HTML table (100 reports/page)             |
-| =bb export --closed-retention 1y= | Keep only reports closed within the last year      |
-| =bb export --topics-filter "a,b"= | Only export reports whose topic is in the list     |
-| =bb export --only-open=           | Also export =-open= files (all-open.json, etc.)      |
-| =bb export root=                  | Regenerate top-level =index.html= only               |
-| =bb notify=                       | Send notification emails                           |
-| =bb notify --dry-run=             | Preview notifications without sending              |
-| =bb notify --force=               | Ignore per-subscriber interval                     |
-| =bb maintenance=                  | Show orphan emails (add =--delete= to purge)         |
-| =bb maintenance --retention 6m=   | Override orphan retention (default 90d)            |
-| =bb maintenance --failures=       | List recent command failures                       |
-| =bb clean=                        | Remove all files in =public/= (preserves =.org= files) |
-| =bb test-config=                  | Validate =config.edn=                                |
-| =bb test-smtp=                    | Test SMTP configuration (=--to addr=, =--dry-run=)     |
+| Task                            | Description                                                    |
+|---------------------------------+----------------------------------------------------------------|
+| =bb export=                       | Incremental export of all formats (skip if unchanged)          |
+| =bb export --force=               | Full rebuild, ignore timestamps                                |
+| =bb export --index-only=          | Regenerate top-level =index.html= only                           |
+| =bb export --page-size 100=       | Paginate HTML table (100 reports/page)                         |
+| =bb export --closed-retention 1y= | Keep only reports closed within the last year                  |
+| =bb export --topics-filter "a,b"= | Only export reports whose topic is in the list                 |
+| =bb export --only-open=           | Also export =-open= files (all-open.json, etc.)                  |
+| =bb export FORMAT=                | Individual formats: json, rss, org, html, stats,               |
+|                                 | patches, text, events (for power users)                        |
+| =bb notify=                       | Send notification emails                                       |
+| =bb notify --dry-run=             | Preview notifications without sending                          |
+| =bb notify --force=               | Ignore per-subscriber interval                                 |
+| =bb maintenance=                  | Show orphan emails (add =--delete= to purge)                     |
+| =bb maintenance --retention 6m=   | Override orphan retention (default 90d)                        |
+| =bb maintenance --failures=       | List recent command failures                                   |
+| =bb clean=                        | Remove all files in =public/=                                    |
+| =bb build-jar=                    | One-shot uberjar build → =target/bark.jar= + =bin/bark= wrapper    |
+| =bb test-config=                  | Validate =config.edn=                                            |
+| =bb test-smtp=                    | Test SMTP configuration (=--to addr=, =--send=; default = dry-run) |
 
 Export accepts flags: =-n <source>= (restrict to one source), =-p <N>=
 (minimum priority), =-s <N>= (minimum status).

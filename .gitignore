@@ -1,12 +1,13 @@
 target/
 .cpcache/
 .nrepl-port
+bin/
 data/
 *.class
 .lsp/
 .clj-kondo/
 config.edn
-configs/
+config_history/
 todo.org
 public/
 logs/
