@@ -272,7 +272,7 @@
 (defn org-inline
   "Convert a single line of inline org markup to HTML, with HTML
   escaping applied first so `&`, `<`, `>` in user text cannot break
-  the output.  Supports [[links]], =code=, *bold* and \\vert."
+  the output.  Supports [[links]], =code=, *bold*, /italic/ and \\vert."
   [s]
   (-> s
       (str/replace "&" "&amp;")
@@ -281,6 +281,7 @@
       org-inline-links
       (str/replace #"=([^=\n\"]+)=" "<code>$1</code>")
       (str/replace #"(?<=\s|^)\*([^*\n]+)\*(?=[\s.,;:!?)]|$)" "<strong>$1</strong>")
+      (str/replace #"(?<=\s|^)/([^/\n]+)/(?=[\s.,;:!?)]|$)" "<em>$1</em>")
       (str/replace "\\vert" "|")))
 
 (defn parse-org-table
