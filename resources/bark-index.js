@@ -704,6 +704,14 @@ function renderPage() {
   tbody.innerHTML = '';
   tbody.appendChild(fragment);
 
+  var tableFig = document.getElementById('reports-table');
+  var emptyEl  = document.getElementById('empty-state');
+  if (tableFig && emptyEl) {
+    var isEmpty = total === 0;
+    tableFig.style.display = isEmpty ? 'none' : '';
+    emptyEl.style.display  = isEmpty ? '' : 'none';
+  }
+
   document.getElementById('status').textContent =
     _filteredReports.length + '/' + barkConfig.total + ' reports';
 

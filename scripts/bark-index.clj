@@ -212,10 +212,16 @@
              :style "margin-left:auto"}
             "⌚ Awaiting"]]]
          [:div#status]
-         [:figure {:style "overflow-x:auto"}
+         [:figure {:id "reports-table" :style "overflow-x:auto"}
           [:table
            [:thead [:tr (seq cols)]]
            [:tbody {:id "data"}]]]
+         [:div#empty-state {:style "display:none;margin:1.5rem 0"}
+          [:p {:style "margin-bottom:0.5rem"} "No matching report.  A few suggestions:"]
+          [:ul {:style "margin:0"}
+           [:li [:a {:href "?types=bug&acked=1&sort=date&dir=asc"} "Fix confirmed bugs"]]
+           [:li [:a {:href "?types=patch&sort=date&dir=asc"} "Review old patches"]]
+           [:li [:a {:href "?types=request&sort=replies&dir=desc"} "Answer active requests"]]]]
          [:div#pagination]
          [:script (h/raw (page-js types-json total open-count closed-count source-type page-size
                                   (json/generate-string reports)))]]
