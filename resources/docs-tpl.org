@@ -63,15 +63,14 @@ action on the same line:
 Announcements, releases, and changes cannot be acked or owned, but
 they can be marked closed, urgent, or important.
 
-/Also accepted for ack (any type)/: =Acked.=, =Confirmed.=, =Approved.=.
-/Also accepted for close (any type)/: =Resolved.=, =Closed.=; =Cancelled.=
-is an alternate spelling of =Canceled.=.
+/Also accepted for ack, any type/: =Acked=, =Confirmed=, =Approved=.
+
+/Also accepted for close, any type/: =Resolved=, =Closed=.
 
 Users don't set the priority directly: it is computed as the sum of
 important (+1) and urgent (+2).
 
-Please also note that =Urgent.= and =Important.= both require a full stop
-at the end.
+Note that =Urgent.= and =Important.= both require a full stop at the end.
 
 You can combine several status/priority commands in a single email:
 
