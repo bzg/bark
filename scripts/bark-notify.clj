@@ -172,7 +172,7 @@
         type    (name (:report/type report))
         subject (or (:email/subject email) "(no subject)")
         date    (format-date (:email/date-sent email))
-        from    (or (:email/from-address email) "?")
+        from    (or (:email/author-address email) "?")
         pri     (report-priority report)
         replies (report-descendant-count report)
         deadline (:report/deadline-value report)

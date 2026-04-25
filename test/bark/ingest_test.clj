@@ -118,3 +118,44 @@
           tx (ingest/email->txdata msg)]
       (is (= txt-data
              (-> tx :email/attachments first :attachment/data))))))
+
+;; ---------------------------------------------------------------------------
+;; Author resolution at ingest (Reply-To override on Mailman/DMARC munging)
+;; ---------------------------------------------------------------------------
+
+(deftest author-fields-on-ingest
+  (testing "no munging: author fields mirror From"
+    (let [msg {:message-id "<plain@test.org>"
+               :subject    "Hello"
+               :from       [{:address "alice@example.org" :name "Alice"}]}
+          tx (ingest/email->txdata msg)]
+      (is (= "alice@example.org" (:email/from-address tx)))
+      (is (= "alice@example.org" (:email/author-address tx)))
+      (is (= "Alice"             (:email/from-name tx)))
+      (is (= "Alice"             (:email/author-name tx)))
+      (is (nil? (:email/reply-to-address tx)))))
+
+  (testing "Reply-To set without 'via' marker: author stays From, reply-to stored raw"
+    (let [msg {:message-id "<rto@test.org>"
+               :subject    "Hi"
+               :from       [{:address "alice@example.org" :name "Alice"}]
+               :reply-to   [{:address "alice-work@example.com"
+                             :name    "Alice (work)"}]}
+          tx (ingest/email->txdata msg)]
+      (is (= "alice@example.org"      (:email/author-address tx)))
+      (is (= "alice-work@example.com" (:email/reply-to-address tx)))
+      (is (= "Alice (work)"           (:email/reply-to-name tx)))))
+
+  (testing "Mailman/DMARC munging: author resolves to Reply-To"
+    ;; Mirrors the BUG-org-habit fixture in the repo root.
+    (let [msg {:message-id "<87ms7n6t47.fsf@daniel-mendler.de>"
+               :subject    "[BUG] org-habit"
+               :from       [{:address "emacs-orgmode@gnu.org"
+                             :name    "Daniel Mendler via \"General discussions about Org-mode.\""}]
+               :reply-to   [{:address "mail@daniel-mendler.de"
+                             :name    "Daniel Mendler"}]}
+          tx (ingest/email->txdata msg)]
+      (is (= "emacs-orgmode@gnu.org"   (:email/from-address tx)))
+      (is (= "mail@daniel-mendler.de"  (:email/author-address tx)))
+      (is (= "Daniel Mendler"          (:email/author-name tx)))
+      (is (= "mail@daniel-mendler.de"  (:email/reply-to-address tx))))))

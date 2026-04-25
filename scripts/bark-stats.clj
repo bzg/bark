@@ -141,7 +141,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn report-date   [r] (get-in r [:report/email :email/date-sent]))
-(defn report-author [r] (get-in r [:report/email :email/from-address]))
+(defn report-author [r] (get-in r [:report/email :email/author-address]))
 
 (defn open->close-days [r]
   (days-between-frac (report-date r)
@@ -278,7 +278,7 @@
        (group-by report-author)
        (map (fn [[addr rs]]
               {:address addr
-               :name    (get-in (first rs) [:report/email :email/from-name])
+               :name    (get-in (first rs) [:report/email :email/author-name])
                :count   (count rs)}))
        (sort-by :count >) (take n)))
 

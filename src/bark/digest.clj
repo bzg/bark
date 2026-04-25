@@ -26,7 +26,9 @@
 (def email-pull-pattern
   '[:db/id :email/id :email/source :email/subject :email/message-id
     :email/in-reply-to :email/references
-    :email/from-address :email/from-name :email/date-sent :email/ingested-at
+    :email/author-address :email/author-name
+    :email/from-address :email/from-name
+    :email/date-sent :email/ingested-at
     :email/digested-at
     :email/body-text :email/body-text-from-html :email/headers-edn
     {:email/attachments [:attachment/filename :attachment/content-type :attachment/data]}])
@@ -121,7 +123,7 @@
            :report/message-id message-id :report/digested-at now
            :report/last-activity (or email-date now)}
           (remove (comp nil? val))
-          {:report/last-activity-address (:email/from-address email)
+          {:report/last-activity-address (:email/author-address email)
            :report/version (:version report-info)
            :report/topic (when (:topic report-info) email-eid)
            :report/topic-value (:topic report-info)
@@ -403,7 +405,7 @@
           (let [rid (create-report! conn eid message-id report-info
                                     (:email/date-sent email) email)]
             (ensure-participant! conn source-name from-addr
-                                 (:email/from-name email) (:email/date-sent email)
+                                 (:email/author-name email) (:email/date-sent email)
                                  :contributor? (= :patch (:type report-info)))
             (tracking/bump-report-updated! conn rid)
             [rid report-info]))
@@ -443,7 +445,7 @@
                          false nearest-eids)]
     (when (and any-cmd? (not new-report?))
       (ensure-participant! conn source-name from-addr
-                           (:email/from-name email) (:email/date-sent email)))
+                           (:email/author-name email) (:email/date-sent email)))
     (tracking/bump-report-updated! conn parent-eids)))
 
 (defn- run-post-creation-hooks!
@@ -480,7 +482,7 @@
   [conn source-map sources email]
   (let [message-id (:email/message-id email)
         eid        (:db/id email)
-        from-addr  (:email/from-address email)
+        from-addr  (:email/author-address email)
         [source-name email delivery] (resolve-email-source! conn email sources)]
     (if-not source-name
       (log/debug "No matching source for" message-id "— skipping")

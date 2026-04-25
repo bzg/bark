@@ -314,7 +314,7 @@
   "Build assertion datoms for setting attributes via -by directives.
   Points the attr to the real email and stores the designated address
   in its lowercased form so downstream comparisons against
-  `:email/from-address` are case-insensitive."
+  `:email/author-address` are case-insensitive."
   [report-eid email-eid set-map]
   (into []
         (mapcat (fn [[attr addr]]
@@ -326,7 +326,7 @@
   "Build transaction data for trigger results.
   `current` is the report's current state (pulled with
   `proxy-state-attrs`).  The `-address` cache is stored lowercased
-  so downstream comparisons against `:email/from-address` are
+  so downstream comparisons against `:email/author-address` are
   case-insensitive.
   Returns [tx-data new-sets] or nil if nothing to do."
   [report-eid trig-result email-eid from-addr current]
@@ -357,17 +357,17 @@
   ;; Proxy-state attrs are pulled as bare refs (we only need :db/id
   ;; for retractions; the setter address comes from their paired
   ;; `-address` cache, pulled separately below).  The other ref
-  ;; attrs additionally pull :email/from-address so scope-permits?
+  ;; attrs additionally pull :email/author-address so scope-permits?
   ;; can derive the setter without a second query.
   (into proxy-state-attrs
         [:report/close-reason
-         {:report/topic         [:db/id :email/from-address]}
+         {:report/topic         [:db/id :email/author-address]}
          :report/topic-value
-         {:report/deadline      [:db/id :email/from-address]}
+         {:report/deadline      [:db/id :email/author-address]}
          :report/deadline-value
-         {:report/expiry        [:db/id :email/from-address]}
+         {:report/expiry        [:db/id :email/author-address]}
          :report/expiry-value
-         {:report/superseded-by [:db/id :email/from-address]}
+         {:report/superseded-by [:db/id :email/author-address]}
          :report/superseded-by-target
          :report/closed-address :report/acked-address
          :report/owned-address :report/urgent-address
@@ -482,10 +482,10 @@
   For proxy-capable state attrs, reads the `-address` cache (which
   captures the designated setter in the `-by` case).  For all other
   setter-tracked attrs, follows the email ref and reads the pose
-  email's `:email/from-address`."
+  email's `:email/author-address`."
   [current attr]
   (or (get current (address-attrs attr))
-      (:email/from-address (get current attr))))
+      (:email/author-address (get current attr))))
 
 (defn- scope-permits?
   "Check whether a directive scope permits `from-addr` to act on `attr`.
@@ -595,11 +595,11 @@
                                     :command (str "Superseded-by: " superseded-by)))))))))
 
 (def ^:private unclosed-pull-pattern
-  ;; `:report/superseded-by` is pulled as {:db/id :email/from-address}
+  ;; `:report/superseded-by` is pulled as {:db/id :email/author-address}
   ;; so scope-permits? can derive the setter; the target report is
   ;; under `:report/superseded-by-target`.
   [:report/closed :report/closed-address :report/close-reason
-   {:report/superseded-by [:db/id :email/from-address]}
+   {:report/superseded-by [:db/id :email/author-address]}
    :report/superseded-by-target
    :report/related])
 
@@ -709,7 +709,7 @@
   [conn report-eid report-type email source-map roles delivery]
   (if-let [body-text (common/email-body-text email)]
     (let [db          (d/db conn)
-          from-addr   (:email/from-address email)
+          from-addr   (:email/author-address email)
           eid         (:db/id email)
           report-mid  (:report/message-id (d/entity db report-eid))
           src-name    (d/q '[:find ?src . :in $ ?rid

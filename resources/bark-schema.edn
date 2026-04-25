@@ -13,6 +13,16 @@
  :email/subject               {:db/valueType :db.type/string}
  :email/from-name             {:db/valueType :db.type/string}
  :email/from-address          {:db/valueType :db.type/string}
+ ;; Reply-To header, raw (kept for traceability when From is munged).
+ :email/reply-to-name         {:db/valueType :db.type/string}
+ :email/reply-to-address      {:db/valueType :db.type/string}
+ ;; Effective author, resolved at source-classification time.
+ ;; Equals from-address in the common case; falls back to the first
+ ;; reply-to address when the From header is rewritten to the list
+ ;; (Mailman/DMARC munging style).  All downstream code (participants,
+ ;; commands, roles, reports, exports) reads author-address.
+ :email/author-name           {:db/valueType :db.type/string}
+ :email/author-address        {:db/valueType :db.type/string}
  :email/to                    {:db/valueType   :db.type/string
                                :db/cardinality :db.cardinality/many}
  :email/cc                    {:db/valueType   :db.type/string
@@ -54,9 +64,9 @@
  ;;
  ;; Every "state" attribute is a ref to the email that posed it.
  ;; The setter's address is available either via the ref (follow it
- ;; to :email/from-address) or, for proxy-capable state attrs, via
+ ;; to :email/author-address) or, for proxy-capable state attrs, via
  ;; the cached `-address` attr below — which may diverge from the
- ;; email's from-address when a maintainer uses the `-by` form.
+ ;; email's author-address when a maintainer uses the `-by` form.
  :report/type                  {:db/valueType :db.type/keyword}
  :report/email                 {:db/valueType :db.type/ref}
  :report/message-id            {:db/valueType :db.type/string
@@ -74,7 +84,7 @@
  :report/closed                {:db/valueType :db.type/ref}
  :report/urgent                {:db/valueType :db.type/ref}
  :report/important             {:db/valueType :db.type/ref}
- ;; Address of the person designated by the command (same as email's from-address
+ ;; Address of the person designated by the command (same as email's author-address
  ;; for direct triggers, may differ for -by directives).
  ;; Present only for state attrs that support the `-by` proxy form.
  :report/acked-address         {:db/valueType :db.type/string}

@@ -75,12 +75,12 @@
        (into #{})))
 
 (defn- all-emails
-  "All email entities as [eid source from-address date-sent message-id]."
+  "All email entities as [eid source author-address date-sent message-id]."
   [db]
   (dq '[:find ?e ?src ?from ?date ?mid
          :where
          [?e :email/source ?src]
-         [?e :email/from-address ?from]
+         [?e :email/author-address ?from]
          [?e :email/date-sent ?date]
          [?e :email/message-id ?mid]]
        db))

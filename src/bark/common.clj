@@ -409,6 +409,41 @@
         sources))
 
 ;; ---------------------------------------------------------------------------
+;; Author resolution
+;; ---------------------------------------------------------------------------
+
+(defn- list-munged-from?
+  "True when From appears to have been rewritten by the list MTA
+  (Mailman/DMARC mitigation).  Mailman wraps the original display
+  name as `Original Name via List-Display-Name`, so a literal
+  ` via ` token in the From-name is the universal munging marker."
+  [from-name]
+  (boolean (and from-name (re-find #"(?i) via " from-name))))
+
+(defn resolve-author
+  "Return {:address ... :name ...} for the effective author of an
+  email.  When the From header has been rewritten by the list (Mailman
+  / DMARC munging — detected via the ` via ` pattern in the display
+  name), the real author lives in Reply-To.  Falls back to From in all
+  other cases (including the common Reply-To-different-from-From use
+  for personal correspondence).
+
+  `reply-to` is a vector of {:name :address} maps as produced by
+  mailseq (may be empty/nil).  Returns {:address from-address :name
+  from-name} when no override applies."
+  [{:keys [from-address from-name reply-to]}]
+  (let [rto-addr (:address (first reply-to))
+        rto-name (:name    (first reply-to))]
+    (if (and (list-munged-from? from-name)
+             rto-addr
+             (not= (some-> rto-addr str/lower-case)
+                   (some-> from-address str/lower-case)))
+      {:address rto-addr
+       :name    (or rto-name from-name)}
+      {:address from-address
+       :name    from-name})))
+
+;; ---------------------------------------------------------------------------
 ;; Label / command defaults and merge logic
 ;; ---------------------------------------------------------------------------
 
@@ -613,27 +648,27 @@
 ;; ---------------------------------------------------------------------------
 
 (def report-pull-pattern
-  ;; Each `:report/<state>` ref carries :email/from-address and
+  ;; Each `:report/<state>` ref carries :email/author-address and
   ;; :email/date-sent so consumers can display "set by X on Y"
   ;; without a second query.  Paired `-value`/`-target` attrs
   ;; carry the business datum posed alongside the setter identity.
   '[:db/id :report/type :report/version
     :report/patch-seq :report/patch-source :report/message-id
-    {:report/acked [:email/from-address :email/date-sent]}
-    {:report/owned [:email/from-address :email/date-sent]}
-    {:report/closed [:email/from-address :email/date-sent]}
-    {:report/urgent [:email/from-address :email/date-sent]}
-    {:report/important [:email/from-address :email/date-sent]}
+    {:report/acked [:email/author-address :email/date-sent]}
+    {:report/owned [:email/author-address :email/date-sent]}
+    {:report/closed [:email/author-address :email/date-sent]}
+    {:report/urgent [:email/author-address :email/date-sent]}
+    {:report/important [:email/author-address :email/date-sent]}
     :report/acked-address :report/owned-address :report/closed-address
     :report/urgent-address :report/important-address
     :report/close-reason
-    {:report/topic [:email/from-address :email/date-sent]}
+    {:report/topic [:email/author-address :email/date-sent]}
     :report/topic-value
-    {:report/deadline [:email/from-address :email/date-sent]}
+    {:report/deadline [:email/author-address :email/date-sent]}
     :report/deadline-value
-    {:report/expiry [:email/from-address :email/date-sent]}
+    {:report/expiry [:email/author-address :email/date-sent]}
     :report/expiry-value
-    {:report/superseded-by [:email/from-address :email/date-sent]}
+    {:report/superseded-by [:email/author-address :email/date-sent]}
     {:report/superseded-by-target [:report/message-id {:report/email [:email/subject]}]}
     :report/has-ics :report/has-text-attachments
     :report/last-activity :report/last-activity-address :report/descendants :report/digested-at :report/updated-at
@@ -644,7 +679,8 @@
                      {:series/cover-letter [:email/message-id]}]}
     {:report/patches [:patch/filename :patch/source :patch/text
                       :patch/author :patch/subject :patch/date]}
-    {:report/email [:email/subject :email/from-address :email/from-name
+    {:report/email [:email/subject :email/author-address :email/author-name
+                    :email/from-address :email/from-name
                     :email/date-sent :email/source :email/id
                     :email/headers-edn]}])
 

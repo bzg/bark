@@ -34,20 +34,21 @@
          :or   {from "user@test.org" source "test-src"
                 subject "Test" date-sent (days-ago 0)}}]
   (let [tempid -1
-        tx (d/transact! conn [{:db/id              tempid
-                                :email/message-id   mid
-                                :email/from-address from
-                                :email/source       source
-                                :email/date-sent    date-sent
-                                :email/subject      subject}])]
+        tx (d/transact! conn [{:db/id                tempid
+                                :email/message-id     mid
+                                :email/from-address   from
+                                :email/author-address from
+                                :email/source         source
+                                :email/date-sent      date-sent
+                                :email/subject        subject}])]
     (get (:tempids tx) tempid)))
 
 (defn- insert-report!
   "Insert a report linked to an email. Returns report eid."
   [conn {:keys [mid type email-eid date-sent]}]
-  (let [email    (d/pull (d/db conn) [:email/date-sent :email/from-address] email-eid)
+  (let [email    (d/pull (d/db conn) [:email/date-sent :email/author-address] email-eid)
         activity (or date-sent (:email/date-sent email) (Date.))
-        from     (:email/from-address email)]
+        from     (:email/author-address email)]
     (d/transact! conn [(cond-> {:report/type          type
                                 :report/email         email-eid
                                 :report/message-id    mid
@@ -66,9 +67,9 @@
 (defn- add-descendant!
   "Add a descendant email to a report, updating :report/last-activity."
   [conn report-eid email-eid]
-  (let [email      (d/pull (d/db conn) [:email/date-sent :email/from-address] email-eid)
+  (let [email      (d/pull (d/db conn) [:email/date-sent :email/author-address] email-eid)
         email-date (:email/date-sent email)
-        from-addr  (:email/from-address email)
+        from-addr  (:email/author-address email)
         current    (:report/last-activity (d/pull (d/db conn) [:report/last-activity] report-eid))
         tx         [[:db/add report-eid :report/descendants email-eid]]
         tx         (if (and email-date (or (nil? current) (.after ^Date email-date ^Date current)))

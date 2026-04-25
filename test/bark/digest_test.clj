@@ -44,7 +44,7 @@
             {:report/series [:series/id :series/expected :series/closed
                              {:series/patches [:db/id]}
                              {:series/cover-letter [:email/message-id]}]}
-            {:report/email [:email/subject :email/from-address
+            {:report/email [:email/subject :email/author-address
                             :email/headers-edn]}]
           [:report/message-id message-id]))
 
@@ -117,10 +117,20 @@
                        {:maint-tenure/source "public-list"
                         :maint-tenure/email  "admin@test.org"
                         :maint-tenure/order  0}])
-    ;; Insert test emails
+    ;; Insert test emails. Fixtures only set :email/from-address /
+    ;; :email/from-name; mirror them into :email/author-* (the cleaned
+    ;; identity attrs that downstream code reads) so the fixtures stay
+    ;; concise and a fixture explicitly setting :email/author-* (e.g.
+    ;; for a DMARC-munged scenario) overrides this default.
     (let [emails (edn/read-string (slurp "resources/emails.edn"))]
       (doseq [email emails]
-        (d/transact! conn [email])))
+        (d/transact!
+         conn
+         [(cond-> email
+            (and (:email/from-address email) (not (:email/author-address email)))
+            (assoc :email/author-address (:email/from-address email))
+            (and (:email/from-name email) (not (:email/author-name email)))
+            (assoc :email/author-name (:email/from-name email)))])))
     {:conn conn :db-path db-path}))
 
 (def ^:private teardown! th/teardown!)

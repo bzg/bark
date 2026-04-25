@@ -86,13 +86,18 @@
   (let [synth-mid (str "<bark-expired-" report-mid ">")]
     (or (d/entid (d/db conn) [:email/message-id synth-mid])
         (let [tempid -1
+              ;; Synthetic actor: mirror "bark-system" on both the raw
+              ;; from-address and the resolved author-address so that
+              ;; downstream consumers (which read author-address) and
+              ;; raw-header inspectors (which read from-address) agree.
               tx (d/transact!
-                  conn [{:db/id          tempid
-                         :email/message-id   synth-mid
-                         :email/from-address "bark-system"
-                         :email/source       src
-                         :email/date-sent    now
-                         :email/subject      (str "Auto-expired: " report-mid)}])]
+                  conn [{:db/id                tempid
+                         :email/message-id     synth-mid
+                         :email/from-address   "bark-system"
+                         :email/author-address "bark-system"
+                         :email/source         src
+                         :email/date-sent      now
+                         :email/subject        (str "Auto-expired: " report-mid)}])]
           (get (:tempids tx) tempid)))))
 
 (defn should-expire?

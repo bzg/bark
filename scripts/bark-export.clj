@@ -272,7 +272,7 @@
 
 (def ^:private proxy-address-pairs
   "Triplets [ref-attr address-key proxy-key] for extracting the maintainer
-  from-address.  The proxy key is only emitted when it differs from the
+  author-address.  The proxy key is only emitted when it differs from the
   corresponding address key (i.e. a `-by` directive pointed the attribute
   at someone other than the pose email's sender)."
   [[:report/acked     :acked     :acked-proxy]
@@ -282,7 +282,7 @@
    [:report/important :important :important-proxy]])
 
 (defn- assoc-from-addresses
-  "Extract addresses from report: direct string attrs and from-address of ref attrs.
+  "Extract addresses from report: direct string attrs and author-address of ref attrs.
   Omits -proxy keys when their value equals the corresponding address key."
   [m report]
   (as-> m m
@@ -293,7 +293,7 @@
             m address-fields)
     (reduce (fn [m [rk mk proxy-mk]]
               (if-let [v (get report rk)]
-                (let [addr (:email/from-address v)]
+                (let [addr (:email/author-address v)]
                   (if (= addr (get m mk))
                     m
                     (assoc m proxy-mk addr)))
@@ -406,7 +406,7 @@
         att-data    (delay (when db
                      (fetch-attachment-data db (:report/message-id report))))
         att-email   (delay (:report/email @att-data))
-        from        (or (:email/from-address email) "")
+        from        (or (:email/author-address email) "")
         arch        (archive-url report email source-map)
         src-type    (get-in source-map [source-name :source-type])
         related     (:report/related report)
@@ -425,7 +425,7 @@
          :replies  (report-descendant-count report)}
         (assoc-from-addresses report)
         (cond->
-         (:email/from-name email)        (assoc :from-name (:email/from-name email))
+         (:email/author-name email)      (assoc :from-name (:email/author-name email))
           role                            (assoc :role role)
           (:report/message-id report)     (assoc :message-id (:report/message-id report))
           (:report/version report)        (assoc :version (:report/version report))

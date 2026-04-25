@@ -92,7 +92,7 @@
 
 ;; Proxy-state attr → paired `-address` cache.  The cache holds the
 ;; credited address, which may differ from the pose-email's
-;; from-address when the `-by` form is used.
+;; author-address when the `-by` form is used.
 (def address-attrs
   {:report/acked     :report/acked-address
    :report/owned     :report/owned-address

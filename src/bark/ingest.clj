@@ -163,6 +163,11 @@
         html-body   (:html body)
         text-from-html (strip-tags html-body)
         from        (first (:from msg))
+        reply-to    (:reply-to msg)
+        author      (common/resolve-author
+                     {:from-address (:address from)
+                      :from-name    (:name from)
+                      :reply-to     reply-to})
         headers     (:headers msg)
         headers-edn (when (seq headers) (pr-str headers))
         in-reply-to (common/extract-in-reply-to headers)
@@ -205,22 +210,28 @@
              :email/content-type (:content-type msg)
              :email/ingested-at  (Date.)}
 
-      id                     (assoc :email/id id)
+      id                          (assoc :email/id id)
 
-      (:address from)      (assoc :email/from-address (:address from))
-      (:name from)         (assoc :email/from-name (:name from))
-      (seq (:to msg))      (assoc :email/to (set (map format-address (:to msg))))
-      (seq (:cc msg))      (assoc :email/cc (set (map format-address (:cc msg))))
-      (:date-sent msg)     (assoc :email/date-sent (:date-sent msg))
-      (:date-received msg) (assoc :email/date-received (:date-received msg))
-      text                 (assoc :email/body-text text)
-      html-body            (assoc :email/body-html html-body)
-      text-from-html       (assoc :email/body-text-from-html text-from-html)
-      (seq (:flags msg))   (assoc :email/flags (:flags msg))
-      (seq attachments)    (assoc :email/attachments attachments)
-      in-reply-to          (assoc :email/in-reply-to in-reply-to)
-      references           (assoc :email/references references)
-      headers-edn          (assoc :email/headers-edn headers-edn)))))
+      (:address from)             (assoc :email/from-address (:address from))
+      (:name from)                (assoc :email/from-name (:name from))
+      (:address (first reply-to)) (assoc :email/reply-to-address
+                                         (:address (first reply-to)))
+      (:name (first reply-to))    (assoc :email/reply-to-name
+                                         (:name (first reply-to)))
+      (:address author)           (assoc :email/author-address (:address author))
+      (:name author)              (assoc :email/author-name (:name author))
+      (seq (:to msg))             (assoc :email/to (set (map format-address (:to msg))))
+      (seq (:cc msg))             (assoc :email/cc (set (map format-address (:cc msg))))
+      (:date-sent msg)            (assoc :email/date-sent (:date-sent msg))
+      (:date-received msg)        (assoc :email/date-received (:date-received msg))
+      text                        (assoc :email/body-text text)
+      html-body                   (assoc :email/body-html html-body)
+      text-from-html              (assoc :email/body-text-from-html text-from-html)
+      (seq (:flags msg))          (assoc :email/flags (:flags msg))
+      (seq attachments)           (assoc :email/attachments attachments)
+      in-reply-to                 (assoc :email/in-reply-to in-reply-to)
+      references                  (assoc :email/references references)
+      headers-edn                 (assoc :email/headers-edn headers-edn)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Store

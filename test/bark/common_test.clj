@@ -330,3 +330,59 @@
   (is (false? (common/ics-file? "ics-like.doc")))
   (is (false? (common/ics-file? nil))))
 
+;; ---------------------------------------------------------------------------
+;; resolve-author — Mailman/DMARC munging detection
+;; ---------------------------------------------------------------------------
+
+(deftest resolve-author-test
+  (testing "no Reply-To: author = From"
+    (is (= {:address "alice@example.org" :name "Alice"}
+           (common/resolve-author
+            {:from-address "alice@example.org"
+             :from-name    "Alice"
+             :reply-to     []}))))
+
+  (testing "Reply-To present but From-name has no 'via' marker: keep From"
+    ;; Standard Reply-To use (e.g. 'reply to my work address').  We must
+    ;; NOT swap — the actual author is in From.
+    (is (= {:address "alice@example.org" :name "Alice"}
+           (common/resolve-author
+            {:from-address "alice@example.org"
+             :from-name    "Alice"
+             :reply-to     [{:address "alice-work@example.com"
+                             :name    "Alice (work)"}]}))))
+
+  (testing "Mailman/DMARC munging: From-name has 'via' + Reply-To different → use Reply-To"
+    ;; Mirrors the BUG-org-habit fixture: Daniel Mendler's post via
+    ;; gnu.org's mailman has From rewritten to the list address, and
+    ;; the original sender address lives in Reply-To.
+    (is (= {:address "mail@daniel-mendler.de" :name "Daniel Mendler"}
+           (common/resolve-author
+            {:from-address "emacs-orgmode@gnu.org"
+             :from-name    "Daniel Mendler via \"General discussions about Org-mode.\""
+             :reply-to     [{:address "mail@daniel-mendler.de"
+                             :name    "Daniel Mendler"}]}))))
+
+  (testing "munged From with no Reply-To: degrade to From rather than nil"
+    (is (= {:address "list@example.org"
+            :name    "Bob via \"Some List\""}
+           (common/resolve-author
+            {:from-address "list@example.org"
+             :from-name    "Bob via \"Some List\""
+             :reply-to     []}))))
+
+  (testing "Reply-To name absent: fall back to From-name"
+    (is (= {:address "real@author.io"
+            :name    "Carol via \"L\""}
+           (common/resolve-author
+            {:from-address "list@example.org"
+             :from-name    "Carol via \"L\""
+             :reply-to     [{:address "real@author.io"}]}))))
+
+  (testing "Reply-To equals From: no swap"
+    (is (= {:address "alice@example.org" :name "Alice via \"L\""}
+           (common/resolve-author
+            {:from-address "alice@example.org"
+             :from-name    "Alice via \"L\""
+             :reply-to     [{:address "alice@example.org"}]})))))
+
