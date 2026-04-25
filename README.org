@@ -335,7 +335,7 @@ You can also [[mailto:bzg@bzg.fr][send me an email]] and support my work on [[ht
 
 This project uses [[https://intver.org][Intentional Versioning]], here are the three audiences:
 
-- =Users= : sysadmins who deploy, configure, and operate BARK instances
+- =Users= : end-users and sysadmins whoe operate BARK instances
 - =Integrators= : consumers of the exported JSON/RSS/Org formats
 - =Maintainers= : maintainers of the codebase
 
