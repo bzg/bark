@@ -39,15 +39,18 @@
         ")(?:" trailing-punct (when-not strict-punct? "|\\s") "|$)")))
 
 (defn- directive-pattern [strict-syntax? {:keys [syntax param]}]
-  (let [qs     (java.util.regex.Pattern/quote syntax)
-        prefix (common/bang-prefix strict-syntax?)]
+  (let [qs       (java.util.regex.Pattern/quote syntax)
+        prefix   (common/bang-prefix strict-syntax?)
+        addr     "[^@<>\\s]+@[^@<>\\s]+\\.[^@<>\\s]+"   ; email address (dot required)
+        mid      "[^<>\\s]+@[^<>\\s]+"                  ; bracketed message-id
+        mid-path "[^/<>\\s]+@[^/<>\\s]+"]               ; mid in path or bare
     (re-pattern
      (case param
-       :email-address (str "^" prefix qs ":\\s+(?:.+<(\\S+@\\S+)>|(\\S+@\\S+))" trailing-punct "?\\s*$")
-       :date          (str "^" prefix qs ":\\s+(\\d{4}-\\d{2}-\\d{2})" trailing-punct "?\\s*$")
+       :email-address    (str "^" prefix qs ":\\s+(?:.*<(" addr ")>|(" addr "))" trailing-punct "?\\s*$")
+       :date             (str "^" prefix qs ":\\s+(\\d{4}-\\d{2}-\\d{2})" trailing-punct "?\\s*$")
        :date-or-duration (str "^" prefix qs ":\\s+(\\d{4}-\\d{2}-\\d{2}|\\d+[dwmy](?:\\s+\\d+[dwmy])*)" trailing-punct "?\\s*$")
-       :word          (str "^" prefix qs ":\\s+([a-zA-Z0-9_-]+)" trailing-punct "?\\s*$")
-       :message-id    (str "^" prefix qs ":\\s+<?([^<>\\s]+@[^<>\\s]+)>?" trailing-punct "?\\s*$")
+       :word             (str "^" prefix qs ":\\s+([a-zA-Z0-9_-]+)" trailing-punct "?\\s*$")
+       :message-id       (str "^" prefix qs ":\\s+(?:.*<(" mid ")>|.*/(" mid-path ")/?|(" mid-path "))" trailing-punct "?\\s*$")
        (str "^" prefix qs trailing-punct "?\\s*$")))))
 
 (defn- compile-trigger-words [strict-syntax? action-map]
@@ -184,7 +187,7 @@
                                                :unset-topic    {:action :unset-topic}
                                                :set-topic      (when-let [t (nth m 1 nil)]
                                                                  {:action :set-topic :topic t})
-                                               :set-superseded   (when-let [mid (nth m 1 nil)]
+                                               :set-superseded   (when-let [mid (or (nth m 1 nil) (nth m 2 nil) (nth m 3 nil))]
                                                                    {:action :set-superseded
                                                                     :target-message-id (str "<" mid ">")})
                                                :unset-superseded {:action :unset-superseded})]
