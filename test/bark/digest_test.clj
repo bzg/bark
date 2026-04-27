@@ -584,6 +584,13 @@
           ;; RFC 5322 "Display Name <addr>" format
           (is (= [{:action :set :attr :report/owned :email-address "x@y.com" :scope :maintainer :id :owned-by}]
                  (commands/detect-directives :bug "Owned-by: Some User <x@y.com>\n")))
+          ;; Bracketed address without display name: angle brackets must be stripped
+          (is (= [{:action :set :attr :report/owned :email-address "x@y.com" :scope :maintainer :id :owned-by}]
+                 (commands/detect-directives :bug "Owned-by: <x@y.com>\n")))
+          ;; Address must contain a dot in the domain part
+          (is (= [] (commands/detect-directives :bug "Owned-by: alice@localhost\n")))
+          ;; Address must not contain stray @ characters
+          (is (= [] (commands/detect-directives :bug "Owned-by: alice@@host.com\n")))
           (is (= [] (commands/detect-directives :bug "Just a normal reply.\n")))
           (is (nil? (commands/detect-directives :bug nil)))
           ;; Expiry directive
@@ -785,9 +792,22 @@
           (is (= [{:action :set-superseded :target-message-id "<msg@example.com>" :scope :user :id :superseded-by}]
                  (commands/detect-directives :bug "Superseded-by: <msg@example.com>\n"))))
 
-        (testing "detect-directives: Superseded-by without angle brackets"
+        (testing "detect-directives: Superseded-by tolerates an URL prefix"
+          (is (= [{:action :set-superseded :target-message-id "<msg@example.com>" :scope :user :id :superseded-by}]
+                 (commands/detect-directives :bug "Superseded-by: https://orgmode.org/list/<msg@example.com>\n"))))
+
+        (testing "detect-directives: Superseded-by accepts a public-inbox URL"
+          (is (= [{:action :set-superseded :target-message-id "<msg@example.com>" :scope :user :id :superseded-by}]
+                 (commands/detect-directives :bug "Superseded-by: https://list.orgmode.org/orgmode/msg@example.com/\n")))
+          (is (= [{:action :set-superseded :target-message-id "<msg@example.com>" :scope :user :id :superseded-by}]
+                 (commands/detect-directives :bug "Superseded-by: https://list.orgmode.org/orgmode/msg@example.com\n"))))
+
+        (testing "detect-directives: Superseded-by accepts a bare message-id"
           (is (= [{:action :set-superseded :target-message-id "<msg@example.com>" :scope :user :id :superseded-by}]
                  (commands/detect-directives :bug "Superseded-by: msg@example.com\n"))))
+
+        (testing "detect-directives: Superseded-by rejects URLs where the @ segment is non-terminal"
+          (is (= [] (commands/detect-directives :bug "Superseded-by: https://example.com/foo@bar/baz.html\n"))))
 
         (testing "detect-directives: Not superseded"
           (is (= [{:action :unset-superseded :scope :setter-or-maintainer :id :unsuperseded}]

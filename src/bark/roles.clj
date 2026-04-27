@@ -134,6 +134,10 @@
   (re-pattern (str "(?m)^" (common/bang-prefix strict-syntax?)
                    "(Add maintainer|Remove maintainer):\\s+(.+)$")))
 
+(def ^:private address-pattern
+  (let [addr "[^@\\s<>]+@[^@\\s<>]+\\.[^@\\s<>]+"]
+    (re-pattern (str "<(" addr ")>|(" addr ")"))))
+
 (defn- parse-addresses
   "Extract email addresses from the argument to `Add maintainer:` or
   `Remove maintainer:`.  Accepts bare addresses (`alice@example.com`)
@@ -143,8 +147,7 @@
   appear."
   [s]
   (when s
-    (->> (re-seq #"<([^@\s<>]+@[^@\s<>]+\.[^@\s<>]+)>|([^@\s<>]+@[^@\s<>]+\.[^@\s<>]+)"
-                 s)
+    (->> (re-seq address-pattern s)
          (keep (fn [[_ bracketed bare]] (or bracketed bare)))
          vec)))
 

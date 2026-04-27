@@ -175,9 +175,15 @@ the old report as superseded by replying to its thread with:
 
 : Superseded-by: <target-message-id@example.com>
 
-The angle brackets around the message-id are optional.  See the
-[[#superseding-a-report-1][maintainer section]] for the full details on what this does and how to
-undo it.
+Three forms are accepted:
+
+- =<msg-id@host>= --- the canonical RFC form.
+- =msg-id@host= --- a bare message-id.
+- An archive URL where the message-id is the last path segment, e.g.
+  =https://list.orgmode.org/orgmode/msg-id@host/=.
+
+See the [[#superseding-a-report-1][maintainer section]] for the full details on what this does
+and how to undo it.
 
 ** Voting on requests
 
@@ -277,7 +283,9 @@ thread with:
 
 : Superseded-by: <target-message-id@example.com>
 
-The angle brackets around the message-id are optional. This does three
+The message-id can be given as =<msg-id@host>=, bare =msg-id@host=, or
+extracted from an archive URL where it is the last path segment (e.g.
+=https://list.orgmode.org/orgmode/msg-id@host/=).  This does three
 things automatically:
 
 1. Sets =:report/superseded-by-target= on the old report (a reference
@@ -546,16 +554,16 @@ prefixed with =!=.  Accepts =:loose= (default) or =:strict=.
 
 The rule applies uniformly to all Bark instructions:
 
-| Form             | Loose                  | Strict                |
-|------------------+------------------------+-----------------------|
-| Trigger          | =Closed.= / =!Closed.=     | =!Closed.=              |
-| Negative trigger | =Not acked= / =!Not acked= | =!Not acked=            |
-| =-by= directive    | =Acked-by: a@b=          | =!Acked-by: a@b=        |
-| Date directive   | =Deadline: 2026-06-01=   | =!Deadline: 2026-06-01= |
-| Topic            | =Topic: event=           | =!Topic: event=         |
-| Supersede        | =Superseded-by: <mid>=   | =!Superseded-by: <mid>= |
-| Role control     | =Add maintainer: a@b=    | =!Add maintainer: a@b=  |
-| Notify           | =Notify: on=             | =!Notify: on=           |
+| Form             | Loose                  | Strict                 |
+|------------------+------------------------+------------------------|
+| Trigger          | =Closed.= / =!Closed.=     | =!Closed.=               |
+| Negative trigger | =Not acked= / =!Not acked= | =!Not acked=             |
+| =-by= directive    | =Acked-by: a@b.c=        | =!Acked-by: a@b.c=       |
+| Date directive   | =Deadline: 2026-06-01=   | =!Deadline: 2026-06-01=  |
+| Topic            | =Topic: event=           | =!Topic: event=          |
+| Supersede        | =Superseded-by: <mid>=   | =!Superseded-by: <mid>=  |
+| Role control     | =Add maintainer: a@b.c=  | =!Add maintainer: a@b.c= |
+| Notify           | =Notify: on=             | =!Notify: on=            |
 
 Set globally or per source (per-source wins):
 
@@ -884,9 +892,6 @@ Emails that don't match any source are not stored.
 | =:periods=               | Time-windowed overrides for maintainers/commands (see [[#source-periods][Source periods]])        |
 
 ** Source periods
-:PROPERTIES:
-:CUSTOM_ID: source-periods
-:END:
 
 When a source's vocabulary or maintainer list has evolved over time,
 declare the history inline with =:periods= --- a vector of time-windowed
