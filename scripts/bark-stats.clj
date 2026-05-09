@@ -18,7 +18,7 @@
          '[taoensso.timbre :as log]
          '[bark.common :refer [report-priority report-status
                                report-descendant-count format-date format-date-iso
-                               parse-cli-args load-config bark-schema
+                               parse-cli-args load-config db-path bark-schema
                                votes-by-report vote-counts]]
          '[bark.common-bb :refer [load-datalevin-pod! all-reports dq]]
          '[bark.html-bb :refer [pico-cdn resolved-theme set-theme!
@@ -35,8 +35,8 @@
 
 (def ^:private stats-js (slurp "resources/bark-stats.js"))
 
-(def db-path
-  (or (System/getenv "BARK_DB") "./data/bark-db"))
+;; db-path is resolved lazily inside generate-json! / generate-html!
+;; so loading this namespace doesn't force a config read.
 
 ;; ---------------------------------------------------------------------------
 ;; Time helpers
@@ -603,7 +603,7 @@
       (update :closed-cancel    #(some-> % (update-keys name)))))
 
 (defn- generate-json! [out-file source-name]
-  (let [conn (d/get-conn db-path bark-schema {:wal? false})]
+  (let [conn (d/get-conn (db-path (load-config)) bark-schema {:wal? false})]
     (try
       (let [db       (d/db conn)
             all-reps (all-reports db)

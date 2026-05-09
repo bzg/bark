@@ -23,7 +23,7 @@
 (require '[clojure.string :as str]
          '[taoensso.timbre :as log]
          '[bark.common :refer [parse-delay parse-cutoff-date
-                               load-config build-source-map
+                               load-config db-path build-source-map
                                bark-schema format-date
                                failures-file-path read-failures-file
                                reason-labels]]
@@ -148,18 +148,18 @@
 
 (let [{:keys [delete? verbose? failures? source-name] :as opts}
       (parse-args *command-line-args*)
-      db-path (or (System/getenv "BARK_DB") "data/bark-db")
       config  (load-config)
       _       (when-not config
                 (log/error "No config.edn found")
                 (System/exit 1))
+      dbp     (db-path config)
       source-map (build-source-map config)
       _       (when (and source-name (not (contains? source-map source-name)))
                 (log/error "Unknown source:" source-name)
                 (log/error "Available:" (str/join ", " (keys source-map)))
                 (System/exit 1))
       ;; Open with WAL for potential writes
-      conn    (d/get-conn db-path bark-schema {})]
+      conn    (d/get-conn dbp bark-schema {})]
   (try
     (let [db (d/db conn)]
       (if failures?

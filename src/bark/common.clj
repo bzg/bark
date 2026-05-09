@@ -592,12 +592,22 @@
 ;; ---------------------------------------------------------------------------
 
 (defn load-config
-  "Load config.edn if it exists, or nil."
-  ([] (load-config "config.edn"))
+  "Load config.edn if it exists, or nil.  With no args, consults the
+  BARK_CONFIG env var, falling back to ./config.edn — so all bb
+  scripts honor a single override point without per-script flags."
+  ([] (load-config (or (System/getenv "BARK_CONFIG") "config.edn")))
   ([path]
    (let [f (io/file path)]
      (when (.exists f)
        (edn/read-string (slurp f))))))
+
+(defn db-path
+  "Resolve the Datalevin DB path: prefer :db {:path …} from the
+  config, fall back to BARK_DB env var, then default \"data/bark-db\"."
+  [config]
+  (or (get-in config [:db :path])
+      (System/getenv "BARK_DB")
+      "data/bark-db"))
 
 (defn build-source-map
   "Build source-name -> config map from config."

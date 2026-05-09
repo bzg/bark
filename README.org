@@ -164,7 +164,21 @@ bb export html --theme none                                 # no theme
 
 * Configuration
 
-See =config.edn.example=. The configuration has three main sections:
+See =config.edn.example=. The configuration has three main sections.
+
+** Config file location
+
+By default BARK reads =./config.edn= (from the current working
+directory).  To override:
+
+- Pass =-c <path>= to the JVM daemon: =clj -M:run -- -c /path/to/config.edn=
+- Or set the =BARK_CONFIG= env var — all =bb= scripts (=bb export=,
+  =bb notify=, =bb maintenance=, =bb test-config=, …) honor it.
+
+Precedence: CLI =-c= flag > =BARK_CONFIG= env var > =./config.edn=.
+
+The script-level =BARK_DB= env var (legacy) still works as a fallback
+when the config has no =:db {:path …}= entry.
 
 ** Mail source (=:mailbox=)
 

@@ -557,7 +557,9 @@
     {:watch?      (arg-set "--watch")
      :fresh?      (arg-set "--fresh")
      :cli-fetch   (some (fn [[a b]] (when (= "--fetch" a) b)) pairs)
-     :config-path (or (some (fn [[a b]] (when (= "-c" a) b)) pairs) "config.edn")}))
+     :config-path (or (some (fn [[a b]] (when (= "-c" a) b)) pairs)
+                      (System/getenv "BARK_CONFIG")
+                      "config.edn")}))
 
 (defn- confirm-fresh! [db-path]
   (print (str "Wipe DB at " db-path "? [y/N] ")) (flush)

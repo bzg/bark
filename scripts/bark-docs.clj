@@ -19,7 +19,7 @@
          '[bark.common :refer [default-labels default-commands
                                resolve-labels-map resolve-commands-map
                                resolve-command-syntax
-                               parse-cli-args load-config build-source-map
+                               parse-cli-args load-config db-path build-source-map
                                format-date-iso bark-schema lead-maintainer]]
          '[bark.common-bb :refer [load-datalevin-pod! get-tenures]]
          '[bark.html-bb :refer [pico-cdn resolved-theme set-theme!
@@ -450,9 +450,9 @@
       effective-dir (or out-dir
                         (.getParent (io/file out-file)))
       ;; Load DB for maintainer names
-      db-path     (or (System/getenv "BARK_DB") "data/bark-db")
+      dbp         (db-path config)
       _           (load-datalevin-pod!)
-      conn        ((resolve 'pod.huahaiy.datalevin/get-conn) db-path bark-schema {:wal? false})
+      conn        ((resolve 'pod.huahaiy.datalevin/get-conn) dbp bark-schema {:wal? false})
       db          ((resolve 'pod.huahaiy.datalevin/db) conn)
       maint-html  (build-maintainers-html db source-name)
       config-html (build-configuration-html config source-name)

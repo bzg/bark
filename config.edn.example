@@ -1,3 +1,10 @@
+;; BARK config — reference template.
+;;
+;; By default BARK reads ./config.edn.  Override via:
+;;   - CLI:  clj -M:run -- -c /path/to/config.edn
+;;   - env:  BARK_CONFIG=/path/to/config.edn  (also honored by all bb scripts)
+;; Precedence: -c > BARK_CONFIG > ./config.edn.
+
 { ;; ---- Connection --------------------------------------------------------
 
  ;; Mail source — IMAP or Maildir. :folder defaults to "INBOX".

@@ -377,7 +377,9 @@
 ;; Main
 ;; ---------------------------------------------------------------------------
 
-(let [path (or (first *command-line-args*) "config.edn")
+(let [path (or (first *command-line-args*)
+               (System/getenv "BARK_CONFIG")
+               "config.edn")
       file (clojure.java.io/file path)]
   (if-not (.exists file)
     (do (log/error "Config file not found:" path)

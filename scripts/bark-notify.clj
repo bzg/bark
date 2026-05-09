@@ -22,7 +22,7 @@
          '[taoensso.timbre :as log]
          '[bark.common :refer [get-header format-date format-date-iso
                                report-priority report-status report-descendant-count
-                               load-config build-source-map
+                               load-config db-path build-source-map
                                bark-schema maintainer?
                                failures-file-path read-failures-file
                                reason-labels]]
@@ -330,8 +330,8 @@
         force?   (flags "--force")
         debug?   (flags "--debug")
         _        (when debug? (log/merge-config! {:min-level :debug}))
-        db-path  (or (System/getenv "BARK_DB") "data/bark-db")
         config   (load-config)
+        dbp      (db-path config)
         notif    (:notifications config)]
     (when-not (and notif (:enabled notif))
       (log/info "Notifications disabled in config.")
@@ -339,7 +339,7 @@
     (let [smtp (or (:smtp notif)
                    (do (log/error "No :smtp config under :notifications.")
                        (System/exit 1)))
-          conn (d/get-conn db-path bark-schema {:wal? false})]
+          conn (d/get-conn dbp bark-schema {:wal? false})]
       (try
         (let [db       (d/db conn)
               now      (java.util.Date.)

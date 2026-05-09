@@ -53,7 +53,7 @@
                                format-date format-date-iso
                                report-priority report-status report-descendant-count
                                parse-cli-args parse-delay parse-cutoff-date
-                               load-config build-source-map
+                               load-config db-path build-source-map
                                bark-schema bark-format
                                votes-by-report vote-counts
                                ics-file? text-attachment?]]
@@ -1256,8 +1256,9 @@
               topics-filter]
        :or {format "all"}}
       (parse-cli-args *command-line-args*)
-      db-path (or (System/getenv "BARK_DB") "data/bark-db")
-      conn    (d/get-conn db-path bark-schema {:wal? false})]
+      config  (load-config)
+      dbp     (db-path config)
+      conn    (d/get-conn dbp bark-schema {:wal? false})]
   (try
     (when-not (formats format)
       (log/error "Unknown format:" format)
@@ -1280,10 +1281,9 @@
                                    (.getTime ^java.util.Date last-export)))]
       (if skip?
         (log/info "Nothing changed since last export, skipping.")
-        ;; Resolve config and source list *before* the expensive DB pull
+        ;; Resolve source list *before* the expensive DB pull
         ;; so we can determine which sources actually need re-export.
-        (let [config          (load-config)
-              effective-theme (or theme (:theme config))
+        (let [effective-theme (or theme (:theme config))
               _               (when effective-theme (set-theme! effective-theme))
               source-map      (if config (build-source-map config) {})
               source-names    (if source-name
