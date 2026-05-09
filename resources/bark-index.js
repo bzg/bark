@@ -267,7 +267,7 @@ function prepareReport(r) {
     // Filter/sort index (lowercase for string comparisons)
     type: type,
     closed: closedBool,
-    mid: messageId,
+    mid: messageId.toLowerCase(),
     from: from.toLowerCase(),
     subject: subject.toLowerCase(),
     date: isoDate,
