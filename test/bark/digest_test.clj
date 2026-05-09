@@ -909,3 +909,215 @@
             (is (nil? (:report/closed r121)) "latest diff should remain open"))))
       (finally
         (teardown! ctx)))))
+
+;; ---------------------------------------------------------------------------
+;; Pending-thread (out-of-order delivery rescue)
+;; ---------------------------------------------------------------------------
+
+(defn- mk-email
+  "Build a minimal email entity map for pending-thread tests."
+  [{:keys [mid subject from date in-reply-to refs body]}]
+  (let [refs-vec    (vec refs)
+        ancestor    (vec (distinct (cond-> refs-vec
+                                     (and in-reply-to (not (some #{in-reply-to} refs-vec)))
+                                     (conj in-reply-to))))]
+    (cond-> {:email/message-id   mid
+             :email/subject      subject
+             :email/from-address from
+             :email/author-address from
+             :email/date-sent    date
+             :email/ingested-at  date
+             :email/body-text    (or body "")}
+      in-reply-to        (assoc :email/in-reply-to in-reply-to)
+      (seq refs)         (assoc :email/references (clojure.string/join " " refs))
+      (seq ancestor)     (assoc :email/ancestor-mids ancestor))))
+
+(defn- store-and-process!
+  "Insert an email entity, then run digest/process-email! on it."
+  [conn email-map source-name]
+  (let [email-with-source (assoc email-map :email/source source-name)]
+    (d/transact! conn [email-with-source])
+    (let [eid (d/entid (d/db conn) [:email/message-id (:email/message-id email-map)])
+          email (d/pull (d/db conn) digest/email-pull-pattern eid)]
+      (digest/process-email! conn source-map sources email))))
+
+(defn- pending? [db mid]
+  (boolean
+   (d/q '[:find ?p . :in $ ?mid
+          :where
+          [?e :email/message-id ?mid]
+          [?e :email/pending-thread? ?p]]
+        db mid)))
+
+(deftest pending-thread-no-irt-not-flagged
+  (testing "An email with no In-Reply-To is never flagged pending."
+    (let [{:keys [conn] :as ctx} (setup-db!)]
+      (try
+        (store-and-process! conn
+                            (mk-email {:mid "<root-1@test.org>"
+                                       :subject "[BUG] something"
+                                       :from "user@test.org"
+                                       :date #inst "2026-05-01T10:00:00"
+                                       :body "broken\n"})
+                            "direct")
+        (let [db (d/db conn)]
+          (is (false? (pending? db "<root-1@test.org>"))
+              "Root email should not be pending")
+          (is (report-exists? db "<root-1@test.org>")
+              "Bug report should be created"))
+        (finally
+          (teardown! ctx))))))
+
+(deftest pending-thread-in-order-typical
+  (testing "In-order : reply arrives after parent → no pending flag, command applied."
+    (let [{:keys [conn] :as ctx} (setup-db!)]
+      (try
+        (store-and-process! conn
+                            (mk-email {:mid "<inord-1@test.org>"
+                                       :subject "[BUG] crash"
+                                       :from "user@test.org"
+                                       :date #inst "2026-05-01T10:00:00"
+                                       :body "broken\n"})
+                            "direct")
+        (store-and-process! conn
+                            (mk-email {:mid "<inord-2@test.org>"
+                                       :subject "Re: [BUG] crash"
+                                       :from "admin@test.org"
+                                       :date #inst "2026-05-01T11:00:00"
+                                       :in-reply-to "<inord-1@test.org>"
+                                       :body "Closed.\n"})
+                            "direct")
+        (let [db (d/db conn)
+              r  (get-report db "<inord-1@test.org>")]
+          (is (false? (pending? db "<inord-2@test.org>"))
+              "Reply with resolved IRT should not be pending")
+          (is (some? (:report/closed r)) "Bug should be closed by the reply"))
+        (finally
+          (teardown! ctx))))))
+
+(deftest pending-thread-out-of-order-rescue
+  (testing "Out-of-order : reply ingested before parent → pending, then retried."
+    (let [{:keys [conn] :as ctx} (setup-db!)]
+      (try
+        ;; 1. Reply arrives first, parent missing → flagged pending,
+        ;;    command not applied yet.
+        (store-and-process! conn
+                            (mk-email {:mid "<ooo-reply@test.org>"
+                                       :subject "Re: [BUG] crash"
+                                       :from "admin@test.org"
+                                       :date #inst "2026-05-01T11:00:00"
+                                       :in-reply-to "<ooo-bug@test.org>"
+                                       :body "Closed.\n"})
+                            "direct")
+        (let [db (d/db conn)]
+          (is (true? (pending? db "<ooo-reply@test.org>"))
+              "Reply should be flagged pending while IRT is absent")
+          (is (not (report-exists? db "<ooo-bug@test.org>"))
+              "No report yet for the missing parent"))
+
+        ;; 2. Parent arrives → its post-process retry hook should re-process
+        ;;    the pending reply and apply the command.
+        (store-and-process! conn
+                            (mk-email {:mid "<ooo-bug@test.org>"
+                                       :subject "[BUG] crash"
+                                       :from "user@test.org"
+                                       :date #inst "2026-05-01T10:00:00"
+                                       :body "broken\n"})
+                            "direct")
+        (let [db (d/db conn)
+              r  (get-report db "<ooo-bug@test.org>")]
+          (is (false? (pending? db "<ooo-reply@test.org>"))
+              "Pending flag must be cleared after retry")
+          (is (some? (:report/closed r))
+              "Bug should now be closed via the retried 'Closed.' trigger"))
+        (finally
+          (teardown! ctx))))))
+
+(deftest pending-thread-shared-ancestor-rescue
+  (testing "Sibling arrival unblocks pending via shared ancestor (transitive case)."
+    (let [{:keys [conn] :as ctx} (setup-db!)]
+      (try
+        ;; 1. Root bug, ingested first → creates a report.
+        (store-and-process! conn
+                            (mk-email {:mid "<shared-bug@test.org>"
+                                       :subject "[BUG] flaky"
+                                       :from "user@test.org"
+                                       :date #inst "2026-05-01T10:00:00"
+                                       :body "broken\n"})
+                            "direct")
+        ;; 2. A reply with IRT pointing to a missing intermediate email,
+        ;;    but References include the root → still pending because IRT
+        ;;    target is absent.
+        (store-and-process! conn
+                            (mk-email {:mid "<shared-reply@test.org>"
+                                       :subject "Re: [BUG] flaky"
+                                       :from "admin@test.org"
+                                       :date #inst "2026-05-01T12:00:00"
+                                       :in-reply-to "<shared-mid@test.org>"
+                                       :refs ["<shared-bug@test.org>"]
+                                       :body "Closed.\n"})
+                            "direct")
+        (is (true? (pending? (d/db conn) "<shared-reply@test.org>"))
+            "Reply should be pending while IRT is missing, even with root in DB")
+
+        ;; 3. The missing intermediate finally arrives. Its ancestors
+        ;;    include the root, sharing the thread with the pending reply
+        ;;    → retry hook fires.
+        (store-and-process! conn
+                            (mk-email {:mid "<shared-mid@test.org>"
+                                       :subject "Re: [BUG] flaky"
+                                       :from "user@test.org"
+                                       :date #inst "2026-05-01T11:00:00"
+                                       :in-reply-to "<shared-bug@test.org>"
+                                       :refs ["<shared-bug@test.org>"]
+                                       :body "still broken\n"})
+                            "direct")
+        (let [db (d/db conn)
+              r  (get-report db "<shared-bug@test.org>")]
+          (is (false? (pending? db "<shared-reply@test.org>"))
+              "Pending flag cleared after retry")
+          (is (some? (:report/closed r))
+              "Root bug should now be closed"))
+        (finally
+          (teardown! ctx))))))
+
+(deftest pending-thread-ttl-flush
+  (testing "TTL flush forces processing of stale pending emails."
+    (let [{:keys [conn] :as ctx} (setup-db!)]
+      (try
+        ;; Create a root report so threading has something to attach to.
+        (store-and-process! conn
+                            (mk-email {:mid "<ttl-bug@test.org>"
+                                       :subject "[BUG] orphan"
+                                       :from "user@test.org"
+                                       :date #inst "2026-04-01T10:00:00"
+                                       :body "broken\n"})
+                            "direct")
+        ;; Reply whose IRT target never arrives — manually backdate
+        ;; ingested-at to simulate an old pending email.
+        (let [old-date #inst "2026-04-01T11:00:00"]
+          (d/transact! conn
+                       [(assoc (mk-email {:mid "<ttl-orphan@test.org>"
+                                          :subject "Re: [BUG] orphan"
+                                          :from "admin@test.org"
+                                          :date old-date
+                                          :in-reply-to "<never-arrives@test.org>"
+                                          :refs ["<ttl-bug@test.org>"]
+                                          :body "Closed.\n"})
+                               :email/source "direct"
+                               :email/pending-thread? true
+                               :email/ingested-at old-date)]))
+        (is (true? (pending? (d/db conn) "<ttl-orphan@test.org>"))
+            "Setup: orphan should be pending")
+
+        ;; TTL flush with a 1-day window — orphan is older than 30 days.
+        (digest/flush-stale-pending! conn source-map sources 1)
+
+        (let [db (d/db conn)
+              r  (get-report db "<ttl-bug@test.org>")]
+          (is (false? (pending? db "<ttl-orphan@test.org>"))
+              "Pending flag cleared by TTL flush")
+          (is (some? (:report/closed r))
+              "Command applied to the available ancestor report after TTL flush"))
+        (finally
+          (teardown! ctx))))))

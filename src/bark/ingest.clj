@@ -175,6 +175,14 @@
                       (parse-message-ids (if (vector? v)
                                            (str/join " " (keep identity v))
                                            v)))
+        ancestor-mids (let [refs-vec (when references
+                                       (re-seq #"<[^>]+>" references))
+                            base     (vec refs-vec)]
+                        (->> (cond-> base
+                               (and in-reply-to (not (some #{in-reply-to} base)))
+                               (conj in-reply-to))
+                             distinct
+                             vec))
         attachments (mapv (fn [att]
                             (let [filename (or (:filename att) "unnamed")
                                   is-patch (re-find #"(?i)\.(patch|diff)$" filename)
@@ -231,6 +239,7 @@
       (seq attachments)           (assoc :email/attachments attachments)
       in-reply-to                 (assoc :email/in-reply-to in-reply-to)
       references                  (assoc :email/references references)
+      (seq ancestor-mids)         (assoc :email/ancestor-mids ancestor-mids)
       headers-edn                 (assoc :email/headers-edn headers-edn)))))
 
 ;; ---------------------------------------------------------------------------

@@ -417,18 +417,25 @@
 
 (def ^:private one-day-ms (* 24 60 60 1000))
 
+;; Pending-thread emails are flushed (force-threaded) after this many
+;; days, so that genuine orphans (In-Reply-To target never arrives)
+;; eventually leave the queue rather than accumulating forever.
+(def ^:private pending-flush-max-age-days 7)
+
 (defn- maybe-expire!
-  "Run expire-reports! if at least one day has elapsed since `last-ms`.
-  Returns the updated timestamp on success, or `last-ms` on failure
-  so that the next cycle retries."
-  [db-conn source-map last-ms]
+  "Run expire-reports! and flush stale pending emails if at least one
+  day has elapsed since `last-ms`.  Returns the updated timestamp on
+  success, or `last-ms` on failure so that the next cycle retries."
+  [db-conn source-map sources last-ms]
   (let [now (System/currentTimeMillis)]
     (if (> (- now last-ms) one-day-ms)
       (try
         (expire/expire-reports! db-conn source-map)
+        (digest/flush-stale-pending! db-conn source-map sources
+                                     pending-flush-max-age-days)
         now
         (catch Exception e
-          (log/error e "Expire failed:" (blog/exception-msg e))
+          (log/error e "Expire/flush failed:" (blog/exception-msg e))
           last-ms))
       last-ms)))
 
@@ -518,7 +525,7 @@
                   (try
                     (log/info "Mailbox connected, folder:" folder)
                     (catch-up-fetch! src db-conn folder fetch-opts source-map sources ingest-opts mailbox-type)
-                    (let [ts (maybe-expire! db-conn source-map last-expire-ms)]
+                    (let [ts (maybe-expire! db-conn source-map sources last-expire-ms)]
                       (when-not (shutting-down?)
                         (start-watch! src db-conn folder source-map sources ingest-opts))
                       ts)
@@ -548,6 +555,8 @@
     (try
       (catch-up-fetch! src db-conn folder fetch-opts source-map sources ingest-opts mailbox-type)
       (expire/expire-reports! db-conn source-map)
+      (digest/flush-stale-pending! db-conn source-map sources
+                                   pending-flush-max-age-days)
       (finally
         (close-mailbox! src)))))
 

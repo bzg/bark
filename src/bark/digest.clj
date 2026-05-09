@@ -25,7 +25,8 @@
 
 (def email-pull-pattern
   '[:db/id :email/id :email/source :email/subject :email/message-id
-    :email/in-reply-to :email/references
+    :email/in-reply-to :email/references :email/ancestor-mids
+    :email/pending-thread?
     :email/author-address :email/author-name
     :email/from-address :email/from-name
     :email/date-sent :email/ingested-at
@@ -473,16 +474,67 @@
                 (count patches) "patch attachments"))))
 
 ;; ---------------------------------------------------------------------------
+;; Pending-thread retry (out-of-order delivery rescue)
+;; ---------------------------------------------------------------------------
+
+(defn- in-reply-to-resolved?
+  "True when the email's In-Reply-To target is nil (root) or already
+  stored in the DB.  When false, the email is held as pending — its
+  threading and commands are deferred until the missing ancestor (or
+  any thread sibling) arrives."
+  [db email]
+  (let [irt (:email/in-reply-to email)]
+    (or (nil? irt)
+        (some? (d/entid db [:email/message-id irt])))))
+
+(declare process-email!)
+
+(defn- retry-pending-in-shared-thread!
+  "After processing `email` normally, retry any pending email that
+  shares at least one ancestor mid with it (or that has `email`'s own
+  mid in its ancestors).  The recursive `process-email!` call retracts
+  the pending flag if its In-Reply-To is now resolvable."
+  [conn email source-map sources]
+  (let [own-mid   (:email/message-id email)
+        ancestors (cond-> (set (:email/ancestor-mids email))
+                    own-mid (conj own-mid))]
+    (when (seq ancestors)
+      (let [pendings (d/q '[:find [?e ...] :in $ [?mid ...]
+                            :where
+                            [?e :email/pending-thread? true]
+                            [?e :email/ancestor-mids ?mid]]
+                          (d/db conn) (vec ancestors))]
+        (doseq [pending-eid pendings]
+          (let [pending-email (d/pull (d/db conn) email-pull-pattern pending-eid)]
+            (log/info "Retrying pending email" (:email/message-id pending-email)
+                      "(triggered by" own-mid ")")
+            (process-email! conn source-map sources pending-email)))))))
+
+;; ---------------------------------------------------------------------------
 ;; Single-email processing — orchestrator
 ;; ---------------------------------------------------------------------------
 
 (defn process-email!
   "Process a single email: classify source, detect report, thread,
-  apply commands, manage series. Called after store-email! succeeds."
-  [conn source-map sources email]
-  (let [message-id (:email/message-id email)
-        eid        (:db/id email)
-        from-addr  (:email/author-address email)
+  apply commands, manage series. Called after store-email! succeeds.
+
+  When the email's In-Reply-To points to a message-id absent from
+  the DB, Phase 3 (threading + commands) and Phase 4 (post-creation
+  hooks) are skipped and the email is flagged
+  `:email/pending-thread? true`.  A later arrival sharing the same
+  thread triggers the retry via `retry-pending-in-shared-thread!`,
+  or the TTL flush forces processing after N days.
+
+  Opts:
+    :force-thread? — bypass the pending-thread guard, threading the
+                     email with whatever ancestors currently exist in
+                     the DB.  Used by the TTL flush."
+  ([conn source-map sources email] (process-email! conn source-map sources email {}))
+  ([conn source-map sources email {:keys [force-thread?]}]
+  (let [message-id   (:email/message-id email)
+        eid          (:db/id email)
+        from-addr    (:email/author-address email)
+        was-pending? (:email/pending-thread? email)
         [source-name email delivery] (resolve-email-source! conn email sources)]
     (if-not source-name
       (log/debug "No matching source for" message-id "— skipping")
@@ -499,23 +551,75 @@
               [report-eid report-info]
               (maybe-create-report! conn eid message-id email from-addr
                                     source-name source-cfg via-channel? rroles)
+              db           (d/db conn)]
 
-              ;; Phase 3: threading and commands
-              db           (d/db conn)
-              parent-eids  (find-reports-for-email email db)
-              nearest-eids (find-nearest-report email db)]
+          (if (or force-thread? (in-reply-to-resolved? db email))
+            ;; --- Normal path: threading, commands, post-creation hooks ---
+            (do
+              (when was-pending?
+                (d/transact! conn [[:db/retract eid :email/pending-thread? true]])
+                (log/info "Cleared pending flag on" message-id))
+              (let [parent-eids  (find-reports-for-email email db)
+                    nearest-eids (find-nearest-report email db)
+                    ;; Recover the existing report-eid on retry so Phase 4
+                    ;; hooks (link-related, close-superseded-thread, …) can
+                    ;; run for pending emails that created a report on first
+                    ;; pass but were skipped past Phase 3/4.
+                    report-eid   (or report-eid
+                                     (when (and was-pending?
+                                                (report-exists? db message-id))
+                                       (d/entid db [:report/message-id message-id])))]
 
-          (when (and (seq parent-eids) via-channel?)
-            (thread-and-apply-commands! conn eid email from-addr source-name rroles
-                                        source-map delivery parent-eids nearest-eids
-                                        (some? report-eid)))
+                (when (and (seq parent-eids) via-channel?)
+                  (thread-and-apply-commands! conn eid email from-addr source-name rroles
+                                              source-map delivery parent-eids nearest-eids
+                                              (some? report-eid)))
 
-          ;; Phase 4: post-creation hooks (plan is pure, execution is effectful)
-          (when report-eid
-            (let [patches (detect/build-patch-entities email)
-                  plan    (post-creation-plan report-info nearest-eids parent-eids patches)]
-              (run-post-creation-hooks! conn report-eid eid email from-addr report-info
-                                        parent-eids nearest-eids patches plan)))
+                ;; Phase 4: post-creation hooks (plan is pure, execution is effectful)
+                (when report-eid
+                  (let [patches (detect/build-patch-entities email)
+                        plan    (post-creation-plan report-info nearest-eids parent-eids patches)]
+                    (run-post-creation-hooks! conn report-eid eid email from-addr report-info
+                                              parent-eids nearest-eids patches plan)))
 
-          ;; Mark email as fully digested so future re-fetches can skip it.
-          (d/transact! conn [{:db/id eid :email/digested-at (Date.)}]))))))
+                ;; Mark email as fully digested so future re-fetches can skip it.
+                (d/transact! conn [{:db/id eid :email/digested-at (Date.)}])
+
+                ;; Out-of-order rescue: this email may have unblocked pending
+                ;; siblings/descendants.  Run AFTER the digested-at write so
+                ;; the recursive call sees a consistent state.
+                (retry-pending-in-shared-thread! conn email source-map sources)))
+
+            ;; --- Pending path: defer threading and commands ---
+            (do (d/transact! conn [{:db/id eid
+                                    :email/pending-thread? true
+                                    :email/digested-at (Date.)}])
+                (log/info "Pending:" message-id "— in-reply-to"
+                          (:email/in-reply-to email) "absent from DB")))))))))
+
+;; ---------------------------------------------------------------------------
+;; TTL flush — force-process pending emails older than max-age-days
+;; ---------------------------------------------------------------------------
+
+(defn flush-stale-pending!
+  "Force-process pending emails older than `max-age-days`. The pending
+  flag is retracted and threading runs against whatever ancestors
+  currently exist in the DB. Returns the count of flushed emails."
+  [conn source-map sources max-age-days]
+  (let [cutoff   (Date. (- (System/currentTimeMillis)
+                           (* max-age-days 24 60 60 1000)))
+        pendings (d/q '[:find [?e ...] :in $ ?cutoff
+                        :where
+                        [?e :email/pending-thread? true]
+                        [?e :email/ingested-at ?ts]
+                        [(.before ^java.util.Date ?ts ^java.util.Date ?cutoff)]]
+                      (d/db conn) cutoff)]
+    (when (seq pendings)
+      (log/info "Flushing" (count pendings)
+                "stale pending email(s) older than" max-age-days "day(s)"))
+    (doseq [eid pendings]
+      (d/transact! conn [[:db/retract eid :email/pending-thread? true]])
+      (let [email (d/pull (d/db conn) email-pull-pattern eid)]
+        (log/info "TTL-flush" (:email/message-id email))
+        (process-email! conn source-map sources email {:force-thread? true})))
+    (count pendings)))

@@ -44,6 +44,16 @@
  :attachment/data             {:db/valueType :db.type/string}
  :email/in-reply-to           {:db/valueType :db.type/string}
  :email/references            {:db/valueType :db.type/string}
+ ;; Ancestors-mids: persisted union of References + In-Reply-To,
+ ;; one entry per ancestor message-id.  Indexed multi-valued so the
+ ;; pending-thread retry can locate emails sharing a thread in O(hits).
+ :email/ancestor-mids         {:db/valueType   :db.type/string
+                               :db/cardinality :db.cardinality/many}
+ ;; Set when an email is ingested while its In-Reply-To target is
+ ;; absent from the DB.  Phase 3/4 of process-email! is skipped on
+ ;; pending emails; they are retried when a related email arrives or
+ ;; when a TTL job forces the threading.
+ :email/pending-thread?       {:db/valueType :db.type/boolean}
  :email/headers-edn           {:db/valueType :db.type/string}
  :email/ingested-at           {:db/valueType :db.type/instant}
  :email/digested-at           {:db/valueType :db.type/instant}
