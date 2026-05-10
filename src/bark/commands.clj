@@ -175,37 +175,29 @@
                                   sc (or (:scope (get overrides id)) scope)]
                               (when (or (nil? rt) (contains? rt report-type))
                                 (when-let [m (re-matches pattern line)]
-                                  (let [base (case action
-                                               :set            (when-let [addr (or (nth m 1 nil) (nth m 2 nil))]
-                                                                 {:action :set :attr attr :email-address addr})
-                                               :unset          {:action :unset :attr attr}
-                                               :set-deadline   (when-let [d (parse-date-or-duration (nth m 1) email-date)]
-                                                                 {:action :set-deadline :date d})
-                                               :unset-deadline {:action :unset-deadline}
-                                               :set-expiry     (when-let [d (parse-date-or-duration (nth m 1) email-date)]
-                                                                 {:action :set-expiry :date d})
-                                               :unset-expiry   {:action :unset-expiry}
-                                               :unset-topic    {:action :unset-topic}
-                                               :set-topic      (when-let [t (nth m 1 nil)]
-                                                                 {:action :set-topic :topic t})
-                                               :set-superseded   (when-let [mid (or (nth m 1 nil) (nth m 2 nil) (nth m 3 nil))]
-                                                                   {:action :set-superseded
-                                                                    :attr attr
-                                                                    :target-message-id (str "<" mid ">")})
+                                  (let [first-capture (fn [] (some #(nth m % nil) (range 1 (count m))))
+                                        mid-result    (fn [act] (when-let [mid (first-capture)]
+                                                                  {:action act :attr attr
+                                                                   :target-message-id (str "<" mid ">")}))
+                                        date-result   (fn [act] (when-let [d (parse-date-or-duration (nth m 1) email-date)]
+                                                                  {:action act :date d}))
+                                        base (case action
+                                               :set              (when-let [addr (first-capture)]
+                                                                   {:action :set :attr attr :email-address addr})
+                                               :unset            {:action :unset :attr attr}
+                                               :set-deadline     (date-result :set-deadline)
+                                               :unset-deadline   {:action :unset-deadline}
+                                               :set-expiry       (date-result :set-expiry)
+                                               :unset-expiry     {:action :unset-expiry}
+                                               :set-topic        (when-let [t (nth m 1 nil)]
+                                                                   {:action :set-topic :topic t})
+                                               :unset-topic      {:action :unset-topic}
+                                               :set-superseded   (mid-result :set-superseded)
                                                :unset-superseded {:action :unset-superseded :attr attr}
-                                               :set-duplicate    (when-let [mid (or (nth m 1 nil) (nth m 2 nil) (nth m 3 nil))]
-                                                                   {:action :set-duplicate
-                                                                    :attr attr
-                                                                    :target-message-id (str "<" mid ">")})
+                                               :set-duplicate    (mid-result :set-duplicate)
                                                :unset-duplicate  {:action :unset-duplicate :attr attr}
-                                               :set-related      (when-let [mid (or (nth m 1 nil) (nth m 2 nil) (nth m 3 nil))]
-                                                                   {:action :set-related
-                                                                    :attr attr
-                                                                    :target-message-id (str "<" mid ">")})
-                                               :unset-related    (when-let [mid (or (nth m 1 nil) (nth m 2 nil) (nth m 3 nil))]
-                                                                   {:action :unset-related
-                                                                    :attr attr
-                                                                    :target-message-id (str "<" mid ">")}))]
+                                               :set-related      (mid-result :set-related)
+                                               :unset-related    (mid-result :unset-related))]
                                     (when base (assoc base :scope sc :id id)))))))
                           all-directives)))
             vec)))))
@@ -845,14 +837,10 @@
   [:report/closed :report/closed-address :report/close-reason])
 
 (def ^:private unclose-relation-rows
-  "Per-row data for retracting a closure relation in `try-unclosed!`.
-    :kind        -- relation kind to retract
-    :unset-key   -- flag in `resolved` that explicitly clears this kind
-    :setter-attr -- key under which the setter is surfaced in the pull
-                    map so `scope-permits?` can resolve
-                    `:setter-or-maintainer` on the matching directive."
-  [{:kind :supersedes :unset-key :unsuperseded? :setter-attr :rel/supersedes}
-   {:kind :duplicates :unset-key :unduplicate?  :setter-attr :rel/duplicates}])
+  "Subset of `closure-relation-rows` used by `try-unclosed!` to retract
+  a closure relation: keeps only :kind / :unset-key / :setter-attr.
+  Derived to keep both row sets in lockstep when a new kind is added."
+  (mapv #(select-keys % [:kind :unset-key :setter-attr]) closure-relation-rows))
 
 (defn- try-unclosed!
   "If a closed report has a Not closed / Not superseded / Not duplicate

@@ -732,39 +732,53 @@
         (str/replace #"[\r\n]+" " ")
         (str/replace #":END:" ":END :"))))
 
+(def ^:private org-property-rows
+  "Ordered :PROPERTIES: entries used by `report->org-entry`.  Each row:
+  `[<key in report-map> <:LABEL:> <xf> <default>]`.
+  An entry is emitted when `(get m key default)` is non-nil; `xf`, when
+  non-nil, transforms the value before stringification.  Vector order
+  dictates property-drawer order."
+  [[:from         "FROM"         org-safe                                  ""]
+   [:date-raw     "DATE"         format-org-inactive-ts                    nil]
+   [:message-id   "MESSAGE-ID"   #(some-> % strip-angle-brackets org-safe) nil]
+   [:archived-at  "ARCHIVED-AT"  org-safe                                  nil]
+   [:flags        "FLAGS"        nil                                       "---"]
+   [:status       "STATUS"       nil                                       0]
+   [:replies      "REPLIES"      nil                                       0]
+   [:version      "VERSION"      org-safe                                  nil]
+   [:topic        "TOPIC"        org-safe                                  nil]
+   [:votes        "VOTES"        nil                                       nil]
+   [:votes-up     "VOTES-UP"     nil                                       nil]
+   [:votes-down   "VOTES-DOWN"   nil                                       nil]
+   [:votes-null   "VOTES-NULL"   nil                                       nil]
+   [:acked        "ACKED"        org-safe                                  nil]
+   [:owned        "OWNED"        org-safe                                  nil]
+   [:closed       "CLOSED"       org-safe                                  nil]
+   [:close-reason "CLOSE-REASON" nil                                       nil]
+   [:urgent       "URGENT"       org-safe                                  nil]
+   [:important    "IMPORTANT"    org-safe                                  nil]
+   [:deadline     "DEADLINE"     nil                                       nil]
+   [:expiry       "EXPIRY"       nil                                       nil]])
+
+(defn- org-property-line
+  "Render one :PROPERTIES: entry from a row of `org-property-rows`,
+  or `nil` to skip it."
+  [m [k label xf default]]
+  (let [raw (get m k default)]
+    (when (some? raw)
+      (str ":" label ": " (if xf (xf raw) raw)))))
+
 (defn- report->org-entry [m]
   (let [todo    (if (= (nth (:flags m "---") 2 \-) \C) "DONE" "TODO")
         prio    (case (:priority m 0)
                   3 "[#A] " 2 "[#B] " 1 "[#C] " "")
         subject (org-safe (:subject m ""))
         tags    (when-let [t (:type m)] (str ":" t ":"))
-        org-date (format-org-inactive-ts (:date-raw m))
-        props   (remove nil?
-                        [(str ":FROM: " (org-safe (:from m "")))
-                         (str ":DATE: " org-date)
-                         (when-let [mid (:message-id m)]
-                           (str ":MESSAGE-ID: " (org-safe (strip-angle-brackets mid))))
-                         (when-let [a (:archived-at m)]  (str ":ARCHIVED-AT: " (org-safe a)))
-                         (str ":FLAGS: " (:flags m "---"))
-                         (str ":STATUS: " (:status m 0))
-                         (str ":REPLIES: " (:replies m 0))
-                         (when-let [v (:version m)]      (str ":VERSION: " (org-safe v)))
-                         (when-let [t (:topic m)]        (str ":TOPIC: " (org-safe t)))
-                         (when-let [v (:votes m)]        (str ":VOTES: " v))
-                         (when-let [v (:votes-up m)]     (str ":VOTES-UP: " v))
-                         (when-let [v (:votes-down m)]   (str ":VOTES-DOWN: " v))
-                         (when-let [v (:votes-null m)]   (str ":VOTES-NULL: " v))
-                         (when-let [a (:acked m)]      (str ":ACKED: " (org-safe a)))
-                         (when-let [o (:owned m)]      (str ":OWNED: " (org-safe o)))
-                         (when-let [c (:closed m)]     (str ":CLOSED: " (org-safe c)))
-                         (when-let [cr (:close-reason m)] (str ":CLOSE-REASON: " cr))
-                         (when-let [u (:urgent m)]     (str ":URGENT: " (org-safe u)))
-                         (when-let [i (:important m)]  (str ":IMPORTANT: " (org-safe i)))
-                         (when-let [d (:deadline m)]     (str ":DEADLINE: " d))
-                         (when-let [d (:expiry m)]      (str ":EXPIRY: " d))
-                         (when-let [s (:series m)]
-                           (str ":SERIES: " (:received s) "/" (:expected s)
-                                (when (:closed s) " closed")))])]
+        props   (cond-> (keep #(org-property-line m %) org-property-rows)
+                  (:series m)
+                  (concat [(let [s (:series m)]
+                             (str ":SERIES: " (:received s) "/" (:expected s)
+                                  (when (:closed s) " closed")))]))]
     (str "* " todo " " prio subject (when tags (str "  " tags)) "\n"
          (when-let [d (:deadline m)]
            (str "DEADLINE: <" d ">\n"))
@@ -1059,6 +1073,23 @@
   (or cli-topics-filter
       (resolve-topics-filter (get-in source-map [source-name :topics-filter]))))
 
+(defn- dump-typed-formats!
+  "Write `reports` to disk in every format enabled by `fmts`: JSON (if
+  `fmts \"json\"` or `:json-always?`), RSS (if `fmts \"rss\"`), Org (if
+  `fmts \"org\"`).  `basename` is the file stem (no extension); `label`
+  is the human title used in RSS/Org headers."
+  [reports reports-dir source-name source-map maintainers-map fmts basename label
+   & {:keys [json-always? counts]}]
+  (when (or json-always? (fmts "json"))
+    (dump-json! reports reports-dir source-name source-map maintainers-map
+                (str basename ".json") counts))
+  (when (fmts "rss")
+    (dump-rss! reports reports-dir source-name source-map maintainers-map
+               (str basename ".xml") label))
+  (when (fmts "org")
+    (dump-org! reports reports-dir source-name source-map maintainers-map
+               (str basename ".org") label)))
+
 (defn- dump-per-type!
   "Export per-type JSON, Org, and RSS files for all report types present.
   When `changed-types` is non-nil, only re-export files for those types."
@@ -1069,15 +1100,8 @@
                 plural (type->plural rtype)]
           :when (and (seq typed)
                      (or (nil? changed-types) (changed-types rtype)))]
-    (when (fmts "json")
-      (dump-json! typed reports-dir source-name source-map maintainers-map
-                  (str plural ".json")))
-    (when (fmts "org")
-      (dump-org! typed reports-dir source-name source-map maintainers-map
-                 (str plural ".org") plural))
-    (when (fmts "rss")
-      (dump-rss! typed reports-dir source-name source-map maintainers-map
-                 (str plural ".xml") plural))))
+    (dump-typed-formats! typed reports-dir source-name source-map maintainers-map
+                         fmts plural plural)))
 
 (defn- dump-open-closed!
   "Export open/closed split files and meta.json with summary counts.
@@ -1114,50 +1138,23 @@
     (spit (str reports-dir "/meta.json")
           (json/generate-string meta-data {:pretty true}))
     (log/info "Wrote meta.json")
-    ;; --- Open ---
-    (dump-json! open reports-dir source-name source-map maintainers-map
-                "all-open.json" counts)
-    (when (fmts "rss")
-      (dump-rss! open reports-dir source-name source-map maintainers-map
-                 "all-open.xml" "open reports"))
-    (when (fmts "org")
-      (dump-org! open reports-dir source-name source-map maintainers-map
-                 "all-open.org" "open reports"))
-    ;; --- Closed ---
-    (dump-json! closed reports-dir source-name source-map maintainers-map
-                "all-closed.json" counts)
-    (when (fmts "rss")
-      (dump-rss! closed reports-dir source-name source-map maintainers-map
-                 "all-closed.xml" "closed reports"))
-    (when (fmts "org")
-      (dump-org! closed reports-dir source-name source-map maintainers-map
-                 "all-closed.org" "closed reports"))
-    ;; --- Per-type open & closed (skip unchanged types when incremental) ---
+    (dump-typed-formats! open reports-dir source-name source-map maintainers-map
+                         fmts "all-open" "open reports"
+                         :json-always? true :counts counts)
+    (dump-typed-formats! closed reports-dir source-name source-map maintainers-map
+                         fmts "all-closed" "closed reports"
+                         :json-always? true :counts counts)
     (doseq [rtype report-types
             :when (or (nil? changed-types) (changed-types rtype))
             :let [plural (type->plural rtype)
                   t-open   (filter-reports open {:type rtype})
                   t-closed (filter-reports closed {:type rtype})]]
       (when (seq t-open)
-        (when (fmts "json")
-          (dump-json! t-open reports-dir source-name source-map maintainers-map
-                      (str plural "-open.json")))
-        (when (fmts "rss")
-          (dump-rss! t-open reports-dir source-name source-map maintainers-map
-                     (str plural "-open.xml") (str plural " (open)")))
-        (when (fmts "org")
-          (dump-org! t-open reports-dir source-name source-map maintainers-map
-                     (str plural "-open.org") (str plural " (open)"))))
+        (dump-typed-formats! t-open reports-dir source-name source-map maintainers-map
+                             fmts (str plural "-open") (str plural " (open)")))
       (when (seq t-closed)
-        (when (fmts "json")
-          (dump-json! t-closed reports-dir source-name source-map maintainers-map
-                      (str plural "-closed.json")))
-        (when (fmts "rss")
-          (dump-rss! t-closed reports-dir source-name source-map maintainers-map
-                     (str plural "-closed.xml") (str plural " (closed)")))
-        (when (fmts "org")
-          (dump-org! t-closed reports-dir source-name source-map maintainers-map
-                     (str plural "-closed.org") (str plural " (closed)")))))))
+        (dump-typed-formats! t-closed reports-dir source-name source-map maintainers-map
+                             fmts (str plural "-closed") (str plural " (closed)"))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Root index -- public/index.html listing all sources

@@ -66,18 +66,21 @@
                        db mid)]
       (into (set as-root) as-desc))))
 
-(defn find-reports-for-email
-  "Return all report eids threaded with this email."
+(defn thread-lookup
+  "Walk an email's ancestor mids nearest-first and return
+  `{:all #{eids} :nearest #{eids}}`.
+  - `:all`     -- every report matched by any ancestor
+  - `:nearest` -- reports matched by the closest matching ancestor,
+                  or `nil` if no ancestor matches.
+  Single DB pass replaces the previous two-function lookup."
   [email db]
-  (into #{} (mapcat #(lookup-reports-by-mid db %)) (ancestor-mids email)))
-
-(defn find-nearest-report
-  "Return the report eids of the nearest ancestor only."
-  [email db]
-  (some (fn [mid]
-          (let [from-db (lookup-reports-by-mid db mid)]
-            (when (seq from-db) from-db)))
-        (rseq (ancestor-mids email))))
+  (reduce (fn [acc mid]
+            (let [eids (lookup-reports-by-mid db mid)]
+              (cond-> acc
+                (seq eids)                            (update :all into eids)
+                (and (seq eids) (nil? (:nearest acc))) (assoc :nearest eids))))
+          {:all #{} :nearest nil}
+          (rseq (ancestor-mids email))))
 
 ;; ---------------------------------------------------------------------------
 ;; DB operations
@@ -635,8 +638,7 @@
               (when was-pending?
                 (d/transact! conn [[:db/retract eid :email/pending-thread? true]])
                 (log/info "Cleared pending flag on" message-id))
-              (let [parent-eids  (find-reports-for-email email db)
-                    nearest-eids (find-nearest-report email db)
+              (let [{parent-eids :all nearest-eids :nearest} (thread-lookup email db)
                     ;; Recover the existing report-eid on retry so Phase 4
                     ;; hooks (link-related, close-superseded-thread, …) can
                     ;; run for pending emails that created a report on first
