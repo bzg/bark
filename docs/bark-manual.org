@@ -50,7 +50,7 @@ And Eve, the maintainer, concludes:
 : 
 : > Confirmed, I see this too, this should not happen.
 : 
-: Fixed in commit0 bc12c0c, thanks to both of you!
+: Fixed in commit bc12c0c, thanks to both of you!
 
 What happened here?
 
