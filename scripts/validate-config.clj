@@ -101,7 +101,8 @@
                           :source/maintainers :source/notifications
                           :source/expiry :source/awaiting-delay
                           :source/export-formats :source/topics-filter
-                          :source/command-syntax :source/periods])
+                          :source/command-syntax :source/patch-triggers?
+                          :source/periods])
          exactly-one-source-type?))
 
 (s/def :bark/sources
@@ -266,6 +267,14 @@
 (s/def :bark/command-syntax #{:loose :strict})
 (s/def :source/command-syntax :bark/command-syntax)
 
+;; Whether patches on this source act as triggers on the bugs/requests
+;; they resolve. When false, a patch in reply to a bug/request does not
+;; auto-set Acked/Owned, and closing the patch as :resolved does not
+;; close the parent. Default true.
+(s/def :bark/patch-triggers? boolean?)
+(s/def :source/patch-triggers? :bark/patch-triggers?)
+(s/def :period/patch-triggers? :bark/patch-triggers?)
+
 ;; Per-source periods (optional) -- time-windowed overrides for
 ;; :maintainers / :commands / :command-syntax / :labels.
 ;; Each period is a map with optional :start, :end (ISO yyyy-MM-dd) and
@@ -282,7 +291,8 @@
 (s/def ::period-entry
   (s/keys :opt-un [:period/start :period/end
                    :period/maintainers :period/commands
-                   :period/command-syntax :period/labels]))
+                   :period/command-syntax :period/patch-triggers?
+                   :period/labels]))
 (s/def :source/periods (s/coll-of ::period-entry :kind vector? :min-count 1))
 
 ;; Top-level config
@@ -408,6 +418,8 @@
                             (:report-types src)  (conj (str "report-types: " (pr-str (:report-types src))))
                             (:command-syntax src) (conj (str "command-syntax: "
                                                               (name (:command-syntax src))))
+                            (false? (:patch-triggers? src))
+                            (conj "patch-triggers: off")
                             (seq (:maintainers src))
                             (conj (str "maintainers: "
                                        (str/join ", " (:maintainers src))))

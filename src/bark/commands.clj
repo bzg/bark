@@ -368,7 +368,7 @@
                        (conj [:db/add report-eid :report/close-reason close-reason]))]
     (when (seq all-tx) [(vec all-tx) new-sets close-reason])))
 
-(defn apply-triggers! [conn report-eid trig-result email-eid email-mid from-addr]
+(defn apply-triggers! [conn report-eid trig-result email-eid email-mid from-addr source-cfg]
   (when trig-result
     (let [db      (d/db conn)
           current (d/pull db proxy-state-attrs report-eid)
@@ -382,7 +382,12 @@
                   (str "(by " email-mid ")"))
         ;; Propagate trigger-driven closure of a patch to the
         ;; bugs/requests it resolves (no successor in the trigger path).
-        (when (and (= :patch rtype) close-reason (:report/closed new-sets))
+        ;; Sources with `:patch-triggers? false` opt out of the :resolved
+        ;; propagation; :canceled retraction still runs (no-op when no
+        ;; auto-credit was posed in the first place).
+        (when (and (= :patch rtype) close-reason (:report/closed new-sets)
+                   (or (not= :resolved close-reason)
+                       (common/patch-triggers? source-cfg)))
           (rel/propagate-patch-closure! conn report-eid rtype email-eid
                                         close-reason nil))))))
 
@@ -996,7 +1001,8 @@
         (let [voted? (when (and (= :request report-type) from-addr)
                        (apply-vote! conn report-eid from-addr body-text email delivery source-cfg)
                        (some? (detect-vote body-text)))]
-          (apply-triggers! conn report-eid trig-result eid (:email/message-id email) from-addr)
+          (apply-triggers! conn report-eid trig-result eid (:email/message-id email) from-addr
+                           source-cfg)
           (apply-directives! conn report-eid directives eid from-addr is-maint? fail-ctx)
           (boolean (or (seq trig-result) (seq directives) voted?)))))
     false))

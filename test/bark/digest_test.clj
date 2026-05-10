@@ -136,12 +136,19 @@
                                 :to "direct@test.org"}
                  "public-list" {:admin "admin@test.org"
                                 :source-type :mailing-list
-                                :list "list.test.org"}})
+                                :list "list.test.org"}
+                 "no-triggers" {:admin "admin@test.org"
+                                :source-type :mailbox
+                                :to "no-triggers@test.org"
+                                :patch-triggers? false}})
 
 (def sources [{:name "public-list"
                :list "list.test.org"}
               {:name "direct"
-               :to "direct@test.org"}])
+               :to "direct@test.org"}
+              {:name "no-triggers"
+               :to "no-triggers@test.org"
+               :patch-triggers? false}])
 
 ;; ---------------------------------------------------------------------------
 ;; DB setup / teardown
@@ -156,6 +163,9 @@
                         :maint-tenure/email  "admin@test.org"
                         :maint-tenure/order  0}
                        {:maint-tenure/source "public-list"
+                        :maint-tenure/email  "admin@test.org"
+                        :maint-tenure/order  0}
+                       {:maint-tenure/source "no-triggers"
                         :maint-tenure/email  "admin@test.org"
                         :maint-tenure/order  0}])
     ;; Insert test emails. Fixtures only set :email/from-address /
@@ -470,6 +480,25 @@
                    (:series/id (:report/series r126))))
             (is (= "orgweb|kana@test.org|2"
                    (:series/id (:report/series r127))))))
+
+        ;; --- :patch-triggers? false on source (emails 128-129) ---
+        (testing "Source with :patch-triggers? false skips auto-credit"
+          (let [bug   (get-report db "<128@test.org>")
+                patch (get-report db "<129@test.org>")]
+            (is (= :bug   (:report/type bug)))
+            (is (= :patch (:report/type patch)))
+            ;; The :resolves cross-link is still recorded -- only the
+            ;; side effects on the bug are gated.
+            (is (some #(= "<128@test.org>" (:report/message-id %))
+                      (all-related patch))
+                ":resolves cross-link is still recorded")
+            ;; No auto-credit fired on the bug.
+            (is (nil? (:report/acked bug))
+                "auto-acked must NOT fire when :patch-triggers? is false")
+            (is (nil? (:report/owned bug))
+                "auto-owned must NOT fire when :patch-triggers? is false")
+            (is (nil? (:report/closed bug))
+                "the bug must remain open after the patch arrives")))
 
         ;; --- Email 40 patch related to bug ---
         (testing "Email 40 patch related to bug"

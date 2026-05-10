@@ -540,12 +540,14 @@
 
 (defn- run-post-creation-hooks!
   "Execute post-creation side effects driven by the plan."
-  [conn report-eid eid email from-addr report-info
+  [conn report-eid eid email from-addr report-info source-cfg
    parent-eids nearest-eids patches plan]
   (when (:link-related plan)
     (link-rel! conn report-eid (:type report-info) email parent-eids))
-  ;; Auto-credit must run AFTER :link-related so :resolves relations exist
-  (when (:auto-credit-resolves plan)
+  ;; Auto-credit must run AFTER :link-related so :resolves relations exist.
+  ;; Skipped on sources with `:patch-triggers? false`.
+  (when (and (:auto-credit-resolves plan)
+             (common/patch-triggers? source-cfg))
     (auto-credit-resolved-reports! conn report-eid email))
   (when (:close-changes plan)
     (close-changes-for-release! conn (:version report-info) email report-eid))
@@ -654,7 +656,7 @@
                   (let [patches (detect/build-patch-entities email)
                         plan    (post-creation-plan report-info nearest-eids parent-eids patches)]
                     (run-post-creation-hooks! conn report-eid eid email from-addr report-info
-                                              parent-eids nearest-eids patches plan)))
+                                              source-cfg parent-eids nearest-eids patches plan)))
 
                 ;; Mark email as fully digested so future re-fetches can skip it.
                 (d/transact! conn [{:db/id eid :email/digested-at (Date.)}])

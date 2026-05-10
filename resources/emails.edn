@@ -1724,4 +1724,29 @@
   :email/in-reply-to "<125@test.org>"
   :email/references  "<125@test.org>"
   :email/body-text  "Patch 2.\n\ndiff --git a/style.css b/style.css\n--- a/style.css\n+++ b/style.css\n@@ -1,3 +1,3 @@\n-old\n+new\n"}
+
+ ;; =========================================================================
+ ;; 128-129 — :patch-triggers? false on the source.
+ ;; A bug, then a patch in reply. The bug must NOT be auto-acked/auto-owned
+ ;; on patch creation; only the structural :resolves cross-link is recorded.
+ ;; =========================================================================
+ {:email/id        "128"
+  :email/source      "no-triggers"
+  :email/message-id  "<128@test.org>"
+  :email/subject     "[BUG] segfault on startup"
+  :email/from-address "user@test.org"
+  :email/date-sent  #inst "2026-03-05T09:00:00"
+  :email/ingested-at #inst "2026-03-05T09:00:00"
+  :email/body-text  "Crashes on startup with empty config.\n"}
+
+ {:email/id        "129"
+  :email/source      "no-triggers"
+  :email/message-id  "<129@test.org>"
+  :email/subject     "Re: [BUG] segfault on startup"
+  :email/from-address "dev@test.org"
+  :email/date-sent  #inst "2026-03-05T10:00:00"
+  :email/ingested-at #inst "2026-03-05T10:00:00"
+  :email/in-reply-to "<128@test.org>"
+  :email/references  "<128@test.org>"
+  :email/body-text  "Patch attached.\n\ndiff --git a/init.clj b/init.clj\n--- a/init.clj\n+++ b/init.clj\n@@ -1,3 +1,3 @@\n-old\n+new\n"}
 ]

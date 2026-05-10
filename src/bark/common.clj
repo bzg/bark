@@ -564,6 +564,15 @@
                          " (expected :loose or :strict)")
                     {:value (:command-syntax source-cfg)}))))
 
+(defn patch-triggers?
+  "True when patches on this source act as triggers on the bugs/requests
+  they resolve: auto-acked + auto-owned on creation, and closure of the
+  patch as :resolved propagates to close the parent. Default true; set
+  `:patch-triggers? false` on a source to opt out."
+  [source-cfg]
+  (let [v (:patch-triggers? source-cfg)]
+    (if (nil? v) true (boolean v))))
+
 ;; ---------------------------------------------------------------------------
 ;; Maintainer tenures (pure -- operate on a seq of tenure maps, no DB access)
 ;; ---------------------------------------------------------------------------

@@ -168,6 +168,13 @@
  ;; a list that tightened from :loose to :strict), declare :periods on
  ;; the source — each period can override :command-syntax.
 
+ ;; ---- Patches as triggers (per-source, default true) ---------------------
+ ;;
+ ;; A patch in reply to a bug/request auto-Acks/auto-Owns the parent and
+ ;; propagates :resolved closure. Set false to opt out (the :resolves
+ ;; cross-link is still recorded). Overridable per :periods entry.
+ ;; :patch-triggers? false
+
  ;; ---- Exports -------------------------------------------------------------
 
  ;; Export formats (optional) — per-type feed files generated.
