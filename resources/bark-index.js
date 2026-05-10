@@ -384,23 +384,6 @@ function sortReports(key, dir) {
 
 /* ── Series folding ─────────────────────────────────────────── */
 
-function seriesStatusSummary(members) {
-  var acked = 0, closed = 0, open = 0;
-  for (var i = 0; i < members.length; i++) {
-    var seq = members[i].raw['patch-seq'] || '';
-    if (seq.indexOf('0/') === 0) continue; // skip cover letter
-    var flags = members[i].raw.flags || '---';
-    if (flags.length >= 3 && flags[2] !== '-') closed++;
-    else if (flags[0] !== '-') acked++;
-    else open++;
-  }
-  var parts = [];
-  if (acked)  parts.push(acked + ' acked');
-  if (closed) parts.push(closed + ' closed');
-  if (open)   parts.push(open + ' open');
-  return parts.join(', ');
-}
-
 function isSeriesHomogeneous(members) {
   var refCat = null;
   for (var i = 0; i < members.length; i++) {
@@ -465,7 +448,6 @@ function buildDisplayList() {
     repEntry._seriesFolded = folded;
     repEntry._seriesId = sid;
     repEntry._seriesMembers = members;
-    repEntry._seriesSummary = seriesStatusSummary(members);
 
     // Replace placeholder with representative + optionally expanded members
     var insert = [repEntry];
@@ -557,19 +539,11 @@ function buildRowElement(rpt) {
   if (rpt._isSeries && rpt._seriesMembers && rpt._seriesMembers.length > 1) {
     var arrow = rpt._seriesFolded ? '\u25B6' : '\u25BC';
     var stitle = rpt._seriesFolded ? 'Unfold series' : 'Fold series';
-    var patchCount = 0;
-    if (rpt._seriesMembers) {
-      for (var si = 0; si < rpt._seriesMembers.length; si++) {
-        var ps = rpt._seriesMembers[si].raw['patch-seq'] || '';
-        if (ps.indexOf('0/') !== 0) patchCount++;
-      }
-    }
-    var slabel = '[' + patchCount + ' patch' + (patchCount !== 1 ? 'es' : '') + ': ' + (rpt._seriesSummary || '') + ']';
     var safeSid = rpt._seriesId.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     seriesHtml = '<a href="javascript:void(0)" onclick="toggleSeriesFold(\'' +
       escAttr(safeSid) + '\'); return false;" title="' + escAttr(stitle) +
       '" style="font-size:0.75rem;margin-right:0.3em;text-decoration:none">' +
-      arrow + ' <small>' + escHtml(slabel) + '</small></a>';
+      arrow + '</a>';
   }
 
   var patchHtml = '';

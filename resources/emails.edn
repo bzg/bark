@@ -1686,4 +1686,42 @@
   :email/in-reply-to "<122@test.org>"
   :email/references  "<122@test.org>"
   :email/body-text  "Yes, my bug is a special case of the broader issue.\nSuperseded-by: <123@test.org>\n"}
+
+ ;; =========================================================================
+ ;; 125 — Cover letter for a series with no inner-bracket topic.
+ ;;       Each patch has a different `subdir:` colon-prefix in its
+ ;;       subject, so the per-message :topic parsed from the subject
+ ;;       diverges across patches. Threading via In-Reply-To must keep
+ ;;       all patches in the same series anyway.
+ ;; =========================================================================
+ {:email/id        "125"
+  :email/source      "direct"
+  :email/message-id  "<125@test.org>"
+  :email/subject     "[PATCH 0/2] orgweb: several minor style fixes"
+  :email/from-address "kana@test.org"
+  :email/date-sent  #inst "2026-03-04T10:00:00"
+  :email/ingested-at #inst "2026-03-04T10:00:00"
+  :email/body-text  "Cover letter for a small style cleanup.\n"}
+
+ {:email/id        "126"
+  :email/source      "direct"
+  :email/message-id  "<126@test.org>"
+  :email/subject     "[PATCH 1/2] org-demo.html: use canonical aside"
+  :email/from-address "kana@test.org"
+  :email/date-sent  #inst "2026-03-04T10:01:00"
+  :email/ingested-at #inst "2026-03-04T10:01:00"
+  :email/in-reply-to "<125@test.org>"
+  :email/references  "<125@test.org>"
+  :email/body-text  "Patch 1.\n\ndiff --git a/org-demo.html b/org-demo.html\n--- a/org-demo.html\n+++ b/org-demo.html\n@@ -1,3 +1,3 @@\n-old\n+new\n"}
+
+ {:email/id        "127"
+  :email/source      "direct"
+  :email/message-id  "<127@test.org>"
+  :email/subject     "[PATCH 2/2] css: fix horizontal scroll on mobile"
+  :email/from-address "kana@test.org"
+  :email/date-sent  #inst "2026-03-04T10:02:00"
+  :email/ingested-at #inst "2026-03-04T10:02:00"
+  :email/in-reply-to "<125@test.org>"
+  :email/references  "<125@test.org>"
+  :email/body-text  "Patch 2.\n\ndiff --git a/style.css b/style.css\n--- a/style.css\n+++ b/style.css\n@@ -1,3 +1,3 @@\n-old\n+new\n"}
 ]

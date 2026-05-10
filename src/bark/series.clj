@@ -47,6 +47,25 @@
            (not [?s :series/closed _])]
          db topic sender)))
 
+(defn find-open-series-via-parents
+  "Find an open series among parent reports' :report/series, restricted
+  to series with the given sender and expected total. Threading is the
+  reliable signal for series membership: the per-message :topic parsed
+  from the subject can vary across patches when each patch carries its
+  own `subdir:` colon-prefix, but threading via In-Reply-To/References
+  consistently links every patch back to the cover letter (or to a
+  sibling already in the series)."
+  [db parent-report-eids sender total]
+  (when (seq parent-report-eids)
+    (d/q '[:find ?s .
+           :in $ [?r ...] ?sender ?total
+           :where
+           [?r :report/series ?s]
+           [?s :series/sender ?sender]
+           [?s :series/expected ?total]
+           (not [?s :series/closed _])]
+         db parent-report-eids sender total)))
+
 (defn create-series! [conn topic sender total]
   (let [sid (next-series-id (d/db conn) topic sender total)]
     (d/transact! conn [{:series/id       sid
@@ -140,7 +159,10 @@
           (log/info "Auto-closed series"
                     (pr-str (:series/id (d/pull (d/db conn) [:series/id] sid)))
                     "(superseded)")))
-      (let [series-eid (or (find-open-series (d/db conn) topic from-addr m)
+      (let [series-eid (or (when (pos? n)
+                             (find-open-series-via-parents
+                              (d/db conn) parent-report-eids from-addr m))
+                           (find-open-series (d/db conn) topic from-addr m)
                            (let [sid (create-series! conn topic from-addr m)]
                              (log/info "New series:"
                                        (pr-str (series-id topic from-addr m))

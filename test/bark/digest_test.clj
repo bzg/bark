@@ -451,6 +451,26 @@
             (is (some? (:report/series r39)))
             (is (= "1/3" (:report/patch-seq r39)))))
 
+        ;; --- Series with diverging per-patch :topic (emails 125-127) ---
+        (testing "Series held together by threading despite divergent topics"
+          ;; Cover letter and patches each have a different `subdir:`
+          ;; colon-prefix, so the per-message :topic differs across
+          ;; reports. Threading via In-Reply-To must keep all patches
+          ;; in the cover letter's series.
+          (let [s (get-series-by-id db "orgweb|kana@test.org|2")]
+            (is (some? (:series/id s)))
+            (is (= 2 (:series/expected s)))
+            (is (= "<125@test.org>" (get-in s [:series/cover-letter :email/message-id])))
+            (is (= 2 (series-patch-count db "orgweb|kana@test.org|2"))))
+          (let [r126 (get-report db "<126@test.org>")
+                r127 (get-report db "<127@test.org>")]
+            (is (some? (:report/series r126)))
+            (is (some? (:report/series r127)))
+            (is (= "orgweb|kana@test.org|2"
+                   (:series/id (:report/series r126))))
+            (is (= "orgweb|kana@test.org|2"
+                   (:series/id (:report/series r127))))))
+
         ;; --- Email 40 patch related to bug ---
         (testing "Email 40 patch related to bug"
           (let [patch (get-report db "<40@test.org>")
