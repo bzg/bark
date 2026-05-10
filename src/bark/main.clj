@@ -295,7 +295,7 @@
   (try
     (store-and-process! db-conn source-map sources msg ingest-opts)
     (catch Exception e
-      (log/error e "Failed to process id:" (:id msg))
+      (log/error e "Failed to process id:" (:id msg) (blog/exception-msg e))
       nil)))
 
 (defn- collect-safe-uids

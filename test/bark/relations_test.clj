@@ -36,11 +36,19 @@
   (testing ":supersedes requires same type, both actionable"
     (is (true?  (r/valid-pose? :supersedes 1 2 :patch :patch)))
     (is (false? (r/valid-pose? :supersedes 1 2 :patch :bug))))
-  (testing ":resolves allows different types (patch resolves bug or request)"
+  (testing ":resolves requires patch source and bug/request target"
     (is (true?  (r/valid-pose? :resolves 1 2 :patch :bug)))
     (is (true?  (r/valid-pose? :resolves 1 2 :patch :request)))
     (is (false? (r/valid-pose? :resolves 1 2 :patch :ann))
-        "non-actionable target rejected"))
+        "non-actionable target rejected")
+    (is (false? (r/valid-pose? :resolves 1 2 :patch :patch))
+        "patch->patch rejected (would auto-credit cover letter from its own series)")
+    (is (false? (r/valid-pose? :resolves 1 2 :bug :patch))
+        "bug source rejected (use :resolved-by for the reverse direction)")
+    (is (true?  (r/valid-pose? :resolved-by 1 2 :bug :patch)))
+    (is (true?  (r/valid-pose? :resolved-by 1 2 :request :patch)))
+    (is (false? (r/valid-pose? :resolved-by 1 2 :patch :patch))
+        "patch->patch rejected on the inverse direction too"))
   (testing ":related-to accepts any type"
     (is (true?  (r/valid-pose? :related-to 1 2 :ann :release)))
     (is (true?  (r/valid-pose? :related-to 1 2 :bug :patch))))

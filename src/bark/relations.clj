@@ -79,6 +79,14 @@
     [to-eid from-eid]
     [from-eid to-eid]))
 
+(defn- valid-resolves-pair?
+  "True iff source/target types form a legal `:resolves` pose
+  (a patch resolving a bug or request).  `:resolved-by` is checked by
+  passing the inverse pair."
+  [source-type target-type]
+  (and (= source-type :patch)
+       (contains? #{:bug :request} target-type)))
+
 (defn valid-pose?
   "True when a relation of `kind` can legally be posed between these
   reports. False if: kind unknown, self-loop, type constraint violated."
@@ -90,7 +98,11 @@
             (and (actionable-types source-type)
                  (actionable-types target-type)))
         (or (not (same-type-kinds kind))
-            (= source-type target-type)))))
+            (= source-type target-type))
+        (case kind
+          :resolves    (valid-resolves-pair? source-type target-type)
+          :resolved-by (valid-resolves-pair? target-type source-type)
+          true))))
 
 (defn pose-tx
   "Datoms to pose a relation. Returns 2 entity maps for asymmetric

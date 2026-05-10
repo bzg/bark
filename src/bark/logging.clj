@@ -71,9 +71,15 @@
           :fn        (fn [data]
                        (locking file-log-lock
                          (rotate-log! file max-bytes backlog)
-                         (spit file
-                               (str (force (:timestamp_ data)) " "
-                                    (str/upper-case (name (:level data))) " "
-                                    (:?ns-str data) " - "
-                                    (force (:msg_ data)) "\n")
-                               :append true)))}}}))))
+                         (let [^Throwable err (:?err data)
+                               trace (when err
+                                       (with-out-str
+                                         (.printStackTrace err
+                                                           (java.io.PrintWriter. *out*))))]
+                           (spit file
+                                 (str (force (:timestamp_ data)) " "
+                                      (str/upper-case (name (:level data))) " "
+                                      (:?ns-str data) " - "
+                                      (force (:msg_ data)) "\n"
+                                      trace)
+                                 :append true))))}}}))))
