@@ -80,7 +80,7 @@
 
 (defn- find-or-create-expiry-email!
   "Look up or create the synthetic email entity for an expiry event.
-  Uses a fresh (d/db conn) — NOT the read-only snapshot — so that
+  Uses a fresh (d/db conn) -- NOT the read-only snapshot -- so that
   re-runs within the same reduce are idempotent (they see earlier inserts)."
   [conn src report-mid now]
   (let [synth-mid (str "<bark-expired-" report-mid ">")]

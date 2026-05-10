@@ -6,11 +6,10 @@ report using predefined commands. Maintainers can update reports by
 writing directly to the monitored inbox, manage roles, and receive
 periodic digest emails.
 
+To explore BARK reports from your terminal, use [[https://codeberg.org/bzg/bone][bone]]. You can also
+highlight BARK with [[codeberg.org/bzg/gnus-bone][gnus-bone.el]] and [[https://codeberg.org/bzg/notmuch-bone][notmuch-bone.el]].
+
 For maintainers, see the full [[https://codeberg.org/bzg/bark/src/branch/main/docs/bark-manual.org][BARK manual]].
-
-To explore BARK reports from your terminal, use [[https://codeberg.org/bzg/bone][bone]].
-
-You can also highlight BARK with [[codeberg.org/bzg/gnus-bone][gnus-bone.el]] and [[https://codeberg.org/bzg/notmuch-bone][notmuch-bone.el]].
 
 ** Subject labels
 

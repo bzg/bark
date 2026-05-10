@@ -7,7 +7,7 @@
   vector declaring how :maintainers / :commands / :command-syntax /
   :labels change over time. Each period inherits unspecified fields
   from the source level. Periods are contiguous half-open windows
-  [from, to). Pure — no DB, no I/O."
+  [from, to). Pure -- no DB, no I/O."
   (:require [bark.common :as common]))
 
 (def ^:private overridable-keys
@@ -46,7 +46,7 @@
           periods)))
 
 (defn source-cfg-at-date
-  "Effective source-cfg for `source` at `date` — source-level fields
+  "Effective source-cfg for `source` at `date` -- source-level fields
   plus the period-level overrides covering `date`. Falls back to the
   last period when no period covers `date` (defensive; contiguous
   periods with an unbounded first :start cover every date)."
@@ -58,13 +58,13 @@
 
 (defn- validate-entry [idx period]
   (if-not (map? period)
-    [(str "period " idx ": not a map — " (pr-str period))]
+    [(str "period " idx ": not a map -- " (pr-str period))]
     (cond-> []
       (and (:start period) (not (iso-date? (:start period))))
-      (conj (str "period " idx ": :start not ISO yyyy-MM-dd — "
+      (conj (str "period " idx ": :start not ISO yyyy-MM-dd -- "
                  (pr-str (:start period))))
       (and (:end period) (not (iso-date? (:end period))))
-      (conj (str "period " idx ": :end not ISO yyyy-MM-dd — "
+      (conj (str "period " idx ": :end not ISO yyyy-MM-dd -- "
                  (pr-str (:end period))))
       (and (iso-date? (:start period)) (iso-date? (:end period))
            (not (neg? (compare (:start period) (:end period)))))

@@ -134,7 +134,7 @@
   (is (nil?            (common/source-type {:name "broken"}))))
 
 ;; ---------------------------------------------------------------------------
-;; build-source-map — nil source-type exclusion (fix 11)
+;; build-source-map -- nil source-type exclusion (fix 11)
 ;; ---------------------------------------------------------------------------
 
 (deftest build-source-map-excludes-nil-type
@@ -310,7 +310,7 @@
 ;; ---------------------------------------------------------------------------
 
 ;; ---------------------------------------------------------------------------
-;; parse-cli-args — --topics-filter
+;; parse-cli-args -- --topics-filter
 ;; ---------------------------------------------------------------------------
 
 (deftest parse-cli-args-topics-filter
@@ -331,7 +331,7 @@
   (is (false? (common/ics-file? nil))))
 
 ;; ---------------------------------------------------------------------------
-;; resolve-author — Mailman/DMARC munging detection
+;; resolve-author -- Mailman/DMARC munging detection
 ;; ---------------------------------------------------------------------------
 
 (deftest resolve-author-test
@@ -344,7 +344,7 @@
 
   (testing "Reply-To present but From-name has no 'via' marker: keep From"
     ;; Standard Reply-To use (e.g. 'reply to my work address').  We must
-    ;; NOT swap — the actual author is in From.
+    ;; NOT swap -- the actual author is in From.
     (is (= {:address "alice@example.org" :name "Alice"}
            (common/resolve-author
             {:from-address "alice@example.org"

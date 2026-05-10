@@ -1,6 +1,6 @@
 #!/usr/bin/env bb
 
-;; bark-index.clj — Generate the reports index HTML page from BARK data.
+;; bark-index.clj -- Generate the reports index HTML page from BARK data.
 ;;
 ;; Reads reports.json (produced by bark-export) and config.edn, then
 ;; builds a standalone HTML page.  Most logic is in Clojure; JS is
@@ -83,7 +83,7 @@
   .theme-toggle { cursor: pointer; background: none; border: none; font-size: 1.2rem; padding: 0.3rem; }
   [data-theme=dark] .bark-logo svg { filter: invert(0.7); }
 
-  /* Responsive: progressively hide columns — only Subject remains */
+  /* Responsive: progressively hide columns -- only Subject remains */
   @media (max-width: 1200px) {
     td:nth-child(4), th:nth-child(4) { display: none; } /* Flags */
   }
@@ -114,7 +114,7 @@
 " footer-css))
 
 ;; ---------------------------------------------------------------------------
-;; JS — client-side filtering, sorting, URL state, theme toggle.
+;; JS -- client-side filtering, sorting, URL state, theme toggle.
 ;; ---------------------------------------------------------------------------
 
 (def ^:private index-js (slurp "resources/bark-index.js"))
@@ -169,7 +169,7 @@
         [:meta {:name "viewport" :content "width=device-width, initial-scale=1"}]
         [:meta {:name "color-scheme" :content "light dark"}]
         [:meta {:name "description" :content bark-description}]
-        [:meta {:property "og:title" :content "BARK — Reports"}]
+        [:meta {:property "og:title" :content "BARK -- Reports"}]
         [:meta {:property "og:description" :content bark-description}]
         [:meta {:property "og:type" :content "website"}]
         [:link {:rel "stylesheet" :href pico-cdn}]
@@ -180,17 +180,17 @@
         (when has-rss?
           [:link {:rel "alternate" :type "application/rss+xml"
                   :title "BARK Reports RSS" :href rss-href}])
-        [:title "BARK — Reports"]
+        [:title "BARK -- Reports"]
         [:style (h/raw page-css)]]
        [:body
         [:main.container
-         (nav-bar "BARK — Reports" "reports")
+         (nav-bar "BARK -- Reports" "reports")
          (noscript-banner)
          [:p {:style "font-size:0.78rem;color:var(--pico-muted-color);margin-bottom:1rem"}
           (str "Generated " generated-at)]
          [:div.toolbar
           [:input#si {:type        "search"
-                      :placeholder "Press / to search — see Docs for syntax"
+                      :placeholder "Press / to search -- see Docs for syntax"
                       :oninput     "onSearchInput()"}]
           [:div.filters
            (for [t types]

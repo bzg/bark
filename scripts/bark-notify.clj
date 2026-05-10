@@ -1,6 +1,6 @@
 #!/usr/bin/env bb
 
-;; bark-notify.clj — Send notification emails to maintainers.
+;; bark-notify.clj -- Send notification emails to maintainers.
 ;;
 ;; BARK: Bug And Report Keeper
 ;;
@@ -9,11 +9,11 @@
 ;; Last-sent timestamps are stored in public/.last-notify.edn (not the DB).
 ;;
 ;; Usage:
-;;   bb notify           — send due notifications
-;;   bb notify --dry-run — show what would be sent without sending
+;;   bb notify           -- send due notifications
+;;   bb notify --dry-run -- show what would be sent without sending
 ;;
 ;; Environment / defaults:
-;;   BARK_DB — path to db (default: ./data/bark-db)
+;;   BARK_DB -- path to db (default: ./data/bark-db)
 
 (require '[babashka.pods :as pods]
          '[clojure.string :as str]
@@ -49,7 +49,7 @@
       (try (edn/read-string (slurp f))
            (catch Exception e
              (log/warn "Could not parse" last-notify-file
-                       "— starting from empty state.  Subscribers may be"
+                       "-- starting from empty state.  Subscribers may be"
                        "re-notified at the next interval." (.getMessage e))
              {}))
       {})))
@@ -77,10 +77,10 @@
   "Return failures relevant to `email-addr` on `source` since `since-date`.
 
   Routing is driven by the `:audience` field on each failure entry:
-  - `:author`      — shown only to the address that triggered the failure
+  - `:author`      -- shown only to the address that triggered the failure
                      (someone seeing their own typo); default for legacy
                      entries that predate the field.
-  - `:maintainers` — shown to every maintainer subscriber on the source
+  - `:maintainers` -- shown to every maintainer subscriber on the source
                      (the notification loop already gates on
                      `still-privileged?`, so we don't re-check here)."
   [all-failures email-addr source since-date]
@@ -161,7 +161,7 @@
         from    (:from failure)
         mid     (:report-mid failure)
         subject (or (get subjects mid) mid)]
-    (str "  [" date "] " command " — " reason "\n"
+    (str "  [" date "] " command " -- " reason "\n"
          "    by: " from "\n"
          "    on: " subject)))
 
@@ -179,8 +179,8 @@
         expiry   (:report/expiry-value report)
         arch    (get-header (:email/headers-edn email) "Archived-At")]
     (str "  [" type "] " subject "\n"
-         "    from: " from " — " date
-         " — priority:" pri " replies:" replies
+         "    from: " from " -- " date
+         " -- priority:" pri " replies:" replies
          (when deadline (str " deadline:" (format-date-iso deadline)))
          (when expiry (str " expiry:" (format-date-iso expiry)))
          (when arch (str "\n    " arch)))))
@@ -278,7 +278,7 @@
         {:keys [dl owned unacked]} (build-sections relevant email)
         sec-fail   (failures-section db source failures)
         sec-dl     (section
-                    (str "== Upcoming deadlines — owned by you (" source ") ==")
+                    (str "== Upcoming deadlines -- owned by you (" source ") ==")
                     dl)
         sec-owned  (section
                     (str "== Open bugs/patches/requests owned by you (" source ") ==")
@@ -287,7 +287,7 @@
                     (str "== Unacked & unowned bugs/patches/requests (" source ") ==")
                     unacked)]
     (log/debug "build-email-body for" email (str "(source: " source ")"))
-    (log/debug "  total reports:" (count reports) "— relevant:" (count relevant))
+    (log/debug "  total reports:" (count reports) "-- relevant:" (count relevant))
     (join-sections [sec-fail sec-dl sec-owned sec-unack])))
 
 ;; ---------------------------------------------------------------------------
@@ -361,7 +361,7 @@
                              (doseq [p enabled
                                      :when (not (source-notify-enabled? src-map (:notify/source p)))]
                                (log/debug "SKIPPED" (:notify/email p)
-                                          "— notifications disabled for source"
+                                          "-- notifications disabled for source"
                                           (:notify/source p))))
                            (log/debug (count src-ok) "after per-source filter"))
               on-time  (if force? src-ok (filter #(due? % now last-sent-map) src-ok))
@@ -373,7 +373,7 @@
                              (doseq [p on-time
                                      :when (not (still-privileged? db p))]
                                (log/debug "DROPPED" (:notify/email p)
-                                          "— not maintainer for"
+                                          "-- not maintainer for"
                                           (:notify/source p)))))
               sent     (atom 0)
               updated-map (atom last-sent-map)]

@@ -1,6 +1,6 @@
 #!/usr/bin/env bb
 
-;; bark-export.clj — Export BARK reports per source.
+;; bark-export.clj -- Export BARK reports per source.
 ;;
 ;; Each source gets its own directory tree under public/:
 ;;   public/<source-name>/index.html
@@ -23,25 +23,25 @@
 ;;   public/<source-name>/patches/<mid-hash>/<file>
 ;;
 ;; Usage:
-;;   bb export               — incremental export (skip if nothing changed)
-;;   bb export json          — export all.json for each source
-;;   bb export rss           — export all.xml for each source
-;;   bb export org           — export all.org for each source
-;;   bb export html          — generate index.html for each source
-;;   bb export stats         — generate stats.json for each source
-;;   bb export patches       — export patch files for each source
-;;   bb export events        — export ICS event files and events.ics for each source
-;;   bb export text          — export text/plain and text/x-log attachments
-;;   bb export root          — regenerate public/index.html (source listing)
-;;   bb export all           — all formats (still incremental)
-;;   bb export --force       — force full export, ignore timestamps
-;;   bb export --only-open   — also export -open files (all-open.json, etc.)
-;;   bb export json -n src   — export only source "src"
-;;   bb export json -p 2     — only priority >= 2
-;;   bb export json -s 3     — only status >= 3
+;;   bb export               -- incremental export (skip if nothing changed)
+;;   bb export json          -- export all.json for each source
+;;   bb export rss           -- export all.xml for each source
+;;   bb export org           -- export all.org for each source
+;;   bb export html          -- generate index.html for each source
+;;   bb export stats         -- generate stats.json for each source
+;;   bb export patches       -- export patch files for each source
+;;   bb export events        -- export ICS event files and events.ics for each source
+;;   bb export text          -- export text/plain and text/x-log attachments
+;;   bb export root          -- regenerate public/index.html (source listing)
+;;   bb export all           -- all formats (still incremental)
+;;   bb export --force       -- force full export, ignore timestamps
+;;   bb export --only-open   -- also export -open files (all-open.json, etc.)
+;;   bb export json -n src   -- export only source "src"
+;;   bb export json -p 2     -- only priority >= 2
+;;   bb export json -s 3     -- only status >= 3
 ;;
 ;; Environment / defaults:
-;;   BARK_DB — path to db (default: ./data/bark-db)
+;;   BARK_DB -- path to db (default: ./data/bark-db)
 
 (require '[babashka.process :as process]
          '[cheshire.core :as json]
@@ -75,14 +75,14 @@
 
 (defn- get-last-export
   "Read the last export timestamp from public/.last-export, or nil.
-  A corrupt file forces a full export on the next run — log so the
+  A corrupt file forces a full export on the next run -- log so the
   operator knows why."
   []
   (let [f (io/file last-export-file)]
     (when (.exists f)
       (try (java.util.Date. ^long (parse-long (str/trim (slurp f))))
            (catch Exception e
-             (log/warn "Could not parse" last-export-file "— forcing full export."
+             (log/warn "Could not parse" last-export-file "-- forcing full export."
                        (.getMessage e))
              nil)))))
 
@@ -361,7 +361,7 @@
                            (:email/attachments @att-email)))))))
 
 ;; ---------------------------------------------------------------------------
-;; Export context — bound once per export run via with-export-context.
+;; Export context -- bound once per export run via with-export-context.
 ;; Used by map-reports, dump-events!, dump-text!, and collect-vevents
 ;; to access the DB and votes without threading parameters through
 ;; every dump-* function.
@@ -400,6 +400,42 @@
               elapsed-days (/ elapsed-ms (* 24 60 60 1000))]
           (>= elapsed-days delay-days))))))
 
+(defn- group-relations
+  "Build the per-kind relation summary for a pulled report.
+  Outgoing relations (:rel/_from) cover all kinds; incoming :related-to
+  (:rel/_to) is added because the symmetric kind canonicalises to the
+  smaller-eid side, so the other report only sees it via incoming."
+  [report src-type]
+  (let [self-eid   (:db/id report)
+        archive    (fn [other-r]
+                     (when-not (#{:alias :mailbox} src-type)
+                       (archived-at (:report/email other-r))))
+        format-rel (fn [from-side? rel]
+                     (let [other (if from-side? (:rel/to rel) (:rel/from rel))
+                           a     (archive other)
+                           subj  (get-in other [:report/email :email/subject])]
+                       (cond-> {:message-id (:report/message-id other)}
+                         (:report/type other) (assoc :type (name (:report/type other)))
+                         subj                 (assoc :subject subj)
+                         a                    (assoc :archived-at a)
+                         (:rel/setter rel)    (assoc :setter (:rel/setter rel))
+                         (:rel/posed-at rel)  (assoc :posed-at (format-date-iso (:rel/posed-at rel)))
+                         (:rel/value rel)     (assoc :value (:rel/value rel)))))
+        active-not-self (fn [other-key]
+                          (filter #(and (:rel/active? %)
+                                        (not= self-eid (:db/id (other-key %))))))
+        out        (sequence (comp (active-not-self :rel/to)
+                                   (map (juxt :rel/kind #(format-rel true %))))
+                             (:rel/_from report))
+        in-related (sequence (comp (active-not-self :rel/from)
+                                   (filter #(= :related-to (:rel/kind %)))
+                                   (map (juxt :rel/kind #(format-rel false %))))
+                             (:rel/_to report))]
+    (reduce-kv (fn [m k entries]
+                 (assoc m (keyword (name k)) (mapv second entries)))
+               {}
+               (group-by first (concat out in-related)))))
+
 (defn report->map [report source-map maintainers-map report-votes db]
   (let [email       (:report/email report)
         source-name (:email/source email)
@@ -409,7 +445,9 @@
         from        (or (:email/author-address email) "")
         arch        (archive-url report email source-map)
         src-type    (get-in source-map [source-name :source-type])
-        related     (:report/related report)
+        relations   (group-relations report src-type)
+        ;; First :supersedes outgoing (singular legacy field, if any)
+        first-sup   (first (:supersedes relations))
         role        (sender-role from source-name source-map maintainers-map)
         awaiting?   (awaiting-reply? report source-name source-map maintainers-map)]
     (-> {:type     (name (:report/type report))
@@ -438,25 +476,21 @@
           awaiting?                      (assoc :awaiting true)
           (:report/expiry-value report)   (assoc :expiry (format-date-iso (:report/expiry-value report)))
           (:report/close-reason report)   (assoc :close-reason (name (:report/close-reason report)))
-          (:report/superseded-by-target report)
+          ;; Legacy singular :superseded-by -- first outgoing :supersedes (if any).
+          ;; Subject is now exposed under :rel/to.{:report/email :email/subject}.
+          first-sup
           (assoc :superseded-by
-                 {:message-id (:report/message-id (:report/superseded-by-target report))
-                  :subject (get-in report [:report/superseded-by-target :report/email :email/subject])})
+                 (cond-> {:message-id (:message-id first-sup)}
+                   (get-in first-sup [:subject])
+                   (assoc :subject (:subject first-sup))))
           (and (= :expired (:report/close-reason report))
                (:email/date-sent (:report/closed report)))
           (assoc :expired-date (format-date-iso (:email/date-sent (:report/closed report)))))
         (merge (report-vote-fields report-votes))
         (cond->
-          (:report/series report) (assoc :series (report-series-fields (:report/series report)))
-          (seq related)
-          (assoc :related
-                 (mapv (fn [r]
-                         (let [a (when-not (#{:alias :mailbox} src-type)
-                                   (archived-at (:report/email r)))]
-                           (cond-> {:type (name (:report/type r))
-                                    :message-id (:report/message-id r)}
-                             a (assoc :archived-at a))))
-                       related)))
+          (:report/series report) (assoc :series (report-series-fields (:report/series report))))
+        ;; Qualified relations exported as one field per kind.
+        (merge relations)
         (cond->
           (seq (:report/patches report)) (assoc :patches (report-patch-fields report)))
         (merge (report-attachment-files report att-email))
@@ -737,15 +771,25 @@
          ":PROPERTIES:\n"
          (str/join "\n" props) "\n"
          ":END:\n"
-         (when-let [related (seq (:related m))]
-           (str "\nRelated:\n"
-                (str/join "\n"
-                          (map (fn [r]
-                                 (str "- [" (:type r) "] " (:message-id r)
-                                      (when-let [a (:archived-at r)]
-                                        (str " (" a ")"))))
-                               related))
-                "\n")))))
+         (let [;; Union of all qualified-relation kinds, deduped by mid.
+               all-related (->> [:resolves :resolved-by
+                                 :supersedes :superseded-by
+                                 :duplicates :duplicated-by
+                                 :related-to]
+                                (mapcat #(get m %))
+                                (filter :message-id)
+                                (group-by :message-id)
+                                vals
+                                (map first))]
+           (when (seq all-related)
+             (str "\nRelated:\n"
+                  (str/join "\n"
+                            (map (fn [r]
+                                   (str "- [" (:type r) "] " (:message-id r)
+                                        (when-let [a (:archived-at r)]
+                                          (str " (" a ")"))))
+                                 all-related))
+                  "\n"))))))
 
 (defn dump-org!
   "Dump reports as Org for a single source."
@@ -1116,7 +1160,7 @@
                      (str plural "-closed.org") (str plural " (closed)")))))))
 
 ;; ---------------------------------------------------------------------------
-;; Root index — public/index.html listing all sources
+;; Root index -- public/index.html listing all sources
 ;; ---------------------------------------------------------------------------
 
 (defn- load-source-meta
@@ -1161,7 +1205,7 @@
         page
         (str
          "<!DOCTYPE html>\n<html lang=\"en\">\n"
-         (html-head {:title "BARK — Sources"
+         (html-head {:title "BARK -- Sources"
                      :css (str "table{margin-top:1.5rem}"
                                "td.num,th.num{text-align:right}"
                                "a.archive{font-size:0.82rem;margin-left:0.4rem;opacity:0.7}"
@@ -1369,7 +1413,7 @@
                                                         :changed-types src-changed)
                                         (atomic-swap-dir! staging final-dir)
                                         (catch Exception e
-                                          (log/error e "Export failed for" src-name "— cleaning up staging dir")
+                                          (log/error e "Export failed for" src-name "-- cleaning up staging dir")
                                           (delete-dir! (io/file staging))
                                           (throw e)))
                                       true))))

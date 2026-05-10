@@ -104,18 +104,18 @@
  :report/important-address     {:db/valueType :db.type/string}
  ;; Why the report was closed: :resolved, :cancelled, :expired, or :superseded
  :report/close-reason          {:db/valueType :db.type/keyword}
- ;; Topic, deadline, expiry and superseded-by: the ref points to the
- ;; email that posed the value.  The actual business value lives in
- ;; the paired `-value` (scalar) or `-target` (structural ref) attr.
- ;; These commands have no proxy form, so there is no `-address` attr.
+ ;; Topic, deadline, expiry: the ref points to the email that posed
+ ;; the value.  The actual business value lives in the paired `-value`
+ ;; scalar attr.  These commands have no proxy form, so there is no
+ ;; `-address` attr.
+ ;; (Superseded-by has moved to the qualified-relations layer below;
+ ;; see :rel/* attributes.)
  :report/topic                 {:db/valueType :db.type/ref}
  :report/topic-value           {:db/valueType :db.type/string}
  :report/deadline              {:db/valueType :db.type/ref}
  :report/deadline-value        {:db/valueType :db.type/instant}
  :report/expiry                {:db/valueType :db.type/ref}
  :report/expiry-value          {:db/valueType :db.type/instant}
- :report/superseded-by         {:db/valueType :db.type/ref}
- :report/superseded-by-target  {:db/valueType :db.type/ref}
  :report/last-activity         {:db/valueType :db.type/instant}
  :report/last-activity-address {:db/valueType :db.type/string}
  :report/has-ics               {:db/valueType :db.type/boolean}
@@ -138,11 +138,31 @@
  :vote/voter  {:db/valueType :db.type/string}
 
  :report/series  {:db/valueType :db.type/ref}
- :report/related {:db/valueType   :db.type/ref
-                  :db/cardinality :db.cardinality/many}
  :report/patches {:db/valueType   :db.type/ref
                   :db/cardinality :db.cardinality/many
                   :db/isComponent true}
+
+ ;; --- Qualified relations between reports (defined by bark.relations) ---
+ ;;
+ ;; A relation is a standalone entity linking two reports.  Asymmetric
+ ;; kinds (:resolves, :supersedes, :duplicates) are stored as TWO
+ ;; entities (one per direction); the symmetric kind :related-to is
+ ;; stored as ONE entity canonicalized by ascending eid order.
+ ;;
+ ;; :rel/id encodes <from-eid>:<kind>:<to-eid> for replay idempotence.
+ ;; :rel/active? is flipped to false on retract; the entity is kept
+ ;; for audit instead of being physically retracted.
+ :rel/id           {:db/valueType :db.type/string
+                    :db/unique    :db.unique/identity}
+ :rel/from         {:db/valueType :db.type/ref}
+ :rel/to           {:db/valueType :db.type/ref}
+ :rel/kind         {:db/valueType :db.type/keyword}
+ :rel/setter       {:db/valueType :db.type/string}
+ :rel/email        {:db/valueType :db.type/ref}
+ :rel/posed-at     {:db/valueType :db.type/instant}
+ :rel/value        {:db/valueType :db.type/string}
+ :rel/active?      {:db/valueType :db.type/boolean}
+ :rel/retracted-by {:db/valueType :db.type/ref}
 
  ;; --- Patch content entities ---
  :patch/filename {:db/valueType :db.type/string}

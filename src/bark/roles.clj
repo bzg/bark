@@ -36,13 +36,13 @@
          :eid)))
 
 ;; ---------------------------------------------------------------------------
-;; Config seeding — per-period sync
+;; Config seeding -- per-period sync
 ;; ---------------------------------------------------------------------------
 
 (defn- active-as-of
   "Tenures whose half-open window [:from, :to) contains `as-of`. A nil
   `as-of` (dawn of time, first period without :start) has no active
-  state yet — returns []."
+  state yet -- returns []."
   [tenures ^Date as-of]
   (when as-of
     (filter (fn [{:keys [^Date from ^Date to]}]
@@ -68,7 +68,7 @@
   "Reconcile tenures with `period` at its start.
   - Opens declared emails that have no tenure matching this boundary's
     :from yet. Idempotent: re-running does not create duplicates, and
-    does NOT reinstate emails closed by a mail directive — the mail
+    does NOT reinstate emails closed by a mail directive -- the mail
     action is authoritative. Use --fresh to replay from scratch.
   - Closes active emails absent from the declared list at :from.
     When :from is nil (first unbounded-past period), closures are
@@ -97,7 +97,7 @@
     (when (and (seq drops) (nil? from))
       (doseq [email drops]
         (log/warn "Cannot close tenure for" email "on" source-name
-                  "— period has no :start")))
+                  "-- period has no :start")))
     (when (seq adds)
       (d/transact! conn adds)
       (doseq [{email :maint-tenure/email f :maint-tenure/from} adds]
@@ -313,7 +313,7 @@
   are allowed to change their notification preferences.  A non-
   maintainer attempt is logged and recorded as an
   `:insufficient-scope` failure (audience `:maintainers`), so it
-  becomes visible to the lead maintainer — otherwise the attempt
+  becomes visible to the lead maintainer -- otherwise the attempt
   would leave no trace at all. `strict-syntax?` (default false)
   controls whether the `!` prefix is required."
   ([conn roles source-name from-addr body-text email-date]

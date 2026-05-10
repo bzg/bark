@@ -1,6 +1,6 @@
 #!/usr/bin/env bb
 
-;; bark-stats.clj — Compute statistics from BARK data.
+;; bark-stats.clj -- Compute statistics from BARK data.
 ;;
 ;; Usage:
 ;;   bb stats                        -> writes public/stats.json
@@ -8,7 +8,7 @@
 ;;   bb scripts/bark-stats.clj html -o path/to/data.html
 ;;
 ;; Environment / defaults:
-;;   BARK_DB — path to db (default: ./data/bark-db)
+;;   BARK_DB -- path to db (default: ./data/bark-db)
 
 (require '[cheshire.core :as json]
          '[clojure.string :as str]
@@ -119,7 +119,7 @@
 
 (defn all-maintainer-since-dates
   "Return :from dates of currently-active tenures as ISO strings
-  (\"yyyy-MM-dd\"). Tenures with :from = nil are excluded — they are
+  (\"yyyy-MM-dd\"). Tenures with :from = nil are excluded -- they are
   counted via `maintainers-without-since` and fed as `n-always` to the
   cumulative chart."
   [db]
@@ -239,7 +239,7 @@
   "Cumulative maintainer count per month over the last 12 months.
   `since-dates` is a seq of \"yyyy-MM-dd\" strings from :roles/maintainer-since.
   `n-always` is the count of current maintainers with no since-date
-  (config-seeded without :since or directive-added) — they are counted
+  (config-seeded without :since or directive-added) -- they are counted
   as present in every month."
   [since-dates n-always]
   (let [by-ym (->> since-dates
@@ -523,7 +523,7 @@
                 top-openers email-ratio closed-cancel
                 participants-by-month contributors-by-month maintainers-by-month
                 total-participants total-contributors total-maintainers]} stats
-        nav-html (str (h/html (nav-bar "BARK — Data" "data")))
+        nav-html (str (h/html (nav-bar "BARK -- Data" "data")))
         data-section (render-data-section out-dir)
         vega-scripts (str "<script src=\"https://cdn.jsdelivr.net/npm/vega@5/build/vega.min.js\"></script>\n"
                           "<script src=\"https://cdn.jsdelivr.net/npm/vega-lite@5/build/vega-lite.min.js\"></script>\n"
@@ -535,7 +535,7 @@
     (str
      "<!DOCTYPE html>\n"
      "<html lang=\"en\" data-theme=\"light\">\n"
-     (html-head {:title      "BARK — Data"
+     (html-head {:title      "BARK -- Data"
                  :css        stats-css
                  :extra-head (str "<noscript><style>.grid{display:none}</style></noscript>\n"
                                   vega-scripts)})
@@ -558,7 +558,7 @@
        (kpi (str (:median-days time-to-close) "d") "Median to close"
             (str "avg " (:avg-days time-to-close) "d")))
      (when email-ratio
-       (kpi (or (:ratio email-ratio) "—") "Report/email ratio (last 12 months)"
+       (kpi (or (:ratio email-ratio) "--") "Report/email ratio (last 12 months)"
             (str (:reports-last-year email-ratio) " reports / "
                  (:emails-last-year email-ratio) " emails")))
      (when total-participants
@@ -620,7 +620,7 @@
   (let [json-path (or json-file (str out-dir "/reports/stats.json"))]
     (when-not (.exists (io/file json-path))
       (throw (ex-info (str "stats.json not found at " json-path
-                           " — generate it first with `bb stats`")
+                           " -- generate it first with `bb stats`")
                       {:path json-path})))
     (let [stats (load-stats-json json-path)]
       (spit-html out-file (render-html stats out-dir))

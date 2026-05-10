@@ -17,7 +17,7 @@
 (def pico-cdn "https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css")
 
 ;; ---------------------------------------------------------------------------
-;; Theme CDN — set via config.edn :theme or --theme CLI flag
+;; Theme CDN -- set via config.edn :theme or --theme CLI flag
 ;; ---------------------------------------------------------------------------
 
 (def ^:private themes-cdn
@@ -77,7 +77,7 @@
 ;; Shared metadata
 ;; ---------------------------------------------------------------------------
 
-(def bark-description "BARK (Bug And Report Keeper) — track bugs, patches, and requests.")
+(def bark-description "BARK (Bug And Report Keeper) -- track bugs, patches, and requests.")
 (def bark-repo-url "https://codeberg.org/bzg/bark")
 
 ;; ---------------------------------------------------------------------------
@@ -107,10 +107,10 @@
 (defn html-head
   "Render a <head> block as a string.
    opts keys:
-     :title      — page <title> (required)
-     :css        — inline CSS string (optional)
-     :extra-head — raw HTML string inserted before </head> (optional)
-     :rss-href   — href for <link rel=alternate> RSS (optional)"
+     :title      -- page <title> (required)
+     :css        -- inline CSS string (optional)
+     :extra-head -- raw HTML string inserted before </head> (optional)
+     :rss-href   -- href for <link rel=alternate> RSS (optional)"
   [{:keys [title css extra-head rss-href]}]
   (str "<head>\n"
        "<meta charset=\"UTF-8\">\n"
@@ -166,7 +166,7 @@
 (defn nav-bar
   "Render a <nav> with BARK logo, title, and Reports/Docs/Data links.
   `current` is the id of the active page (bolded).  When `current` is
-  nil, the per-source page links are omitted — useful on the root
+  nil, the per-source page links are omitted -- useful on the root
   index where those paths live one directory deeper."
   [title current]
   [:nav
@@ -201,9 +201,9 @@
     [:p [:strong "This page requires JavaScript to display reports."]
      " You can browse BARK data with these tools instead:"]
     [:ul
-     [:li [:a {:href "https://codeberg.org/bzg/bone"} "bone"] " — CLI based on fzf"]
-     [:li [:a {:href "https://codeberg.org/bzg/gnus-bone"} "gnus-bone"] " — GNU Emacs Gnus interface"]
-     [:li [:a {:href "https://codeberg.org/bzg/notmuch-bone"} "notmuch-bone"] " — GNU Emacs notmuch interface"]]
+     [:li [:a {:href "https://codeberg.org/bzg/bone"} "bone"] " -- CLI based on fzf"]
+     [:li [:a {:href "https://codeberg.org/bzg/gnus-bone"} "gnus-bone"] " -- GNU Emacs Gnus interface"]
+     [:li [:a {:href "https://codeberg.org/bzg/notmuch-bone"} "notmuch-bone"] " -- GNU Emacs notmuch interface"]]
     [:p "You can also access the data files directly:"]
     [:table
      [:thead [:tr [:th "File"] [:th "Description"]]]
@@ -247,14 +247,14 @@
     [:a {:href "https://www.gnu.org/philosophy/free-sw.html"}
      "Free Software"]
     (when feeds
-      (list " — "
+      (list " -- "
             [:a {:href "reports/all.xml"} "RSS"]
-            " — "
+            " -- "
             [:a {:href "reports/all.json"} "JSON"]
-            " — "
+            " -- "
             [:a {:href "reports/all.org"} "Org"]
             (when ical
-              (list " — " [:a {:href "events/announcements.ics"} "iCal"]))))]))
+              (list " -- " [:a {:href "events/announcements.ics"} "iCal"]))))]))
 
 ;; ---------------------------------------------------------------------------
 ;; Org-mode inline link conversion (shared by bark-docs, bark-stats)
@@ -310,7 +310,7 @@
              "</tbody></table>")))))
 
 ;; ---------------------------------------------------------------------------
-;; HTML tidy (optional — graceful no-op when tidy is not installed)
+;; HTML tidy (optional -- graceful no-op when tidy is not installed)
 ;; ---------------------------------------------------------------------------
 
 (def ^:private tidy-available?

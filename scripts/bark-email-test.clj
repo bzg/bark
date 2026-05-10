@@ -1,14 +1,14 @@
 #!/usr/bin/env bb
 
-;; test/bark-email-test.clj — Test SMTP configuration by sending a test email.
+;; test/bark-email-test.clj -- Test SMTP configuration by sending a test email.
 ;;
 ;; Reads :notifications :smtp from config.edn, sends a short test message
 ;; to the lead maintainer of the first source (or to a custom address via --to).
 ;;
 ;; Usage:
-;;   bb test-smtp                    — validate config, no email sent (default)
-;;   bb test-smtp --send             — actually send the test email
-;;   bb test-smtp --to me@example.com --send — send to a specific address
+;;   bb test-smtp                    -- validate config, no email sent (default)
+;;   bb test-smtp --send             -- actually send the test email
+;;   bb test-smtp --to me@example.com --send -- send to a specific address
 
 (require '[babashka.pods :as pods]
          '[clojure.edn :as edn]

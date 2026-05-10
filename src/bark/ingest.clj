@@ -42,7 +42,7 @@
 
 (defn sync-uid-validity!
   "Align the stored UIDVALIDITY with the mailbox's live value.
-  Returns :match, :stamped (first time), or :reset (changed — watermark
+  Returns :match, :stamped (first time), or :reset (changed -- watermark
   cleared). On :reset, the caller will see max-imap-uid return 0 and
   fall through to the first-run fetch path.
 
@@ -62,7 +62,7 @@
 
         (not= stored live-uv)
         (do (log/warn "UIDVALIDITY changed" stored "→" live-uv
-                      "— clearing UID watermark, re-running initial fetch")
+                      "-- clearing UID watermark, re-running initial fetch")
             (d/transact! conn [{:watermark/id "default"
                                 :watermark/imap-uid-validity live-uv
                                 :watermark/imap-uid 0}])
@@ -151,7 +151,7 @@
 
 (defn email->txdata
   "Convert a mailseq message map to Datalevin transaction data.
-  No source is stamped here — that is resolved at digest time from headers.
+  No source is stamped here -- that is resolved at digest time from headers.
   `opts` may contain :max-attachment-size to override the default (1 MB)."
   ([msg] (email->txdata msg {}))
   ([msg opts]
@@ -175,14 +175,7 @@
                       (parse-message-ids (if (vector? v)
                                            (str/join " " (keep identity v))
                                            v)))
-        ancestor-mids (let [refs-vec (when references
-                                       (re-seq #"<[^>]+>" references))
-                            base     (vec refs-vec)]
-                        (->> (cond-> base
-                               (and in-reply-to (not (some #{in-reply-to} base)))
-                               (conj in-reply-to))
-                             distinct
-                             vec))
+        ancestor-mids (common/ancestor-mids-from references in-reply-to)
         attachments (mapv (fn [att]
                             (let [filename (or (:filename att) "unnamed")
                                   is-patch (re-find #"(?i)\.(patch|diff)$" filename)
@@ -203,7 +196,7 @@
                               (when too-large?
                                 (log/warn "Attachment" filename "exceeds"
                                           (str (quot max-att-size 1024) "KB")
-                                          "limit (" (count raw-text) "chars) — content not stored"))
+                                          "limit (" (count raw-text) "chars) -- content not stored"))
                               (cond-> {:attachment/filename     filename
                                        :attachment/content-type (:content-type att)
                                        :attachment/size         (or (:size att)
@@ -253,7 +246,7 @@
 
 (defn store-email!
   "Store a single parsed email in Datalevin.
-  Skips if Message-ID is nil or already exists.
+  Skips if Message-ID is nil, oversized, or already exists.
   Returns true if the email was stored, false/nil otherwise.
   `opts` may contain :max-attachment-size to override the default (1 MB)."
   ([conn msg] (store-email! conn msg {}))
@@ -264,12 +257,16 @@
       (nil? message-id)
       (do (log/warn "Skipping email with nil Message-ID, id:" id) false)
 
+      (not (common/indexable-mid? message-id))
+      (do (log/warn "Skipping email with oversized Message-ID (" (count message-id)
+                    "chars), id:" id "-- exceeds LMDB key limit") false)
+
       (entity-exists? conn :email/message-id message-id)
       (do (log/debug "Skipping already stored Message-ID:" message-id) false)
 
       (entity-exists? conn :email/id id)
       (do (log/warn "Skipping id collision:" id
-                    "— different Message-ID but id already stored")
+                    "-- different Message-ID but id already stored")
           false)
 
       :else
@@ -281,7 +278,7 @@
           true
           (catch Exception e
             ;; If the message-id now exists, another process (e.g. bb digest)
-            ;; inserted it between our exists? check and the transact — harmless race.
+            ;; inserted it between our exists? check and the transact -- harmless race.
             (let [now-exists? (try (entity-exists? conn :email/message-id message-id)
                                   (catch Exception _ false))]
               (if now-exists?

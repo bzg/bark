@@ -3,7 +3,7 @@
 ;; License-Filename: LICENSES/EPL-2.0.txt
 
 (ns bark.common
-  "Shared pure utilities for BARK. No datalevin dependency — loadable by both
+  "Shared pure utilities for BARK. No datalevin dependency -- loadable by both
   JVM and Babashka."
   (:require [clojure.string :as str]
             [clojure.edn :as edn]
@@ -21,7 +21,7 @@
 
 (def bark-format
   "BARK export format version. Bump when the JSON/Org export shape changes."
-  "0.8.0")
+  "0.9.0")
 
 (def bark-schema
   (edn/read-string (slurp (io/resource "bark-schema.edn"))))
@@ -290,7 +290,7 @@
   Normalizes values that reference Message-Ids (Message-Id itself,
   In-Reply-To) so that threading lookups match even when the raw
   header carries parenthetical comments, folded whitespace, or extra
-  padding — cases that show up on the Maildir read path where raw
+  padding -- cases that show up on the Maildir read path where raw
   MIME bytes are parsed directly rather than via IMAP ENVELOPE."
   [v]
   (when v
@@ -304,6 +304,36 @@
   Handles both string and vector values."
   [headers]
   (extract-bracketed-id (get-header headers "In-Reply-To")))
+
+;; LMDB key max is 511 bytes; Datalevin's AVE-index encoding (type tag
+;; + hex of the value + metadata) roughly doubles the raw string and
+;; adds padding.  A conservative cap of 200 chars on the raw mid keeps
+;; us comfortably under the limit and rejects pathological mids (some
+;; ProtonMail addresses produce 130+ char message-ids that trigger
+;; MDB_BAD_VALSIZE on insert/lookup).  Any code that uses a mid as a
+;; lookup key or unique attribute MUST filter through `indexable-mid?`.
+(def ^:const max-indexable-mid-length 200)
+
+(defn indexable-mid?
+  "True iff `mid` is non-nil and short enough to fit in the LMDB AVE
+  index for `:email/message-id` / `:report/message-id` lookups.
+  Use to short-circuit queries that would otherwise raise
+  MDB_BAD_VALSIZE on oversized mids."
+  [mid]
+  (and (string? mid) (<= (count mid) max-indexable-mid-length)))
+
+(defn ancestor-mids-from
+  "Pure helper -- ordered vector of ancestor message-ids from the
+  References (space-separated string) and In-Reply-To values.  Order
+  follows RFC 2822: root first, immediate parent last.  Mids exceeding
+  the LMDB index limit are filtered out -- they cannot be looked up
+  anyway, so retaining them in threading queries is pointless."
+  [references in-reply-to]
+  (let [refs (if (string? references) (re-seq #"<[^>]+>" references) [])
+        all  (if (and in-reply-to (not (some #{in-reply-to} refs)))
+               (conj (vec refs) in-reply-to)
+               (vec refs))]
+    (into [] (comp (distinct) (filter indexable-mid?)) all)))
 
 ;; ---------------------------------------------------------------------------
 ;; Source classification
@@ -423,7 +453,7 @@
 (defn resolve-author
   "Return {:address ... :name ...} for the effective author of an
   email.  When the From header has been rewritten by the list (Mailman
-  / DMARC munging — detected via the ` via ` pattern in the display
+  / DMARC munging -- detected via the ` via ` pattern in the display
   name), the real author lives in Reply-To.  Falls back to From in all
   other cases (including the common Reply-To-different-from-From use
   for personal correspondence).
@@ -535,7 +565,7 @@
                     {:value (:command-syntax source-cfg)}))))
 
 ;; ---------------------------------------------------------------------------
-;; Maintainer tenures (pure — operate on a seq of tenure maps, no DB access)
+;; Maintainer tenures (pure -- operate on a seq of tenure maps, no DB access)
 ;; ---------------------------------------------------------------------------
 ;;
 ;; A "tenure" is a map {:email str :from Date|nil :to Date|nil :order long|nil}
@@ -555,7 +585,7 @@
    (str/lower-case (or (:email t) ""))])
 
 (defn lead-maintainer
-  "Return the lower-cased email of the lead maintainer — the active tenure
+  "Return the lower-cased email of the lead maintainer -- the active tenure
   with the earliest :from (nil sorts first), tie-broken by :order then email.
   Returns nil if no active tenure."
   [tenures]
@@ -593,7 +623,7 @@
 
 (defn load-config
   "Load config.edn if it exists, or nil.  With no args, consults the
-  BARK_CONFIG env var, falling back to ./config.edn — so all bb
+  BARK_CONFIG env var, falling back to ./config.edn -- so all bb
   scripts honor a single override point without per-script flags."
   ([] (load-config (or (System/getenv "BARK_CONFIG") "config.edn")))
   ([path]
@@ -633,7 +663,7 @@
                                             (set (map keyword rt)))
                             :expiry (or (:expiry src) global-expiry)
                             :command-syntax (or (:command-syntax src) global-cs :loose)})]
-                   (log/warn "Source has no :list, :alias, or :to key — skipping:" (:name src)))))
+                   (log/warn "Source has no :list, :alias, or :to key -- skipping:" (:name src)))))
           (:sources config))))
 
 ;; ---------------------------------------------------------------------------
@@ -660,8 +690,14 @@
 (def report-pull-pattern
   ;; Each `:report/<state>` ref carries :email/author-address and
   ;; :email/date-sent so consumers can display "set by X on Y"
-  ;; without a second query.  Paired `-value`/`-target` attrs
-  ;; carry the business datum posed alongside the setter identity.
+  ;; without a second query.  Paired `-value` attrs carry the business
+  ;; datum posed alongside the setter identity.
+  ;;
+  ;; Qualified relations (:resolves, :supersedes, :duplicates,
+  ;; :related-to) are pulled via the reverse refs :rel/_from and
+  ;; :rel/_to.  Since asymmetric kinds store two datoms (one per
+  ;; direction), each report sees both its outgoing and incoming sides;
+  ;; consumers pick whichever is appropriate for display.
   '[:db/id :report/type :report/version
     :report/patch-seq :report/patch-source :report/message-id
     {:report/acked [:email/author-address :email/date-sent]}
@@ -678,12 +714,14 @@
     :report/deadline-value
     {:report/expiry [:email/author-address :email/date-sent]}
     :report/expiry-value
-    {:report/superseded-by [:email/author-address :email/date-sent]}
-    {:report/superseded-by-target [:report/message-id {:report/email [:email/subject]}]}
     :report/has-ics :report/has-text-attachments
     :report/last-activity :report/last-activity-address :report/descendants :report/digested-at :report/updated-at
-    {:report/related [:report/type :report/message-id
-                      {:report/email [:email/headers-edn]}]}
+    {:rel/_from [:rel/kind :rel/active? :rel/setter :rel/posed-at :rel/value
+                 {:rel/to [:db/id :report/type :report/message-id
+                           {:report/email [:email/subject]}]}]}
+    {:rel/_to [:rel/kind :rel/active? :rel/setter :rel/posed-at :rel/value
+               {:rel/from [:db/id :report/type :report/message-id
+                           {:report/email [:email/subject]}]}]}
     {:report/series [:series/id :series/expected :series/closed
                      {:series/patches [:db/id]}
                      {:series/cover-letter [:email/message-id]}]}
@@ -717,7 +755,7 @@
    :order (:maint-tenure/order m)})
 
 ;; ---------------------------------------------------------------------------
-;; Vote helpers (pure — no datalevin dependency)
+;; Vote helpers (pure -- no datalevin dependency)
 ;; ---------------------------------------------------------------------------
 
 (defn votes-by-report
@@ -752,7 +790,7 @@
   [a v]
   (cond
     (nil? v)       (do (log/warn "Flag" a "requires a value") :missing)
-    (flag-like? v) (do (log/warn "Flag" a "followed by flag" v "— missing value?") :flag-as-value)
+    (flag-like? v) (do (log/warn "Flag" a "followed by flag" v "-- missing value?") :flag-as-value)
     :else          :ok))
 
 (def ^:private valued-flags

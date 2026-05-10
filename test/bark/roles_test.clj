@@ -111,7 +111,7 @@
         (is (common/maintainer? ts "carol@x.org"))))))
 
 ;; ---------------------------------------------------------------------------
-;; sync-source-tenures! — per-period reconciliation
+;; sync-source-tenures! -- per-period reconciliation
 ;; ---------------------------------------------------------------------------
 
 (defn- emails [tenures]
@@ -158,7 +158,7 @@
 
 (deftest sync-warm-restart-preserves-mail-removal
   ;; A mail directive closed bob's tenure. A warm re-sync with config
-  ;; still declaring bob does NOT reinstate bob — the mail action is
+  ;; still declaring bob does NOT reinstate bob -- the mail action is
   ;; authoritative. To replay from scratch (ignoring historical mail
   ;; actions), the operator must use --fresh.
   (let [conn (fresh-conn)]
@@ -170,18 +170,18 @@
     (roles/sync-source-tenures!
      conn {:name "s" :maintainers ["lead@x.org" "bob@x.org"]})
     (is (not (contains? (active conn "s") "bob@x.org"))
-        "bob stays removed — warm re-sync is append-only here")))
+        "bob stays removed -- warm re-sync is append-only here")))
 
 (deftest sync-no-period-cannot-close-undeclared
   ;; Without :periods, sync is append-only (F=nil cannot carry a close
   ;; date). A pre-seeded maintainer absent from the declared list stays
-  ;; active — operator must use --fresh or add :periods.
+  ;; active -- operator must use --fresh or add :periods.
   (let [conn (fresh-conn)]
     (seed-two-maintainers! conn "s" "lead@x.org" "bob@x.org")
     (roles/sync-source-tenures!
      conn {:name "s" :maintainers ["lead@x.org"]})
     (is (contains? (active conn "s") "bob@x.org")
-        "bob stays active — no :periods means no close date available")))
+        "bob stays active -- no :periods means no close date available")))
 
 (deftest sync-with-started-first-period-can-close
   ;; First period has :start, so a pre-existing mail-added maintainer

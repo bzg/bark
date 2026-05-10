@@ -1,6 +1,6 @@
 #!/usr/bin/env bb
 
-;; bark-maintenance.clj — Purge orphan emails from the BARK database.
+;; bark-maintenance.clj -- Purge orphan emails from the BARK database.
 ;;
 ;; An orphan email is one that is not referenced by any report (directly
 ;; or as a descendant/command), and was not sent by a maintainer.
@@ -9,16 +9,16 @@
 ;; write collisions on the Datalevin database.
 ;;
 ;; Usage:
-;;   bb maintenance                  — dry run, show orphan counts
-;;   bb maintenance --delete         — actually delete orphan emails
-;;   bb maintenance -n my-source     — scope to a single source
-;;   bb maintenance --verbose        — list individual orphan message-ids
-;;   bb maintenance --failures       — list recent command failures
-;;   bb maintenance --retention DUR  — orphan retention (default: 90d).
+;;   bb maintenance                  -- dry run, show orphan counts
+;;   bb maintenance --delete         -- actually delete orphan emails
+;;   bb maintenance -n my-source     -- scope to a single source
+;;   bb maintenance --verbose        -- list individual orphan message-ids
+;;   bb maintenance --failures       -- list recent command failures
+;;   bb maintenance --retention DUR  -- orphan retention (default: 90d).
 ;;                                     Accepts "30d", "6m", "1y" or ISO date.
 ;;
 ;; Environment:
-;;   BARK_DB — path to db (default: ./data/bark-db)
+;;   BARK_DB -- path to db (default: ./data/bark-db)
 
 (require '[clojure.string :as str]
          '[taoensso.timbre :as log]
@@ -50,21 +50,27 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- report-referenced-eids
-  "All email entity IDs reachable from any report via any ref attribute.
-  This covers :report/email, :report/descendants, :report/acked,
-  :report/closed, :report/related, etc.
-  If it's an email entity pointed to by a report, it's protected."
+  "All email entity IDs reachable from any report via any ref attribute,
+  PLUS the emails referenced by qualified relations (:rel/email).
+  If an email is pointed to by a report or a relation, it's protected."
   [db]
-  (set (dq '[:find [?e ...]
-             :where
-             [?r :report/type _]
-             [?r _ ?e]
-             [?e :email/message-id _]]
-           db)))
+  (let [via-reports (dq '[:find [?e ...]
+                          :where
+                          [?r :report/type _]
+                          [?r _ ?e]
+                          [?e :email/message-id _]]
+                        db)
+        via-rels    (dq '[:find [?e ...]
+                          :where
+                          [?rel :rel/kind _]
+                          [?rel :rel/email ?e]
+                          [?e :email/message-id _]]
+                        db)]
+    (set (concat via-reports via-rels))))
 
 (defn- maintainer-addresses
   "Union of all addresses that ever held maintainer status on any source,
-  including closed tenures — these are still 'privileged' for the purpose
+  including closed tenures -- these are still 'privileged' for the purpose
   of orphan detection (we don't want to delete emails from a former
   maintainer just because their tenure was closed)."
   [db _config source-map]
@@ -138,7 +144,7 @@
                         " | " source
                         " | " from
                         " | " command
-                        " — " (get reason-labels reason (name reason)))))))))
+                        " -- " (get reason-labels reason (name reason)))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Main
@@ -183,7 +189,7 @@
                     (d/transact! conn tx-data)
                     (log/info "Done. Deleted" (count orphans) "email(s).")))
                 (do
-                  (log/info "Dry run — no changes made. Pass --delete to remove.")
+                  (log/info "Dry run -- no changes made. Pass --delete to remove.")
                   (log/info "Tip: use --verbose to list individual orphan message-ids."))))))))
     (finally
       (d/close conn))))

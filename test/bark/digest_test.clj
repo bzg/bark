@@ -27,26 +27,67 @@
               (.setTimeZone (TimeZone/getTimeZone "UTC")))]
     (.parse fmt s)))
 
-(defn- get-report [db message-id]
+(defn- get-report
+  "Pull a report by message-id, including the qualified-relation reverse refs.
+  After the qualified-links refactor: :report/superseded-by(-target) and
+  :report/related are gone -- see :rel/_from / :rel/_to instead."
+  [db message-id]
   (d/pull db
           '[:report/type :report/version :report/topic-value
             :report/patch-seq :report/patch-source :report/message-id
             :report/acked :report/owned :report/closed
             :report/close-reason
-            {:report/superseded-by-target [:report/message-id {:report/email [:email/subject]}]}
             :report/urgent :report/important
             :report/deadline-value :report/expiry-value
             :report/acked-address :report/owned-address
             :report/closed-address :report/urgent-address
             :report/important-address
             {:report/descendants [:email/message-id]}
-            {:report/related [:report/type :report/message-id]}
+            {:rel/_from [:rel/kind :rel/active? :rel/setter :rel/posed-at :rel/value
+                         {:rel/to [:db/id :report/type :report/message-id
+                                   {:report/email [:email/subject]}]}]}
+            {:rel/_to [:rel/kind :rel/active? :rel/setter :rel/posed-at :rel/value
+                       {:rel/from [:db/id :report/type :report/message-id
+                                   {:report/email [:email/subject]}]}]}
             {:report/series [:series/id :series/expected :series/closed
                              {:series/patches [:db/id]}
                              {:series/cover-letter [:email/message-id]}]}
             {:report/email [:email/subject :email/author-address
                             :email/headers-edn]}]
           [:report/message-id message-id]))
+
+;; --- Helpers to bridge legacy assertions to the new :rel/* model ---
+
+(defn- active-out-rels
+  "All active outgoing relations of `kind` from `report-pull`."
+  [report-pull kind]
+  (->> (:rel/_from report-pull)
+       (filter :rel/active?)
+       (filter #(= kind (:rel/kind %)))))
+
+(defn- active-in-rels
+  "All active incoming relations of `kind` into `report-pull`."
+  [report-pull kind]
+  (->> (:rel/_to report-pull)
+       (filter :rel/active?)
+       (filter #(= kind (:rel/kind %)))))
+
+(defn- all-related
+  "Legacy :report/related accessor: collects every report linked via
+  :related-to (canonical may live on either side), :resolves/:resolved-by,
+  or :supersedes/:superseded-by -- i.e. anything that used to populate
+  the bidirectional :report/related ref."
+  [report-pull]
+  (let [outs (->> (:rel/_from report-pull)
+                  (filter :rel/active?)
+                  (map :rel/to))
+        ins  (->> (:rel/_to report-pull)
+                  (filter :rel/active?)
+                  (map :rel/from))]
+    (vec (distinct (concat outs ins)))))
+
+(defn- superseded-by-target [report-pull]
+  (some-> (first (active-out-rels report-pull :supersedes)) :rel/to))
 
 (defn- report-exists? [db message-id]
   (some? (d/q '[:find ?r . :in $ ?mid :where [?r :report/message-id ?mid]]
@@ -310,11 +351,11 @@
             (is (= :release (:report/type rel)))
             (is (= "9.8" (:report/version rel)))
             (is (some #(= "<19@test.org>" (:report/message-id %))
-                      (:report/related rel)))
+                      (all-related rel)))
             (is (some #(= "<20@test.org>" (:report/message-id %))
-                      (:report/related chg)))))
+                      (all-related chg)))))
 
-        ;; --- Email 21 (Ignore mechanism removed — report is now created) ---
+        ;; --- Email 21 (Ignore mechanism removed -- report is now created) ---
         (testing "Email 21 spam user creates report (no Ignore)"
           (is (report-exists? db "<21@test.org>")))
 
@@ -375,7 +416,7 @@
           (is (not (report-exists? db "<32@test.org>"))))
 
         ;; --- Email 33 admin direct (no bark-source fallback) ---
-        (testing "Email 33 admin direct — no report without list delivery"
+        (testing "Email 33 admin direct -- no report without list delivery"
           (is (not (report-exists? db "<33@test.org>"))))
 
         ;; --- Series v1 ---
@@ -392,11 +433,11 @@
             (is (= "1/3" (:report/patch-seq r35)))
             ;; All 3 patches in the series are mutually related
             (is (some #(= "<36@test.org>" (:report/message-id %))
-                      (:report/related r35)))
+                      (all-related r35)))
             (is (some #(= "<37@test.org>" (:report/message-id %))
-                      (:report/related r35)))
+                      (all-related r35)))
             (is (some #(= "<35@test.org>" (:report/message-id %))
-                      (:report/related r37)))))
+                      (all-related r37)))))
 
         ;; --- Series v2 ---
         (testing "Series v2 emails 38-39"
@@ -416,9 +457,9 @@
                 bug   (get-report db "<23@test.org>")]
             (is (= :patch (:report/type patch)))
             (is (some #(= "<23@test.org>" (:report/message-id %))
-                      (:report/related patch)))
+                      (all-related patch)))
             (is (some #(= "<40@test.org>" (:report/message-id %))
-                      (:report/related bug)))))
+                      (all-related bug)))))
 
         ;; --- Emails 41-42 add then remove maintainer ---
         (testing "Emails 41-42 add then remove maintainer"
@@ -531,9 +572,9 @@
             (is (some? (:report/series r69)))
             ;; Patches in the same series are related to each other
             (is (some #(= "<69@test.org>" (:report/message-id %))
-                      (:report/related r68)))
+                      (all-related r68)))
             (is (some #(= "<68@test.org>" (:report/message-id %))
-                      (:report/related r69)))))
+                      (all-related r69)))))
 
         ;; --- Email 70 different sender ---
         (testing "Email 70 different sender same topic"
@@ -706,7 +747,7 @@
           (is (some? (:report/deadline-value (get-report db "<98@test.org>")))))
 
         ;; --- Email 100 [source-name] prefix (bark-source fallback removed) ---
-        (testing "Email 100 — no bark-source fallback"
+        (testing "Email 100 -- no bark-source fallback"
           (is (not (report-exists? db "<100@test.org>"))))
 
         ;; --- CHG 102+103 / REL 104 ---
@@ -714,7 +755,7 @@
           (let [chg1 (get-report db "<102@test.org>")
                 chg2 (get-report db "<103@test.org>")
                 rel  (get-report db "<104@test.org>")
-                rel-mids (set (map :report/message-id (:report/related rel)))]
+                rel-mids (set (map :report/message-id (all-related rel)))]
             (is (some? (:report/closed chg1)))
             (is (some? (:report/closed chg2)))
             (is (= :resolved (:report/close-reason chg1)))
@@ -722,9 +763,9 @@
             (is (contains? rel-mids "<102@test.org>"))
             (is (contains? rel-mids "<103@test.org>"))
             (is (some #(= "<104@test.org>" (:report/message-id %))
-                      (:report/related chg1)))
+                      (all-related chg1)))
             (is (some #(= "<104@test.org>" (:report/message-id %))
-                      (:report/related chg2)))))
+                      (all-related chg2)))))
 
         ;; --- Emails 105-107 Superseded-by ---
         (testing "Bug 105 superseded by 106"
@@ -733,12 +774,12 @@
             (is (some? (:report/closed r105)) "superseded report is closed")
             (is (= :superseded (:report/close-reason r105)))
             (is (= "<106@test.org>"
-                    (get-in r105 [:report/superseded-by-target :report/message-id])))
+                    (some-> (superseded-by-target r105) :report/message-id)))
             ;; Bidirectional related link
             (is (some #(= "<106@test.org>" (:report/message-id %))
-                      (:report/related r105)))
+                      (all-related r105)))
             (is (some #(= "<105@test.org>" (:report/message-id %))
-                      (:report/related r106)))))
+                      (all-related r106)))))
 
         ;; --- Emails 108-110 Supersede then unsupersede ---
         ;; 109 admin supersedes 108 by 106, 110 admin "Not superseded"
@@ -749,12 +790,12 @@
                 r106 (get-report db "<106@test.org>")]
             (is (nil? (:report/closed r108)) "unsuperseded report is reopened")
             (is (nil? (:report/close-reason r108)))
-            (is (nil? (:report/superseded-by-target r108)))
+            (is (nil? (superseded-by-target r108)))
             ;; Related link from the supersede is removed
             (is (not (some #(= "<106@test.org>" (:report/message-id %))
-                           (:report/related r108))))
+                           (all-related r108))))
             (is (not (some #(= "<108@test.org>" (:report/message-id %))
-                           (:report/related r106))))))
+                           (all-related r106))))))
 
         ;; --- Emails 122-124 user Superseded-by ---
         ;; user-a (not a maintainer) marks their own narrow report 122
@@ -766,12 +807,12 @@
             (is (some? (:report/closed r122)) "user supersede closes 122")
             (is (= :superseded (:report/close-reason r122)))
             (is (= "<123@test.org>"
-                    (get-in r122 [:report/superseded-by-target :report/message-id])))
+                    (some-> (superseded-by-target r122) :report/message-id)))
             ;; Bidirectional related link set by the supersede
             (is (some #(= "<123@test.org>" (:report/message-id %))
-                      (:report/related r122)))
+                      (all-related r122)))
             (is (some #(= "<122@test.org>" (:report/message-id %))
-                      (:report/related r123)))))
+                      (all-related r123)))))
 
         ;; --- Emails 114-116 Not closed on superseded report ---
         (testing "Bug 114 superseded then reopened via Not closed"
@@ -779,38 +820,38 @@
                 r106 (get-report db "<106@test.org>")]
             (is (nil? (:report/closed r114)) "report is reopened")
             (is (nil? (:report/close-reason r114)) "close-reason is cleared")
-            (is (nil? (:report/superseded-by-target r114)) "superseded-by-target is cleared")
+            (is (nil? (superseded-by-target r114)) "superseded-by-target is cleared")
             (is (not (some #(= "<106@test.org>" (:report/message-id %))
-                           (:report/related r114)))
+                           (all-related r114)))
                 "related link to superseder is removed")
             (is (not (some #(= "<114@test.org>" (:report/message-id %))
-                           (:report/related r106)))
+                           (all-related r106)))
                 "reverse related link is removed")))
 
         ;; --- Directive unit tests for supersede ---
         (testing "detect-directives: Superseded-by with angle brackets"
-          (is (= [{:action :set-superseded :target-message-id "<msg@example.com>" :scope :user :id :superseded-by}]
+          (is (= [{:action :set-superseded :attr :rel/supersedes :target-message-id "<msg@example.com>" :scope :user :id :superseded-by}]
                  (commands/detect-directives :bug "Superseded-by: <msg@example.com>\n"))))
 
         (testing "detect-directives: Superseded-by tolerates an URL prefix"
-          (is (= [{:action :set-superseded :target-message-id "<msg@example.com>" :scope :user :id :superseded-by}]
+          (is (= [{:action :set-superseded :attr :rel/supersedes :target-message-id "<msg@example.com>" :scope :user :id :superseded-by}]
                  (commands/detect-directives :bug "Superseded-by: https://orgmode.org/list/<msg@example.com>\n"))))
 
         (testing "detect-directives: Superseded-by accepts a public-inbox URL"
-          (is (= [{:action :set-superseded :target-message-id "<msg@example.com>" :scope :user :id :superseded-by}]
+          (is (= [{:action :set-superseded :attr :rel/supersedes :target-message-id "<msg@example.com>" :scope :user :id :superseded-by}]
                  (commands/detect-directives :bug "Superseded-by: https://list.orgmode.org/orgmode/msg@example.com/\n")))
-          (is (= [{:action :set-superseded :target-message-id "<msg@example.com>" :scope :user :id :superseded-by}]
+          (is (= [{:action :set-superseded :attr :rel/supersedes :target-message-id "<msg@example.com>" :scope :user :id :superseded-by}]
                  (commands/detect-directives :bug "Superseded-by: https://list.orgmode.org/orgmode/msg@example.com\n"))))
 
         (testing "detect-directives: Superseded-by accepts a bare message-id"
-          (is (= [{:action :set-superseded :target-message-id "<msg@example.com>" :scope :user :id :superseded-by}]
+          (is (= [{:action :set-superseded :attr :rel/supersedes :target-message-id "<msg@example.com>" :scope :user :id :superseded-by}]
                  (commands/detect-directives :bug "Superseded-by: msg@example.com\n"))))
 
         (testing "detect-directives: Superseded-by rejects URLs where the @ segment is non-terminal"
           (is (= [] (commands/detect-directives :bug "Superseded-by: https://example.com/foo@bar/baz.html\n"))))
 
         (testing "detect-directives: Not superseded"
-          (is (= [{:action :unset-superseded :scope :setter-or-maintainer :id :unsuperseded}]
+          (is (= [{:action :unset-superseded :attr :rel/supersedes :scope :setter-or-maintainer :id :unsuperseded}]
                  (commands/detect-directives :bug "Not superseded\n"))))
 
         (testing "resolve-commands: superseded-by"
@@ -879,7 +920,7 @@
             (is (some? (:report/closed r117)) "first patch should be closed")
             (is (= :superseded (:report/close-reason r117)))
             (is (= "<118@test.org>"
-                    (get-in r117 [:report/superseded-by-target :report/message-id])))))
+                    (some-> (superseded-by-target r117) :report/message-id)))))
 
         (testing "Patch 118 superseded by same-subject reply 119"
           (let [r118 (get-report db "<118@test.org>")]
@@ -887,7 +928,7 @@
             (is (some? (:report/closed r118)) "second patch should be closed")
             (is (= :superseded (:report/close-reason r118)))
             (is (= "<119@test.org>"
-                    (get-in r118 [:report/superseded-by-target :report/message-id])))))
+                    (some-> (superseded-by-target r118) :report/message-id)))))
 
         (testing "Patch 119 is open (latest in chain)"
           (let [r119 (get-report db "<119@test.org>")]
@@ -901,7 +942,7 @@
             (is (some? (:report/closed r120)) "first diff should be closed")
             (is (= :superseded (:report/close-reason r120)))
             (is (= "<121@test.org>"
-                    (get-in r120 [:report/superseded-by-target :report/message-id])))))
+                    (some-> (superseded-by-target r120) :report/message-id)))))
 
         (testing "Inline diff 121 is open (latest)"
           (let [r121 (get-report db "<121@test.org>")]
@@ -1093,7 +1134,7 @@
                                        :date #inst "2026-04-01T10:00:00"
                                        :body "broken\n"})
                             "direct")
-        ;; Reply whose IRT target never arrives — manually backdate
+        ;; Reply whose IRT target never arrives -- manually backdate
         ;; ingested-at to simulate an old pending email.
         (let [old-date #inst "2026-04-01T11:00:00"]
           (d/transact! conn
@@ -1110,7 +1151,7 @@
         (is (true? (pending? (d/db conn) "<ttl-orphan@test.org>"))
             "Setup: orphan should be pending")
 
-        ;; TTL flush with a 1-day window — orphan is older than 30 days.
+        ;; TTL flush with a 1-day window -- orphan is older than 30 days.
         (digest/flush-stale-pending! conn source-map sources 1)
 
         (let [db (d/db conn)

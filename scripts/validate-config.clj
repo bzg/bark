@@ -1,6 +1,6 @@
 #!/usr/bin/env bb
 
-;; validate-config.clj — Validate config.edn against spec.
+;; validate-config.clj -- Validate config.edn against spec.
 ;;
 ;; Usage:
 ;;   bb scripts/validate-config.clj [path]
@@ -58,7 +58,7 @@
 (s/def :match/alias ::non-blank-string)
 (s/def :match/to ::non-blank-string)
 
-;; Source — exactly one of :list, :alias, :to
+;; Source -- exactly one of :list, :alias, :to
 (defn- exactly-one-source-type? [src]
   (= 1 (count (filter some? (map src [:list :alias :to])))))
 
@@ -81,11 +81,11 @@
 ;; Per-source topics filter
 (s/def :source/topics-filter (s/coll-of ::non-blank-string :kind vector? :min-count 1))
 
-;; Per-source notifications (optional) — override global notification gate
+;; Per-source notifications (optional) -- override global notification gate
 (s/def :source-notif/enabled boolean?)
 (s/def :source/notifications (s/keys :req-un [:source-notif/enabled]))
 
-;; Per-source maintainers (optional) — plain list of email strings.
+;; Per-source maintainers (optional) -- plain list of email strings.
 ;; The first entry is the lead. "Add/Remove maintainer:" directives
 ;; mutate the live tenure history at runtime; for historical evolution,
 ;; use :periods (defined further down, after ::commands-map / ::labels).
@@ -112,7 +112,7 @@
 (s/def :db/path ::non-blank-string)
 (s/def :bark/db (s/keys :req-un [:db/path]))
 
-;; Ingest — :fetch accepts exactly one of three disjoint map shapes.
+;; Ingest -- :fetch accepts exactly one of three disjoint map shapes.
 (s/def :ingest.fetch/limit pos-int?)
 (s/def :ingest.fetch/since
   (s/and string? #(re-matches #"\d+[dwmy]" %)))
@@ -202,7 +202,7 @@
 
 (s/def :source/commands ::commands-map)
 
-;; Global commands (optional) — same shape as per-source
+;; Global commands (optional) -- same shape as per-source
 (s/def :bark/commands ::commands-map)
 
 ;; Subject triggers: map of report-type keyword -> vector of tag strings
@@ -245,7 +245,7 @@
 (s/def :logging/max-size (s/and ::non-blank-string #(re-matches #"\d+[KMG]B" (str/upper-case (str/trim %)))))
 (s/def :logging/backlog ::pos-int)
 
-;; Logging :email — sends log entries via :notifications :smtp
+;; Logging :email -- sends log entries via :notifications :smtp
 (s/def :log-email/to ::email)
 (s/def :log-email/level #{:debug :info :warn :error})
 (s/def :logging/email (s/keys :req-un [:log-email/to]
@@ -254,19 +254,19 @@
 (s/def :bark/logging (s/keys :opt-un [:logging/file :logging/level :logging/max-size
                                       :logging/backlog :logging/email]))
 
-;; Awaiting-reply delay — same units as parse-duration-str (d/w/m/y)
+;; Awaiting-reply delay -- same units as parse-duration-str (d/w/m/y)
 (s/def :bark/awaiting-delay
   (s/and ::non-blank-string #(re-matches #"\d+[dwmy](?:\s+\d+[dwmy])*" %)))
 (s/def :source/awaiting-delay :bark/awaiting-delay)
 
-;; Command syntax mode: :loose (default — ! is optional on every Bark
+;; Command syntax mode: :loose (default -- ! is optional on every Bark
 ;; instruction) or :strict (! required on every Bark instruction).
 ;; For historical evolution of this setting, declare multiple periods
 ;; on the source.
 (s/def :bark/command-syntax #{:loose :strict})
 (s/def :source/command-syntax :bark/command-syntax)
 
-;; Per-source periods (optional) — time-windowed overrides for
+;; Per-source periods (optional) -- time-windowed overrides for
 ;; :maintainers / :commands / :command-syntax / :labels.
 ;; Each period is a map with optional :start, :end (ISO yyyy-MM-dd) and
 ;; any subset of the overridable keys. Periods must be contiguous.

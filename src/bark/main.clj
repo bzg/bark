@@ -52,9 +52,9 @@
                              conn
                              {:from    from
                               :to      [to]
-                              :subject (str "[BARK] " level-str " — " (:?ns-str data))
+                              :subject (str "[BARK] " level-str " -- " (:?ns-str data))
                               :body    (str (force (:timestamp_ data)) " " level-str " "
-                                            (:?ns-str data) " — " msg)}))
+                                            (:?ns-str data) " -- " msg)}))
                           (catch Exception e
                             (.println System/err
                                       (str "Failed to send log email: " (.getMessage e))))))}}}))))
@@ -70,13 +70,13 @@
 ;; ---------------------------------------------------------------------------
 ;; Fetch parsing
 ;;
-;; `:fetch` accepts exactly one of three disjoint map shapes — strict,
+;; `:fetch` accepts exactly one of three disjoint map shapes -- strict,
 ;; no key mixing, empty map rejected:
 ;;
-;;   {:limit N}              — latest N messages (pos-int)
-;;   {:since "Nd"|"Nw"|...}  — relative duration from now (duration-only)
+;;   {:limit N}              -- latest N messages (pos-int)
+;;   {:since "Nd"|"Nw"|...}  -- relative duration from now (duration-only)
 ;;   {:start "yyyy-MM-dd"
-;;    :end   "yyyy-MM-dd"?}  — absolute window; :start alone, :end alone,
+;;    :end   "yyyy-MM-dd"?}  -- absolute window; :start alone, :end alone,
 ;;                             or both are all valid (ISO dates only).
 ;;
 ;; Mailseq's wire vocabulary is :since/:before; this function translates
@@ -134,7 +134,7 @@
       :else
       (fetch-err (str "value: " (pr-str v)
                       " (expected exactly one of {:limit N}, {:since \"30d\"}, "
-                      "or {:start/:end ISO} — no key mixing, no empty map)") v))))
+                      "or {:start/:end ISO} -- no key mixing, no empty map)") v))))
 
 (defn- cli-fetch->map
   "Convert a scalar --fetch CLI arg into the canonical map form.
@@ -158,7 +158,7 @@
 (defn- max-contiguous-safe-uid
   "Walk sorted UIDs from lowest to highest and return the last UID in the
   unbroken prefix of safe-uids.  Returns nil if the very first UID is
-  not safe — this is deliberate: we only advance the watermark past UIDs
+  not safe -- this is deliberate: we only advance the watermark past UIDs
   that are known-good in sequence, so that a failed message is retried
   on next reconnect rather than silently skipped."
   [all-uids safe-uids]
@@ -171,12 +171,12 @@
     (if-let [new-wm (max-contiguous-safe-uid all-uids safe-ids)]
       (do (when (not= new-wm (some->> all-uids last))
             (log/warn "Watermark stopped at UID" new-wm
-                      "(some messages failed — will retry on next reconnect)"))
+                      "(some messages failed -- will retry on next reconnect)"))
           (ingest/save-imap-uid! db-conn new-wm))
-      ;; First UID in batch failed — watermark cannot advance at all.
+      ;; First UID in batch failed -- watermark cannot advance at all.
       (when (seq all-uids)
         (log/warn "Watermark not advanced: first UID" (first all-uids)
-                  "failed — entire batch of" (count all-uids)
+                  "failed -- entire batch of" (count all-uids)
                   "message(s) will be retried on next reconnect")))))
 
 ;; ---------------------------------------------------------------------------
@@ -196,17 +196,22 @@
 (defn- store-and-process!
   "Classify, store, and digest an email.
   Returns one of:
-    :ok    — fully processed (or already digested), advance watermark
-    :skip  — deterministic skip (oversized, no source, no Message-ID),
+    :ok    -- fully processed (or already digested), advance watermark
+    :skip  -- deterministic skip (oversized, no source, no Message-ID),
              advance watermark since retrying won't help
-    :retry — transient failure, do not advance watermark
+    :retry -- transient failure, do not advance watermark
   When an email was previously stored but not yet digested (e.g. crash
   between store and digest), re-runs process-email! which is idempotent.
   Already-digested emails are skipped to avoid redundant work."
   [db-conn source-map sources msg {:keys [max-size max-attachment-size]}]
   (let [size (:size msg -1)
         id   (:id msg)
-        mid  (:message-id msg)]
+        ;; Normalize the same way `store-email!` does, so `:email/message-id`
+        ;; lookup refs resolve consistently after store.  Without this, a raw
+        ;; mid carrying RFC 5322 padding/comments diverges from the extracted
+        ;; form actually persisted, and `entity-exists?` returns true while
+        ;; the lookup ref fails downstream transacts.
+        mid  (common/extract-bracketed-id (:message-id msg))]
     (cond
       (and max-size (pos? size) (> size max-size))
       (do (log/warn "Skipping oversized email id:" id
@@ -214,7 +219,14 @@
           :skip)
 
       (nil? mid)
-      (do (log/warn "No Message-ID for id:" id "— skipping")
+      (do (log/warn "No Message-ID for id:" id "-- skipping")
+          :skip)
+
+      ;; LMDB key limit -- skip before any DB operation rather than
+      ;; crash mid-flight (see common/indexable-mid?).
+      (not (common/indexable-mid? mid))
+      (do (log/warn "Skipping email with oversized Message-ID (" (count mid)
+                    "chars), id:" id)
           :skip)
 
       :else
@@ -224,23 +236,29 @@
                            {:max-attachment-size max-attachment-size}
                            {})]
           (if (ingest/store-email! db-conn msg store-opts)
-            (do (d/transact! db-conn [{:db/id lookup :email/source src-name}])
-                (try-digest! db-conn source-map sources
-                             (d/pull (d/db db-conn) digest/email-pull-pattern lookup) mid))
-            (let [email (d/pull (d/db db-conn) digest/email-pull-pattern lookup)]
-              (cond
-                (not (:db/id email))
-                :ok
+            (let [eid (d/entid (d/db db-conn) lookup)]
+              (d/transact! db-conn [{:db/id eid :email/source src-name}])
+              (try-digest! db-conn source-map sources
+                           (d/pull (d/db db-conn) digest/email-pull-pattern eid) mid))
+            ;; store-email! returned false: either dup Message-ID (re-process
+            ;; the existing entity) or id collision on :email/id (a different
+            ;; Message-ID was stored under the same Maildir filename -- skip).
+            ;; Resolve the lookup with `d/entid` so a non-existent entity
+            ;; returns nil instead of a phantom :db/id from `d/pull`.
+            (if-let [eid (d/entid (d/db db-conn) lookup)]
+              (let [email (d/pull (d/db db-conn) digest/email-pull-pattern eid)]
+                (cond
+                  (:email/digested-at email)
+                  (do (log/debug "Already digested, skipping:" mid) :ok)
 
-                (:email/digested-at email)
-                (do (log/debug "Already digested, skipping:" mid) :ok)
-
-                :else
-                (do (log/info "Re-processing previously stored email:" mid)
-                    (when-not (:email/source email)
-                      (d/transact! db-conn [{:db/id lookup :email/source src-name}]))
-                    (try-digest! db-conn source-map sources email mid))))))
-        (do (log/debug "No matching source for id:" id "— not stored")
+                  :else
+                  (do (log/info "Re-processing previously stored email:" mid)
+                      (when-not (:email/source email)
+                        (d/transact! db-conn [{:db/id eid :email/source src-name}]))
+                      (try-digest! db-conn source-map sources email mid))))
+              (do (log/warn "Skipping id collision (different Message-ID stored):" mid)
+                  :skip))))
+        (do (log/debug "No matching source for id:" id "-- not stored")
             :skip)))))
 
 ;; ---------------------------------------------------------------------------
@@ -248,7 +266,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- log-first-run [{:keys [limit since]}]
-  (log/info "First run — fetching"
+  (log/info "First run -- fetching"
             (if since (str "messages since " since) (str "last " (or limit "all") " messages"))))
 
 (defn- first-run-messages [src folder fetch-opts]
@@ -259,7 +277,7 @@
   "Sort a batch of mailseq messages oldest-first by the Date: header,
   falling back to server receive time then UID so messages without a
   date do not reshuffle well-dated ones.  Ensures a parent is ingested
-  before its replies when both land in the same batch — descendant
+  before its replies when both land in the same batch -- descendant
   threading relies on the parent already existing in the DB."
   [msgs]
   (sort-by (fn [msg]
@@ -271,7 +289,7 @@
 (defn- safe-store-and-process!
   "Run store-and-process! on `msg`, logging and swallowing exceptions.
   Returns the result keyword (:ok/:skip/:retry) or nil on exception.
-  Honours `shutting-down?` — callers that iterate should also check it
+  Honours `shutting-down?` -- callers that iterate should also check it
   via a `:while` clause to stop cleanly."
   [db-conn source-map sources msg ingest-opts]
   (try
@@ -307,7 +325,7 @@
 
   Before fetching we check the folder's UIDVALIDITY: if it has changed
   since the last run, the stored UID watermark points nowhere and must
-  be cleared — otherwise `by-id-range` would silently return nothing
+  be cleared -- otherwise `by-id-range` would silently return nothing
   forever. On reset we fall through to the first-run fetch path."
   [src db-conn folder fetch-opts source-map sources ingest-opts]
   (let [live-uv   (try (mailseq/uid-validity src folder)
@@ -319,7 +337,7 @@
         msgs (sort-chronologically
               (if (zero? watermark)
                 (first-run-messages src folder fetch-opts)
-                (do (log/info "Resuming — fetching UIDs >" watermark)
+                (do (log/info "Resuming -- fetching UIDs >" watermark)
                     (mailseq/by-id-range src folder
                                          (str (inc watermark)) nil))))]
     (log/info "Fetched" (count msgs) "messages")
@@ -354,7 +372,7 @@
         (cond
           (and (empty? msgs) (seq all-ids))
           (log/warn "First-run filter matched 0 of" (count all-ids)
-                    "Maildir files — verify :fetch and :folder"
+                    "Maildir files -- verify :fetch and :folder"
                     "(all" (count all-ids) "ids will be sealed as seen)")
           (empty? msgs)
           (log/info "No new messages in Maildir")
@@ -363,7 +381,7 @@
               (process-each! db-conn source-map sources msgs ingest-opts)))
         ;; Record all pre-existing ids not yet stored, then flag init done.
         ;; If we crash before this point, the next run retries the first-run
-        ;; path — store-and-process! skips already-stored emails harmlessly.
+        ;; path -- store-and-process! skips already-stored emails harmlessly.
         (let [stored (ingest/known-email-ids db-conn)
               unseen (remove stored all-ids)]
           (when (seq unseen)
@@ -455,7 +473,7 @@
                      (if (nil? msg)
                        (log/warn "Watch delivered nil message, skipping")
                        (do
-                         (log/info "New message via watch — id:" (:id msg)
+                         (log/info "New message via watch -- id:" (:id msg)
                                    "Subject:" (:subject msg))
                          (try
                            (let [result (store-and-process! db-conn source-map sources msg ingest-opts)]
@@ -470,12 +488,12 @@
                   :heartbeat-ms (* 20 60 1000)}))
 
 ;; ---------------------------------------------------------------------------
-;; Run context — shared by batch and watch modes
+;; Run context -- shared by batch and watch modes
 ;; ---------------------------------------------------------------------------
 
 (defn- run-opts
   "Derive the per-run options from mailbox and ingest config.  Same shape
-  for batch and watch — factoring this prevents the two paths drifting."
+  for batch and watch -- factoring this prevents the two paths drifting."
   [mailbox-cfg ingest-cfg]
   {:folder       (or (:folder mailbox-cfg) "INBOX")
    :mailbox-type (:type mailbox-cfg)
@@ -492,7 +510,7 @@
   "Re-read config, seed any newly-added maintainers into the tenure
   model, and derive source-map/sources.  Called once at startup in
   batch mode, and on every reconnect in watch mode so edits to
-  config.edn — including new maintainers — take effect without a
+  config.edn -- including new maintainers -- take effect without a
   restart.  `sync-all-sources!` and `ensure-notify-defaults!` are
   both idempotent, so re-running them on every reconnect is safe."
   [db-conn config-path]
@@ -600,7 +618,7 @@
     (log/error "No :mailbox key in config.edn.")
     (System/exit 1))
   (when-not (#{:imap :maildir} (:type mailbox-cfg))
-    (log/error "Invalid :type in :mailbox — expected :imap or :maildir, got:"
+    (log/error "Invalid :type in :mailbox -- expected :imap or :maildir, got:"
                (pr-str (:type mailbox-cfg)))
     (System/exit 1)))
 

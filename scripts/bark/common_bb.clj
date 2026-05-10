@@ -12,7 +12,7 @@
 (log/merge-config! {:min-level :info})
 
 ;; ---------------------------------------------------------------------------
-;; Datalevin pod (bb-only — JVM uses datalevin.core directly)
+;; Datalevin pod (bb-only -- JVM uses datalevin.core directly)
 ;; ---------------------------------------------------------------------------
 
 (def datalevin-version "0.10.7")
@@ -28,7 +28,7 @@
 (defn dpull "Resolved d/pull" [& args] (apply @d-pull args))
 
 ;; ---------------------------------------------------------------------------
-;; Datalevin queries (bb-only — JVM equivalents are inline)
+;; Datalevin queries (bb-only -- JVM equivalents are inline)
 ;; ---------------------------------------------------------------------------
 
 (defn all-reports
@@ -66,7 +66,7 @@
     :order  integer index from config.edn (absent when unknown)
     :lead?  true iff this is the currently-active lead tenure
   The list is sorted active-first (by :from asc, nil first), then closed
-  tenures by :to desc — matching how the HTML docs render them."
+  tenures by :to desc -- matching how the HTML docs render them."
   [tenures]
   (let [lead   (common/lead-maintainer tenures)
         sort-k (fn [{:keys [from to]}]

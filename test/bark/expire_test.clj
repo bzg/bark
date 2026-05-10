@@ -1,5 +1,5 @@
 (ns bark.expire-test
-  "Tests for bark.expire — rule-based report expiry."
+  "Tests for bark.expire -- rule-based report expiry."
   (:require [clojure.test :refer [deftest is testing]]
             [datalevin.core :as d]
             [bark.common :as common]
@@ -246,7 +246,7 @@
       (teardown! ctx))))
 
 (deftest combined-rules-test
-  (testing "All conditions met — expires"
+  (testing "All conditions met -- expires"
     (let [{:keys [conn] :as ctx} (setup-db!)
           source-map {"test-src" {:expiry {:bug {:inactive-after"5d"
                                                  :max-status 0
@@ -262,7 +262,7 @@
       (is (report-closed? conn "<combo-yes@test>"))
       (teardown! ctx)))
 
-  (testing "One condition fails (priority too high) — does NOT expire"
+  (testing "One condition fails (priority too high) -- does NOT expire"
     (let [{:keys [conn] :as ctx} (setup-db!)
           source-map {"test-src" {:expiry {:bug {:inactive-after"5d"
                                                  :max-status 0
@@ -280,7 +280,7 @@
       (is (not (report-closed? conn "<combo-no@test>")))
       (teardown! ctx)))
 
-  (testing "One condition fails (acked, score=1 > max-status=0) — does NOT expire"
+  (testing "One condition fails (acked, score=1 > max-status=0) -- does NOT expire"
     (let [{:keys [conn] :as ctx} (setup-db!)
           source-map {"test-src" {:expiry {:bug {:inactive-after"5d"
                                                  :max-status 0
@@ -308,7 +308,7 @@
       (is (not (report-closed? conn "<norule@test>")))
       (teardown! ctx)))
 
-  (testing "Source with no expiry config — nothing expires"
+  (testing "Source with no expiry config -- nothing expires"
     (let [{:keys [conn] :as ctx} (setup-db!)
           source-map {"test-src" {}}
           eid (insert-email! conn {:mid "<nocfg@test>" :date-sent (days-ago 100)})

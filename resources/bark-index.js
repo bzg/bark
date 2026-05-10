@@ -1,10 +1,10 @@
-// bark-index.js — Client-side filtering, sorting, URL state, lazy-load closed.
+// bark-index.js -- Client-side filtering, sorting, URL state, lazy-load closed.
 // Copyright (c) 2026 Bastien Guerry <bzg@gnu.org>
 // SPDX-License-Identifier: MPL-2.0
 //
 // Expects global objects:
-//   barkConfig — .types, .total, .openCount, .closedCount, .closedJsonUrl, .pageSize, .sourceType
-//   barkData   — array of report objects (open reports, embedded in page)
+//   barkConfig -- .types, .total, .openCount, .closedCount, .closedJsonUrl, .pageSize, .sourceType
+//   barkData   -- array of report objects (open reports, embedded in page)
 
 var allTypes = barkConfig.types;
 var activeTypes = {};
@@ -584,13 +584,28 @@ function buildRowElement(rpt) {
   }
 
   var relatedHtml = '';
-  if (r.related && r.related.length > 0) {
-    var mids = r.related.map(function(x) { return x['message-id']; }).filter(Boolean).join(',');
-    if (mids) {
-      relatedHtml = '<a class="secondary" href="#" onclick="showRelated(\'m:' + escAttr(mids) +
-        '\'); return false;" title="Filter related reports" style="font-size:0.75rem">\u21B3' +
-        r.related.length + ' </a>';
+  // Union of all qualified-relation kinds: a click on this link should
+  // filter on every report linked to the current one regardless of how
+  // (resolves, supersedes, duplicates, related-to, and their inverses).
+  var allRelated = [];
+  var seenMids = {};
+  ['resolves', 'resolved-by',
+   'supersedes', 'superseded-by',
+   'duplicates', 'duplicated-by',
+   'related-to'].forEach(function(kind) {
+    var entries = r[kind];
+    if (entries && entries.length) {
+      entries.forEach(function(e) {
+        var mid = e && e['message-id'];
+        if (mid && !seenMids[mid]) { seenMids[mid] = 1; allRelated.push(mid); }
+      });
     }
+  });
+  if (allRelated.length > 0) {
+    relatedHtml = '<a class="secondary" href="#" onclick="showRelated(\'m:' +
+      escAttr(allRelated.join(',')) +
+      '\'); return false;" title="Filter related reports" style="font-size:0.75rem">\u21B3' +
+      allRelated.length + ' </a>';
   }
 
   var eventsHtml = '';
@@ -635,9 +650,9 @@ function buildRowElement(rpt) {
   }
 
   var priLabel = priority === 3 ? 'A' : priority === 2 ? 'B' : priority === 1 ? 'C' : ' ';
-  var priTitle = priority === 3 ? 'Priority A — urgent and important'
-               : priority === 2 ? 'Priority B — urgent'
-               : priority === 1 ? 'Priority C — important'
+  var priTitle = priority === 3 ? 'Priority A -- urgent and important'
+               : priority === 2 ? 'Priority B -- urgent'
+               : priority === 1 ? 'Priority C -- important'
                : 'No priority';
   var isMaint = role === 'maintainer';
   var authorInner = isMaint ? '<strong>' + escHtml(author) + '</strong>' : escHtml(author);

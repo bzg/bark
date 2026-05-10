@@ -15,6 +15,7 @@
             [bark.detect :as detect]
             [bark.commands :as commands]
             [bark.periods :as periods]
+            [bark.relations :as rel]
             [bark.roles :as roles]
             [bark.series :as series])
   (:import [java.util Date]))
@@ -39,27 +40,31 @@
 ;; ---------------------------------------------------------------------------
 
 (defn ancestor-mids
-  "Return an ordered vector of ancestor message-ids from the References
-  and In-Reply-To headers.  Order follows RFC 2822: root thread ancestor
-  first, immediate parent last (suitable for `rseq` to walk nearest-first)."
+  "Ordered vector of ancestor message-ids on `email`.  Order follows
+  RFC 2822: root first, immediate parent last (so `rseq` walks
+  nearest-first).
+
+  Recomputed from `:email/references` / `:email/in-reply-to` rather
+  than read from `:email/ancestor-mids`, which is multi-valued (no
+  ordering guarantee) and only suited to the unordered lookup used by
+  `retry-pending-in-shared-thread!`."
   [email]
-  (let [raw  (:email/references email)
-        refs (if (string? raw) (re-seq #"<[^>]+>" raw) [])
-        irt  (:email/in-reply-to email)
-        all  (if (and irt (not (some #{irt} refs)))
-               (conj (vec refs) irt)
-               (vec refs))]
-    (into [] (distinct) all)))
+  (common/ancestor-mids-from (:email/references email)
+                              (:email/in-reply-to email)))
 
 (defn- lookup-reports-by-mid
-  "Find report eids matching a message-id, either as report root or descendant."
+  "Find report eids matching a message-id, either as report root or
+  descendant.  Returns #{} for mids exceeding the LMDB index limit
+  (they cannot have been stored, so the lookup would crash with
+  MDB_BAD_VALSIZE for nothing)."
   [db mid]
-  (let [as-root (d/q '[:find [?r ...] :in $ ?mid :where [?r :report/message-id ?mid]]
-                     db mid)
-        as-desc (d/q '[:find [?r ...] :in $ ?mid
-                       :where [?r :report/descendants ?e] [?e :email/message-id ?mid]]
-                     db mid)]
-    (into (set as-root) as-desc)))
+  (when (common/indexable-mid? mid)
+    (let [as-root (d/q '[:find [?r ...] :in $ ?mid :where [?r :report/message-id ?mid]]
+                       db mid)
+          as-desc (d/q '[:find [?r ...] :in $ ?mid
+                         :where [?r :report/descendants ?e] [?e :email/message-id ?mid]]
+                       db mid)]
+      (into (set as-root) as-desc))))
 
 (defn find-reports-for-email
   "Return all report eids threaded with this email."
@@ -89,7 +94,7 @@
           e     (d/entid db [:participant/key k])
           since (or date-sent (Date.))]
       (cond
-        ;; Already a participant — only act if we need to stamp contributor-since.
+        ;; Already a participant -- only act if we need to stamp contributor-since.
         e
         (when (and contributor?
                    (not (d/q '[:find ?d . :in $ ?e
@@ -156,41 +161,72 @@
                   (d/pull (d/db conn) [:report/last-activity] report-eid))]
     (d/transact! conn (descendant-tx report-eid email-eid email-date from-address current))))
 
-(defn- link-related-reports! [conn new-report-eid parent-report-eids]
+(defn- link-rel!
+  "Post-creation linker: posts qualified relations between the new
+  report and its threaded parents.
+
+  - `:related-to` (neutral) is posted between the new report and every
+    parent (was the role of the old `link-related-reports!`).
+  - `:resolves`/`:resolved-by` is *additionally* posted when the new
+    report is a patch and the parent is a bug or request -- this is
+    the structural support for auto-crediting and closure propagation."
+  [conn new-report-eid new-report-type email parent-report-eids]
   (when (seq parent-report-eids)
-    (let [txdata (into []
-                       (mapcat (fn [rid]
-                                 [[:db/add new-report-eid :report/related rid]
-                                  [:db/add rid :report/related new-report-eid]]))
-                       parent-report-eids)]
-      (d/transact! conn txdata))))
+    (let [db          (d/db conn)
+          parents     (d/q '[:find ?r ?t :in $ [?r ...]
+                             :where [?r :report/type ?t]]
+                           db (vec parent-report-eids))
+          posed-at    (or (:email/date-sent email) (Date.))
+          email-eid   (:db/id email)
+          setter      (:email/author-address email)
+          base-opts   {:from-eid new-report-eid
+                       :setter setter
+                       :email-eid email-eid
+                       :posed-at posed-at
+                       :value nil}]
+      (doseq [[parent-eid parent-type] parents]
+        ;; :related-to (neutral, all type combinations)
+        (when (rel/valid-pose? :related-to new-report-eid parent-eid
+                               new-report-type parent-type)
+          (rel/pose-if-absent! conn (assoc base-opts :to-eid parent-eid :kind :related-to)))
+        ;; :resolves (patch -> bug/request only)
+        (when (and (= :patch new-report-type)
+                   (rel/valid-pose? :resolves new-report-eid parent-eid
+                                    new-report-type parent-type))
+          (rel/pose-if-absent! conn (assoc base-opts :to-eid parent-eid :kind :resolves)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Auto-close logic
 ;; ---------------------------------------------------------------------------
 
-(defn- close-changes-for-release! [conn version release-email-eid release-report-eid]
+(defn- close-changes-for-release! [conn version release-email release-report-eid]
   (when (and version (not (str/blank? version)))
     (let [db      (d/db conn)
           open-chgs (d/q '[:find [?r ...] :in $ ?ver
                            :where
                            [?r :report/type :change] [?r :report/version ?ver]
                            (not [?r :report/closed _])]
-                         db version)]
+                         db version)
+          release-email-eid (:db/id release-email)]
       (when (seq open-chgs)
-        ;; Single transaction: closing the changes and linking them to the
-        ;; release must be atomic — otherwise a crash between the two could
-        ;; leave changes closed but not linked to their release.
+        ;; Close the changes atomically.  Linking via :related-to comes
+        ;; right after -- :rel/* posing is non-destructive (rel entities)
+        ;; so atomicity with the close is no longer mandatory.
         (let [close-tx (mapv (fn [r] {:db/id r
                                       :report/closed release-email-eid
                                       :report/close-reason :resolved})
-                             open-chgs)
-              rel-tx   (into []
-                             (mapcat (fn [chg-rid]
-                                       [[:db/add release-report-eid :report/related chg-rid]
-                                        [:db/add chg-rid :report/related release-report-eid]]))
                              open-chgs)]
-          (d/transact! conn (into close-tx rel-tx)))
+          (d/transact! conn close-tx))
+        (let [posed-at (or (:email/date-sent release-email) (Date.))
+              setter   (:email/author-address release-email)]
+          (doseq [chg-rid open-chgs]
+            (rel/pose-if-absent! conn {:from-eid  release-report-eid
+                                       :to-eid    chg-rid
+                                       :kind      :related-to
+                                       :setter    setter
+                                       :email-eid release-email-eid
+                                       :posed-at  posed-at
+                                       :value     nil})))
         (tracking/bump-report-updated! conn open-chgs)
         (log/info "Auto-closed" (count open-chgs)
                   "[CHG" version "] (superseded by release)")))))
@@ -198,7 +234,29 @@
 (defn- parse-version-number [v]
   (when v (when-let [[_ n] (re-find #"^v(\d+)$" v)] (parse-long n))))
 
-(defn- close-patch-previous-version! [conn report-eid report-info email-eid nearest-report-eids]
+(defn- auto-supersede-patch!
+  "Close `old-rid` as :superseded by `new-report-eid`, post the
+  :supersedes (+ :related-to companion) link, and propagate auto-credit
+  transfers.  `log-msg` is the human-readable detail appended to the
+  Auto-closed log line.  Idempotent on the relation pose."
+  [conn old-rid new-report-eid email log-msg]
+  (let [email-eid (:db/id email)
+        from-addr (:email/author-address email)
+        posed-at  (or (:email/date-sent email) (Date.))
+        opts      {:from-eid old-rid :to-eid new-report-eid
+                   :setter from-addr :email-eid email-eid
+                   :posed-at posed-at :value nil}]
+    (d/transact! conn [{:db/id old-rid
+                        :report/closed email-eid
+                        :report/close-reason :superseded}])
+    (rel/pose-if-absent! conn (assoc opts :kind :supersedes))
+    (rel/pose-if-absent! conn (assoc opts :kind :related-to))
+    (rel/propagate-patch-closure! conn old-rid :patch email-eid
+                                  :superseded new-report-eid)
+    (tracking/bump-report-updated! conn old-rid)
+    (log/info "Auto-closed patch" log-msg)))
+
+(defn- close-patch-previous-version! [conn report-eid report-info email nearest-report-eids]
   (let [new-version (:version report-info)
         new-topic   (:topic report-info)
         n           (parse-version-number new-version)]
@@ -219,16 +277,12 @@
                            (and new-topic
                                 (= (str/lower-case new-topic)
                                    (str/lower-case (or (:report/topic-value r) ""))))))
-              (d/transact! conn [{:db/id rid
-                                  :report/closed email-eid
-                                  :report/close-reason :superseded
-                                  :report/superseded-by email-eid
-                                  :report/superseded-by-target report-eid}])
-              (tracking/bump-report-updated! conn rid)
-              (log/info "Auto-closed [PATCH" (:report/version r)
-                        (or (:report/topic-value r) "") "]"
-                        (str "(" (:report/message-id r) ")")
-                        (str "(superseded by " new-version ")")))))))))
+              (auto-supersede-patch!
+               conn rid report-eid email
+               (str "[PATCH " (:report/version r)
+                    (when-let [t (:report/topic-value r)] (str " " t)) "] "
+                    "(" (:report/message-id r) ") "
+                    "(superseded by " new-version ")")))))))))
 
 (defn- normalize-subject
   "Strip Re:/Fwd: prefixes and bracketed tags to get the base subject."
@@ -244,32 +298,31 @@
   "When a new patch report is created in a thread, close open ancestor patch
   reports that share the same base subject (ignoring Re:/[TAG] prefixes).
   This handles re-sent patches/diffs without explicit version numbers."
-  [conn report-eid email-eid email nearest-report-eids]
+  [conn report-eid email nearest-report-eids]
   (let [new-subj (normalize-subject (:email/subject email))
         db       (d/db conn)]
     (when (and new-subj (seq nearest-report-eids))
-      (doseq [rid nearest-report-eids]
-        (when (not= rid report-eid)
-          (let [r (d/pull db [:report/type :report/closed :report/message-id
-                              {:report/email [:email/subject]}] rid)]
-            (when (and (= :patch (:report/type r))
-                       (not (:report/closed r))
-                       (= new-subj (normalize-subject (get-in r [:report/email :email/subject]))))
-              (d/transact! conn [{:db/id rid
-                                  :report/closed email-eid
-                                  :report/close-reason :superseded
-                                  :report/superseded-by email-eid
-                                  :report/superseded-by-target report-eid}])
-              (tracking/bump-report-updated! conn rid)
-              (log/info "Auto-closed patch" (:report/message-id r)
-                        "(superseded by same-subject thread patch)"))))))))
+      (doseq [rid nearest-report-eids
+              :when (not= rid report-eid)]
+        (let [r (d/pull db [:report/type :report/closed :report/message-id
+                            {:report/email [:email/subject]}] rid)]
+          (when (and (= :patch (:report/type r))
+                     (not (:report/closed r))
+                     (= new-subj (normalize-subject (get-in r [:report/email :email/subject]))))
+            (auto-supersede-patch!
+             conn rid report-eid email
+             (str (:report/message-id r) " (superseded by same-subject thread patch)"))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Source resolution
 ;; ---------------------------------------------------------------------------
 
-(defn- source-from-in-reply-to [db in-reply-to]
-  (when in-reply-to
+(defn- source-from-in-reply-to
+  "Lookup the source of the email referenced by `in-reply-to`, or nil.
+  Skips mids exceeding the LMDB index limit; the caller falls back to
+  header-based classification."
+  [db in-reply-to]
+  (when (common/indexable-mid? in-reply-to)
     (d/q '[:find ?src . :in $ ?mid
            :where [?e :email/message-id ?mid] [?e :email/source ?src]]
          db in-reply-to)))
@@ -310,14 +363,14 @@
             (classify-email-source (d/db conn) sources hdrs irt)]
         (when (and irt-src hdr-src (not= irt-src hdr-src))
           (log/warn "Source mismatch for" mid
-                    "— In-Reply-To says" irt-src
+                    "-- In-Reply-To says" irt-src
                     "but headers say" hdr-src (str "(using " irt-src ")")))
         (when src-name
           (d/transact! conn [{:db/id eid :email/source src-name}]))
         [src-name email delivery]))))
 
 ;; ---------------------------------------------------------------------------
-;; Single-email processing — pure decisions
+;; Single-email processing -- pure decisions
 ;; ---------------------------------------------------------------------------
 
 (defn creation-decision
@@ -341,6 +394,9 @@
   (let [rtype (:type report-info)]
     (cond-> #{}
       (seq parent-eids)                                       (conj :link-related)
+      ;; A patch in reply to a bug/request auto-credits the parent
+      ;; (acked + owned).  Runs AFTER :link-related so :resolves exists.
+      (and (= :patch rtype) (seq parent-eids))                (conj :auto-credit-resolves)
       (and (= :release rtype) (:version report-info))        (conj :close-changes)
       (and (= :patch rtype) (:version report-info)
            (seq nearest-eids))                                (conj :close-previous-version)
@@ -352,7 +408,7 @@
            (> (count patches) 1))                             (conj :auto-series))))
 
 ;; ---------------------------------------------------------------------------
-;; Single-email processing — effectful phases
+;; Single-email processing -- effectful phases
 ;; ---------------------------------------------------------------------------
 
 (defn- apply-controls!
@@ -371,7 +427,7 @@
 (defn- record-creation-denial!
   "Write a failure record for a report-creation attempt that was
   denied.  The report doesn't exist yet, so `:report-mid` is the
-  empty string — the notification renders the subject instead of a
+  empty string -- the notification renders the subject instead of a
   report link.  Audience is `:maintainers` so the lead sees the
   attempt."
   [source-name from-addr email report-info reason]
@@ -384,7 +440,7 @@
       :reason     :insufficient-scope
       :audience   :maintainers
       :command    (str "Create " (name (:type report-info))
-                       " — " (name reason)
+                       " -- " (name reason)
                        " (subject: " (:email/subject email) ")")})))
 
 (def ^:private denial-reason-labels
@@ -417,7 +473,7 @@
           (record-creation-denial! source-name from-addr email report-info decision)
           [nil report-info])
 
-      ;; nil — no report detected
+      ;; nil -- no report detected
       [nil report-info])))
 
 (defn- thread-and-apply-commands!
@@ -447,28 +503,64 @@
     (when (and any-cmd? (not new-report?))
       (ensure-participant! conn source-name from-addr
                            (:email/author-name email) (:email/date-sent email)))
-    (tracking/bump-report-updated! conn parent-eids)))
+    (when (seq parent-eids)
+      (tracking/bump-report-updated! conn parent-eids))))
+
+(defn- auto-credit-resolved-reports!
+  "For each report this patch :resolves (i.e. the bug/request the
+  patch was posted in reply to), auto-set :report/acked and :report/owned
+  on the parent, unless those attributes are already set explicitly
+  (an existing setter is preserved, the patch becomes a validator only).
+
+  Auto-credits posed here will later be detected via `auto-credit?`
+  for retraction on cancel, and on supersession transferred to the
+  new patch's author."
+  [conn patch-report-eid email]
+  (let [db        (d/db conn)
+        email-eid (:db/id email)
+        from-addr (:email/author-address email)
+        addr-lc   (some-> from-addr str/lower-case)
+        targets   (rel/active-targets db patch-report-eid :resolves)]
+    (doseq [bug-eid targets]
+      (let [bug-state (d/pull db [:report/acked :report/owned] bug-eid)
+            credit    (fn [tx attr addr-attr]
+                        (cond-> tx
+                          (nil? (get bug-state attr))
+                          (conj {:db/id bug-eid attr email-eid addr-attr addr-lc})))
+            tx        (-> []
+                          (credit :report/acked :report/acked-address)
+                          (credit :report/owned :report/owned-address))]
+        (when (seq tx)
+          (d/transact! conn tx)
+          (tracking/bump-report-updated! conn bug-eid)
+          (log/info "Auto-credit:" from-addr "credited as acked+owned of"
+                    (:report/message-id (d/pull (d/db conn) [:report/message-id] bug-eid))
+                    "via patch"
+                    (:report/message-id (d/pull (d/db conn) [:report/message-id] patch-report-eid))))))))
 
 (defn- run-post-creation-hooks!
   "Execute post-creation side effects driven by the plan."
   [conn report-eid eid email from-addr report-info
    parent-eids nearest-eids patches plan]
   (when (:link-related plan)
-    (link-related-reports! conn report-eid parent-eids))
+    (link-rel! conn report-eid (:type report-info) email parent-eids))
+  ;; Auto-credit must run AFTER :link-related so :resolves relations exist
+  (when (:auto-credit-resolves plan)
+    (auto-credit-resolved-reports! conn report-eid email))
   (when (:close-changes plan)
-    (close-changes-for-release! conn (:version report-info) eid report-eid))
+    (close-changes-for-release! conn (:version report-info) email report-eid))
   (when (:close-previous-version plan)
-    (close-patch-previous-version! conn report-eid report-info eid nearest-eids))
+    (close-patch-previous-version! conn report-eid report-info email nearest-eids))
   (when (:close-superseded-thread plan)
-    (close-superseded-thread-patches! conn report-eid eid email nearest-eids))
+    (close-superseded-thread-patches! conn report-eid email nearest-eids))
   (when (:manage-series plan)
-    (series/manage-series! conn report-eid eid report-info from-addr parent-eids))
+    (series/manage-series! conn report-eid email report-info from-addr parent-eids))
   (when (:store-patches plan)
     (d/transact! conn [{:db/id report-eid :report/patches patches}])
     (log/info (count patches) "patch file(s) stored"))
   (when (:auto-series plan)
     (let [series-eid (series/create-series! conn (:topic report-info) from-addr 1)]
-      (series/add-patch-to-series! conn series-eid report-eid)
+      (series/add-patch-to-series! conn series-eid report-eid email)
       (series/close-series! conn series-eid eid)
       (log/info "Auto-created single-member series for"
                 (count patches) "patch attachments"))))
@@ -478,41 +570,23 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- in-reply-to-resolved?
-  "True when the email's In-Reply-To target is nil (root) or already
-  stored in the DB.  When false, the email is held as pending — its
-  threading and commands are deferred until the missing ancestor (or
-  any thread sibling) arrives."
+  "True when the email's In-Reply-To target is nil (root), exceeds the
+  LMDB index limit (cannot be looked up nor stored, so threading via
+  it is impossible anyway), or is already stored in the DB.  When
+  false, the email is held as pending -- its threading and commands
+  are deferred until the missing ancestor (or any thread sibling)
+  arrives."
   [db email]
   (let [irt (:email/in-reply-to email)]
     (or (nil? irt)
+        (not (common/indexable-mid? irt))
         (some? (d/entid db [:email/message-id irt])))))
 
-(declare process-email!)
-
-(defn- retry-pending-in-shared-thread!
-  "After processing `email` normally, retry any pending email that
-  shares at least one ancestor mid with it (or that has `email`'s own
-  mid in its ancestors).  The recursive `process-email!` call retracts
-  the pending flag if its In-Reply-To is now resolvable."
-  [conn email source-map sources]
-  (let [own-mid   (:email/message-id email)
-        ancestors (cond-> (set (:email/ancestor-mids email))
-                    own-mid (conj own-mid))]
-    (when (seq ancestors)
-      (let [pendings (d/q '[:find [?e ...] :in $ [?mid ...]
-                            :where
-                            [?e :email/pending-thread? true]
-                            [?e :email/ancestor-mids ?mid]]
-                          (d/db conn) (vec ancestors))]
-        (doseq [pending-eid pendings]
-          (let [pending-email (d/pull (d/db conn) email-pull-pattern pending-eid)]
-            (log/info "Retrying pending email" (:email/message-id pending-email)
-                      "(triggered by" own-mid ")")
-            (process-email! conn source-map sources pending-email)))))))
-
 ;; ---------------------------------------------------------------------------
-;; Single-email processing — orchestrator
+;; Single-email processing -- orchestrator
 ;; ---------------------------------------------------------------------------
+
+(declare retry-pending-in-shared-thread!)
 
 (defn process-email!
   "Process a single email: classify source, detect report, thread,
@@ -526,7 +600,7 @@
   or the TTL flush forces processing after N days.
 
   Opts:
-    :force-thread? — bypass the pending-thread guard, threading the
+    :force-thread? -- bypass the pending-thread guard, threading the
                      email with whatever ancestors currently exist in
                      the DB.  Used by the TTL flush."
   ([conn source-map sources email] (process-email! conn source-map sources email {}))
@@ -537,7 +611,7 @@
         was-pending? (:email/pending-thread? email)
         [source-name email delivery] (resolve-email-source! conn email sources)]
     (if-not source-name
-      (log/debug "No matching source for" message-id "— skipping")
+      (log/debug "No matching source for" message-id "-- skipping")
       (let [source-cfg   (when-let [cfg (get source-map source-name)]
                              (periods/source-cfg-at-date cfg (:email/date-sent email)))
             via-channel? (common/sent-via-source-channel? delivery source-cfg)
@@ -594,11 +668,32 @@
             (do (d/transact! conn [{:db/id eid
                                     :email/pending-thread? true
                                     :email/digested-at (Date.)}])
-                (log/info "Pending:" message-id "— in-reply-to"
+                (log/info "Pending:" message-id "-- in-reply-to"
                           (:email/in-reply-to email) "absent from DB")))))))))
 
+(defn- retry-pending-in-shared-thread!
+  "After processing `email` normally, retry any pending email that
+  shares at least one ancestor mid with it (or that has `email`'s own
+  mid in its ancestors).  The recursive `process-email!` call retracts
+  the pending flag if its In-Reply-To is now resolvable."
+  [conn email source-map sources]
+  (let [own-mid   (:email/message-id email)
+        ancestors (cond-> (set (:email/ancestor-mids email))
+                    own-mid (conj own-mid))]
+    (when (seq ancestors)
+      (let [pendings (d/q '[:find [?e ...] :in $ [?mid ...]
+                            :where
+                            [?e :email/pending-thread? true]
+                            [?e :email/ancestor-mids ?mid]]
+                          (d/db conn) (vec ancestors))]
+        (doseq [pending-eid pendings]
+          (let [pending-email (d/pull (d/db conn) email-pull-pattern pending-eid)]
+            (log/info "Retrying pending email" (:email/message-id pending-email)
+                      "(triggered by" own-mid ")")
+            (process-email! conn source-map sources pending-email)))))))
+
 ;; ---------------------------------------------------------------------------
-;; TTL flush — force-process pending emails older than max-age-days
+;; TTL flush -- force-process pending emails older than max-age-days
 ;; ---------------------------------------------------------------------------
 
 (defn flush-stale-pending!

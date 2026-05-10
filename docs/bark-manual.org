@@ -182,8 +182,53 @@ Three forms are accepted:
 - An archive URL where the message-id is the last path segment, e.g.
   =https://list.orgmode.org/orgmode/msg-id@host/=.
 
+Source and target must both be bugs, patches, or requests, of the
+same type.
+
 See the [[#superseding-a-report-1][maintainer section]] for the full details on what this does
 and how to undo it.
+
+** Marking a report as a duplicate
+
+To mark a report as a duplicate of another, reply with:
+
+: Duplicate-of: <target-message-id@example.com>
+
+Same three message-id forms and type constraints as =Superseded-by:=.
+Closes the duplicate with reason =:cancelled= and links it to the
+target.  To undo: =Not duplicate.=
+
+Use =Superseded-by:= for "replaced by a newer version" (=:superseded=,
+typical for patch v1=>v2); =Duplicate-of:= for "same issue as another
+report" (=:cancelled=, typical for duplicated bug reports).
+
+** Cross-referencing reports
+
+To cross-reference another report:
+
+: Related-to: <other-message-id@example.com>
+
+Accepts any pair of reports.  Three message-id forms: bracketed
+(=<msg-id@host>=), bare (=msg-id@host=), or archive URL.  Several
+=Related-to:= lines in one email post several links.  Works on
+closed reports.  To undo:
+=Not related-to: <other-message-id@example.com>=.
+
+** Resolving a bug or request with a patch
+
+A patch sent in reply to a bug or request links the two reports and
+credits you for what it resolves:
+
+| What you do                  | Effect on the bug/request     |
+|------------------------------+-------------------------------|
+| Send the patch               | =Acked= + =Owned= by you          |
+| =Closed.= the patch (applied)  | =Closed=, reason =:resolved=      |
+| =Cancelled.= the patch         | Auto-acked/owned removed      |
+| =Superseded-by:= a newer patch | =Owned= transfers to new author |
+
+Only the *nearest* bug or request in the thread is affected.  An
+existing explicit =Acked= or =Owned= setter is preserved (the link
+is still posted).  To opt out: =Not acked.= / =Not owned.=
 
 ** Voting on requests
 

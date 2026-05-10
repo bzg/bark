@@ -6,8 +6,10 @@
   "Patch series management."
   (:require [clojure.string :as str]
             [datalevin.core :as d]
+            [bark.relations :as rel]
             [bark.tracking :as tracking]
-            [taoensso.timbre :as log]))
+            [taoensso.timbre :as log])
+  (:import [java.util Date]))
 
 (defn parse-seq
   "Parse \"2/5\" into [2 5], or nil."
@@ -71,28 +73,34 @@
                           :report/close-reason :superseded}])
       (tracking/bump-report-updated! conn rid))))
 
-(defn add-patch-to-series! [conn series-eid report-eid]
+(defn add-patch-to-series! [conn series-eid report-eid email]
   (let [existing (d/q '[:find [?r ...]
                          :in $ ?s ?self
                          :where [?s :series/patches ?r]
                          [(not= ?r ?self)]]
-                       (d/db conn) series-eid report-eid)
-        related-tx (into [] (mapcat (fn [rid]
-                                      [[:db/add report-eid :report/related rid]
-                                       [:db/add rid :report/related report-eid]]))
-                         existing)]
-    (d/transact! conn (into [[:db/add series-eid :series/patches report-eid]
-                             {:db/id report-eid :report/series series-eid}]
-                            related-tx))))
+                       (d/db conn) series-eid report-eid)]
+    (d/transact! conn [[:db/add series-eid :series/patches report-eid]
+                       {:db/id report-eid :report/series series-eid}])
+    ;; Cross-link this patch with siblings via :related-to (symmetric,
+    ;; canonicalized).  Idempotent via :rel/id unique-identity.
+    (let [opts {:from-eid  report-eid
+                :kind      :related-to
+                :setter    (:email/author-address email)
+                :email-eid (:db/id email)
+                :posed-at  (or (:email/date-sent email) (Date.))
+                :value     nil}]
+      (doseq [sibling-eid existing]
+        (rel/pose-if-absent! conn (assoc opts :to-eid sibling-eid))))))
 
 (defn set-cover-letter! [conn series-eid email-eid]
   (d/transact! conn [{:db/id series-eid :series/cover-letter email-eid}]))
 
 (defn manage-series!
   "After creating a patch report, manage its series membership."
-  [conn report-eid email-eid report-info from-addr parent-report-eids]
+  [conn report-eid email report-info from-addr parent-report-eids]
   (when-let [[n m] (parse-seq (:patch-seq report-info))]
-    (let [topic  (:topic report-info)
+    (let [email-eid (:db/id email)
+          topic  (:topic report-info)
           db     (d/db conn)
           existing-series (when topic
                             (find-open-series-by-topic-sender db topic from-addr))
@@ -147,4 +155,4 @@
         (if (zero? n)
           (do (set-cover-letter! conn series-eid email-eid)
               (d/transact! conn [{:db/id report-eid :report/series series-eid}]))
-          (add-patch-to-series! conn series-eid report-eid))))))
+          (add-patch-to-series! conn series-eid report-eid email))))))

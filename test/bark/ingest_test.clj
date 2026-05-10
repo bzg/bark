@@ -1,5 +1,5 @@
 (ns bark.ingest-test
-  "Unit tests for bark.ingest — ICS attachment data extraction."
+  "Unit tests for bark.ingest -- ICS attachment data extraction."
   (:require [clojure.test :refer [deftest is testing]]
             [bark.ingest :as ingest]))
 

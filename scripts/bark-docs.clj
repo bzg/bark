@@ -1,6 +1,6 @@
 #!/usr/bin/env bb
 
-;; bark-docs.clj — Generate public/<source>/docs.html from resources/docs-tpl.org.
+;; bark-docs.clj -- Generate public/<source>/docs.html from resources/docs-tpl.org.
 ;;
 ;; Reads the org template and substitutes source-specific labels and
 ;; commands into the unified table, based on merged config
@@ -111,7 +111,7 @@
     (str/join "\n" (concat [header hline] (map row-str rows)))))
 
 ;; ---------------------------------------------------------------------------
-;; Template substitution — detect and replace org table blocks
+;; Template substitution -- detect and replace org table blocks
 ;; ---------------------------------------------------------------------------
 
 (defn- table-line? [s] (str/starts-with? (str/trim s) "|"))
@@ -149,7 +149,7 @@
                           [commands-block]
                           (drop (inc t2-end) lines))))
 
-      ;; Only one table — replace with labels only
+      ;; Only one table -- replace with labels only
       (seq blocks)
       (let [[t1-start t1-end] (first blocks)]
         (str/join "\n"
@@ -264,7 +264,7 @@
 " footer-css))
 
 (defn docs-page [body-html {:keys [ical]}]
-  (let [title        "BARK — Docs"
+  (let [title        "BARK -- Docs"
         generated-at (str (java.util.Date.))]
     (str
      "<!DOCTYPE html>\n"
@@ -333,7 +333,7 @@
            (map (fn [line]
                   (if (and (str/starts-with? (str/trim line) "|")
                            (re-find #"\[\[.+\.(json|xml|org)\]" line))
-                    ;; This is a table row with feed links — process each cell
+                    ;; This is a table row with feed links -- process each cell
                     (let [cells (->> (str/split line #"\|" -1)
                                      (drop 1) butlast
                                               (mapv #(str/trim %)))

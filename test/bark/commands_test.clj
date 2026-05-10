@@ -119,7 +119,7 @@
 
 (deftest trigger-tx-lowercases-address-cache
   (testing "build-trigger-tx stores :report/*-address lowercased regardless of
-            the sender's from-address casing — so downstream :setter-or-maintainer
+            the sender's from-address casing -- so downstream :setter-or-maintainer
             comparisons are stable even if the user's MUA rewrites address case"
     (let [trig-result {:report/acked 999}
           [tx _ _] (commands/build-trigger-tx 42 trig-result 999 "Alice@Example.COM" {})]

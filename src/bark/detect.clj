@@ -55,10 +55,10 @@
       (when-not (str/blank? t) t))))
 
 ;; Detection table: each entry describes how to parse a subject tag.
-;; :key       — lookup in compiled patterns map
-;; :type      — report type keyword
-;; :versioned — extract last token as :version
-;; :special   — :patch triggers special patch-subject parsing
+;; :key       -- lookup in compiled patterns map
+;; :type      -- report type keyword
+;; :versioned -- extract last token as :version
+;; :special   -- :patch triggers special patch-subject parsing
 (def ^:private detection-table
   [{:key :bug     :type :bug}
    {:key :patch   :type :patch   :special :patch}
@@ -124,7 +124,7 @@
 (defn has-patch-attachment? [attachments]
   (some (fn [att] (common/patch-file? (:attachment/filename att))) attachments))
 
-;; ICS / calendar detection — delegates to common for JVM+bb consistency.
+;; ICS / calendar detection -- delegates to common for JVM+bb consistency.
 
 (defn has-ics?
   "True if an email has ICS content (attached or inline)."
@@ -186,7 +186,7 @@
                 (when-let [pattern (get patterns key)]
                   (allowed?
                    (if (= special :patch)
-                     ;; [PATCH] in subject but no attachment/inline — subject-only patch
+                     ;; [PATCH] in subject but no attachment/inline -- subject-only patch
                      (detect-patch-subject subject patterns)
                      (detect-simple-tag type subject pattern versioned)))))
               detection-table))))))
