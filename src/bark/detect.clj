@@ -54,18 +54,9 @@
     (let [t (str/trim s)]
       (when-not (str/blank? t) t))))
 
-;; Detection table: each entry describes how to parse a subject tag.
-;; :key       -- lookup in compiled patterns map
-;; :type      -- report type keyword
-;; :versioned -- extract last token as :version
-;; :special   -- :patch triggers special patch-subject parsing
-(def ^:private detection-table
-  [{:key :bug     :type :bug}
-   {:key :patch   :type :patch   :special :patch}
-   {:key :request :type :request}
-   {:key :announcement :type :announcement}
-   {:key :release :type :release :versioned true}
-   {:key :change  :type :change  :versioned true}])
+;; Detection precedence comes from `common/report-type-spec`; we only
+;; need the per-row :type / :versioned? / :special fields here (the
+;; lookup key into the compiled patterns map equals :type).
 
 (defn- detect-tag-with-topic
   "Non-versioned subject tag: the inner text (if any) becomes the topic,
@@ -182,14 +173,14 @@
         (allowed? (detect-patch subject attachments body-text patterns)))
       ;; 2. Subject tag walk (no patch content present)
       (when subject
-        (some (fn [{:keys [key type versioned special]}]
-                (when-let [pattern (get patterns key)]
+        (some (fn [{:keys [type versioned? special]}]
+                (when-let [pattern (get patterns type)]
                   (allowed?
                    (if (= special :patch)
                      ;; [PATCH] in subject but no attachment/inline -- subject-only patch
                      (detect-patch-subject subject patterns)
-                     (detect-simple-tag type subject pattern versioned)))))
-              detection-table))))))
+                     (detect-simple-tag type subject pattern versioned?)))))
+              common/report-type-spec))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Patch content extraction (pure)

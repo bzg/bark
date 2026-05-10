@@ -44,12 +44,6 @@
   (+ (if (:report/owned report) 2 0)
      (if (:report/acked report) 1 0)))
 
-(defn- report-priority-value
-  "Compute priority from a pulled report."
-  [report]
-  (+ (if (:report/urgent report) 2 0)
-     (if (:report/important report) 1 0)))
-
 (defn- rule-matches?
   "Check whether a report matches all expiry rule conditions.
   Returns true if the report should be expired."
@@ -72,7 +66,7 @@
          (<= (report-activity-score report-data) max-status))
      ;; Priority ceiling
      (or (nil? max-priority)
-         (<= (report-priority-value report-data) max-priority)))))
+         (<= (common/report-priority report-data) max-priority)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Expiry engine

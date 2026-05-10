@@ -175,28 +175,24 @@
     the structural support for auto-crediting and closure propagation."
   [conn new-report-eid new-report-type email parent-report-eids]
   (when (seq parent-report-eids)
-    (let [db          (d/db conn)
-          parents     (d/q '[:find ?r ?t :in $ [?r ...]
-                             :where [?r :report/type ?t]]
-                           db (vec parent-report-eids))
-          posed-at    (or (:email/date-sent email) (Date.))
-          email-eid   (:db/id email)
-          setter      (:email/author-address email)
-          base-opts   {:from-eid new-report-eid
-                       :setter setter
-                       :email-eid email-eid
-                       :posed-at posed-at
-                       :value nil}]
+    (let [db      (d/db conn)
+          parents (d/q '[:find ?r ?t :in $ [?r ...]
+                         :where [?r :report/type ?t]]
+                       db (vec parent-report-eids))
+          pose!   (fn [parent-eid kind]
+                    (rel/pose-from-email! conn email {:from-eid new-report-eid
+                                                      :to-eid   parent-eid
+                                                      :kind     kind}))]
       (doseq [[parent-eid parent-type] parents]
         ;; :related-to (neutral, all type combinations)
         (when (rel/valid-pose? :related-to new-report-eid parent-eid
                                new-report-type parent-type)
-          (rel/pose-if-absent! conn (assoc base-opts :to-eid parent-eid :kind :related-to)))
+          (pose! parent-eid :related-to))
         ;; :resolves (patch -> bug/request only)
         (when (and (= :patch new-report-type)
                    (rel/valid-pose? :resolves new-report-eid parent-eid
                                     new-report-type parent-type))
-          (rel/pose-if-absent! conn (assoc base-opts :to-eid parent-eid :kind :resolves)))))))
+          (pose! parent-eid :resolves))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Auto-close logic
@@ -220,16 +216,11 @@
                                       :report/close-reason :resolved})
                              open-chgs)]
           (d/transact! conn close-tx))
-        (let [posed-at (or (:email/date-sent release-email) (Date.))
-              setter   (:email/author-address release-email)]
-          (doseq [chg-rid open-chgs]
-            (rel/pose-if-absent! conn {:from-eid  release-report-eid
-                                       :to-eid    chg-rid
-                                       :kind      :related-to
-                                       :setter    setter
-                                       :email-eid release-email-eid
-                                       :posed-at  posed-at
-                                       :value     nil})))
+        (doseq [chg-rid open-chgs]
+          (rel/pose-from-email! conn release-email
+                                {:from-eid release-report-eid
+                                 :to-eid   chg-rid
+                                 :kind     :related-to}))
         (tracking/bump-report-updated! conn open-chgs)
         (log/info "Auto-closed" (count open-chgs)
                   "[CHG" version "] (superseded by release)")))))
@@ -244,16 +235,12 @@
   Auto-closed log line.  Idempotent on the relation pose."
   [conn old-rid new-report-eid email log-msg]
   (let [email-eid (:db/id email)
-        from-addr (:email/author-address email)
-        posed-at  (or (:email/date-sent email) (Date.))
-        opts      {:from-eid old-rid :to-eid new-report-eid
-                   :setter from-addr :email-eid email-eid
-                   :posed-at posed-at :value nil}]
+        endpoints {:from-eid old-rid :to-eid new-report-eid}]
     (d/transact! conn [{:db/id old-rid
                         :report/closed email-eid
                         :report/close-reason :superseded}])
-    (rel/pose-if-absent! conn (assoc opts :kind :supersedes))
-    (rel/pose-if-absent! conn (assoc opts :kind :related-to))
+    (rel/pose-from-email! conn email (assoc endpoints :kind :supersedes))
+    (rel/pose-from-email! conn email (assoc endpoints :kind :related-to))
     (rel/propagate-patch-closure! conn old-rid :patch email-eid
                                   :superseded new-report-eid)
     (tracking/bump-report-updated! conn old-rid)

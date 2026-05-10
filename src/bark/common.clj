@@ -477,13 +477,33 @@
 ;; Label / command defaults and merge logic
 ;; ---------------------------------------------------------------------------
 
+(def report-type-spec
+  "Ordered specification of each report type.  Vector order drives subject
+  detection precedence (first matching tag wins) and per-type export
+  iteration.  Each entry:
+    :type       -- keyword identifier
+    :tags       -- default subject-bracket tokens that detect this type
+    :plural     -- plural noun used in export filenames / RSS labels
+    :versioned? -- bracket's last token is parsed as :version
+    :special    -- (legacy) :patch triggers the dedicated patch parser"
+  [{:type :bug          :tags ["BUG"]                :plural "bugs"}
+   {:type :patch        :tags ["PATCH"]              :plural "patches"        :special :patch}
+   {:type :request      :tags ["POLL" "TODO"]        :plural "requests"}
+   {:type :announcement :tags ["ANN" "ANNOUNCEMENT"] :plural "announcements"}
+   {:type :release      :tags ["REL" "RELEASE"]      :plural "releases"       :versioned? true}
+   {:type :change       :tags ["CHG" "CHANGE"]       :plural "changes"        :versioned? true}])
+
 (def default-labels
-  {:bug          ["BUG"]
-   :patch        ["PATCH"]
-   :request      ["POLL" "TODO"]
-   :announcement ["ANN" "ANNOUNCEMENT"]
-   :release      ["REL" "RELEASE"]
-   :change       ["CHG" "CHANGE"]})
+  "Map of type => default subject tags. Derived from `report-type-spec`."
+  (into {} (map (juxt :type :tags)) report-type-spec))
+
+(def report-type-keywords
+  "Set of all valid report type keywords."
+  (into #{} (map :type) report-type-spec))
+
+(def type->plural
+  "Map of type keyword => plural noun used in export filenames / RSS labels."
+  (into {} (map (juxt :type :plural)) report-type-spec))
 
 (def default-commands
   {:acked     ["Acked" "Confirmed" "Approved"]

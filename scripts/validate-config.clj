@@ -154,8 +154,8 @@
 (s/def :bark/notifications (s/keys :req-un [:notif/enabled]
                                    :opt-un [:notif/smtp]))
 
-;; Valid report type keywords (shared by commands, export, and report-types specs)
-(def valid-report-types #{:bug :patch :request :announcement :release :change})
+;; Valid report type keywords -- derived from common/report-type-spec.
+(def valid-report-types common/report-type-keywords)
 
 ;; Command IDs (for extended :commands format)
 (def valid-command-ids

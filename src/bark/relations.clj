@@ -163,6 +163,21 @@
     (when-not existing?
       (d/transact! conn (pose-tx opts)))))
 
+(defn pose-from-email!
+  "Pose a relation triggered by `email` (pull map or entity carrying
+  :db/id, :email/author-address, :email/date-sent).  Derives :setter /
+  :email-eid / :posed-at from the email; missing :email/date-sent
+  falls back to now.  `opts` must carry :from-eid / :to-eid / :kind ;
+  :value defaults to nil but may be overridden.  Caller must have
+  validated via `valid-pose?`."
+  [conn email opts]
+  (pose-if-absent! conn
+                   (merge {:setter    (:email/author-address email)
+                           :email-eid (:db/id email)
+                           :posed-at  (or (:email/date-sent email) (java.util.Date.))
+                           :value     nil}
+                          opts)))
+
 (defn retract-pair!
   "Retract a specific (from, kind, to) relation if active.  Handles
   symmetric kinds by canonicalizing the lookup, so callers can pass

@@ -575,46 +575,29 @@
 
 (defn- filter-permitted-directives
   "Return the subset of `directives` whose scope permits `from-addr` to
-  act, optionally further filtered by `action-pred`. `current-d` is
-  the delay passed through to `scope-permits?` -- only forced when at
-  least one directive has scope `:setter-or-maintainer`.
+  act, further filtered by `action-pred`. `current-d` is the delay
+  passed through to `scope-permits?` -- only forced when at least one
+  directive has scope `:setter-or-maintainer`.
 
   When `failure-ctx` is non-nil, directives that are rejected by the
   scope check (but pass `action-pred`) are written to the failures
   file as `:insufficient-scope`, audience `:maintainers`, so they
   surface in the next notification round."
-  ([directives current-d from-addr is-maintainer?]
-   (filter-permitted-directives directives current-d from-addr is-maintainer?
-                                 (constantly true) nil))
-  ([directives current-d from-addr is-maintainer? action-pred]
-   (filter-permitted-directives directives current-d from-addr is-maintainer?
-                                 action-pred nil))
-  ([directives current-d from-addr is-maintainer? action-pred failure-ctx]
-   ;; Eager realization via `filterv` so the recording side effect in
-   ;; the denial branch fires deterministically, regardless of whether
-   ;; callers seq or reduce over the result.
-   (filterv (fn [{:keys [scope attr action] :as directive}]
-              (and (action-pred action)
-                   (or (scope-permits? scope attr from-addr is-maintainer? current-d)
-                       (do (when failure-ctx
-                             (record-failure!
-                              (assoc failure-ctx
-                                     :reason    :insufficient-scope
-                                     :audience  :maintainers
-                                     :command   (describe-denied-directive directive))))
-                           false))))
-            directives)))
-
-(defn- relation-active-from?
-  "True if `report-eid` has at least one active outgoing relation of `kind`."
-  [db report-eid kind]
-  (boolean
-   (seq (d/q '[:find [?e ...] :in $ ?from ?kind
-               :where
-               [?e :rel/from ?from]
-               [?e :rel/kind ?kind]
-               [?e :rel/active? true]]
-             db report-eid kind))))
+  [directives current-d from-addr is-maintainer? action-pred failure-ctx]
+  ;; Eager realization via `filterv` so the recording side effect in
+  ;; the denial branch fires deterministically, regardless of whether
+  ;; callers seq or reduce over the result.
+  (filterv (fn [{:keys [scope attr action] :as directive}]
+             (and (action-pred action)
+                  (or (scope-permits? scope attr from-addr is-maintainer? current-d)
+                      (do (when failure-ctx
+                            (record-failure!
+                             (assoc failure-ctx
+                                    :reason    :insufficient-scope
+                                    :audience  :maintainers
+                                    :command   (describe-denied-directive directive))))
+                          false))))
+           directives))
 
 (defn- resolve-target
   "Look up the target report-eid for a relation directive (Superseded-by:
@@ -761,7 +744,7 @@
                    :target-mid target-mid
                    :resolved   r
                    :clear-now? (and (boolean (get resolved unset-key))
-                                    (relation-active-from? db report-eid kind)))))
+                                    (some? (relation-target-eid db report-eid kind))))))
         closure-relation-rows))
 
 (defn apply-directives! [conn report-eid directives email-eid from-addr is-maintainer?

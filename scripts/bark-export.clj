@@ -55,6 +55,7 @@
                                parse-cli-args parse-delay parse-cutoff-date
                                load-config db-path build-source-map
                                bark-schema bark-format
+                               report-type-spec type->plural
                                votes-by-report vote-counts
                                ics-file? text-attachment?]]
          '[bark.common-bb :refer [load-datalevin-pod! all-reports dq
@@ -558,11 +559,9 @@
 ;; Per-type helpers
 ;; ---------------------------------------------------------------------------
 
-(def report-types [:bug :patch :request :announcement :release :change])
-
-(def type->plural
-  {:bug "bugs" :patch "patches" :request "requests"
-   :announcement "announcements" :release "releases" :change "changes"})
+(def report-types
+  "Ordered keywords of every report type, driven by `common/report-type-spec`."
+  (mapv :type report-type-spec))
 
 (def rss-limit 50)
 
