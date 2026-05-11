@@ -6,6 +6,7 @@
 
   Ported from test/bark-digest-test.clj (bb version)."
   (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [datalevin.core :as d]
             [bark.commands :as commands]
@@ -62,13 +63,6 @@
   "All active outgoing relations of `kind` from `report-pull`."
   [report-pull kind]
   (->> (:rel/_from report-pull)
-       (filter :rel/active?)
-       (filter #(= kind (:rel/kind %)))))
-
-(defn- active-in-rels
-  "All active incoming relations of `kind` into `report-pull`."
-  [report-pull kind]
-  (->> (:rel/_to report-pull)
        (filter :rel/active?)
        (filter #(= kind (:rel/kind %)))))
 
@@ -1019,7 +1013,7 @@
              :email/ingested-at  date
              :email/body-text    (or body "")}
       in-reply-to        (assoc :email/in-reply-to in-reply-to)
-      (seq refs)         (assoc :email/references (clojure.string/join " " refs))
+      (seq refs)         (assoc :email/references (str/join " " refs))
       (seq ancestor)     (assoc :email/ancestor-mids ancestor))))
 
 (defn- store-and-process!

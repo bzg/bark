@@ -22,7 +22,7 @@
                                votes-by-report vote-counts]]
          '[bark.common-bb :refer [load-datalevin-pod! all-reports dq]]
          '[bark.html-bb :refer [pico-cdn resolved-theme set-theme!
-                                bark-description bark-repo-url footer-css
+                                bark-description footer-css
                                 bark-footer wrap-js spit-html theme-toggle-js
                                 nav-bar html-head
                                 org-inline parse-org-table]])

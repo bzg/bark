@@ -146,7 +146,7 @@
         (let [tgt-mid    "<patch-v2@x>"
               src-mid    "<patch-v1@x>"
               tgt-email  (mk-email! conn tgt-mid "carol@x" #inst "2026-02-02")
-              tgt-eid    (mk-report! conn tgt-mid tgt-email :patch)
+              _tgt-eid   (mk-report! conn tgt-mid tgt-email :patch)
               src-email  (mk-email! conn src-mid "alice@x" #inst "2026-02-01")
               src-eid    (mk-report! conn src-mid src-email :patch)
               ;; "Reply" email carrying the directive
@@ -181,7 +181,7 @@
               bug-eid   (mk-report! conn bug-mid bug-email :bug)
               patch-mid "<patch-1@x>"
               patch-email (mk-email! conn patch-mid "alice@x" #inst "2026-02-02")
-              patch-eid (mk-report! conn patch-mid patch-email :patch)
+              _patch-eid (mk-report! conn patch-mid patch-email :patch)
               cmd-email-eid (mk-email! conn "<cmd@x>" "bob@x" #inst "2026-02-03")
               cmd-email     {:db/id cmd-email-eid
                              :email/author-address "bob@x"
@@ -206,7 +206,7 @@
         (let [tgt-mid   "<patch-v2@x>"
               src-mid   "<patch-v1@x>"
               _tgt-email (mk-email! conn tgt-mid "carol@x" #inst "2026-02-02")
-              tgt-eid   (mk-report! conn tgt-mid (d/entid (d/db conn) [:email/message-id tgt-mid]) :patch)
+              _tgt-eid  (mk-report! conn tgt-mid (d/entid (d/db conn) [:email/message-id tgt-mid]) :patch)
               src-email (mk-email! conn src-mid "alice@x" #inst "2026-02-01")
               src-eid   (mk-report! conn src-mid src-email :patch)
               ;; Apply Superseded-by first (alice as setter)
@@ -283,7 +283,7 @@
       (try
         (let [bug-mid    "<bug-1@x>"
               bug-email  (mk-email! conn bug-mid "alice@x" #inst "2026-03-01")
-              bug-eid    (mk-report! conn bug-mid bug-email :bug)
+              _bug-eid   (mk-report! conn bug-mid bug-email :bug)
               req-mid    "<req-1@x>"
               req-email  (mk-email! conn req-mid "bob@x" #inst "2026-03-02")
               req-eid    (mk-report! conn req-mid req-email :request)

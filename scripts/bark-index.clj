@@ -19,7 +19,7 @@
          '[taoensso.timbre :as log]
          '[bark.common :refer [parse-cli-args load-config]]
          '[bark.html-bb :refer [pico-cdn resolved-theme set-theme!
-                                bark-description bark-repo-url
+                                bark-description
                                 footer-css bark-footer wrap-js spit-html
                                 noscript-css noscript-banner
                                 theme-toggle-js nav-bar]])
