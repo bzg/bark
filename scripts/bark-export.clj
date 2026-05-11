@@ -383,14 +383,21 @@
 
 (defn- awaiting-reply?
   "True when a report is open, last activity was by a maintainer,
-  and the configured delay has elapsed."
+  the OP is not a maintainer, and the configured delay has elapsed.
+  When the OP is themselves a maintainer, \"awaiting reply\" makes no
+  semantic sense -- we are not waiting for a maintainer to answer their
+  own thread."
   [report source-name source-map maintainers-map]
   (when (and (not (:report/closed report))
              (:report/last-activity report)
              (:report/last-activity-address report))
-    (let [addr    (str/lower-case (:report/last-activity-address report))
-          role    (sender-role addr source-name source-map maintainers-map)]
-      (when role
+    (let [last-addr (str/lower-case (:report/last-activity-address report))
+          op-addr   (some-> (get-in report [:report/email :email/author-address])
+                            str/lower-case)
+          last-role (sender-role last-addr source-name source-map maintainers-map)
+          op-role   (when op-addr
+                      (sender-role op-addr source-name source-map maintainers-map))]
+      (when (and last-role (not op-role))
         (let [config     (ctx-config)
               src-cfg    (get source-map source-name)
               delay-str  (or (:awaiting-delay src-cfg)
