@@ -117,6 +117,24 @@
                                 (into-array java.nio.file.CopyOption
                                             [java.nio.file.StandardCopyOption/REPLACE_EXISTING])))))
 
+(defn- copy-dir!
+  "Recursively copy `src` into `dst`, creating `dst` if needed.
+  Used to seed the staging directory with the previous target so an
+  incremental export does not lose files for unchanged report types.
+  Relies on `file-seq`'s pre-order traversal so each directory is
+  created before its children are copied."
+  [^java.io.File src ^java.io.File dst]
+  (when (.exists src)
+    (let [src-path (.toPath src)
+          dst-path (.toPath dst)
+          opts     (into-array java.nio.file.CopyOption
+                               [java.nio.file.StandardCopyOption/REPLACE_EXISTING])]
+      (doseq [^java.io.File f (file-seq src)
+              :let [target (.resolve dst-path (.relativize src-path (.toPath f)))]]
+        (if (.isDirectory f)
+          (.mkdirs (.toFile target))
+          (java.nio.file.Files/copy (.toPath f) target opts))))))
+
 (defn- clean-stale-old-dirs!
   "Remove any leftover `<target>.old-*` directories from a previous
   crashed swap so they don't accumulate."
@@ -1411,6 +1429,13 @@
                                                      (if incremental? " (incremental)" "")))
                                       (try
                                         (delete-dir! (io/file staging))
+                                        ;; Incremental writes only changed types
+                                        ;; into staging; seed it with the previous
+                                        ;; target so unchanged files survive the
+                                        ;; atomic swap.
+                                        (when src-changed
+                                          (copy-dir! (io/file final-dir)
+                                                     (io/file staging)))
                                         (export-source! format reports staging src-name
                                                         source-map maintainers-map cli-extra
                                                         :changed-types src-changed)
