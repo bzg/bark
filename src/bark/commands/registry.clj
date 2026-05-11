@@ -19,10 +19,9 @@
 ;;                           administrative override)
 ;;
 ;; :setter-or-maintainer is only meaningful for unset-style directives
-;; whose target attribute is tracked by a ref to the pose-email (see
-;; `setter-ref-attrs` below).  These are the five original state
-;; attrs (acked/owned/closed/urgent/important) plus topic, deadline,
-;; expiry and superseded-by -- a total of nine `:un*` commands.
+;; whose target has a recoverable "setter": either a ref to the
+;; pose-email (see `setter-ref-attrs` below), or a :rel/setter on a
+;; qualified relation (see `setter-scoped-command-ids` below).
 ;; `validate-config.clj` rejects that scope on any other command.
 ;; ---------------------------------------------------------------------------
 
@@ -75,6 +74,14 @@
     :syntax "Superseded-by" :param :message-id :report-types #{:bug :patch :request}}
    {:id :unsuperseded   :kind :directive :action :unset-superseded :attr :rel/supersedes :scope :setter-or-maintainer
     :syntax "Not superseded" :report-types #{:bug :patch :request}}
+   ;; Supersedes -- symmetric of Superseded-by from the replacement's POV.
+   ;; Posed on the new report, it closes the target as :superseded.
+   ;; Same canonical :rel/supersedes relation; only the role is flipped
+   ;; (current = :rel/to, target = :rel/from = the closed report).
+   {:id :supersedes     :kind :directive :action :set-supersedes   :attr :rel/supersedes :scope :user
+    :syntax "Supersedes" :param :message-id :report-types #{:bug :patch :request}}
+   {:id :unsupersedes   :kind :directive :action :unset-supersedes :attr :rel/supersedes :scope :setter-or-maintainer
+    :syntax "Not superseding" :report-types #{:bug :patch :request}}
    ;; Duplicate-of -- same shape as Superseded-by, but encodes "this is a
    ;; duplicate of another report" (close-reason :canceled).  Same-type
    ;; constraint enforced (bug=>bug, patch=>patch, request=>request).
@@ -145,7 +152,7 @@
 ;; - explicitly-listed commands backed by qualified relations whose
 ;;   setter is recorded in :rel/setter (:unsuperseded, :unduplicate).
 (def setter-scoped-command-ids
-  (into #{:unsuperseded :unduplicate}
+  (into #{:unsuperseded :unsupersedes :unduplicate}
         (comp (filter #(str/starts-with? (name (:action %)) "unset"))
               (filter #(contains? setter-ref-attrs (:attr %)))
               (map :id))

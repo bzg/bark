@@ -56,7 +56,13 @@
     (is (seq (detect-with false "!No deadline\n"))))
   (testing "Superseded-by"
     (is (seq (detect-with false "Superseded-by: <msg@example.com>\n")))
-    (is (seq (detect-with false "!Superseded-by: <msg@example.com>\n")))))
+    (is (seq (detect-with false "!Superseded-by: <msg@example.com>\n"))))
+  (testing "Supersedes"
+    (is (seq (detect-with false "Supersedes: <msg@example.com>\n")))
+    (is (seq (detect-with false "!Supersedes: <msg@example.com>\n"))))
+  (testing "Not superseding"
+    (is (seq (detect-with false "Not superseding\n")))
+    (is (seq (detect-with false "!Not superseding\n")))))
 
 (deftest directive-strict-rejects-bare-form
   (testing "-by directive"
@@ -70,7 +76,13 @@
     (is (seq    (detect-with true "!Not acked\n"))))
   (testing "Superseded-by"
     (is (empty? (detect-with true "Superseded-by: <msg@example.com>\n")))
-    (is (seq    (detect-with true "!Superseded-by: <msg@example.com>\n")))))
+    (is (seq    (detect-with true "!Superseded-by: <msg@example.com>\n"))))
+  (testing "Supersedes"
+    (is (empty? (detect-with true "Supersedes: <msg@example.com>\n")))
+    (is (seq    (detect-with true "!Supersedes: <msg@example.com>\n"))))
+  (testing "Not superseding"
+    (is (empty? (detect-with true "Not superseding\n")))
+    (is (seq    (detect-with true "!Not superseding\n")))))
 
 ;; ---------------------------------------------------------------------------
 ;; Role directives (Add/Remove maintainer) via pure parse-role-controls

@@ -194,6 +194,8 @@
                                                :unset-topic      {:action :unset-topic}
                                                :set-superseded   (mid-result :set-superseded)
                                                :unset-superseded {:action :unset-superseded :attr attr}
+                                               :set-supersedes   (mid-result :set-supersedes)
+                                               :unset-supersedes {:action :unset-supersedes :attr attr}
                                                :set-duplicate    (mid-result :set-duplicate)
                                                :unset-duplicate  {:action :unset-duplicate :attr attr}
                                                :set-related      (mid-result :set-related)
@@ -266,6 +268,8 @@
               :unset-topic    (-> acc (dissoc :topic) (assoc :untopic? true))
               :set-superseded   (-> acc (assoc :superseded-by target-message-id) (dissoc :unsuperseded?))
               :unset-superseded (-> acc (dissoc :superseded-by) (assoc :unsuperseded? true))
+              :set-supersedes   (-> acc (assoc :supersedes target-message-id) (dissoc :unsupersedes?))
+              :unset-supersedes (-> acc (dissoc :supersedes) (assoc :unsupersedes? true))
               :set-duplicate    (-> acc (assoc :duplicate-of target-message-id) (dissoc :unduplicate?))
               :unset-duplicate  (-> acc (dissoc :duplicate-of) (assoc :unduplicate? true))
               :set-related      (-> acc
@@ -469,14 +473,27 @@
     (conj [:db/retract report-eid :report/close-reason
            (:report/close-reason current)])))
 
+(def ^:private close-state-pull-pattern
+  [:report/closed :report/closed-address :report/close-reason])
+
+(defn- reopen-report!
+  "Pull `report-eid`'s close state and transact a reopen iff it is
+  closed.  Returns true when a reopen actually ran.  Used in the
+  closure-relation flip and clear paths, where the report to reopen
+  may differ from the email's anchor report."
+  [conn report-eid]
+  (let [pulled (d/pull (d/db conn) close-state-pull-pattern report-eid)
+        tx     (reopen-tx report-eid pulled)]
+    (when (seq tx)
+      (d/transact! conn tx)
+      true)))
+
 (defn build-directives-tx
-  "Build transaction data from resolved commands and current report state.
-  Returns the tx vector (may be empty).
-  Note: Supersede and Duplicate-of are handled separately by
-  `apply-directives!` (they post a relation, not a paired attr)."
-  [report-eid email-eid from-addr resolved current
-   supersede-target-eid duplicate-target-eid
-   unsupersede-now? unduplicate-now?]
+  "Build attribute-level transaction data from resolved commands and
+  current report state.  Returns the tx vector (may be empty).
+  Closure-relation effects (Superseded-by / Supersedes / Duplicate-of
+  posing, close/reopen) are handled separately by `apply-directives!`."
+  [report-eid email-eid resolved current]
   (let [{:keys [set unset]} resolved]
     (-> []
         (into (build-directive-set-tx report-eid email-eid set))
@@ -486,19 +503,14 @@
         (into (build-unset-tx report-eid current unset))
         (cond-> (and (contains? unset :report/closed) (:report/close-reason current))
           (conj [:db/retract report-eid :report/close-reason (:report/close-reason current)]))
-        (build-paired-directive-tx report-eid email-eid current resolved)
-        (cond-> supersede-target-eid
-          (into (close-with-reason-tx report-eid email-eid from-addr :superseded)))
-        (cond-> duplicate-target-eid
-          (into (close-with-reason-tx report-eid email-eid from-addr :canceled)))
-        (cond-> (or unsupersede-now? unduplicate-now?)
-          (into (reopen-tx report-eid current))))))
+        (build-paired-directive-tx report-eid email-eid current resolved))))
 
 (defn describe-directives
   "Build a human-readable summary of applied directives."
   [resolved]
   (let [{:keys [set unset deadline undeadline? expiry unexpiry?
                 topic untopic? superseded-by unsuperseded?
+                supersedes unsupersedes?
                 duplicate-of unduplicate?
                 related-to-set related-to-unset]} resolved]
     (str/join ", " (concat (map (fn [[attr addr]] (str (name attr) " -> " addr)) set)
@@ -511,6 +523,8 @@
                            (when untopic? ["no topic"])
                            (when superseded-by [(str "superseded-by:" superseded-by)])
                            (when unsuperseded? ["not superseded"])
+                           (when supersedes [(str "supersedes:" supersedes)])
+                           (when unsupersedes? ["not superseding"])
                            (when duplicate-of [(str "duplicate-of:" duplicate-of)])
                            (when unduplicate? ["not duplicate"])
                            (map #(str "related-to:" %) related-to-set)
@@ -568,6 +582,7 @@
       :set-expiry       (str syntax ": " (common/format-date-iso date))
       :set-topic        (str syntax ": " topic)
       :set-superseded   (str syntax ": " target-message-id)
+      :set-supersedes   (str syntax ": " target-message-id)
       :set-duplicate    (str syntax ": " target-message-id)
       :set-related      (str syntax ": " target-message-id)
       :unset-related    (str syntax ": " target-message-id)
@@ -685,34 +700,72 @@
          [?e :rel/to ?to]]
        db report-eid kind))
 
-(defn- relation-setter
-  "`:rel/setter` address of the active outgoing relation of `kind` on
-  `report-eid`, or nil."
+(defn- relation-source-eid
+  "Eid of the source report of an active incoming relation of `kind`
+  pointing at `report-eid`, or nil.  Mirror of `relation-target-eid`."
   [db report-eid kind]
-  (d/q '[:find ?setter . :in $ ?from ?kind
+  (d/q '[:find ?from . :in $ ?to ?kind
          :where
          [?e :rel/from ?from]
          [?e :rel/kind ?kind]
          [?e :rel/active? true]
-         [?e :rel/setter ?setter]]
+         [?e :rel/to ?to]]
        db report-eid kind))
+
+(defn- relation-counterparty-eid
+  "Eid of the other endpoint of an active `kind` relation involving
+  `report-eid`.  For :current-as-from, returns the relation's :rel/to;
+  for :current-as-to, returns the relation's :rel/from."
+  [db report-eid kind role]
+  (case role
+    :current-as-from (relation-target-eid db report-eid kind)
+    :current-as-to   (relation-source-eid db report-eid kind)))
+
+(defn- relation-setter
+  "`:rel/setter` address of the active `kind` relation involving
+  `report-eid`, or nil.  `role` controls which side `report-eid` is on."
+  [db report-eid kind role]
+  (case role
+    :current-as-from (d/q '[:find ?setter . :in $ ?from ?kind
+                            :where
+                            [?e :rel/from ?from]
+                            [?e :rel/kind ?kind]
+                            [?e :rel/active? true]
+                            [?e :rel/setter ?setter]]
+                          db report-eid kind)
+    :current-as-to   (d/q '[:find ?setter . :in $ ?to ?kind
+                            :where
+                            [?e :rel/to ?to]
+                            [?e :rel/kind ?kind]
+                            [?e :rel/active? true]
+                            [?e :rel/setter ?setter]]
+                          db report-eid kind)))
 
 (defn- relation-setters-as-pull
   "Build a partial pull map exposing relation setters under `:setter-attr`
   so `scope-permits?` can resolve `:setter-or-maintainer` on relation
-  unset directives.  `rows` is a seq carrying `:kind` and `:setter-attr`."
+  unset directives.  `rows` is a seq carrying `:kind`, `:role` and
+  `:setter-attr`."
   [db report-eid rows]
-  (into {} (keep (fn [{:keys [kind setter-attr]}]
-                   (when-let [s (relation-setter db report-eid kind)]
+  (into {} (keep (fn [{:keys [kind role setter-attr]}]
+                   (when-let [s (relation-setter db report-eid kind role)]
                      [setter-attr {:email/author-address s}])))
         rows))
 
 (def ^:private closure-relation-rows
   "Specs for directive-driven closure relations (Superseded-by /
-  Duplicate-of).  Each row drives an iteration in `apply-directives!`:
+  Supersedes / Duplicate-of).  Each row drives an iteration in
+  `apply-directives!`:
+    :id            -- unique row id (matches the registry command :id)
     :kind          -- relation kind to pose
+    :role          -- :current-as-from when the current report is the
+                      one being closed (Superseded-by:, Duplicate-of:);
+                      :current-as-to when the current report is the
+                      replacement and the target is the one being closed
+                      (Supersedes:).  The :rel/from of the posed
+                      relation is always the report being closed.
     :propagate     -- close-reason passed to propagate-patch-closure!
-    :propagate-tgt -- when true, pass the target eid as `successor-eid`
+    :propagate-tgt -- when true, pass the replacement eid as `successor-eid`
     :syntax        -- human-readable directive name (for failure logs)
     :mid-key       -- key in resolved holding the target message-id
     :unset-key     -- key in resolved holding the unset flag
@@ -720,39 +773,112 @@
                       surfaced in the pull map so `scope-permits?` can
                       resolve `:setter-or-maintainer` on the unset
                       directive in the open-report path."
-  [{:kind :supersedes :propagate :superseded :propagate-tgt true
+  [{:id :superseded-by :kind :supersedes :role :current-as-from
+    :propagate :superseded :propagate-tgt true
     :syntax "Superseded-by" :mid-key :superseded-by :unset-key :unsuperseded?
     :setter-attr :rel/supersedes}
-   {:kind :duplicates :propagate :canceled :propagate-tgt false
+   {:id :supersedes :kind :supersedes :role :current-as-to
+    :propagate :superseded :propagate-tgt true
+    :syntax "Supersedes" :mid-key :supersedes :unset-key :unsupersedes?
+    :setter-attr :rel/supersedes}
+   {:id :duplicate-of :kind :duplicates :role :current-as-from
+    :propagate :canceled :propagate-tgt false
     :syntax "Duplicate-of" :mid-key :duplicate-of :unset-key :unduplicate?
     :setter-attr :rel/duplicates}])
 
 (defn- compute-closure-rows
-  "Enrich `closure-relation-rows` with per-kind decisions derived from
+  "Enrich `closure-relation-rows` with per-row decisions derived from
   `resolved` and current DB state.  Each row gains:
-    :target-mid -- string from `resolved`'s mid-key (or nil)
-    :resolved   -- {:target-eid :target-type :valid?} from `resolve-target`
-    :clear-now? -- true when an active relation should be retracted
-                   on this email (explicit unset directive, AND a
-                   matching active outgoing relation exists)."
+    :target-mid   -- string from `resolved`'s mid-key (or nil)
+    :resolved     -- {:target-eid :target-type :valid?} from `resolve-target`
+    :pose-from    -- eid that becomes :rel/from on the pose (= the
+                     report being closed; either current or target
+                     depending on role)
+    :pose-to      -- eid that becomes :rel/to on the pose (the replacement)
+    :counterparty -- eid of the other endpoint of the currently-active
+                     relation involving the current report (or nil)
+    :clear-now?   -- true when an active relation should be retracted
+                     on this email (explicit unset directive AND a
+                     matching active relation exists)."
   [db report-eid source-type resolved]
-  (mapv (fn [{:keys [kind unset-key mid-key] :as row}]
+  (mapv (fn [{:keys [kind role unset-key mid-key] :as row}]
           (let [target-mid (get resolved mid-key)
                 r          (resolve-target db kind report-eid
-                                            source-type target-mid)]
+                                            source-type target-mid)
+                tgt        (:target-eid r)
+                [pose-from pose-to] (case role
+                                      :current-as-from [report-eid tgt]
+                                      :current-as-to   [tgt report-eid])
+                counterparty (relation-counterparty-eid db report-eid kind role)]
             (assoc row
-                   :target-mid target-mid
-                   :resolved   r
-                   :clear-now? (and (boolean (get resolved unset-key))
-                                    (some? (relation-target-eid db report-eid kind))))))
+                   :target-mid   target-mid
+                   :resolved     r
+                   :pose-from    pose-from
+                   :pose-to      pose-to
+                   :counterparty counterparty
+                   :clear-now?   (and (boolean (get resolved unset-key))
+                                      (some? counterparty)))))
         closure-relation-rows))
+
+(defn- apply-closure-set-row!
+  "Process one valid closure-relation set directive.  Steps:
+  1. Last-write-wins flip: if a relation of `kind` is active in the
+     reversed direction, retract its :supersedes pair (the :related-to
+     companion is symmetric and stays active -- the two reports remain
+     related either way) and reopen pose-to (which was the :rel/from
+     of the inverse, hence previously closed).
+  2. Close pose-from with the row's propagate close-reason.
+  3. Pose the new closure relation + :related-to companion.
+  4. Propagate the patch closure when pose-from is a patch."
+  [conn {:keys [kind resolved target-mid pose-from pose-to
+                propagate propagate-tgt]}
+   email-eid from-addr posed-at source-type]
+  (when (rel/active-inverse-relation (d/db conn) pose-from pose-to kind)
+    (rel/retract-pair! conn pose-to kind pose-from email-eid)
+    (reopen-report! conn pose-to)
+    (tracking/bump-report-updated! conn pose-to))
+  (d/transact! conn (close-with-reason-tx pose-from email-eid from-addr propagate))
+  (let [opts {:from-eid pose-from :to-eid pose-to
+              :setter from-addr :email-eid email-eid
+              :posed-at posed-at}]
+    (rel/pose-if-absent! conn (assoc opts :kind kind :value target-mid))
+    (rel/pose-if-absent! conn (assoc opts :kind :related-to :value nil)))
+  (tracking/bump-report-updated! conn pose-from)
+  (tracking/bump-report-updated! conn pose-to)
+  (when (= :patch source-type)
+    (rel/propagate-patch-closure!
+     conn pose-from :patch email-eid
+     propagate (when propagate-tgt pose-to))))
+
+(defn- apply-closure-clear-row!
+  "Process one closure-relation unset directive that has a matching
+  active relation.  Retracts the :supersedes pair AND the :related-to
+  companion, then reopens the previously-closed party.  Which side is
+  current vs counterparty depends on `:role`."
+  [conn report-eid {:keys [kind role counterparty]} email-eid]
+  (case role
+    :current-as-from
+    (do (rel/retract-by-from! conn report-eid kind email-eid)
+        (when counterparty
+          (rel/retract-pair! conn report-eid :related-to counterparty email-eid))
+        (reopen-report! conn report-eid)
+        (tracking/bump-report-updated! conn report-eid)
+        (when counterparty (tracking/bump-report-updated! conn counterparty)))
+    :current-as-to
+    (do (rel/retract-by-to! conn report-eid kind email-eid)
+        (when counterparty
+          (rel/retract-pair! conn counterparty :related-to report-eid email-eid)
+          (reopen-report! conn counterparty)
+          (tracking/bump-report-updated! conn counterparty))
+        (tracking/bump-report-updated! conn report-eid))))
 
 (defn apply-directives! [conn report-eid directives email-eid from-addr is-maintainer?
                          failure-ctx]
   (let [db         (d/db conn)
         ;; Surface relation setters under their :setter-attr so the
-        ;; scope check on `:unsuperseded` / `:unduplicate` works on the
-        ;; open-report path (mirrors the same trick in `try-unclosed!`).
+        ;; scope check on `:unsuperseded` / `:unsupersedes` / `:unduplicate`
+        ;; works on the open-report path (mirrors the same trick in
+        ;; `try-unclosed!`).
         current-d  (delay (merge (d/pull db directive-pull-pattern report-eid)
                                   (relation-setters-as-pull db report-eid
                                                              closure-relation-rows)))
@@ -764,19 +890,18 @@
             resolved    (resolve-commands permitted)
             source-type (:report/type current)
             rows        (compute-closure-rows db report-eid source-type resolved)
-            by-kind     (into {} (map (juxt :kind identity)) rows)
-            valid-tgt   (fn [k] (when (get-in by-kind [k :resolved :valid?])
-                                  (get-in by-kind [k :resolved :target-eid])))
-            sup-target  (valid-tgt :supersedes)
-            dup-target  (valid-tgt :duplicates)
-            unsupersede-now? (get-in by-kind [:supersedes :clear-now?])
-            unduplicate-now? (get-in by-kind [:duplicates :clear-now?])
-            all-tx      (build-directives-tx
-                         report-eid email-eid from-addr resolved current
-                         sup-target dup-target
-                         unsupersede-now? unduplicate-now?)]
-        (when (seq all-tx)
-          (d/transact! conn all-tx)
+            valid-rows  (filterv (comp :valid? :resolved) rows)
+            clear-rows  (filterv :clear-now? rows)
+            attr-tx     (build-directives-tx report-eid email-eid resolved current)
+            posed-at    (Date.)
+            did-work?   (or (seq attr-tx) (seq valid-rows) (seq clear-rows))]
+        (when (seq attr-tx)
+          (d/transact! conn attr-tx))
+        (doseq [row valid-rows]
+          (apply-closure-set-row! conn row email-eid from-addr posed-at source-type))
+        (doseq [row clear-rows]
+          (apply-closure-clear-row! conn report-eid row email-eid))
+        (when did-work?
           (tracking/bump-report-updated! conn report-eid)
           (doseq [{:keys [resolved]} rows
                   :let [t (:target-eid resolved)]
@@ -784,29 +909,7 @@
             (tracking/bump-report-updated! conn t))
           (log/info "Commands:"
                     (describe-directives resolved)
-                    (str "(by " from-addr ")"))
-          ;; A patch just got closed with :canceled or :superseded via
-          ;; the directive: propagate to the bugs it resolves.
-          (when (= :patch source-type)
-            (doseq [{:keys [resolved propagate propagate-tgt]} rows
-                    :when (:valid? resolved)]
-              (rel/propagate-patch-closure!
-               conn report-eid :patch email-eid
-               propagate (when propagate-tgt (:target-eid resolved))))))
-        ;; Pose :supersedes / :duplicates (+ :related-to) once attrs are written.
-        (let [posed-at (Date.)]
-          (doseq [{:keys [kind resolved target-mid]} rows
-                  :when (:valid? resolved)
-                  :let [tgt (:target-eid resolved)
-                        opts {:from-eid report-eid :to-eid tgt
-                              :setter from-addr :email-eid email-eid
-                              :posed-at posed-at}]]
-            (rel/pose-if-absent! conn (assoc opts :kind kind :value target-mid))
-            (rel/pose-if-absent! conn (assoc opts :kind :related-to :value nil))))
-        ;; Retract relation on Not (super|dupli)cated
-        (doseq [{:keys [kind clear-now?]} rows :when clear-now?]
-          (rel/retract-by-from! conn report-eid kind email-eid))
-        ;; Errors / warnings
+                    (str "(by " from-addr ")")))
         (doseq [{:keys [resolved syntax target-mid]} rows
                 :let [tgt-eid (:target-eid resolved)
                       valid?  (:valid? resolved)]]
@@ -816,21 +919,22 @@
                       source-type "vs target" (:target-type resolved))))
         (apply-related-to! conn report-eid resolved email-eid from-addr failure-ctx)))))
 
-(def ^:private unclosed-pull-pattern
-  [:report/closed :report/closed-address :report/close-reason])
-
 (def ^:private unclose-relation-rows
   "Subset of `closure-relation-rows` used by `try-unclosed!` to retract
-  a closure relation: keeps only :kind / :unset-key / :setter-attr.
+  a closure relation on a closed report.  Filters to :current-as-from
+  rows only (rows where current can ever be the closed party).
   Derived to keep both row sets in lockstep when a new kind is added."
-  (mapv #(select-keys % [:kind :unset-key :setter-attr]) closure-relation-rows))
+  (into []
+        (comp (filter #(= :current-as-from (:role %)))
+              (map #(select-keys % [:id :kind :role :unset-key :setter-attr])))
+        closure-relation-rows))
 
 (defn- try-unclosed!
   "If a closed report has a Not closed / Not superseded / Not duplicate
   directive, retract the closure (and the relation if any)."
   [conn report-eid directives email-eid is-maintainer? from-addr failure-ctx]
   (let [db          (d/db conn)
-        current-d   (delay (merge (d/pull db unclosed-pull-pattern report-eid)
+        current-d   (delay (merge (d/pull db close-state-pull-pattern report-eid)
                                   (relation-setters-as-pull
                                    db report-eid unclose-relation-rows)))
         permitted   (filter-permitted-directives

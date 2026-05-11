@@ -199,6 +199,23 @@
         (d/transact! conn (vec tx))
         true))))
 
+(defn active-inverse-relation
+  "Return the eid of an active relation of `kind` whose direction is
+  reversed relative to (`from-eid`, `to-eid`) -- i.e. the stored
+  relation has :rel/from = `to-eid` and :rel/to = `from-eid`.  Returns
+  nil when no such relation is active.  Used by the closure-relation
+  directive flow to enforce 'last-write-wins' when a new pose would
+  conflict with a prior pose in the inverse direction."
+  [db from-eid to-eid kind]
+  (d/q '[:find ?e .
+         :in $ ?new-from ?new-to ?kind
+         :where
+         [?e :rel/from ?new-to]
+         [?e :rel/to ?new-from]
+         [?e :rel/kind ?kind]
+         [?e :rel/active? true]]
+       db from-eid to-eid kind))
+
 (defn retract-by-from!
   "Retract (set :rel/active? false) all active relations of `kind`
   whose :rel/from is `from-eid`.  For asymmetric kinds, also retracts
@@ -225,6 +242,35 @@
                                         [?e :rel/kind ?inv-kind]
                                         [?e :rel/active? true]]
                                       db from-eid inv-kind)]
+                    (mapcat #(retract-tx % retracted-by-email-eid) inv-eids)))]
+        (d/transact! conn (vec (concat tx inv)))
+        (count eids)))))
+
+(defn retract-by-to!
+  "Retract (set :rel/active? false) all active relations of `kind`
+  whose :rel/to is `to-eid`.  For asymmetric kinds, also retracts the
+  inverse-direction sibling (entities with :rel/from = `to-eid` and
+  :rel/kind = inverse-kind).  Mirror of `retract-by-from!`."
+  [conn to-eid kind retracted-by-email-eid]
+  (let [db   (d/db conn)
+        eids (d/q '[:find [?e ...]
+                    :in $ ?to ?kind
+                    :where
+                    [?e :rel/to ?to]
+                    [?e :rel/kind ?kind]
+                    [?e :rel/active? true]]
+                  db to-eid kind)]
+    (when (seq eids)
+      (let [tx (mapcat #(retract-tx % retracted-by-email-eid) eids)
+            inv (when (asymmetric-kinds kind)
+                  (let [inv-kind (inverse-kinds kind)
+                        inv-eids (d/q '[:find [?e ...]
+                                        :in $ ?from ?inv-kind
+                                        :where
+                                        [?e :rel/from ?from]
+                                        [?e :rel/kind ?inv-kind]
+                                        [?e :rel/active? true]]
+                                      db to-eid inv-kind)]
                     (mapcat #(retract-tx % retracted-by-email-eid) inv-eids)))]
         (d/transact! conn (vec (concat tx inv)))
         (count eids)))))

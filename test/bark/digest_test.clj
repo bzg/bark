@@ -897,6 +897,14 @@
           (is (= [{:action :unset-superseded :attr :rel/supersedes :scope :setter-or-maintainer :id :unsuperseded}]
                  (commands/detect-directives :bug "Not superseded\n"))))
 
+        (testing "detect-directives: Supersedes (symmetric of Superseded-by)"
+          (is (= [{:action :set-supersedes :attr :rel/supersedes :target-message-id "<msg@example.com>" :scope :user :id :supersedes}]
+                 (commands/detect-directives :bug "Supersedes: <msg@example.com>\n"))))
+
+        (testing "detect-directives: Not superseding"
+          (is (= [{:action :unset-supersedes :attr :rel/supersedes :scope :setter-or-maintainer :id :unsupersedes}]
+                 (commands/detect-directives :bug "Not superseding\n"))))
+
         (testing "resolve-commands: superseded-by"
           (is (= {:set {} :unset #{} :superseded-by "<mid@host>"}
                  (commands/resolve-commands
@@ -911,6 +919,59 @@
                  (commands/resolve-commands
                   [{:action :set-superseded :target-message-id "<mid@host>"}
                    {:action :unset-superseded}]))))
+
+        (testing "resolve-commands: supersedes"
+          (is (= {:set {} :unset #{} :supersedes "<mid@host>"}
+                 (commands/resolve-commands
+                  [{:action :set-supersedes :target-message-id "<mid@host>"}]))))
+
+        (testing "resolve-commands: supersedes then not superseding"
+          (is (= {:set {} :unset #{} :unsupersedes? true}
+                 (commands/resolve-commands
+                  [{:action :set-supersedes :target-message-id "<mid@host>"}
+                   {:action :unset-supersedes}]))))
+
+        ;; --- Emails 130-131 Supersedes (close target) ---
+        (testing "Bug 130 closed by 131 via Supersedes:"
+          (let [r130 (get-report db "<130@test.org>")
+                r131 (get-report db "<131@test.org>")]
+            (is (some? (:report/closed r130)) "target of Supersedes: is closed")
+            (is (= :superseded (:report/close-reason r130)))
+            (is (nil? (:report/closed r131)) "the directive's report stays open")
+            ;; The canonical relation has :rel/from = 130 (closed) and
+            ;; :rel/to = 131 (replacement), as if 131 had received a
+            ;; Superseded-by: <131> directly.
+            (is (= "<131@test.org>"
+                   (some-> (superseded-by-target r130) :report/message-id)))
+            (is (some #(= "<131@test.org>" (:report/message-id %))
+                      (all-related r130)))
+            (is (some #(= "<130@test.org>" (:report/message-id %))
+                      (all-related r131)))))
+
+        ;; --- Emails 132-134 Supersedes then Not superseding ---
+        (testing "Bug 132 superseded by 133 then reopened via Not superseding"
+          (let [r132 (get-report db "<132@test.org>")
+                r133 (get-report db "<133@test.org>")]
+            (is (nil? (:report/closed r132)) "Not superseding reopens the previously-closed target")
+            (is (nil? (:report/close-reason r132)))
+            (is (nil? (superseded-by-target r132)))
+            (is (not (some #(= "<133@test.org>" (:report/message-id %))
+                           (all-related r132)))
+                "Not superseding retracts the :related-to companion too")
+            (is (nil? (:report/closed r133)) "the superseder stays open throughout")))
+
+        ;; --- Emails 135-137 Cycle flip via cross-directive ---
+        (testing "Bug 135 superseded then unsuperseded by 136 flip; 136 closed instead"
+          (let [r135 (get-report db "<135@test.org>")
+                r136 (get-report db "<136@test.org>")]
+            (is (nil? (:report/closed r135)) "135 reopens once 136 flips the direction")
+            (is (nil? (:report/close-reason r135)))
+            (is (some? (:report/closed r136)) "136 is now closed in the flipped direction")
+            (is (= :superseded (:report/close-reason r136)))
+            (is (= "<135@test.org>"
+                   (some-> (superseded-by-target r136) :report/message-id)))
+            (is (some #(= "<135@test.org>" (:report/message-id %))
+                      (all-related r136)))))
 
         ;; ---------------------------------------------------------------
         ;; Participant / contributor tracking

@@ -185,6 +185,20 @@ Three forms are accepted:
 Source and target must both be bugs, patches, or requests, of the
 same type.
 
+Symmetric form -- when investigation matures and you file a fresh
+report that captures the real problem, mark the old one as superseded
+from the new report's side:
+
+: Supersedes: <old-message-id@example.com>
+
+Both =Superseded-by:= and =Supersedes:= produce the exact same effect
+(same close, same relation) -- they differ only by point of view.
+=Supersedes:= works in the opening mail of a new bug/patch/request,
+not only in replies.
+
+To undo: =Not superseded= (from the closed report's thread) or
+=Not superseding= (from the replacement's thread).
+
 See the [[#superseding-a-report-1][maintainer section]] for the full details on what this does
 and how to undo it.
 
@@ -333,11 +347,11 @@ extracted from an archive URL where it is the last path segment (e.g.
 =https://list.orgmode.org/orgmode/msg-id@host/=).  This does three
 things automatically:
 
-1. Sets =:report/superseded-by-target= on the old report (a reference
-   to the target report) and =:report/superseded-by= to the email that
-   posed the supersession.
+1. Poses a =:supersedes= qualified relation (=:rel/from= = the closed
+   report, =:rel/to= = the replacement) and a symmetric =:related-to=
+   audit link.
 2. Closes the old report with close-reason =:superseded=.
-3. Links the two reports as related (bidirectional).
+3. Links the two reports as related (bidirectional, kept on undo).
 
 In the index, superseded reports appear struck through (like canceled
 reports) and display an "S" status flag. The subject tooltip shows the
@@ -349,6 +363,38 @@ To undo:
 
 This retracts the supersede reference, reopens the report, and clears
 the close-reason. The related link is kept.
+
+*** Supersedes (symmetric form, replacement's point of view)
+
+After several rounds of investigation, the original mail of a bug or
+patch often no longer captures the real understanding.  Filing a
+fresh report that supersedes the old one is a natural editorial move,
+and BARK supports it from the replacement's side:
+
+: Supersedes: <old-message-id@example.com>
+
+This works both in a reply (the current report becomes the replacement)
+and in the *opening mail* of a brand-new bug/patch/request -- making
+the new report the canonical face of the issue.
+
+=Supersedes:= and =Superseded-by:= produce the *same* relation and
+the *same* close on the same pair of reports: the canonical
+=:supersedes= relation always points from the closed (superseded)
+report to the replacement.  They only differ in point of view.
+
+Last-write-wins on direction: if a later directive flips the
+direction (e.g. =Supersedes: <X>= posed at t1, then
+=Superseded-by: <X>= posed at t2 on the same report), the second
+pose retracts the first and reopens the previously-closed report
+before applying the new direction.
+
+To undo from the replacement's side:
+
+: Not superseding.
+
+This retracts the =:supersedes= relation and reopens the
+previously-closed target.  Same scope as =Not superseded.= (the
+original setter or a maintainer).
 
 *** Automatic supersession of patches and diffs
 
@@ -575,8 +621,9 @@ Each entry is a map with any of =:words=, =:scope=, =:report-types=
   =:setter-or-maintainer= is only valid on unset directives whose
   target attribute is tracked by a ref to the pose-email: =:unacked=,
   =:unowned=, =:unclosed=, =:unurgent=, =:unimportant=, =:untopic=,
-  =:undeadline=, =:unexpiry=, =:unsuperseded=.  =bb test-config=
-  rejects this scope on any other command.
+  =:undeadline=, =:unexpiry=, =:unsuperseded=, =:unsupersedes=,
+  =:unduplicate=.  =bb test-config= rejects this scope on any other
+  command.
 - =:report-types= replaces the default set of report types the command
   applies to. When absent, the registry default is used.
 - Any command ID from the table below can be overridden, both triggers
@@ -607,6 +654,7 @@ The rule applies uniformly to all Bark instructions:
 | Date directive   | =Deadline: 2026-06-01=   | =!Deadline: 2026-06-01=  |
 | Topic            | =Topic: event=           | =!Topic: event=          |
 | Supersede        | =Superseded-by: <mid>=   | =!Superseded-by: <mid>=  |
+| Supersede (sym.) | =Supersedes: <mid>=      | =!Supersedes: <mid>=     |
 | Role control     | =Add maintainer: a@b.c=  | =!Add maintainer: a@b.c= |
 | Notify           | =Notify: on=             | =!Notify: on=            |
 
@@ -646,6 +694,7 @@ full override).
 | =:important=     | =Important.=                                     | any user             | all                 |
 | =:topic=         | =Topic: word=                                    | any user             | all                 |
 | =:superseded-by= | =Superseded-by: <msg-id>=                        | any user             | all                 |
+| =:supersedes=    | =Supersedes: <msg-id>=                           | any user             | all                 |
 | =:deadline=      | =Deadline: 2025-03-19= or =Deadline: 30d=          | any user             | bug, patch, request |
 | =:expiry=        | =Expiry: 2025-06-15= or =Expiry: 30d=              | any user             | bug, patch, request |
 |----------------+------------------------------------------------+----------------------+---------------------|
@@ -658,6 +707,7 @@ full override).
 | =:unimportant=   | =Not important=                                  | setter or maintainer | all                 |
 | =:untopic=       | =No topic=                                       | setter or maintainer | all                 |
 | =:unsuperseded=  | =Not superseded=                                 | setter or maintainer | all                 |
+| =:unsupersedes=  | =Not superseding=                                | setter or maintainer | all                 |
 | =:unacked=       | =Not acked=                                      | setter or maintainer | bug, patch, request |
 | =:unowned=       | =Not owned=                                      | setter or maintainer | bug, patch, request |
 | =:undeadline=    | =No deadline=                                    | setter or maintainer | bug, patch, request |

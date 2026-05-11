@@ -640,6 +640,16 @@
                                               source-map delivery parent-eids nearest-eids
                                               (some? report-eid)))
 
+                ;; Initial-mail directives: when the email is the first
+                ;; of a new thread (no parents) AND it created a new
+                ;; report, apply directives on the new report itself.
+                ;; This makes `Supersedes: <mid>` (and other cross-
+                ;; report directives) work in the opening mail of a
+                ;; new bug/patch/request, not only in replies.
+                (when (and report-eid via-channel? (empty? parent-eids))
+                  (commands/apply-commands! conn report-eid (:type report-info)
+                                            email source-map rroles delivery))
+
                 ;; Phase 4: post-creation hooks (plan is pure, execution is effectful)
                 (when report-eid
                   (let [patches (detect/build-patch-entities email)
