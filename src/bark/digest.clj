@@ -52,31 +52,52 @@
   (common/ancestor-mids-from (:email/references email)
                               (:email/in-reply-to email)))
 
+(defn- safe-mid-query
+  "Run `f` (a thunk wrapping mid-keyed DB queries) and swallow
+  MDB_BAD_VALSIZE (-30781) -- raised by Datalevin's AVE scan on mids
+  that pass the conservative `indexable-mid?` guard but still exceed
+  the stricter encoding limit used at scan time.  Logs the offending
+  mid at warn level and returns `fallback`."
+  [mid f fallback]
+  (try (f)
+       (catch Exception e
+         (let [msg (str (.getMessage e) " " (some-> (.getCause e) .getMessage))]
+           (if (str/includes? msg "code-30781")
+             (do (log/warn "Skipping mid lookup -- MDB_BAD_VALSIZE on" mid)
+                 fallback)
+             (throw e))))))
+
 (defn- lookup-reports-by-mid
   "Find report eids matching a message-id, either as report root or
-  descendant.  Returns #{} for mids exceeding the LMDB index limit
-  (they cannot have been stored, so the lookup would crash with
-  MDB_BAD_VALSIZE for nothing)."
+  descendant.  Returns #{} for mids that fail the indexable guard or
+  that trigger MDB_BAD_VALSIZE during the AVE scan."
   [db mid]
   (when (common/indexable-mid? mid)
-    (let [as-root (d/q '[:find [?r ...] :in $ ?mid :where [?r :report/message-id ?mid]]
-                       db mid)
-          as-desc (d/q '[:find [?r ...] :in $ ?mid
-                         :where [?r :report/descendants ?e] [?e :email/message-id ?mid]]
-                       db mid)]
-      (into (set as-root) as-desc))))
+    (safe-mid-query mid
+                    (fn []
+                      (let [as-root (d/q '[:find [?r ...] :in $ ?mid :where [?r :report/message-id ?mid]]
+                                         db mid)
+                            as-desc (d/q '[:find [?r ...] :in $ ?mid
+                                           :where [?r :report/descendants ?e] [?e :email/message-id ?mid]]
+                                         db mid)]
+                        (into (set as-root) as-desc)))
+                    #{})))
 
 (defn- email-ancestors-by-mid
   "Ancestor mids of a stored email identified by `mid`, in root-first
-  RFC 2822 order. Returns nil when `mid` is not indexable or no
-  matching email exists. Used by `thread-lookup` to splice through a
-  stored-but-pending intermediate email."
+  RFC 2822 order. Returns nil when `mid` is not indexable, no
+  matching email exists, or the AVE scan hits MDB_BAD_VALSIZE.  Used
+  by `thread-lookup` to splice through a stored-but-pending
+  intermediate email."
   [db mid]
   (when (common/indexable-mid? mid)
-    (when-let [e (d/entid db [:email/message-id mid])]
-      (let [pulled (d/pull db [:email/references :email/in-reply-to] e)]
-        (common/ancestor-mids-from (:email/references pulled)
-                                   (:email/in-reply-to pulled))))))
+    (safe-mid-query mid
+                    (fn []
+                      (when-let [e (d/entid db [:email/message-id mid])]
+                        (let [pulled (d/pull db [:email/references :email/in-reply-to] e)]
+                          (common/ancestor-mids-from (:email/references pulled)
+                                                     (:email/in-reply-to pulled)))))
+                    nil)))
 
 (def ^:private thread-lookup-max-splices
   "Upper bound on transitive ancestor splicing per `thread-lookup`

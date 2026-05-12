@@ -22,9 +22,9 @@
                                votes-by-report vote-counts]]
          '[bark.common-bb :refer [load-datalevin-pod! all-reports dq]]
          '[bark.html-bb :refer [pico-cdn resolved-theme set-theme!
-                                bark-description footer-css
+                                bark-description footer-css page-title
                                 bark-footer wrap-js spit-html theme-toggle-js
-                                nav-bar html-head
+                                nav-bar html-head wrap-template
                                 org-inline parse-org-table]])
 
 (load-datalevin-pod!)
@@ -522,74 +522,80 @@
 ;; HTML assembly
 ;; ---------------------------------------------------------------------------
 
-(defn render-html [stats out-dir]
+(defn render-html [stats out-dir source-name]
   (let [{:keys [generated-at reports-per-type reports-by-month
                 time-to-close open-closed-ratio open-last-year
                 top-openers email-ratio closed-cancel
                 participants-by-month contributors-by-month maintainers-by-month
                 total-participants total-contributors total-maintainers]} stats
-        nav-html (str (h/html (nav-bar "BARK -- Data" "data")))
+        title        (page-title "Data" source-name)
+        has-ical?    (.exists (io/file out-dir "events" "announcements.ics"))
         data-section (render-data-section out-dir)
         vega-scripts (str "<script src=\"https://cdn.jsdelivr.net/npm/vega@5/build/vega.min.js\"></script>\n"
                           "<script src=\"https://cdn.jsdelivr.net/npm/vega-lite@5/build/vega-lite.min.js\"></script>\n"
                           "<script src=\"https://cdn.jsdelivr.net/npm/vega-embed@6/build/vega-embed.min.js\"></script>\n"
                           "<script>\n" (wrap-js theme-toggle-js) "\n</script>\n"
                           "<script>\n" (wrap-js stats-js) "\n</script>\n")
-        n-yr (reduce + (vals reports-per-type))
-        pct  #(when % (str (Math/round (* 100.0 %)) "%"))]
+        n-yr         (reduce + (vals reports-per-type))
+        pct          #(when % (str (Math/round (* 100.0 %)) "%"))
+        ;; The three blocks below are injected only when JS runs.  JS-less
+        ;; browsers (eww, w3m, lynx) skip <script> bodies entirely, so the
+        ;; page reduces to <noscript><h1></h1></noscript> + Available data.
+        tpl-nav      (str (h/html (nav-bar title "data"))
+                          "\n<p class=\"meta\">Generated " generated-at "</p>\n")
+        tpl-stats    (str "<section class=\"stats-section\">\n"
+                          "<h3>Statistics</h3>\n"
+                          "<div id=\"kpi-area\" class=\"kpis\">\n"
+                          ;; Baked fallback (replaced by stats.json fetch when served over HTTP)
+                          (kpi n-yr "Reports (last 12 months)"
+                               (str open-last-year " still open"))
+                          (kpi (:open open-closed-ratio) "Open (all time)"
+                               (str (pct (:ratio open-closed-ratio)) " of all"))
+                          (kpi (:closed open-closed-ratio) "Closed (all time)")
+                          (when time-to-close
+                            (kpi (str (:median-days time-to-close) "d") "Median to close"
+                                 (str "avg " (:avg-days time-to-close) "d")))
+                          (when email-ratio
+                            (kpi (or (:ratio email-ratio) "--") "Report/email ratio (last 12 months)"
+                                 (str (:reports-last-year email-ratio) " reports / "
+                                      (:emails-last-year email-ratio) " emails")))
+                          (when total-participants
+                            (kpi total-participants "Participants"
+                                 (when total-contributors (str total-contributors " contributors"))))
+                          (when total-maintainers
+                            (kpi total-maintainers "Maintainers"))
+                          "</div>\n"
+                          "<div class=\"grid\">\n"
+                          (chart-box "chart-month"   (chart-by-month reports-by-month))
+                          (chart-box "chart-type"    (chart-per-type reports-per-type))
+                          (when (or (seq participants-by-month) (seq contributors-by-month))
+                            (chart-box "chart-people"
+                                       (chart-people (or participants-by-month [])
+                                                     (or contributors-by-month [])
+                                                     (or maintainers-by-month []))))
+                          (when time-to-close
+                            (chart-box "chart-ttc"   (chart-ttc time-to-close)))
+                          (chart-box "chart-openers" (chart-openers top-openers))
+                          (when (seq closed-cancel)
+                            (chart-box "chart-cancel" (chart-cancel-breakdown closed-cancel)))
+                          "</div>\n"
+                          "</section>\n")
+        tpl-footer   (str (h/html (bark-footer {:ical has-ical?})))]
     (str
      "<!DOCTYPE html>\n"
      "<html lang=\"en\" data-theme=\"light\">\n"
-     (html-head {:title      "BARK -- Data"
+     (html-head {:title      title
                  :css        stats-css
-                 :extra-head (str "<noscript><style>.grid{display:none}</style></noscript>\n"
-                                  vega-scripts)})
+                 :extra-head vega-scripts})
      "<body>\n"
+     "<noscript><h1>" title "</h1></noscript>\n"
      "<main class=\"container\">\n"
-     nav-html "\n"
-     "<p class=\"meta\">Generated " generated-at "</p>\n"
-
+     (wrap-template "tpl-nav" tpl-nav)
+     ;; Available data: always visible -- the only content rendered for JS-less browsers.
      (when data-section (str data-section "\n"))
-
-     "<h3>Statistics</h3>\n"
-     "<div id=\"kpi-area\" class=\"kpis\">\n"
-     ;; Baked fallback (replaced by stats.json fetch when served over HTTP)
-     (kpi n-yr "Reports (last 12 months)"
-          (str open-last-year " still open"))
-     (kpi (:open open-closed-ratio) "Open (all time)"
-          (str (pct (:ratio open-closed-ratio)) " of all"))
-     (kpi (:closed open-closed-ratio) "Closed (all time)")
-     (when time-to-close
-       (kpi (str (:median-days time-to-close) "d") "Median to close"
-            (str "avg " (:avg-days time-to-close) "d")))
-     (when email-ratio
-       (kpi (or (:ratio email-ratio) "--") "Report/email ratio (last 12 months)"
-            (str (:reports-last-year email-ratio) " reports / "
-                 (:emails-last-year email-ratio) " emails")))
-     (when total-participants
-       (kpi total-participants "Participants"
-            (when total-contributors (str total-contributors " contributors"))))
-     (when total-maintainers
-       (kpi total-maintainers "Maintainers"))
-     "</div>\n"
-
-     "<div class=\"grid\">\n"
-     (chart-box "chart-month"   (chart-by-month reports-by-month))
-     (chart-box "chart-type"    (chart-per-type reports-per-type))
-     (when (or (seq participants-by-month) (seq contributors-by-month))
-       (chart-box "chart-people"
-                  (chart-people (or participants-by-month [])
-                                (or contributors-by-month [])
-                                (or maintainers-by-month []))))
-     (when time-to-close
-       (chart-box "chart-ttc"   (chart-ttc time-to-close)))
-     (chart-box "chart-openers" (chart-openers top-openers))
-     (when (seq closed-cancel)
-       (chart-box "chart-cancel" (chart-cancel-breakdown closed-cancel)))
-     "</div>\n"
-
+     (wrap-template "tpl-stats" tpl-stats)
      "</main>\n"
-     (h/html (bark-footer {:ical (.exists (io/file out-dir "events" "announcements.ics"))}))
+     (wrap-template "tpl-footer" tpl-footer)
      "</body>\n</html>\n")))
 
 ;; ---------------------------------------------------------------------------
@@ -621,14 +627,14 @@
       (finally
         (try (d/close conn) (catch Exception _ nil))))))
 
-(defn- generate-html! [out-file out-dir json-file]
+(defn- generate-html! [out-file out-dir json-file source-name]
   (let [json-path (or json-file (str out-dir "/reports/stats.json"))]
     (when-not (.exists (io/file json-path))
       (throw (ex-info (str "stats.json not found at " json-path
                            " -- generate it first with `bb stats`")
                       {:path json-path})))
     (let [stats (load-stats-json json-path)]
-      (spit-html out-file (render-html stats out-dir))
+      (spit-html out-file (render-html stats out-dir source-name))
       (log/info "Wrote" out-file "(HTML, from" json-path ")"))))
 
 (defn -main [& args]
@@ -642,6 +648,6 @@
                         (.getParent (io/file out-file)))]
     (io/make-parents out-file)
     (if html?
-      (generate-html! out-file out-dir (:json-file opts))
+      (generate-html! out-file out-dir (:json-file opts) source-name)
       (generate-json! out-file source-name))))
 (apply -main *command-line-args*)

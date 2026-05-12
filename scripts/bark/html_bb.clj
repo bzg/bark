@@ -182,49 +182,50 @@
     [:li (theme-toggle-btn)]]])
 
 ;; ---------------------------------------------------------------------------
-;; Shared <noscript> banner (hiccup vector)
+;; Shared page title
 ;; ---------------------------------------------------------------------------
 
-(def noscript-css
-  (str ".noscript-banner { background:var(--pico-del-color,#e53935); color:#fff;"
-       " padding:1.5rem; border-radius:0.5rem; margin-bottom:1.5rem; }"
-       ".noscript-banner a { color:#fff; text-decoration:underline; }"
-       ".noscript-banner table { color:#fff; margin-top:1rem; font-size:0.85rem; }"
-       ".noscript-banner th, .noscript-banner td { padding:0.25rem 0.75rem;"
-       " border-color:rgba(255,255,255,0.3); }"))
+(defn page-title
+  "Build a 'BARK -- <kind>' page title, appending the source name when set."
+  [kind source-name]
+  (str "BARK -- " kind (when source-name (str " -- " source-name))))
+
+;; ---------------------------------------------------------------------------
+;; JS-less fallback: <noscript> banner + script-template injection
+;; ---------------------------------------------------------------------------
 
 (defn noscript-banner
-  "Render a <noscript> block listing alternative tools and data files."
-  []
+  "Render a <noscript> block with a title and a flat list of entry
+  points for JavaScript-less browsers (eww, w3m, Lynx).  This is the
+  entire visible content of the page in those browsers."
+  [title]
   [:noscript
-   [:div.noscript-banner
-    [:p [:strong "This page requires JavaScript to display reports."]
-     " You can browse BARK data with these tools instead:"]
-    [:ul
-     [:li [:a {:href "https://codeberg.org/bzg/bone"} "bone"] " -- CLI based on fzf"]
-     [:li [:a {:href "https://codeberg.org/bzg/gnus-bone"} "gnus-bone"] " -- GNU Emacs Gnus interface"]
-     [:li [:a {:href "https://codeberg.org/bzg/notmuch-bone"} "notmuch-bone"] " -- GNU Emacs notmuch interface"]]
-    [:p "You can also access the data files directly:"]
-    [:table
-     [:thead [:tr [:th "File"] [:th "Description"]]]
-     [:tbody
-      [:tr [:td "reports/all.json"] [:td "All reports (JSON)"]]
-      [:tr [:td "reports/all.xml"] [:td "All reports (RSS)"]]
-      [:tr [:td "reports/all.org"] [:td "All reports (Org)"]]
-      [:tr [:td "reports/bugs.json"] [:td "Bugs (JSON)"]]
-      [:tr [:td "reports/patches.json"] [:td "Patches (JSON)"]]
-      [:tr [:td "reports/requests.json"] [:td "Requests (JSON)"]]
-      [:tr [:td "reports/announcements.json"] [:td "Announcements (JSON)"]]
-      [:tr [:td "reports/releases.json"] [:td "Releases (JSON)"]]
-      [:tr [:td "reports/changes.json"] [:td "Changes (JSON)"]]
-      [:tr [:td "reports/meta.json"] [:td "Source metadata"]]
-      [:tr [:td "stats.json"] [:td "Statistics"]]
-      [:tr [:td "events/announcements.ics"] [:td "Calendar (iCal)"]]]]]])
+   [:h1 title]
+   [:ul
+    [:li [:a {:href "data.html"} "Available data"] " -- JSON, RSS, Org, iCal files"]
+    [:li [:a {:href "docs.html"} "Documentation"]]
+    [:li [:a {:href "reports/all.xml"} "Subscribe via RSS"]]
+    [:li [:a {:href "https://codeberg.org/bzg/bone"} "bone"] " -- CLI based on fzf"]
+    [:li [:a {:href "https://codeberg.org/bzg/gnus-bone"} "gnus-bone"] " -- GNU Emacs Gnus interface"]
+    [:li [:a {:href "https://codeberg.org/bzg/notmuch-bone"} "notmuch-bone"] " -- GNU Emacs notmuch interface"]
+    [:li [:a {:href bark-repo-url} "BARK source repository"]]]])
 
-(defn noscript-banner-html
-  "Render the noscript banner as a raw HTML string (for non-hiccup pages)."
-  []
-  (str (h/html (noscript-banner))))
+(defn wrap-template
+  "Embed raw HTML inside a non-executable <script type=\"text/x-html\">
+  and emit a bootstrap that re-injects it via document.write.  JS-less
+  browsers (eww, w3m, lynx) ignore the script body entirely; browsers
+  with JS run the bootstrap during parsing and the content lands in the
+  DOM at that position.
+
+  A literal </script> in `body` would close the outer template, so it
+  is replaced with a placeholder and restored client-side."
+  [id body]
+  (str "<script type=\"text/x-html\" id=\"" id "\">"
+       (str/replace body "</script>" "__BARK_END_SCRIPT__")
+       "</script>\n"
+       "<script>document.write("
+       "document.getElementById('" id "').textContent"
+       ".replace(/__BARK_END_SCRIPT__/g,'<\\/script>'));</script>\n"))
 
 ;; ---------------------------------------------------------------------------
 ;; Shared footer (hiccup vector)

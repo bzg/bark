@@ -19,9 +19,9 @@
          '[taoensso.timbre :as log]
          '[bark.common :refer [parse-cli-args load-config]]
          '[bark.html-bb :refer [pico-cdn resolved-theme set-theme!
-                                bark-description
+                                bark-description page-title
                                 footer-css bark-footer wrap-js spit-html
-                                noscript-css noscript-banner
+                                noscript-banner wrap-template
                                 theme-toggle-js nav-bar]])
 
 ;; ---------------------------------------------------------------------------
@@ -38,7 +38,7 @@
 ;; CSS (inlined)
 ;; ---------------------------------------------------------------------------
 
-(def page-css (str noscript-css "
+(def page-css (str "
   main.container { max-width: 1800px; padding-left: max(1rem, env(safe-area-inset-left)); padding-right: max(1rem, env(safe-area-inset-right)); }
   mark[data-type=bug]          { --pico-mark-background-color: var(--bark-mark-bug-bg, #c0392b1a); --pico-mark-color: var(--bark-mark-bug, #c0392b); }
   mark[data-type=announcement] { --pico-mark-background-color: var(--bark-mark-ann-bg, #1a7a8a1a); --pico-mark-color: var(--bark-mark-ann, #1a7a8a); }
@@ -140,6 +140,8 @@
 
 (defn index-page [reports reports-dir envelope page-size]
   (let [source-type  (get envelope "source-type")
+        source-name  (get envelope "source")
+        title        (page-title "Reports" source-name)
         types        (vec (distinct (map #(get % "type") reports)))
         types-json   (json/generate-string types)
         total        (get envelope "total" (count reports))
@@ -159,7 +161,50 @@
                       [:th {:data-sort "from"     :onclick "sortTable(5,'from')"}     "Author"]
                       [:th {:data-sort "owner"    :onclick "sortTable(6,'owner')"}    "Owner"]
                       [:th {:data-sort "date"     :onclick "sortTable(7,'date')"}     "Date"]
-                      [:th {:data-sort "replies"  :onclick "sortTable(8,'replies')"}  "↩"]]]
+                      [:th {:data-sort "replies"  :onclick "sortTable(8,'replies')"}  "↩"]]
+        tpl-body     (str
+                      (h/html
+                       [:main.container
+                        (nav-bar title "reports")
+                        [:p.generated-at
+                         {:style "font-size:0.78rem;color:var(--pico-muted-color);margin-bottom:1rem"}
+                         (str "Generated " generated-at)]
+                        [:div.toolbar
+                         [:input#si {:type        "search"
+                                     :placeholder "Press / to search -- see Docs for syntax"
+                                     :oninput     "onSearchInput()"}]
+                         [:div.filters
+                          (for [t types]
+                            [:button {:data-type t
+                                      :onclick (str "toggleType('" t "',this)")}
+                             (get type-labels t t)])]
+                         [:div.filters.status-filters
+                          [:button#btn-open.open-btn
+                           {:onclick "toggleOpen(this)" :title "Toggle visibility of open reports only"}
+                           "Open"]
+                          [:button#btn-acked.acked-btn.outline
+                           {:onclick "toggleAcked(this)" :title "Toggle visibility of acked reports"}
+                           "Acked"]
+                          [:button#btn-owned.owned-btn.outline
+                           {:onclick "toggleOwned(this)" :title "Toggle visibility of owned reports"}
+                           "Owned"]
+                          [:button#btn-awaiting.awaiting-btn.outline
+                           {:onclick "toggleAwaiting(this)" :title "Show only reports awaiting reply"
+                            :style "margin-left:auto"}
+                           "⌚ Awaiting"]]]
+                        [:div#status]
+                        [:figure {:id "reports-table" :style "overflow-x:auto"}
+                         [:table
+                          [:thead [:tr (seq cols)]]
+                          [:tbody {:id "data"}]]]
+                        [:div#empty-state {:style "display:none;margin:1.5rem 0"}
+                         [:p {:style "margin-bottom:0.5rem"} "No matching report.  A few suggestions:"]
+                         [:ul {:style "margin:0"}
+                          [:li [:a {:href "?types=bug&acked=1&sort=date&dir=asc"} "Fix confirmed bugs"]]
+                          [:li [:a {:href "?types=patch&sort=date&dir=asc"} "Review old patches"]]
+                          [:li [:a {:href "?types=request&sort=replies&dir=desc"} "Answer active requests"]]]]
+                        [:div#pagination]])
+                      (h/html (bark-footer {:ical has-ical?})))]
     (str
      "<!DOCTYPE html>\n"
      (h/html
@@ -169,7 +214,7 @@
         [:meta {:name "viewport" :content "width=device-width, initial-scale=1"}]
         [:meta {:name "color-scheme" :content "light dark"}]
         [:meta {:name "description" :content bark-description}]
-        [:meta {:property "og:title" :content "BARK -- Reports"}]
+        [:meta {:property "og:title" :content title}]
         [:meta {:property "og:description" :content bark-description}]
         [:meta {:property "og:type" :content "website"}]
         [:link {:rel "stylesheet" :href pico-cdn}]
@@ -180,52 +225,13 @@
         (when has-rss?
           [:link {:rel "alternate" :type "application/rss+xml"
                   :title "BARK Reports RSS" :href rss-href}])
-        [:title "BARK -- Reports"]
+        [:title title]
         [:style (h/raw page-css)]]
        [:body
-        [:main.container
-         (nav-bar "BARK -- Reports" "reports")
-         (noscript-banner)
-         [:p {:style "font-size:0.78rem;color:var(--pico-muted-color);margin-bottom:1rem"}
-          (str "Generated " generated-at)]
-         [:div.toolbar
-          [:input#si {:type        "search"
-                      :placeholder "Press / to search -- see Docs for syntax"
-                      :oninput     "onSearchInput()"}]
-          [:div.filters
-           (for [t types]
-             [:button {:data-type t
-                       :onclick (str "toggleType('" t "',this)")}
-              (get type-labels t t)])]
-          [:div.filters.status-filters
-           [:button#btn-open.open-btn
-            {:onclick "toggleOpen(this)" :title "Toggle visibility of open reports only"}
-            "Open"]
-           [:button#btn-acked.acked-btn.outline
-            {:onclick "toggleAcked(this)" :title "Toggle visibility of acked reports"}
-            "Acked"]
-           [:button#btn-owned.owned-btn.outline
-            {:onclick "toggleOwned(this)" :title "Toggle visibility of owned reports"}
-            "Owned"]
-           [:button#btn-awaiting.awaiting-btn.outline
-            {:onclick "toggleAwaiting(this)" :title "Show only reports awaiting reply"
-             :style "margin-left:auto"}
-            "⌚ Awaiting"]]]
-         [:div#status]
-         [:figure {:id "reports-table" :style "overflow-x:auto"}
-          [:table
-           [:thead [:tr (seq cols)]]
-           [:tbody {:id "data"}]]]
-         [:div#empty-state {:style "display:none;margin:1.5rem 0"}
-          [:p {:style "margin-bottom:0.5rem"} "No matching report.  A few suggestions:"]
-          [:ul {:style "margin:0"}
-           [:li [:a {:href "?types=bug&acked=1&sort=date&dir=asc"} "Fix confirmed bugs"]]
-           [:li [:a {:href "?types=patch&sort=date&dir=asc"} "Review old patches"]]
-           [:li [:a {:href "?types=request&sort=replies&dir=desc"} "Answer active requests"]]]]
-         [:div#pagination]
-         [:script (h/raw (page-js types-json total open-count closed-count source-type page-size
-                                  (json/generate-string reports)))]]
-        (bark-footer {:ical has-ical?})]]))))
+        (noscript-banner title)
+        (h/raw (wrap-template "js-tpl" tpl-body))
+        [:script (h/raw (page-js types-json total open-count closed-count source-type page-size
+                                 (json/generate-string reports)))]]]))))
 
 ;; ---------------------------------------------------------------------------
 ;; Main
