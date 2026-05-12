@@ -613,14 +613,20 @@
      (when (seq data)
        (log/info "Wrote" (count data) "reports to" filename)))))
 
+(def ^:private rfc822-formatter
+  ;; DateTimeFormatter is immutable and thread-safe.  Pattern matches
+  ;; SimpleDateFormat's "EEE, dd MMM yyyy HH:mm:ss Z" output (e.g.
+  ;; "Mon, 12 May 2026 14:30:45 +0000") -- do not substitute with
+  ;; RFC_1123_DATE_TIME, which emits "GMT" and a non-padded day.
+  (-> (java.time.format.DateTimeFormatter/ofPattern "EEE, dd MMM yyyy HH:mm:ss Z")
+      (.withLocale java.util.Locale/ENGLISH)
+      (.withZone java.time.ZoneOffset/UTC)))
+
 (defn- rfc822-date
   "Format a java.util.Date as an RFC 822 date string (for RSS)."
   [^java.util.Date d]
   (when d
-    (let [out-fmt (doto (java.text.SimpleDateFormat. "EEE, dd MMM yyyy HH:mm:ss Z"
-                                                     java.util.Locale/ENGLISH)
-                    (.setTimeZone (java.util.TimeZone/getTimeZone "UTC")))]
-      (.format out-fmt d))))
+    (.format rfc822-formatter (.toInstant d))))
 
 (defn- rss-author [m]
   (let [email (:from m)

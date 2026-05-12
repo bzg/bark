@@ -763,12 +763,39 @@
   "Build a partial pull map exposing relation setters under `:setter-attr`
   so `scope-permits?` can resolve `:setter-or-maintainer` on relation
   unset directives.  `rows` is a seq carrying `:kind`, `:role` and
-  `:setter-attr`."
+  `:setter-attr`.
+
+  Batches the per-row d/q calls into at most two queries (one per role)
+  to avoid N+1 lookups when several rows share a role."
   [db report-eid rows]
-  (into {} (keep (fn [{:keys [kind role setter-attr]}]
-                   (when-let [s (relation-setter db report-eid kind role)]
-                     [setter-attr {:email/author-address s}])))
-        rows))
+  (let [by-role      (group-by :role rows)
+        from-kinds   (some->> (get by-role :current-as-from) seq (map :kind) vec)
+        to-kinds     (some->> (get by-role :current-as-to) seq (map :kind) vec)
+        from-setters (when from-kinds
+                       (into {} (d/q '[:find ?kind ?setter
+                                       :in $ ?from [?kind ...]
+                                       :where
+                                       [?e :rel/from ?from]
+                                       [?e :rel/kind ?kind]
+                                       [?e :rel/active? true]
+                                       [?e :rel/setter ?setter]]
+                                     db report-eid from-kinds)))
+        to-setters   (when to-kinds
+                       (into {} (d/q '[:find ?kind ?setter
+                                       :in $ ?to [?kind ...]
+                                       :where
+                                       [?e :rel/to ?to]
+                                       [?e :rel/kind ?kind]
+                                       [?e :rel/active? true]
+                                       [?e :rel/setter ?setter]]
+                                     db report-eid to-kinds)))]
+    (into {}
+          (keep (fn [{:keys [kind role setter-attr]}]
+                  (when-let [s (case role
+                                 :current-as-from (get from-setters kind)
+                                 :current-as-to   (get to-setters kind))]
+                    [setter-attr {:email/author-address s}])))
+          rows)))
 
 (def ^:private closure-relation-rows
   "Specs for directive-driven closure relations (Superseded-by /

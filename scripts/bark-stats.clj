@@ -166,35 +166,40 @@
        (group-by #(some-> (:report/type %) name))
        (into {} (map (fn [[t rs]] [t (count rs)])))))
 
-(defn- make-ym-formatter
-  "Create a locale-independent yyyy-MM formatter (UTC).
-  SimpleDateFormat is not thread-safe, so create a fresh instance each time."
-  ^java.text.SimpleDateFormat []
-  (doto (java.text.SimpleDateFormat. "yyyy-MM" java.util.Locale/ENGLISH)
-    (.setTimeZone (java.util.TimeZone/getTimeZone "UTC"))))
+(def ^:private ym-formatter
+  ;; DateTimeFormatter is immutable and thread-safe, so it can be shared.
+  (-> (java.time.format.DateTimeFormatter/ofPattern "yyyy-MM")
+      (.withLocale java.util.Locale/ENGLISH)
+      (.withZone java.time.ZoneOffset/UTC)))
 
 (defn- date->ym
   "Extract 'yyyy-MM' from a java.util.Date using a locale-independent formatter.
   Returns nil on failure."
   [date]
   (when date
-    (try (.format (make-ym-formatter) date)
+    (try (.format ym-formatter (.toInstant ^java.util.Date date))
          (catch Exception _ nil))))
 
 (defn- current-ym
   "Return [year month] for right now, locale-independent."
   []
-  (let [s (.format (make-ym-formatter) (java.util.Date.))
+  (let [s (.format ym-formatter (.toInstant (java.util.Date.)))
         [year month] (str/split s #"-")]
     [(parse-long year) (parse-long month)]))
+
+(def ^:private last-12-months*
+  ;; Memoize: the script runs once per invocation, so freezing the
+  ;; window at first deref is fine and avoids recomputing 4+ times.
+  (delay
+   (let [[cy cm] (current-ym)]
+     (vec (for [i (range 11 -1 -1)]
+            (let [total (+ (* cy 12) (dec cm) (- i))]
+              (format "%04d-%02d" (quot total 12) (inc (mod total 12)))))))))
 
 (defn- last-12-months
   "Return a vector of 12 \"yyyy-MM\" strings ending with the current month."
   []
-  (let [[cy cm] (current-ym)]
-    (vec (for [i (range 11 -1 -1)]
-           (let [total (+ (* cy 12) (dec cm) (- i))]
-             (format "%04d-%02d" (quot total 12) (inc (mod total 12))))))))
+  @last-12-months*)
 
 (defn- cumulative-by-month
   "Given a {\"yyyy-MM\" count} frequency map and a base count (entries before

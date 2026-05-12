@@ -358,18 +358,21 @@
 ;; Maintainers section
 ;; ---------------------------------------------------------------------------
 
-(defn- participant-name
-  "Look up a participant's display name by email for a given source.
-  Returns the name if found and non-blank, otherwise nil."
-  [db source-name email]
-  (let [dq (resolve 'pod.huahaiy.datalevin/q)
-        k  (str source-name ":" (str/lower-case email))]
-    (when-let [n (dq '[:find ?n .
-                       :in $ ?k
-                       :where [?e :participant/key ?k]
-                       [?e :participant/name ?n]]
-                     db k)]
-      (when-not (str/blank? n) n))))
+(defn- participant-names-for-source
+  "Return `{lowercase-email -> non-blank name}` for all participants of
+  `source-name`.  Single query, intended for batch lookups."
+  [db source-name]
+  (let [dq (resolve 'pod.huahaiy.datalevin/q)]
+    (->> (dq '[:find ?email ?name
+               :in $ ?src
+               :where
+               [?e :participant/source ?src]
+               [?e :participant/email ?email]
+               [?e :participant/name ?name]]
+             db source-name)
+         (reduce (fn [acc [email name]]
+                   (if (str/blank? name) acc (assoc acc email name)))
+                 {}))))
 
 (defn- html-escape
   "Escape HTML special characters in a string."
@@ -391,6 +394,7 @@
   (when source-name
     (let [tenures     (get-tenures db source-name)
           lead        (lead-maintainer tenures)
+          names       (participant-names-for-source db source-name)
           ;; Sort: lead first, then alphabetical by email (case-insensitive).
           sort-key    (fn [{:keys [email to]}]
                         [(if (and (nil? to) (= email lead)) 0 1)
@@ -398,7 +402,7 @@
           ordered     (sort-by sort-key tenures)
           entries     (mapv
                        (fn [{:keys [email from to]}]
-                         (let [display (or (participant-name db source-name email) email)
+                         (let [display (or (get names (some-> email str/lower-case)) email)
                                escaped (html-escape display)
                                range   (cond
                                          (and from to)

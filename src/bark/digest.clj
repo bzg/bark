@@ -289,27 +289,37 @@
         n           (parse-version-number new-version)]
     (when (and n (>= n 1))
       (let [versions-to-close (cond-> #{new-version}
-                                (> n 1) (conj (str "v" (dec n))))]
-        (doseq [rid nearest-report-eids]
-          ;; Refresh the snapshot per-iteration so prior transacts in
-          ;; this loop are visible to the :report/closed check below.
-          (let [r (d/pull (d/db conn)
-                          [:report/type :report/version :report/topic-value :report/closed
-                           :report/message-id]
-                          rid)]
-            (when (and (= :patch (:report/type r))
-                       (contains? versions-to-close (:report/version r))
-                       (not (:report/closed r))
-                       (or (and (nil? new-topic) (nil? (:report/topic-value r)))
-                           (and new-topic
-                                (= (str/lower-case new-topic)
-                                   (str/lower-case (or (:report/topic-value r) ""))))))
-              (auto-supersede-patch!
-               conn rid report-eid email
-               (str "[PATCH " (:report/version r)
-                    (when-let [t (:report/topic-value r)] (str " " t)) "] "
-                    "(" (:report/message-id r) ") "
-                    "(superseded by " new-version ")")))))))))
+                                (> n 1) (conj (str "v" (dec n))))
+            new-topic-lc      (some-> new-topic str/lower-case)
+            ;; Single snapshot: nearest-report-eids contains distinct
+            ;; rids and the daemon is single-threaded on this section,
+            ;; so no concurrent mutation of :report/closed can happen
+            ;; between pulls.  If that invariant changes, restore the
+            ;; per-iteration refresh.
+            db                (d/db conn)
+            candidates        (keep
+                               (fn [rid]
+                                 (let [r (d/pull db
+                                                 [:report/type :report/version
+                                                  :report/topic-value :report/closed
+                                                  :report/message-id]
+                                                 rid)]
+                                   (when (and (= :patch (:report/type r))
+                                              (contains? versions-to-close
+                                                         (:report/version r))
+                                              (not (:report/closed r))
+                                              (= new-topic-lc
+                                                 (some-> (:report/topic-value r)
+                                                         str/lower-case)))
+                                     [rid r])))
+                               nearest-report-eids)]
+        (doseq [[rid r] candidates]
+          (auto-supersede-patch!
+           conn rid report-eid email
+           (str "[PATCH " (:report/version r)
+                (when-let [t (:report/topic-value r)] (str " " t)) "] "
+                "(" (:report/message-id r) ") "
+                "(superseded by " new-version ")")))))))
 
 (defn- normalize-subject
   "Strip Re:/Fwd: prefixes and bracketed tags to get the base subject."
@@ -547,9 +557,11 @@
         email-eid (:db/id email)
         from-addr (:email/author-address email)
         addr-lc   (some-> from-addr str/lower-case)
-        targets   (rel/active-targets db patch-report-eid :resolves)]
+        targets   (rel/active-targets db patch-report-eid :resolves)
+        patch-mid (:report/message-id
+                   (d/pull db [:report/message-id] patch-report-eid))]
     (doseq [bug-eid targets]
-      (let [bug-state (d/pull db [:report/acked :report/owned] bug-eid)
+      (let [bug-state (d/pull db [:report/acked :report/owned :report/message-id] bug-eid)
             credit    (fn [tx attr addr-attr]
                         (cond-> tx
                           (nil? (get bug-state attr))
@@ -561,9 +573,8 @@
           (d/transact! conn tx)
           (tracking/bump-report-updated! conn bug-eid)
           (log/info "Auto-credit:" from-addr "credited as acked+owned of"
-                    (:report/message-id (d/pull (d/db conn) [:report/message-id] bug-eid))
-                    "via patch"
-                    (:report/message-id (d/pull (d/db conn) [:report/message-id] patch-report-eid))))))))
+                    (:report/message-id bug-state)
+                    "via patch" patch-mid))))))
 
 (defn- run-post-creation-hooks!
   "Execute post-creation side effects driven by the plan."

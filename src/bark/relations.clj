@@ -341,10 +341,16 @@
           bugs (active-targets db patch-eid :resolves)]
       (case close-reason
         :resolved
-        (doseq [bug-eid bugs]
-          (let [closed? (some? (:report/closed
-                                (d/pull (d/db conn) [:report/closed] bug-eid)))]
-            (when-not closed?
+        ;; Bugs already closed are filtered up-front in a single query.
+        ;; Safe with one snapshot: each bug-eid is distinct, so closing
+        ;; bug-A does not affect the closed status of bug-B.
+        (let [closed-bugs (when (seq bugs)
+                            (set (d/q '[:find [?b ...]
+                                        :in $ [?b ...]
+                                        :where [?b :report/closed _]]
+                                      db bugs)))]
+          (doseq [bug-eid bugs]
+            (when-not (contains? closed-bugs bug-eid)
               (d/transact! conn [{:db/id bug-eid
                                   :report/closed email-eid
                                   :report/close-reason :resolved}]))))

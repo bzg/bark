@@ -145,11 +145,11 @@
                                              :where [?s :series/cover-letter ?e]
                                              [?e :email/message-id ?mid]]
                                            db existing-series))
-                            parent-mids (set (keep (fn [rid]
-                                                     (d/q '[:find ?mid . :in $ ?r
-                                                            :where [?r :report/message-id ?mid]]
-                                                          db rid))
-                                                   parent-report-eids))]
+                            parent-mids (when (seq parent-report-eids)
+                                          (set (d/q '[:find [?mid ...]
+                                                      :in $ [?r ...]
+                                                      :where [?r :report/message-id ?mid]]
+                                                    db parent-report-eids)))]
                         (some old-mids parent-mids)))]
       (when (and restart? ancestor?)
         (doseq [sid existing-series]
