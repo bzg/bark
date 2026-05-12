@@ -41,24 +41,21 @@ function setSearch(val) {
   pushURL();
 }
 
-function resetFilters() {
-  onlyOpen = false;
+function showRelated(val) {
+  // Reset types/acked/owned/awaiting; leave the Open button untouched.
+  // Appending 'closed:true' to the query bypasses the Open filter
+  // transiently -- clearing the search restores the previous state.
   onlyAcked = false;
   onlyOwned = false;
   onlyAwaiting = false;
   allTypes.forEach(function(t) { activeTypes[t] = true; });
-  document.getElementById('btn-open').classList.add('outline');
   document.getElementById('btn-acked').classList.add('outline');
   document.getElementById('btn-owned').classList.add('outline');
   document.getElementById('btn-awaiting').classList.add('outline');
   document.querySelectorAll('.filters button[data-type]').forEach(function(btn) {
     btn.classList.remove('outline');
   });
-}
-
-function showRelated(val) {
-  resetFilters();
-  setSearch(val);
+  setSearch(val + ' closed:true');
 }
 
 function localDate(d) {
@@ -144,7 +141,8 @@ function parseClause(q) {
                  dateFrom: '', dateTo: '',
                  deadlineFrom: '', deadlineTo: '',
                  expiredFrom: '', expiredTo: '',
-                 minPriority: null };
+                 minPriority: null,
+                 includeClosed: false };
   var parts = q.trim().split(/\s+/).filter(Boolean);
   for (var i = 0; i < parts.length; i++) {
     var p  = parts[i];
@@ -155,6 +153,13 @@ function parseClause(q) {
       continue;
     }
     var lp = p.toLowerCase();
+    // closed:true / c:true bypasses the Open filter without touching
+    // the button. The marker lives in the search query, so clearing it
+    // restores the previous Open state automatically.
+    if (lp === 'closed:true' || lp === 'c:true') {
+      result.includeClosed = true;
+      continue;
+    }
     var matched = false;
     for (var j = 0; j < fieldMap.length; j++) {
       if (startsWithAny(lp, fieldMap[j].prefixes)) {
@@ -232,6 +237,7 @@ function prepareReport(r) {
   var priority = r.priority || 0;
   var acked = r.acked || '';
   var owned = r.owned || '';
+  var ownedName = r['owned-name'] || '';
   var closed = r.closed || '';
   var urgent = r.urgent || '';
   var important = r.important || '';
@@ -248,6 +254,9 @@ function prepareReport(r) {
   var isoDate = parseIsoDate(dateRaw);
   var closedBool = flags.length >= 3 && flags[2] !== '-';
   var author = fromName ? abbreviateName(fromName) : emailLocalPart(from);
+  var ownerDisplay = ownedName ? abbreviateName(ownedName)
+                   : owned     ? emailLocalPart(owned)
+                   : '';
   var flagsScore = (acked ? 1 : 0) + (owned ? 2 : 0) + (closedBool ? 0 : 4);
 
   var dueDays = null;
@@ -283,10 +292,11 @@ function prepareReport(r) {
     topic: (topic || '').toLowerCase(),
     awaiting: !!awaiting,
     lastActivity: lastActivity,
-    search: (subject + ' ' + from + ' ' + author + ' ' + owned + ' ' + isoDate + ' ' + topic).toLowerCase(),
+    search: (subject + ' ' + from + ' ' + author + ' ' + owned + ' ' + ownedName + ' ' + isoDate + ' ' + topic).toLowerCase(),
     // Render helpers (pre-computed once)
     isoDate: isoDate,
     author: author,
+    ownerDisplay: ownerDisplay,
     flagsScore: flagsScore,
     dueDays: dueDays,
     replies: replies
@@ -297,7 +307,7 @@ function prepareReport(r) {
 
 function matchReport(rpt, q) {
   if (!activeTypes[rpt.type]) return false;
-  if (onlyOpen && rpt.closed) return false;
+  if (onlyOpen && !q.includeClosed && rpt.closed) return false;
   if (onlyAcked  && rpt.acked === '') return false;
   if (onlyOwned  && rpt.owned === '') return false;
   if (onlyAwaiting && !rpt.awaiting) return false;
@@ -329,12 +339,22 @@ function matchReportAny(rpt, clauses) {
   return clauses.some(function(c) { return matchReport(rpt, c); });
 }
 
+function queryIncludesClosed(q) {
+  if (!q) return false;
+  return q.split(/\s*\|\s*/).map(parseClause)
+          .some(function(c) { return c.includeClosed; });
+}
+
 /* ── Filtering & Sorting (in-memory, no DOM access) ──────────── */
 
 function filterReports() {
-  console.time('bark:filter');
   var raw = getSearchInput().value;
   var clauses = raw.split(/\s*\|\s*/).map(parseClause);
+  if (!closedLoaded && clauses.some(function(c) { return c.includeClosed; })) {
+    loadClosedReports(function() { filterReports(); });
+    return;
+  }
+  console.time('bark:filter');
   _filteredReports = [];
   for (var i = 0; i < _allReports.length; i++) {
     if (matchReportAny(_allReports[i], clauses)) {
@@ -638,7 +658,7 @@ function buildRowElement(rpt) {
 
   var ownerAddr = owned || '';
   var ownerHtml = ownerAddr
-    ? '<a href="javascript:void(0)" onclick="setSearch(\'o:' + escAttr(ownerAddr) + '\')" title="' + escAttr(ownerAddr) + '">' + escHtml(emailLocalPart(ownerAddr)) + '</a>'
+    ? '<a href="javascript:void(0)" onclick="setSearch(\'o:' + escAttr(ownerAddr) + '\')" title="' + escAttr(ownerAddr) + '">' + escHtml(rpt.ownerDisplay) + '</a>'
     : '';
 
   // Date cell with expiry handling
@@ -810,7 +830,7 @@ function buildURL() {
   if (q) params.set('q', q);
   var active = allTypes.filter(function(t) { return activeTypes[t]; });
   if (active.length !== allTypes.length) params.set('types', active.join(','));
-  if (!onlyOpen)    params.set('open', '0');
+  if (!onlyOpen || queryIncludesClosed(q)) params.set('open', '0');
   if (onlyAcked)    params.set('acked', '1');
   if (onlyOwned)    params.set('owned', '1');
   if (onlyAwaiting) params.set('awaiting', '1');
@@ -938,7 +958,8 @@ function updateStatusButtons() {
 
 function restoreFromURL() {
   var params = new URLSearchParams(location.search);
-  getSearchInput().value = params.get('q') || '';
+  var qVal = params.get('q') || '';
+  getSearchInput().value = qVal;
 
   if (params.has('types')) {
     var allowed = params.get('types').split(',');
@@ -950,7 +971,12 @@ function restoreFromURL() {
     btn.classList.toggle('outline', !activeTypes[btn.dataset.type]);
   });
 
-  onlyOpen = params.get('open') !== '0';
+  // If the search query bypasses the Open filter via 'closed:true', any
+  // 'open=0' in the URL is a side-effect of that override -- not a button
+  // toggle. Keep the button on (default) so clearing the query restores
+  // Open-only filtering automatically.
+  var queryHasClosed = queryIncludesClosed(qVal);
+  onlyOpen = queryHasClosed ? true : (params.get('open') !== '0');
   document.getElementById('btn-open').classList.toggle('outline', !onlyOpen);
 
   onlyAcked = params.get('acked') === '1';
@@ -978,7 +1004,7 @@ function restoreFromURL() {
 
   currentPage = params.has('page') ? parseInt(params.get('page'), 10) || 1 : 1;
 
-  if (!onlyOpen && !closedLoaded) {
+  if ((!onlyOpen || queryHasClosed) && !closedLoaded) {
     loadClosedReports(function() { filterReports(); });
   } else {
     filterReports();

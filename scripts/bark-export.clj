@@ -266,6 +266,27 @@
                      set)]))
         source-map))
 
+(defn- build-author-names
+  "Build a {lowercased-addr -> latest-known author-name} map by scanning
+  all emails.  Used to display role-bearing addresses (owner, etc.) by
+  display name in exports rather than as bare email local-parts."
+  [db]
+  (let [pairs  (dq '[:find ?addr ?name ?date
+                     :where
+                     [?e :email/author-address ?addr]
+                     [?e :email/author-name ?name]
+                     [?e :email/date-sent ?date]]
+                   db)
+        latest (reduce (fn [m [addr name date]]
+                         (let [k    (str/lower-case addr)
+                               prev (get m k)]
+                           (if (or (nil? prev)
+                                   (.after ^java.util.Date date ^java.util.Date (second prev)))
+                             (assoc m k [name date])
+                             m)))
+                       {} pairs)]
+    (update-vals latest first)))
+
 ;; ---------------------------------------------------------------------------
 ;; Report -> map
 ;; ---------------------------------------------------------------------------
@@ -299,6 +320,16 @@
    [:report/closed    :closed    :closed-proxy]
    [:report/urgent    :urgent    :urgent-proxy]
    [:report/important :important :important-proxy]])
+
+(defn- assoc-owned-name
+  "Attach :owned-name when the owner's display name is known (looked up
+  via the global author-names map built once per export)."
+  [m author-names]
+  (if-let [owned (:owned m)]
+    (if-let [nm (get author-names (str/lower-case owned))]
+      (assoc m :owned-name nm)
+      m)
+    m))
 
 (defn- assoc-from-addresses
   "Extract addresses from report: direct string attrs and author-address of ref attrs.
@@ -387,15 +418,20 @@
 ;; ---------------------------------------------------------------------------
 
 (def ^:private export-ctx
-  "Export context: {:db <datalevin-db> :votes {eid -> [vote-maps]} :config <config>}"
-  (atom {:db nil :votes {} :config nil}))
+  "Export context: {:db <datalevin-db> :votes {eid -> [vote-maps]}
+  :config <config> :author-names {lc-addr -> display-name}}"
+  (atom {:db nil :votes {} :config nil :author-names {}}))
 
 (defn- set-export-context! [db votes config]
-  (reset! export-ctx {:db db :votes votes :config config}))
+  (reset! export-ctx {:db           db
+                      :votes        votes
+                      :config       config
+                      :author-names (build-author-names db)}))
 
 (defn- ctx-db [] (:db @export-ctx))
 (defn- ctx-votes [] (:votes @export-ctx))
 (defn- ctx-config [] (:config @export-ctx))
+(defn- ctx-author-names [] (:author-names @export-ctx))
 
 (def ^:private default-awaiting-delay-days 14)
 
@@ -488,6 +524,7 @@
          :priority (report-priority report)
          :replies  (report-descendant-count report)}
         (assoc-from-addresses report)
+        (assoc-owned-name (ctx-author-names))
         (cond->
          (:email/author-name email)      (assoc :from-name (:email/author-name email))
           role                            (assoc :role role)
