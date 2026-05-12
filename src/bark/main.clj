@@ -232,12 +232,11 @@
       :else
       (if-let [src-name (digest/pre-classify-source (d/db db-conn) sources msg)]
         (let [lookup     [:email/message-id mid]
-              store-opts (if max-attachment-size
-                           {:max-attachment-size max-attachment-size}
-                           {})]
+              store-opts (cond-> {:source src-name}
+                           max-attachment-size (assoc :max-attachment-size
+                                                      max-attachment-size))]
           (if (ingest/store-email! db-conn msg store-opts)
             (let [eid (d/entid (d/db db-conn) lookup)]
-              (d/transact! db-conn [{:db/id eid :email/source src-name}])
               (try-digest! db-conn source-map sources
                            (d/pull (d/db db-conn) digest/email-pull-pattern eid) mid))
             ;; store-email! returned false: either dup Message-ID (re-process

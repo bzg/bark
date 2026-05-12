@@ -66,21 +66,58 @@
                        db mid)]
       (into (set as-root) as-desc))))
 
+(defn- email-ancestors-by-mid
+  "Ancestor mids of a stored email identified by `mid`, in root-first
+  RFC 2822 order. Returns nil when `mid` is not indexable or no
+  matching email exists. Used by `thread-lookup` to splice through a
+  stored-but-pending intermediate email."
+  [db mid]
+  (when (common/indexable-mid? mid)
+    (when-let [e (d/entid db [:email/message-id mid])]
+      (let [pulled (d/pull db [:email/references :email/in-reply-to] e)]
+        (common/ancestor-mids-from (:email/references pulled)
+                                   (:email/in-reply-to pulled))))))
+
+(def ^:private thread-lookup-max-splices
+  "Upper bound on transitive ancestor splicing per `thread-lookup`
+  call. Bounds worst-case walks on threads where many intermediate
+  emails are stored but unattached to any report."
+  32)
+
 (defn thread-lookup
   "Walk an email's ancestor mids nearest-first and return
   `{:all #{eids} :nearest #{eids}}`.
   - `:all`     -- every report matched by any ancestor
   - `:nearest` -- reports matched by the closest matching ancestor,
                   or `nil` if no ancestor matches.
-  Single DB pass replaces the previous two-function lookup."
+
+  When an ancestor mid matches a stored email but no report (an
+  intermediate email held pending, or simply attached to no report),
+  that email's own ancestor mids are spliced into the walk so the
+  pending intermediate cannot orphan its descendants. Splicing is
+  bounded by `thread-lookup-max-splices`."
   [email db]
-  (reduce (fn [acc mid]
-            (let [eids (lookup-reports-by-mid db mid)]
-              (cond-> acc
-                (seq eids)                            (update :all into eids)
-                (and (seq eids) (nil? (:nearest acc))) (assoc :nearest eids))))
-          {:all #{} :nearest nil}
-          (rseq (ancestor-mids email))))
+  (loop [stack   (vec (ancestor-mids email))  ; root-first; peek = nearest
+         seen    #{}
+         splices 0
+         acc     {:all #{} :nearest nil}]
+    (if (empty? stack)
+      acc
+      (let [mid    (peek stack)
+            stack' (pop stack)]
+        (if (contains? seen mid)
+          (recur stack' seen splices acc)
+          (let [seen' (conj seen mid)
+                eids  (lookup-reports-by-mid db mid)
+                acc'  (cond-> acc
+                        (seq eids)                              (update :all into eids)
+                        (and (seq eids) (nil? (:nearest acc))) (assoc :nearest eids))]
+            (if (and (empty? eids)
+                     (< splices thread-lookup-max-splices))
+              (if-let [ancestors (email-ancestors-by-mid db mid)]
+                (recur (into stack' ancestors) seen' (inc splices) acc')
+                (recur stack' seen' splices acc'))
+              (recur stack' seen' splices acc'))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; DB operations
@@ -561,18 +598,24 @@
 ;; Pending-thread retry (out-of-order delivery rescue)
 ;; ---------------------------------------------------------------------------
 
-(defn- in-reply-to-resolved?
-  "True when the email's In-Reply-To target is nil (root), exceeds the
-  LMDB index limit (cannot be looked up nor stored, so threading via
-  it is impossible anyway), or is already stored in the DB.  When
-  false, the email is held as pending -- its threading and commands
-  are deferred until the missing ancestor (or any thread sibling)
-  arrives."
+(defn- thread-anchorable?
+  "True when the email can be threaded now: at least one ancestor mid
+  (In-Reply-To or any References entry) is already stored in the DB.
+  Also true when In-Reply-To is absent (root) or exceeds the LMDB
+  index limit (cannot be looked up either way).
+
+  Accepting any References ancestor -- not only the immediate parent
+  -- approximates public-inbox's threading: a missing intermediate
+  message no longer orphans its descendants, as long as the chain
+  reaches some known ancestor.  When no anchor is found the email is
+  held pending until an ancestor arrives or the TTL flush forces
+  processing."
   [db email]
   (let [irt (:email/in-reply-to email)]
     (or (nil? irt)
         (not (common/indexable-mid? irt))
-        (some? (d/entid db [:email/message-id irt])))))
+        (boolean (some #(d/entid db [:email/message-id %])
+                       (ancestor-mids email))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Single-email processing -- orchestrator
@@ -584,9 +627,9 @@
   "Process a single email: classify source, detect report, thread,
   apply commands, manage series. Called after store-email! succeeds.
 
-  When the email's In-Reply-To points to a message-id absent from
-  the DB, Phase 3 (threading + commands) and Phase 4 (post-creation
-  hooks) are skipped and the email is flagged
+  When no ancestor mid (In-Reply-To or any References entry) is
+  stored in the DB, Phase 3 (threading + commands) and Phase 4
+  (post-creation hooks) are skipped and the email is flagged
   `:email/pending-thread? true`.  A later arrival sharing the same
   thread triggers the retry via `retry-pending-in-shared-thread!`,
   or the TTL flush forces processing after N days.
@@ -619,7 +662,7 @@
                                     source-name source-cfg via-channel? rroles)
               db           (d/db conn)]
 
-          (if (or force-thread? (in-reply-to-resolved? db email))
+          (if (or force-thread? (thread-anchorable? db email))
             ;; --- Normal path: threading, commands, post-creation hooks ---
             (do
               (when was-pending?
@@ -669,8 +712,8 @@
             (do (d/transact! conn [{:db/id eid
                                     :email/pending-thread? true
                                     :email/digested-at (Date.)}])
-                (log/info "Pending:" message-id "-- in-reply-to"
-                          (:email/in-reply-to email) "absent from DB")))))))))
+                (log/info "Pending:" message-id "-- no ancestor mid in DB"
+                          "(in-reply-to" (:email/in-reply-to email) ")")))))))))
 
 (defn- retry-pending-in-shared-thread!
   "After processing `email` normally, retry any pending email that

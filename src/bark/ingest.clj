@@ -24,6 +24,17 @@
 (defn- entity-exists? [conn attr v]
   (when v (some? (d/entid (d/db conn) [attr v]))))
 
+(defn- id-collision?
+  "True iff an email is already stored under the composite
+  (:email/source, :email/id) pair.  Mailseq ids are not globally
+  unique (IMAP UIDs are per-folder, Maildir filenames are per-folder)
+  so dedup must be source-scoped."
+  [conn source-name id]
+  (when (and source-name id)
+    (some? (d/q '[:find ?e . :in $ ?src ?id
+                  :where [?e :email/source ?src] [?e :email/id ?id]]
+                (d/db conn) source-name id))))
+
 (defn max-imap-uid [conn]
   (or (d/q '[:find ?uid . :where [?e :watermark/id "default"] [?e :watermark/imap-uid ?uid]]
            (d/db conn))
@@ -135,12 +146,14 @@
 
 (defn- parse-message-ids
   "Parse a References header value into a single space-separated string
-  of message-ids, preserving RFC 2822 order (root -> parent).
-  Returns the string, or nil if empty."
+  of message-ids, preserving RFC 2822 order (root -> parent).  Each
+  mid is normalized (domain lowercased per RFC 5322 §3.6.4).  Tokens
+  with whitespace or nested brackets are rejected.  Returns the
+  string, or nil if no well-formed mid is found."
   [s]
   (when s
-    (let [ids (->> (re-seq #"<[^>]+>" s)
-                   (map str)
+    (let [ids (->> (re-seq #"<[^<>\s]+>" s)
+                   (map common/normalize-mid)
                    distinct
                    vec)]
       (when (seq ids) (str/join " " ids)))))
@@ -248,11 +261,18 @@
   "Store a single parsed email in Datalevin.
   Skips if Message-ID is nil, oversized, or already exists.
   Returns true if the email was stored, false/nil otherwise.
-  `opts` may contain :max-attachment-size to override the default (1 MB)."
+
+  `opts` may contain:
+    :source              -- source name to stamp on the entity and to
+                           scope the (:email/source, :email/id) dedup
+                           check.  Required for live ingestion; tests
+                           that bypass classification may omit it.
+    :max-attachment-size -- override the default (1 MB) limit."
   ([conn msg] (store-email! conn msg {}))
   ([conn msg opts]
   (let [message-id (common/extract-bracketed-id (:message-id msg))
-        id         (:id msg)]
+        id         (:id msg)
+        src-name   (:source opts)]
     (cond
       (nil? message-id)
       (do (log/warn "Skipping email with nil Message-ID, id:" id) false)
@@ -264,13 +284,14 @@
       (entity-exists? conn :email/message-id message-id)
       (do (log/debug "Skipping already stored Message-ID:" message-id) false)
 
-      (entity-exists? conn :email/id id)
-      (do (log/warn "Skipping id collision:" id
-                    "-- different Message-ID but id already stored")
+      (id-collision? conn src-name id)
+      (do (log/warn "Skipping id collision:" id "on source" src-name
+                    "-- different Message-ID but (source,id) already stored")
           false)
 
       :else
-      (let [txdata (email->txdata msg opts)]
+      (let [txdata (cond-> (email->txdata msg opts)
+                     src-name (assoc :email/source src-name))]
         (try
           (d/transact! conn [txdata])
           (log/info "Stored email id:" id

@@ -561,8 +561,12 @@ function buildRowElement(rpt) {
   // Union of all qualified-relation kinds: a click on this link should
   // filter on every report linked to the current one regardless of how
   // (resolves, supersedes, duplicates, related-to, and their inverses).
+  // Include the current report's own message-id so the whole related
+  // cluster surfaces together, not just its neighbours.
   var allRelated = [];
   var seenMids = {};
+  var selfMid = r['message-id'] || '';
+  if (selfMid) { seenMids[selfMid] = 1; allRelated.push(selfMid); }
   ['resolves', 'resolved-by',
    'supersedes', 'superseded-by',
    'duplicates', 'duplicated-by',
@@ -575,11 +579,11 @@ function buildRowElement(rpt) {
       });
     }
   });
-  if (allRelated.length > 0) {
+  if (allRelated.length > 1) {
     relatedHtml = '<a class="secondary" href="#" onclick="showRelated(\'m:' +
       escAttr(allRelated.join(',')) +
       '\'); return false;" title="Filter related reports" style="font-size:0.75rem">\u21B3' +
-      allRelated.length + ' </a>';
+      (allRelated.length - 1) + ' </a>';
   }
 
   var eventsHtml = '';

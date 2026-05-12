@@ -614,15 +614,29 @@
                           false))))
            directives))
 
+(defn- report-eid-by-mid
+  "Look up a report by `target-mid`, matching either as the report's
+  root (:report/message-id) or as a descendant email
+  (:report/descendants -> :email/message-id).  Returns the report eid
+  or nil.  Aligned with `digest/lookup-reports-by-mid`: a mid that
+  points at a thread descendant should resolve to its containing
+  report, not be reported as :unknown-target.  Returns nil for
+  oversized mids -- such mids cannot have been stored."
+  [db target-mid]
+  (when (common/indexable-mid? target-mid)
+    (or (d/entid db [:report/message-id target-mid])
+        (d/q '[:find ?r . :in $ ?mid
+               :where [?r :report/descendants ?e] [?e :email/message-id ?mid]]
+             db target-mid))))
+
 (defn- resolve-target
   "Look up the target report-eid for a relation directive (Superseded-by:
   or Duplicate-of:).  Returns {:target-eid :target-type :valid?} where
   `:valid?` is true iff the target exists AND the type constraint passes
-  for `kind`.  Mids exceeding the LMDB index limit are treated as
-  unknown (the target cannot have been stored)."
+  for `kind`.  A `target-mid` that resolves to a descendant of a report
+  resolves to the containing report (parity with threading)."
   [db kind report-eid source-type target-mid]
-  (let [target-eid  (when (common/indexable-mid? target-mid)
-                      (d/entid db [:report/message-id target-mid]))
+  (let [target-eid  (report-eid-by-mid db target-mid)
         target-type (when target-eid
                       (:report/type (d/pull db [:report/type] target-eid)))]
     {:target-eid  target-eid
@@ -650,7 +664,11 @@
   "Pose / retract :related-to relations from a resolved directives map.
   Independent of report closure state; called from both `apply-directives!`
   (open path) and `try-unclosed!` (closed path).  Emits failures for
-  unknown targets, ignores self-loops silently."
+  unknown targets, ignores self-loops silently.
+
+  Target mids resolve via `report-eid-by-mid` -- root or descendant --
+  so a mid pointing at any email in a report's thread reaches that
+  report (parity with threading)."
   [conn report-eid resolved email-eid from-addr failure-ctx]
   (let [db        (d/db conn)
         ;; Filter mids exceeding the LMDB index limit; the lookup would
@@ -662,7 +680,7 @@
         to-clear  (into #{} indexable (:related-to-unset resolved))
         posed-at  (Date.)]
     (doseq [mid to-pose]
-      (let [target-eid (d/entid db [:report/message-id mid])]
+      (let [target-eid (report-eid-by-mid db mid)]
         (cond
           (nil? target-eid)
           (when failure-ctx
@@ -681,7 +699,7 @@
               (tracking/bump-report-updated! conn target-eid)
               (log/info "Related-to:" mid "(by" from-addr ")")))))
     (doseq [mid to-clear]
-      (let [target-eid (d/entid db [:report/message-id mid])]
+      (let [target-eid (report-eid-by-mid db mid)]
         (when target-eid
           (when (rel/retract-pair! conn report-eid :related-to
                                     target-eid email-eid)

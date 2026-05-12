@@ -1,6 +1,10 @@
 (ns bark.ingest-test
-  "Unit tests for bark.ingest -- ICS attachment data extraction."
-  (:require [clojure.test :refer [deftest is testing]]
+  "Unit tests for bark.ingest -- ICS attachment data extraction
+  and composite-source dedup."
+  (:require [clojure.java.io :as io]
+            [clojure.test :refer [deftest is testing]]
+            [datalevin.core :as d]
+            [bark.common :as common]
             [bark.ingest :as ingest]))
 
 ;; ---------------------------------------------------------------------------
@@ -159,3 +163,71 @@
       (is (= "mail@daniel-mendler.de"  (:email/author-address tx)))
       (is (= "Daniel Mendler"          (:email/author-name tx)))
       (is (= "mail@daniel-mendler.de"  (:email/reply-to-address tx))))))
+
+;; ---------------------------------------------------------------------------
+;; Composite (source, id) dedup -- two sources may legitimately collide on
+;; mailseq id (IMAP UIDs are per-folder, Maildir filenames are per-folder),
+;; so the dedup check must be source-scoped.
+;; ---------------------------------------------------------------------------
+
+(defn- fresh-conn []
+  (let [path (str "/tmp/bark-ingest-test-" (System/currentTimeMillis) "-" (rand-int 1e6))]
+    {:conn (d/get-conn path common/bark-schema) :path path}))
+
+(defn- cleanup! [{:keys [conn path]}]
+  (d/close conn)
+  (let [dir (io/file path)]
+    (when (.exists dir)
+      (doseq [f (reverse (file-seq dir))] (.delete f)))))
+
+(defn- minimal-msg
+  "Minimal mailseq-shaped msg with stable defaults."
+  [{:keys [id mid]}]
+  {:id           id
+   :message-id   mid
+   :subject      "Hi"
+   :content-type "text/plain"
+   :from         [{:address "alice@example.org" :name "Alice"}]
+   :date-sent    #inst "2026-05-01"
+   :body         {:text "Body."}})
+
+(deftest store-email!-composite-source-id-dedup
+  (testing "same id on different sources is NOT a collision"
+    (let [{:keys [conn] :as setup} (fresh-conn)]
+      (try
+        (is (true? (ingest/store-email! conn
+                                        (minimal-msg {:id "42" :mid "<m1@x>"})
+                                        {:source "src-a"})))
+        (is (true? (ingest/store-email! conn
+                                        (minimal-msg {:id "42" :mid "<m2@x>"})
+                                        {:source "src-b"})))
+        (let [db (d/db conn)
+              cnt (count (d/q '[:find [?e ...] :where [?e :email/message-id]] db))]
+          (is (= 2 cnt) "both emails stored"))
+        (finally (cleanup! setup)))))
+
+  (testing "same id on the same source IS a collision (different Message-ID)"
+    (let [{:keys [conn] :as setup} (fresh-conn)]
+      (try
+        (is (true? (ingest/store-email! conn
+                                        (minimal-msg {:id "42" :mid "<m1@x>"})
+                                        {:source "src-a"})))
+        (is (false? (ingest/store-email! conn
+                                         (minimal-msg {:id "42" :mid "<m3@x>"})
+                                         {:source "src-a"})))
+        (finally (cleanup! setup)))))
+
+  (testing "same Message-ID on different sources is dropped as a dup (mid is globally unique)"
+    (let [{:keys [conn] :as setup} (fresh-conn)]
+      (try
+        (is (true? (ingest/store-email! conn
+                                        (minimal-msg {:id "42" :mid "<shared@x>"})
+                                        {:source "src-a"})))
+        (let [r (ingest/store-email! conn
+                                     (minimal-msg {:id "99" :mid "<shared@x>"})
+                                     {:source "src-b"})]
+          ;; store-email! returns false on dup Message-ID -- that's the
+          ;; intended branch ("re-process the existing entity"), not an
+          ;; error.
+          (is (false? r)))
+        (finally (cleanup! setup))))))

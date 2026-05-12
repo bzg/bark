@@ -341,6 +341,44 @@
             (is (some? orig-eid)                   "_")))
         (finally (close-and-cleanup! setup))))))
 
+(defn- attach-descendant!
+  "Add `email-eid` as descendant of `report-eid`."
+  [conn report-eid email-eid]
+  (d/transact! conn [[:db/add report-eid :report/descendants email-eid]]))
+
+(deftest directive-resolves-target-via-descendant
+  (testing "Related-to: <descendant-mid> resolves to the containing report
+            (parity with thread-lookup: a mid that points at any email
+            in a report's thread reaches that report)."
+    (let [{:keys [conn] :as setup} (fresh-conn)]
+      (try
+        (let [bug-mid       "<bug-root@x>"
+              comment-mid   "<bug-comment@x>"
+              other-bug-mid "<other-bug@x>"
+              bug-email     (mk-email! conn bug-mid "alice@x" #inst "2026-04-01")
+              bug-eid       (mk-report! conn bug-mid bug-email :bug)
+              comment-email (mk-email! conn comment-mid "user@x" #inst "2026-04-02")
+              _             (attach-descendant! conn bug-eid comment-email)
+              other-email   (mk-email! conn other-bug-mid "bob@x" #inst "2026-04-03")
+              other-eid     (mk-report! conn other-bug-mid other-email :bug)
+              ;; Bob writes Related-to: <bug-comment@x> -- pointing at a
+              ;; descendant of bug-eid, not the root.
+              cmd-email-eid (mk-email! conn "<cmd@x>" "bob@x" #inst "2026-04-04")
+              cmd-email     {:db/id cmd-email-eid
+                             :email/author-address "bob@x"
+                             :email/date-sent #inst "2026-04-04"
+                             :email/body-text (str "Related-to: " comment-mid "\n")}]
+          (commands/apply-commands! conn other-eid :bug cmd-email
+                                    {} {} :direct)
+          (let [rels (get-relations (d/db conn) other-eid)
+                related (filter #(= :related-to (:kind %)) rels)]
+            (is (some #(or (= bug-eid (:to %))
+                           (= bug-eid (:from %)))
+                      related)
+                ":related-to was posted toward bug-eid, even though the
+                 cited mid was a descendant of bug-eid, not its root")))
+        (finally (close-and-cleanup! setup))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Phase 4: R1-R4 -- patch <-> bug auto-credit and propagation
 ;; ---------------------------------------------------------------------------

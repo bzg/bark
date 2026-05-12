@@ -192,12 +192,29 @@
     (is (= "<abc@x>" (common/extract-bracketed-id "   <abc@x>   "))))
   (testing "vector values take the first element"
     (is (= "<abc@x>" (common/extract-bracketed-id ["<abc@x>" "<other@y>"]))))
-  (testing "falls back to trimmed string when no bracketed token"
-    (is (= "abc@x" (common/extract-bracketed-id "  abc@x  "))))
+  (testing "rejects values without a bracketed token (RFC 5322 §3.6.4)"
+    (is (nil? (common/extract-bracketed-id "  abc@x  ")))
+    (is (nil? (common/extract-bracketed-id "no brackets here"))))
+  (testing "rejects bracketed tokens with internal whitespace"
+    (is (nil? (common/extract-bracketed-id "<foo bar@x>"))))
+  (testing "lowercases the domain part (RFC 5322 §3.6.4)"
+    (is (= "<abc@example.com>" (common/extract-bracketed-id "<abc@Example.COM>")))
+    (is (= "<Local-Part@example.com>"
+           (common/extract-bracketed-id "<Local-Part@EXAMPLE.com>"))))
   (testing "blank and nil return nil"
     (is (nil? (common/extract-bracketed-id nil)))
     (is (nil? (common/extract-bracketed-id "")))
     (is (nil? (common/extract-bracketed-id "   ")))))
+
+(deftest normalize-mid-test
+  (testing "lowercases the domain only, preserves local-part case"
+    (is (= "<Abc@example.com>" (common/normalize-mid "<Abc@EXAMPLE.com>"))))
+  (testing "no-op when no @"
+    (is (= "<no-at>" (common/normalize-mid "<no-at>"))))
+  (testing "uses the last @ as local/domain separator"
+    (is (= "<a@b@c.com>" (common/normalize-mid "<a@b@C.COM>"))))
+  (testing "nil passes through"
+    (is (nil? (common/normalize-mid nil)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Role checks (pure)

@@ -1178,8 +1178,8 @@
         (finally
           (teardown! ctx))))))
 
-(deftest pending-thread-shared-ancestor-rescue
-  (testing "Sibling arrival unblocks pending via shared ancestor (transitive case)."
+(deftest pending-thread-references-anchor
+  (testing "Reply with missing IRT but a known References ancestor is threaded immediately."
     (let [{:keys [conn] :as ctx} (setup-db!)]
       (try
         ;; 1. Root bug, ingested first → creates a report.
@@ -1190,9 +1190,9 @@
                                        :date #inst "2026-05-01T10:00:00"
                                        :body "broken\n"})
                             "direct")
-        ;; 2. A reply with IRT pointing to a missing intermediate email,
-        ;;    but References include the root → still pending because IRT
-        ;;    target is absent.
+        ;; 2. Reply whose IRT points to a missing intermediate, but
+        ;;    References include the root → no longer pending: the
+        ;;    References ancestor anchors the thread.
         (store-and-process! conn
                             (mk-email {:mid "<shared-reply@test.org>"
                                        :subject "Re: [BUG] flaky"
@@ -1202,27 +1202,106 @@
                                        :refs ["<shared-bug@test.org>"]
                                        :body "Closed.\n"})
                             "direct")
-        (is (true? (pending? (d/db conn) "<shared-reply@test.org>"))
-            "Reply should be pending while IRT is missing, even with root in DB")
-
-        ;; 3. The missing intermediate finally arrives. Its ancestors
-        ;;    include the root, sharing the thread with the pending reply
-        ;;    → retry hook fires.
-        (store-and-process! conn
-                            (mk-email {:mid "<shared-mid@test.org>"
-                                       :subject "Re: [BUG] flaky"
-                                       :from "user@test.org"
-                                       :date #inst "2026-05-01T11:00:00"
-                                       :in-reply-to "<shared-bug@test.org>"
-                                       :refs ["<shared-bug@test.org>"]
-                                       :body "still broken\n"})
-                            "direct")
         (let [db (d/db conn)
               r  (get-report db "<shared-bug@test.org>")]
           (is (false? (pending? db "<shared-reply@test.org>"))
-              "Pending flag cleared after retry")
+              "Reply must not be pending -- References ancestor is in DB")
           (is (some? (:report/closed r))
-              "Root bug should now be closed"))
+              "Root bug must be closed by the Closed. trigger right away"))
+        (finally
+          (teardown! ctx))))))
+
+(deftest pending-thread-splice-through-stored
+  (testing "thread-lookup splices through a stored pending intermediate to reach the report."
+    (let [{:keys [conn] :as ctx} (setup-db!)]
+      (try
+        ;; 1. Root bug → report exists.
+        (store-and-process! conn
+                            (mk-email {:mid "<spl-bug@test.org>"
+                                       :subject "[BUG] flaky"
+                                       :from "user@test.org"
+                                       :date #inst "2026-05-01T10:00:00"
+                                       :body "broken\n"})
+                            "direct")
+        ;; 2. An intermediate reply arrives BUT its own IRT points to
+        ;;    a missing message (and no References) → flagged pending,
+        ;;    *not* attached as a descendant of the bug report.
+        (store-and-process! conn
+                            (mk-email {:mid "<spl-mid@test.org>"
+                                       :subject "Re: [BUG] flaky"
+                                       :from "admin@test.org"
+                                       :date #inst "2026-05-01T11:00:00"
+                                       :in-reply-to "<spl-missing@test.org>"
+                                       :body "tracking\n"})
+                            "direct")
+        ;; Sanity check: intermediate is pending and not attached.
+        (is (true? (pending? (d/db conn) "<spl-mid@test.org>"))
+            "Setup: intermediate must be pending (its IRT is unknown)")
+        ;; 3. Final reply with IRT = the stored pending intermediate
+        ;;    (no References). With splicing, thread-lookup walks
+        ;;    through the pending intermediate's own ancestor mids and
+        ;;    reaches the bug report -- so Closed. applies.
+        (store-and-process! conn
+                            (mk-email {:mid "<spl-final@test.org>"
+                                       :subject "Re: [BUG] flaky"
+                                       :from "admin@test.org"
+                                       :date #inst "2026-05-01T12:00:00"
+                                       :in-reply-to "<spl-mid@test.org>"
+                                       :refs ["<spl-bug@test.org>"]
+                                       :body "Closed.\n"})
+                            "direct")
+        (let [db (d/db conn)
+              r  (get-report db "<spl-bug@test.org>")]
+          (is (false? (pending? db "<spl-final@test.org>"))
+              "Final reply not pending -- the stored pending intermediate anchors it")
+          (is (some? (:report/closed r))
+              "Closed. must reach the bug via splicing through the pending intermediate"))
+        (finally
+          (teardown! ctx))))))
+
+(deftest pending-thread-splice-no-references
+  (testing "Splicing also works when the final reply has no References at all."
+    ;; This is the PavoDive case: a late reply whose only ancestor mid
+    ;; is the immediate parent, and that parent itself is stored but
+    ;; pending (broken by a missing IRT of its own).
+    (let [{:keys [conn] :as ctx} (setup-db!)]
+      (try
+        (store-and-process! conn
+                            (mk-email {:mid "<nr-bug@test.org>"
+                                       :subject "[BUG] flaky"
+                                       :from "user@test.org"
+                                       :date #inst "2026-05-01T10:00:00"
+                                       :body "broken\n"})
+                            "direct")
+        (store-and-process! conn
+                            (mk-email {:mid "<nr-mid@test.org>"
+                                       :subject "Re: [BUG] flaky"
+                                       :from "admin@test.org"
+                                       :date #inst "2026-05-01T11:00:00"
+                                       :in-reply-to "<nr-missing@test.org>"
+                                       :refs ["<nr-bug@test.org>"
+                                              "<nr-missing@test.org>"]
+                                       :body "tracking\n"})
+                            "direct")
+        ;; Intermediate has a known References ancestor (the bug), so
+        ;; with (1) it's NOT pending and is attached as a descendant.
+        (is (false? (pending? (d/db conn) "<nr-mid@test.org>"))
+            "Intermediate must be threaded via its References anchor")
+        ;; Final reply with NO References, IRT to the intermediate.
+        (store-and-process! conn
+                            (mk-email {:mid "<nr-final@test.org>"
+                                       :subject "Re: [BUG] flaky"
+                                       :from "admin@test.org"
+                                       :date #inst "2026-05-01T12:00:00"
+                                       :in-reply-to "<nr-mid@test.org>"
+                                       :body "Closed.\n"})
+                            "direct")
+        (let [db (d/db conn)
+              r  (get-report db "<nr-bug@test.org>")]
+          (is (false? (pending? db "<nr-final@test.org>"))
+              "Final reply is anchored via its IRT (stored intermediate)")
+          (is (some? (:report/closed r))
+              "Bug closed via the chain: final -> intermediate -> bug"))
         (finally
           (teardown! ctx))))))
 

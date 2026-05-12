@@ -5,8 +5,12 @@
 ;; they can open the Datalevin DB with the full schema.
 
 {;; --- Email (defined by bark-ingest) ---
- :email/id                    {:db/valueType :db.type/string
-                               :db/unique    :db.unique/identity}
+ ;; Mailseq id (IMAP UID per folder, Maildir filename per folder).
+ ;; Not globally unique -- two sources may collide on UID space or
+ ;; Maildir filename across folders.  Dedup is enforced at store time
+ ;; as the composite (:email/source, :email/id) pair, not at the
+ ;; schema level.
+ :email/id                    {:db/valueType :db.type/string}
  :email/source                {:db/valueType :db.type/string}
  :email/message-id            {:db/valueType :db.type/string
                                :db/unique    :db.unique/identity}

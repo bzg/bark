@@ -281,23 +281,39 @@
       id
       (str raw))))
 
-(defn extract-bracketed-id
-  "Extract the first `<addr@domain>` token from a header value.
-  Falls back to the trimmed input when no bracketed token is present,
-  so malformed headers are not silently dropped.  Returns nil for nil
-  or blank input.
+;; RFC 5322 §3.6.4 token shape -- msg-id = "<" id-left "@" id-right ">".
+;; Reject whitespace and angle brackets inside; tolerate the obs-* set
+;; through the broad atext-ish character class.
+(def ^:private mid-token-re #"<[^<>\s]+>")
 
-  Normalizes values that reference Message-Ids (Message-Id itself,
-  In-Reply-To) so that threading lookups match even when the raw
-  header carries parenthetical comments, folded whitespace, or extra
-  padding -- cases that show up on the Maildir read path where raw
-  MIME bytes are parsed directly rather than via IMAP ENVELOPE."
+(defn normalize-mid
+  "Normalize a bracketed Message-Id by lowercasing the domain part
+  (everything after the last `@`), per RFC 5322 §3.6.4 which makes the
+  id-right case-insensitive while keeping the id-left case-sensitive.
+  Returns nil on nil; leaves mids without `@` untouched."
+  [mid]
+  (when mid
+    (let [at (.lastIndexOf ^String mid (int \@))]
+      (if (pos? at)
+        (str (subs mid 0 (inc at)) (str/lower-case (subs mid (inc at))))
+        mid))))
+
+(defn extract-bracketed-id
+  "Extract the first `<addr@domain>` token from a header value, with the
+  domain part lowercased (RFC 5322 §3.6.4).  Returns nil for nil,
+  blank, or missing-bracket input -- header values without a
+  well-formed `<...>` token are rejected rather than stored verbatim
+  (the trimmed fallback used to leak whitespace-laden garbage into
+  `:email/message-id` where it could neither match nor be matched).
+
+  The token shape rejects whitespace inside the brackets so a
+  malformed `<foo bar@x>` does not pass."
   [v]
   (when v
     (let [s (if (vector? v) (first v) (str v))]
       (when-not (str/blank? s)
-        (or (first (re-seq #"<[^>]+>" s))
-            (str/trim s))))))
+        (some-> (first (re-seq mid-token-re s))
+                normalize-mid)))))
 
 (defn extract-in-reply-to
   "Extract In-Reply-To message-id from a headers map (raw or parsed).
@@ -325,13 +341,17 @@
 (defn ancestor-mids-from
   "Pure helper -- ordered vector of ancestor message-ids from the
   References (space-separated string) and In-Reply-To values.  Order
-  follows RFC 2822: root first, immediate parent last.  Mids exceeding
-  the LMDB index limit are filtered out -- they cannot be looked up
-  anyway, so retaining them in threading queries is pointless."
+  follows RFC 2822: root first, immediate parent last.  Each mid is
+  normalized (domain lowercased per RFC 5322 §3.6.4) and filtered to
+  the LMDB-indexable shape; oversized mids are dropped since they
+  cannot be looked up anyway."
   [references in-reply-to]
-  (let [refs (if (string? references) (re-seq #"<[^>]+>" references) [])
-        all  (if (and in-reply-to (not (some #{in-reply-to} refs)))
-               (conj (vec refs) in-reply-to)
+  (let [refs (if (string? references)
+               (mapv normalize-mid (re-seq mid-token-re references))
+               [])
+        irt  (normalize-mid in-reply-to)
+        all  (if (and irt (not (some #{irt} refs)))
+               (conj (vec refs) irt)
                (vec refs))]
     (into [] (comp (distinct) (filter indexable-mid?)) all)))
 
