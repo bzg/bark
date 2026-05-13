@@ -252,6 +252,18 @@ The full tenure history (active and closed) is exported in
 command processing on archived emails even when maintainers have
 changed over time.
 
+*** Canonical display names (=mailmap.edn=)
+
+To unify display names across addresses belonging to the same person,
+create =mailmap.edn= at the repo root:
+
+#+begin_src clojure
+{"Bastien Guerry" ["bzg@gnu.org" "bzg@bzg.fr"]}
+#+end_src
+
+Applied at export time only (DB untouched) to maintainers, authors,
+and owners.  Unlisted emails keep their last observed =From:= name.
+
 For sources whose maintainer list or vocabulary evolved over time,
 declare the history inline via =:periods= on the source (see
 =docs/bark-manual.org §Source periods=).

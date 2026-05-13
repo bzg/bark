@@ -19,7 +19,7 @@
          '[bark.common :refer [default-labels default-commands
                                resolve-labels-map resolve-commands-map
                                resolve-command-syntax
-                               parse-cli-args load-config db-path build-source-map
+                               parse-cli-args load-config load-mailmap db-path build-source-map
                                format-date-iso bark-schema lead-maintainer]]
          '[bark.common-bb :refer [load-datalevin-pod! get-tenures]]
          '[bark.html-bb :refer [pico-cdn resolved-theme set-theme!
@@ -387,14 +387,15 @@
 (defn build-maintainers-html
   "Build an HTML section listing all maintainer tenures (active and closed),
   with :from/:to dates when known. The lead maintainer is highlighted.
-  Deduplication is intentionally NOT applied: the goal is to let an
-  operator reproduce command processing in another deployment, which
-  requires the full tenure history."
+  Identical rendered lines are deduplicated: when several email
+  addresses resolve to the same display name (via mailmap.edn) with
+  the same date range and lead status, only one line is shown."
   [db source-name]
   (when source-name
     (let [tenures     (get-tenures db source-name)
           lead        (lead-maintainer tenures)
-          names       (participant-names-for-source db source-name)
+          names       (merge (participant-names-for-source db source-name)
+                             (load-mailmap))
           ;; Sort: lead first, then alphabetical by email (case-insensitive).
           sort-key    (fn [{:keys [email to]}]
                         [(if (and (nil? to) (= email lead)) 0 1)
@@ -415,7 +416,8 @@
                                badge   (when (and (nil? to) (= email lead))
                                          " <small><em>(lead)</em></small>")]
                            (str escaped range badge)))
-                       ordered)]
+                       ordered)
+          entries     (vec (distinct entries))]
       (when (seq entries)
         (str "<h2 id=\"maintainers\">Maintainers</h2>\n<ul>\n"
              (str/join "\n" (map #(str "<li>" % "</li>") entries))

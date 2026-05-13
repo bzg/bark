@@ -680,6 +680,26 @@
      (when (.exists f)
        (edn/read-string (slurp f))))))
 
+(defn load-mailmap
+  "Load ./mailmap.edn (or `path`) and return `{email-lc -> canonical-name}`.
+  Input shape: `{\"Canonical Name\" [\"e1@x\" \"e2@y\"]}`.  Multiple
+  emails per person are inverted to a flat lookup.  Returns `{}` if
+  the file is absent.  Used at export time only -- never read by the
+  ingest path, so the DB stays the single source of truth for what
+  each address sent under what name."
+  ([] (load-mailmap "mailmap.edn"))
+  ([path]
+   (let [f (io/file path)]
+     (if (.exists f)
+       (let [m (edn/read-string (slurp f))]
+         (reduce-kv
+          (fn [acc nm emails]
+            (reduce (fn [a e] (assoc a (str/lower-case e) nm))
+                    acc
+                    emails))
+          {} m))
+       {}))))
+
 (defn db-path
   "Resolve the Datalevin DB path: prefer :db {:path …} from the
   config, fall back to BARK_DB env var, then default \"data/bark-db\"."

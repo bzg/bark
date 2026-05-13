@@ -53,7 +53,7 @@
                                format-date format-date-iso
                                report-priority report-status report-descendant-count
                                parse-cli-args parse-delay parse-cutoff-date
-                               load-config db-path build-source-map
+                               load-config load-mailmap db-path build-source-map
                                bark-schema bark-format
                                report-type-spec type->plural
                                votes-by-report vote-counts
@@ -426,7 +426,8 @@
   (reset! export-ctx {:db           db
                       :votes        votes
                       :config       config
-                      :author-names (build-author-names db)}))
+                      :author-names (merge (build-author-names db)
+                                           (load-mailmap))}))
 
 (defn- ctx-db [] (:db @export-ctx))
 (defn- ctx-votes [] (:votes @export-ctx))
@@ -505,6 +506,8 @@
                      (fetch-attachment-data db (:report/message-id report))))
         att-email   (delay (:report/email @att-data))
         from        (or (:email/author-address email) "")
+        from-name   (or (get (ctx-author-names) (str/lower-case from))
+                        (:email/author-name email))
         arch        (archive-url report email source-map)
         src-type    (get-in source-map [source-name :source-type])
         relations   (group-relations report src-type)
@@ -526,7 +529,7 @@
         (assoc-from-addresses report)
         (assoc-owned-name (ctx-author-names))
         (cond->
-         (:email/author-name email)      (assoc :from-name (:email/author-name email))
+         from-name                       (assoc :from-name from-name)
           role                            (assoc :role role)
           (:report/message-id report)     (assoc :message-id (:report/message-id report))
           (:report/version report)        (assoc :version (:report/version report))

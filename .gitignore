@@ -8,6 +8,7 @@ data/
 .clj-kondo/
 config.edn
 config_history/
+mailmap.edn
 todo.org
 public/
 logs/
