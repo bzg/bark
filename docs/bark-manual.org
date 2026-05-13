@@ -476,6 +476,9 @@ Reports are detected from email subject labels:
 Long-form aliases are also accepted: =[ANNOUNCEMENT]=, =[RELEASE]=,
 =[CHANGE]=.
 
+Labels are case-sensitive and require whitespace (or end of subject)
+after the closing =]=.  Malformed labels are ignored.
+
 Announcements, releases and changes require maintainer permission.
 
 All =<…>= parts are optional and positional. For release and change, a

@@ -13,11 +13,18 @@
 
 (def ^:private ml-prefix "(?:\\[[^\\]]*\\]\\s*)*")
 
-(defn compile-labels [st]
+(defn compile-labels
+  "Compile a type=>tags map into type=>regex.  The label must take a
+  strict bracket form anchored at the start of the subject: `[TAG]` or
+  `[TAG <inner>]`, with the tag matched case-sensitively against the
+  configured tokens and followed by whitespace or end-of-subject after
+  the closing `]`.  Optional mailing-list bracket prefixes (e.g.
+  `[my-list] [BUG] ...`) are tolerated."
+  [st]
   (update-vals st
                (fn [tags]
                  (let [alts (str/join "|" (map #(java.util.regex.Pattern/quote %) tags))]
-                   (re-pattern (str "(?i)^" ml-prefix "\\[(" alts ")(?:\\s+([^\\]]*))?\\]"))))))
+                   (re-pattern (str "^" ml-prefix "\\[(" alts ")(?:\\s+([^\\]]*))?\\](?=\\s|$)"))))))
 
 (def default-compiled-labels (compile-labels common/default-labels))
 

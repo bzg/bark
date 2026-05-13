@@ -564,8 +564,8 @@
                              [:notify/key "direct:maint@test.org"])]
             (is (= 1 (:notify/interval-days pref)))))
 
-        ;; --- Email 59 case insensitive [bug] ---
-        (testing "Email 59 case insensitive [bug]"
+        ;; --- Email 59 properly tagged [BUG] ---
+        (testing "Email 59 properly tagged [BUG]"
           (is (= :bug (:report/type (get-report db "<59@test.org>")))))
 
         ;; --- Email 60 [ANNOUNCEMENT] long form ---
@@ -593,8 +593,14 @@
           (is (not (report-exists? db "<63@test.org>"))))
 
         ;; --- Email 64 duplicate tag ---
-        (testing "Email 64 [bug] reply creates own report"
+        (testing "Email 64 [BUG] reply creates own report"
           (is (report-exists? db "<64@test.org>")))
+
+        ;; --- Emails 201-202 malformed labels create no report ---
+        (testing "Email 201 lowercase [bug] is rejected"
+          (is (not (report-exists? db "<201@test.org>"))))
+        (testing "Email 202 glued [BUG]subject is rejected"
+          (is (not (report-exists? db "<202@test.org>"))))
 
         ;; --- Emails 65-66 HTML body fallback ---
         (testing "Emails 65-66 HTML body fallback"

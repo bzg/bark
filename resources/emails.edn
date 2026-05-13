@@ -797,17 +797,17 @@
   :email/body-text  "Notify: d:1\n"}
 
  ;; =========================================================================
- ;; 59 — Case insensitive tag: [bug] lowercase
+ ;; 59 — Properly tagged [BUG] (anchors a thread for 61/62/64)
  ;; =========================================================================
  {
   :email/id        "59"
   :email/source     "direct"
   :email/message-id "<59@test.org>"
-  :email/subject    "[bug] lowercase tag test"
+  :email/subject    "[BUG] strict tag test"
   :email/from-address "user@test.org"
   :email/date-sent  #inst "2026-01-21T10:00:00"
   :email/ingested-at #inst "2026-01-21T10:00:00"
-  :email/body-text  "Lowercase tag.\n"}
+  :email/body-text  "Strict tag.\n"}
 
  ;; =========================================================================
  ;; 60 — [ANNOUNCEMENT] long form tag
@@ -829,7 +829,7 @@
   :email/id        "61"
   :email/source     "direct"
   :email/message-id "<61@test.org>"
-  :email/subject    "Re: [bug] lowercase tag test"
+  :email/subject    "Re: [BUG] strict tag test"
   :email/from-address "maint@test.org"
   :email/date-sent  #inst "2026-01-21T12:00:00"
   :email/ingested-at #inst "2026-01-21T12:00:00"
@@ -843,7 +843,7 @@
   :email/id        "62"
   :email/source     "direct"
   :email/message-id "<62@test.org>"
-  :email/subject    "Re: Re: [bug] lowercase tag test"
+  :email/subject    "Re: Re: [BUG] strict tag test"
   :email/from-address "maint@test.org"
   :email/date-sent  #inst "2026-01-21T13:00:00"
   :email/ingested-at #inst "2026-01-21T13:00:00"
@@ -866,7 +866,7 @@
 
  ;; =========================================================================
  ;; 64 — Duplicate report attempt (same subject tag, same thread)
- ;; Tests that a second [bug] email in the same thread doesn't create
+ ;; Tests that a second [BUG] email in the same thread doesn't create
  ;; a second report — it becomes a descendant instead.
  ;; Uses its own message-id (unlike email 59) to avoid DB-level upsert.
  ;; =========================================================================
@@ -874,7 +874,7 @@
   :email/id        "64"
   :email/source     "direct"
   :email/message-id "<64@test.org>"
-  :email/subject    "[bug] lowercase tag test"
+  :email/subject    "[BUG] strict tag test"
   :email/from-address "user@test.org"
   :email/date-sent  #inst "2026-01-21T15:00:00"
   :email/ingested-at #inst "2026-01-21T15:00:00"
@@ -1838,4 +1838,30 @@
   :email/in-reply-to "<136@test.org>"
   :email/references  "<136@test.org>"
   :email/body-text  "Actually the other one was the better description.\nSuperseded-by: <135@test.org>\n"}
+
+ ;; =========================================================================
+ ;; 201 — Malformed label (lowercase): label must be case-sensitive
+ ;; Expected: no report created (regex rejects [bug])
+ ;; =========================================================================
+ {:email/id        "201"
+  :email/source      "direct"
+  :email/message-id  "<201@test.org>"
+  :email/subject     "[bug] should not match"
+  :email/from-address "user-a@test.org"
+  :email/date-sent  #inst "2026-03-09T09:00:00"
+  :email/ingested-at #inst "2026-03-09T09:00:00"
+  :email/body-text  "Lowercase tag, must not classify.\n"}
+
+ ;; =========================================================================
+ ;; 202 — Malformed label (no space after `]`): must be rejected
+ ;; Expected: no report created (regex requires \s|$ after closing bracket)
+ ;; =========================================================================
+ {:email/id        "202"
+  :email/source      "direct"
+  :email/message-id  "<202@test.org>"
+  :email/subject     "[BUG]glued subject"
+  :email/from-address "user-a@test.org"
+  :email/date-sent  #inst "2026-03-09T09:01:00"
+  :email/ingested-at #inst "2026-03-09T09:01:00"
+  :email/body-text  "Glued label, must not classify.\n"}
 ]

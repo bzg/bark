@@ -63,3 +63,41 @@
     (is (not (detect/has-ics?
               {:email/body-text "Hello"
                :email/attachments [{:attachment/filename "doc.pdf"}]})))))
+
+;; ---------------------------------------------------------------------------
+;; Strict label regex: case-sensitive tag, mandatory `\s` or EOL after `]`
+;; ---------------------------------------------------------------------------
+
+(defn- detect-type [subject]
+  (:type (detect/detect-report {:email/subject subject})))
+
+(deftest label-regex-strict-test
+  (testing "accepted forms"
+    (is (= :bug   (detect-type "[BUG] Mon bug")))
+    (is (= :bug   (detect-type "[BUG foo] Mon bug")))
+    (is (= :bug   (detect-type "[BUG]")))
+    (is (= :bug   (detect-type "[mylist] [BUG] Mon bug")))
+    (is (= :patch (detect-type "[PATCH foo v2 1/2] Body")))
+    (is (= :request     (detect-type "[POLL] question?")))
+    (is (= :request     (detect-type "[TODO] task")))
+    (is (= :announcement (detect-type "[ANN] news")))
+    (is (= :announcement (detect-type "[ANNOUNCEMENT] news")))
+    (is (= :release  (detect-type "[REL 2.0] notes")))
+    (is (= :change   (detect-type "[CHG 9.8] heads-up"))))
+
+  (testing "rejected: wrong case"
+    (is (nil? (detect-type "[Bug] Mon bug")))
+    (is (nil? (detect-type "[bug] Mon bug")))
+    (is (nil? (detect-type "[Patch] body")))
+    (is (nil? (detect-type "[poll] question?"))))
+
+  (testing "rejected: no whitespace after closing bracket"
+    (is (nil? (detect-type "[BUG]Mon bug")))
+    (is (nil? (detect-type "[BUG foo]bar")))
+    (is (nil? (detect-type "[POLL]?"))))
+
+  (testing "rejected: malformed bracket content"
+    (is (nil? (detect-type "[BUG/RFC] Mon bug")))
+    (is (nil? (detect-type "[ BUG ] Mon bug")))
+    (is (nil? (detect-type "BUG: Mon bug")))
+    (is (nil? (detect-type "Re: [BUG] Mon bug")))))
