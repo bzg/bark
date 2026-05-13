@@ -67,41 +67,28 @@ BARK is for: storing reports sent to a mailbox in a database.
 
 * Principles
 
-- *Email-native* :: No account to create, no platform to maintain, no
-  vendor lock-in.  Users report bugs and review patches with whatever
-  mail client they already use.  The mailing list archive *is* the
-  tracker history — BARK simply indexes it.
+- *One place* :: Reports and their discussions belong in one source
+  -- the mailing list, which BARK indexes.  The tracker's job is to
+  filter noise, not to host a separate conversation.
 
-- *One place* :: [[https://orgmode.org][Org mode]] was born out of the idea that to-do items and
-  free-form notes should be edited in the same space. Similarly, bug
-  reports, patches and feature requests should be handled where users
-  and developers discuss them. It is the tracker's job to filter out
-  the noise and help everyone focus on how they can contribute.
+- *Email-native* :: No account, no platform, no vendor lock-in.
+  Users work in whatever mail client they already use, and the
+  mailing list archive *is* the tracker history -- BARK simply
+  indexes it.
 
-- *KISS* :: BARK provides a simple framework for acting on reports, with
-  a fixed vocabulary: =acked=, =owned=, or =closed= for status; =urgency= and
-  =importance= for priority. You cannot invent a custom =WONTFIX-MAYBE=
-  status or manually set a report to P0.  This is deliberate: a fixed
-  vocabulary prevents the label proliferation that eventually makes
-  trackers unusable.
+- *Immutable* :: Every state change is encoded in an email, so the
+  whole tracker state can be rebuilt from the mailbox at any time.
+  No tracker backups to manage, no DB migrations between versions
+  -- the mailbox is the source of truth.
 
-- *Immutable* :: No web form, no API endpoint, no account. Users report
-  bugs and request features by emailing a list. Maintainers respond by
-  replying to the same thread. As every state change is encoded in an
-  email, the entire tracker state can be reconstructed at any time by
-  re-monitoring the mailbox from scratch.  This means no tracker backup
-  to manage and no database migration between BARK versions — the
-  mailbox is the source of truth.
+- *Local-first* :: Companion tools (=bone= TUI, =gnus-bone.el=,
+  =notmuch-bone.el=) let users consume BARK data from their existing
+  environment instead of imposing a new interface.
 
-- *Low ops* :: BARK exports static HTML, JSON, RSS and Org files.  There
-  is no application server to keep running, no database to back up
-  (beyond the mailbox itself), and no user accounts to administer.  A
-  cron job and a web server serving static files are all you need.
-
-- *Local-first* :: BARK exports to JSON, RSS, Org. Companion tools like
-  =bone= (TUI browser), =gnus-bone.el= (Emacs/Gnus) and =notmuch-bone.el=
-  (Emacs/notmuch) let users consume the data in whatever environment
-  they already live in, rather than forcing a new interface on them.
+- *KISS* :: Fixed vocabulary, deliberately: =acked=, =owned=, =closed=
+  for status; =urgency= and =importance= for priority.  No custom
+  =WONTFIX-MAYBE= status, no manual P0 -- this prevents the label
+  proliferation that eventually breaks trackers.
 
 * As a user
 ** Bug, Patch, Request
@@ -169,38 +156,30 @@ maintainers, who can undo anyone's action (see [[#undoing-updates][Undoing updat
 
 ** Superseding a report
 
-If your report turns out to duplicate another one, or if you send a
-new version of a patch that replaces the previous one, you can mark
-the old report as superseded by replying to its thread with:
+When one report replaces another (a newer patch version, a fresh bug
+report capturing the real issue), mark the supersession with either
+of two equivalent directives -- they produce the same effect and
+differ only by point of view:
 
-: Superseded-by: <target-message-id@example.com>
+- From the *old* report's thread:
 
-Three forms are accepted:
+  : Superseded-by: <new-message-id@example.com>
 
-- =<msg-id@host>= --- the canonical RFC form.
-- =msg-id@host= --- a bare message-id.
-- An archive URL where the message-id is the last path segment, e.g.
-  =https://list.orgmode.org/orgmode/msg-id@host/=.
+- From the *new* report's thread (works in a reply *and* in the
+  opening mail of a brand-new bug/patch/request):
 
-Source and target must both be bugs, patches, or requests, of the
-same type.
+  : Supersedes: <old-message-id@example.com>
 
-Symmetric form -- when investigation matures and you file a fresh
-report that captures the real problem, mark the old one as superseded
-from the new report's side:
+Message-ids accept three forms: =<id@host>=, bare =id@host=, or the
+last path segment of an archive URL (e.g.
+=https://list.orgmode.org/orgmode/id@host/=).  Source and target must
+be of the same type (both bugs, both patches, or both requests).
 
-: Supersedes: <old-message-id@example.com>
+To undo: =Not superseded= (from the closed report's thread) or =Not
+superseding= (from the replacement's thread).
 
-Both =Superseded-by:= and =Supersedes:= produce the exact same effect
-(same close, same relation) -- they differ only by point of view.
-=Supersedes:= works in the opening mail of a new bug/patch/request,
-not only in replies.
-
-To undo: =Not superseded= (from the closed report's thread) or
-=Not superseding= (from the replacement's thread).
-
-See the [[#superseding-a-report-1][maintainer section]] for the full details on what this does
-and how to undo it.
+See the [[#superseding-a-report-1][maintainer section]] for the automatic actions BARK performs
+on supersession.
 
 ** Marking a report as a duplicate
 
@@ -222,10 +201,9 @@ To cross-reference another report:
 
 : Related-to: <other-message-id@example.com>
 
-Accepts any pair of reports.  Three message-id forms: bracketed
-(=<msg-id@host>=), bare (=msg-id@host=), or archive URL.  Several
-=Related-to:= lines in one email post several links.  Works on
-closed reports.  To undo:
+Accepts any pair of reports.  Same message-id forms as
+=Superseded-by:= (see above).  Several =Related-to:= lines in one
+email post several links.  Works on closed reports.  To undo:
 =Not related-to: <other-message-id@example.com>=.
 
 ** Resolving a bug or request with a patch
@@ -335,17 +313,8 @@ To remove a per-report expiry:
 
 ** Superseding a report
 
-When a report is made obsolete by another (e.g. a patch resubmitted
-without version numbers, or a bug report that duplicates a broader
-one), anyone can mark the old report as superseded by replying to its
-thread with:
-
-: Superseded-by: <target-message-id@example.com>
-
-The message-id can be given as =<msg-id@host>=, bare =msg-id@host=, or
-extracted from an archive URL where it is the last path segment (e.g.
-=https://list.orgmode.org/orgmode/msg-id@host/=).  This does three
-things automatically:
+A =Supersedes:= or =Superseded-by:= directive (see [[#superseding-a-report][the user section]]
+for syntax and message-id forms) triggers three automatic actions:
 
 1. Poses a =:supersedes= qualified relation (=:rel/from= = the closed
    report, =:rel/to= = the replacement) and a symmetric =:related-to=
@@ -354,47 +323,18 @@ things automatically:
 3. Links the two reports as related (bidirectional, kept on undo).
 
 In the index, superseded reports appear struck through (like canceled
-reports) and display an "S" status flag. The subject tooltip shows the
-title of the superseding report.
+reports) with an "S" status flag; the subject tooltip shows the
+replacement's title.
 
-To undo:
+Last-write-wins on direction: if a later directive flips the direction
+(e.g. =Supersedes: <X>= posed at t1, then =Superseded-by: <X>= posed
+at t2 on the same report), the second pose retracts the first,
+reopens the previously-closed report, and applies the new direction.
 
-: Not superseded.
-
-This retracts the supersede reference, reopens the report, and clears
-the close-reason. The related link is kept.
-
-*** Supersedes (symmetric form, replacement's point of view)
-
-After several rounds of investigation, the original mail of a bug or
-patch often no longer captures the real understanding.  Filing a
-fresh report that supersedes the old one is a natural editorial move,
-and BARK supports it from the replacement's side:
-
-: Supersedes: <old-message-id@example.com>
-
-This works both in a reply (the current report becomes the replacement)
-and in the *opening mail* of a brand-new bug/patch/request -- making
-the new report the canonical face of the issue.
-
-=Supersedes:= and =Superseded-by:= produce the *same* relation and
-the *same* close on the same pair of reports: the canonical
-=:supersedes= relation always points from the closed (superseded)
-report to the replacement.  They only differ in point of view.
-
-Last-write-wins on direction: if a later directive flips the
-direction (e.g. =Supersedes: <X>= posed at t1, then
-=Superseded-by: <X>= posed at t2 on the same report), the second
-pose retracts the first and reopens the previously-closed report
-before applying the new direction.
-
-To undo from the replacement's side:
-
-: Not superseding.
-
-This retracts the =:supersedes= relation and reopens the
-previously-closed target.  Same scope as =Not superseded.= (the
-original setter or a maintainer).
+Undo scope: =Not superseded= and =Not superseding= can be issued by
+the original setter or by any maintainer.  Either retracts the
+relation, reopens the closed report, and clears the close-reason; the
+=:related-to= link is kept.
 
 *** Automatic supersession of patches and diffs
 
@@ -638,16 +578,10 @@ in turn take precedence over the built-in defaults.
 
 *** Syntax mode: =:loose= vs =:strict=
 
-The =:command-syntax= key controls whether Bark instructions must be
-prefixed with =!=.  Accepts =:loose= (default) or =:strict=.
-
-- =:loose= — every Bark instruction can be written with or without a
-  =!= prefix.  Matches prose-style usage on mailing lists.
-- =:strict= — every Bark instruction MUST start with =!=.  Eliminates
-  false positives on common English words like "Done.", "Closed.",
-  "Applied." that appear naturally in conversation.
-
-The rule applies uniformly to all Bark instructions:
+The =:command-syntax= key (=:loose= default, =:strict= opt-in) controls
+whether Bark instructions must be prefixed with =!=.  =:strict= eliminates
+false positives on common English words like "Done.", "Closed." or
+"Applied." that appear naturally in conversation.
 
 | Form             | Loose                  | Strict                 |
 |------------------+------------------------+------------------------|
@@ -743,63 +677,38 @@ The BARK instance can expose reports as HTML, JSON, Org and RSS.
 
 Running =bb export all= generates, for each source:
 
-- =index.html= --- the main reports table (filterable, sortable).
-- =stats.html= --- report statistics and charts.
-- =docs.html= --- a user-facing documentation page (from =docs-tpl.org=).
-- =all.json=, =all.org=, =all.xml= --- full exports in JSON, Org and RSS.
+- HTML pages: =index.html= (reports table), =stats.html= (charts),
+  =docs.html= (user docs).
+- Full exports: =all.json=, =all.org=, =all.xml=.
+- Per-type feeds: =bugs.json=, =patches.xml=, =requests.org=, etc.
 - =votes.json= --- per-report vote details (see below).
-- Per-type feeds: =bugs.json=, =patches.xml=, etc.
-- =patches/= --- a directory with attached and inline patch files.
-- =text/= --- a directory with =text/plain= and =text/x-log= attachments
-  (e.g. backtraces, log files).  Saved under =text/<mid-hash>/=.
-- =events/= --- a directory with =.ics= calendar files extracted from
-  announcements.  Each report's =.ics= attachments are saved under
-  =events/<mid-hash>/=.  Combined =events/announcements.ics=,
-  =events/announcements-open.ics= and =events/announcements-closed.ics=
-  aggregate =VEVENT= blocks into subscribable calendar feeds.
-- =events.json=, =events.org=, =events.xml= --- open announcements that
-  carry an =.ics= attachment or inline =VCALENDAR= content.
-- =events-closed.json=, =events-closed.org=, =events-closed.xml= ---
-  closed announcements with =.ics= content.
+- =patches/= --- attached and inline patch files.
+- =text/<mid-hash>/= --- =text/plain= and =text/x-log= attachments
+  (backtraces, log files).
+- =events/<mid-hash>/= --- =.ics= attachments from announcements;
+  combined feeds at =events/announcements{,-open,-closed}.ics=
+  aggregate VEVENT blocks for subscription.
+- =events.{json,org,xml}= and =events-closed.{json,org,xml}= ---
+  open/closed announcements carrying =.ics= or inline VCALENDAR content.
 
-RSS feeds contain up to 50 items, most recent first.
+RSS feeds contain up to 50 items, most recent first.  Export is
+incremental (only sources modified since the last export are
+re-generated); use =--force= to bypass.
 
-Export is incremental: only sources modified since the last export are
-re-generated. Use =bb export all --force= to force a full re-export.
+Single-format export: =bb export {json|rss|org|html|stats|text|events}=.
 
-You can also export a single format:
+| Flag                  | Purpose                                                  | Configurable |
+|-----------------------+----------------------------------------------------------+--------------|
+| =-n <source>=           | restrict to one source                                   | --           |
+| =-p <N>=                | filter by minimum priority                               | --           |
+| =-s <N>=                | filter by minimum status                                 | --           |
+| =--page-size <N>=       | paginate HTML report table (client-side rendering)       | CLI only     |
+| =--closed-retention=    | exclude reports closed before given ISO date or duration | CLI only     |
+| =--topics-filter=       | restrict to topics (comma-separated, case-insensitive)   | per source   |
+| =--force=               | force a full re-export                                   | CLI only     |
 
-: bb export json
-: bb export rss
-: bb export org
-: bb export html
-: bb export stats
-: bb export text
-: bb export events
-
-Use =-n <source>= to restrict to one source, =-p <N>= to filter by minimum
-priority, and =-s <N>= to filter by minimum status.
-
-Use =--page-size <N>= to paginate the HTML report table (e.g.
-=bb export --page-size 100=).  Pagination is client-side: all data is
-still exported, but only one page of rows is rendered at a time,
-improving browser responsiveness on large trackers.
-
-Use =--closed-retention <date-or-duration>= to exclude old closed reports
-from all exports.  Accepts an ISO date (=2024-01-01=) or a duration
-(=1y=, =6m=, =90d=).  For instance, =bb export --closed-retention 1y=
-keeps only reports closed within the last 12 months.
-
-Use =--topics-filter <topics>= to export only reports matching given
-topics (comma-separated, case-insensitive).  For instance,
-=bb export --topics-filter event= exports only reports with topic
-"event".  Use =bb export --topics-filter "event,security"= for
-multiple topics.  The filter can also be set per source in =config.edn=
-(see below); the CLI flag overrides all config values.
-
-=:page-size= and =:closed-retention= are CLI-only flags.
-=:topics-filter= can also be set per source in =config.edn=; the CLI
-flag overrides any per-source value.
+Durations accept =Nd=, =Nw=, =Nm=, =Ny= (e.g. =--closed-retention 1y=
+keeps reports closed within the last 12 months).
 
 ** Vote transparency
 
@@ -1045,17 +954,11 @@ All rules are conjunctive: a report is only expired when *all*
 conditions are met.  Only =:inactive-after= is required; the others are
 optional filters.
 
-When =:inactive-after= is a duration, it is measured from the date of the
-*last email in the thread* (the most recent descendant, or the founding
-email if there are no replies).  This means any reply — from any
-participant — resets the expiry clock.
-
-When =:inactive-after= is an ISO date, the report expires after that
-fixed date regardless of activity.
-
-When =:inactive-after= is =:deadline=, the report expires when its
-deadline date is in the past (reports without a deadline are never
-expired by this rule).
+| =:inactive-after= value | Trigger                                                              |
+|-----------------------+----------------------------------------------------------------------|
+| Duration (e.g. =30d=)   | Last email in the thread is older than the duration (any reply resets) |
+| ISO date              | The fixed date has passed, regardless of activity                    |
+| =:deadline=             | The report's deadline is in the past (no deadline => never expires)   |
 
 The =:max-status= value uses an activity score that only counts acked
 and owned (since expiry candidates are always open reports):
@@ -1092,18 +995,16 @@ report has an explicit expiry date, only that date is checked.
          :max-size 1048576}       ;; skip emails > 1 MB (optional)
 #+end_src
 
-- =:fetch= — first-run fetch window (no watermark yet).  Exactly one of
-  three disjoint map shapes (strict; no key mixing, empty map rejected):
-  - ={:limit N}= — fetch the latest N messages (positive integer).
-  - ={:since "30d"}= — relative duration from now.  Accepts =Nd=, =Nw=, =Nm=, =Ny=.
-  - ={:start "yyyy-MM-dd" :end "yyyy-MM-dd"}= — absolute half-open window
-    =[start, end)=.  Both =:start= and =:end= are optional (at least one
-    must be present); ISO dates only.
-  Default when =:fetch= is omitted: ={:limit 50}=.  CLI shortcut
-  (=--fetch=), the scalar is lifted to one of the three map shapes:
-  - =--fetch 50=          → ={:limit 50}=
-  - =--fetch 30d=         → ={:since "30d"}=
-  - =--fetch 2020-01-01=  → ={:start "2020-01-01"}=
+- =:fetch= — first-run fetch window (no watermark yet).  Exactly one
+  of three disjoint map shapes (no key mixing, empty map rejected);
+  default is ={:limit 50}=:
+
+  | Config form                       | CLI shortcut            | Meaning                                                   |
+  |-----------------------------------+-------------------------+-----------------------------------------------------------|
+  | ={:limit N}=                        | =--fetch 50=              | Latest N messages (positive integer)                      |
+  | ={:since "Nd"}=                     | =--fetch 30d=             | Relative duration from now (=Nd=, =Nw=, =Nm=, =Ny=)             |
+  | ={:start "yyyy-MM-dd" :end "..."}=  | =--fetch 2020-01-01=      | Absolute half-open window =[start, end)=; both keys optional, at least one required |
+
 - =:max-size= — skip emails larger than N bytes.  No limit by default.
 
 Text content of =.patch=, =.diff=, =.ics=, =text/plain= and =text/x-log=
