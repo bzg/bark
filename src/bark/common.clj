@@ -27,16 +27,13 @@
   (edn/read-string (slurp (io/resource "bark-schema.edn"))))
 
 (def failures-file-path
-  "Path to the shared command-failures EDN file.
-  Written by the JVM (`bark.commands/record-failure!`) and read by
-  `bark-notify` and `bark-maintenance` to surface denied/failed
-  commands to subscribers and operators."
+  "Shared command-failures EDN file: JVM writes, bb scripts read."
   "public/.failures.edn")
 
 (defn read-failures-file
-  "Read the failures EDN file at `path`, returning a vector.
-  Returns [] when the file does not exist. On parse failure, invokes
-  `on-error` with the exception (for logging) and returns []."
+  "Read the failures EDN file at `path`, returning a vector ([] if
+  missing or unparseable).  `on-error` is invoked with the exception
+  on parse failure."
   ([] (read-failures-file failures-file-path nil))
   ([path] (read-failures-file path nil))
   ([path on-error]
@@ -53,9 +50,7 @@
 ;; ---------------------------------------------------------------------------
 
 (def reason-labels
-  "Human-readable labels for command-failure :reason keys.
-  Shared between the notifier and the maintenance CLI so both surface
-  the same phrasing."
+  "Human-readable labels for command-failure :reason keys."
   {:unknown-target     "unknown target"
    :insufficient-scope "insufficient permissions"})
 
@@ -64,9 +59,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn expand-home
-  "Expand a leading ~/ to the user's home directory.
-  Returns the string unchanged when no leading ~/ is present, or when
-  the value is nil."
+  "Expand a leading ~/ to the user's home directory."
   [p]
   (if (and (string? p) (str/starts-with? p "~/"))
     (str (System/getProperty "user.home") (subs p 1))
@@ -299,15 +292,10 @@
         mid))))
 
 (defn extract-bracketed-id
-  "Extract the first `<addr@domain>` token from a header value, with the
-  domain part lowercased (RFC 5322 §3.6.4).  Returns nil for nil,
-  blank, or missing-bracket input -- header values without a
-  well-formed `<...>` token are rejected rather than stored verbatim
-  (the trimmed fallback used to leak whitespace-laden garbage into
-  `:email/message-id` where it could neither match nor be matched).
-
-  The token shape rejects whitespace inside the brackets so a
-  malformed `<foo bar@x>` does not pass."
+  "Extract the first <addr@domain> token from a header value, domain
+  lowercased (RFC 5322 §3.6.4).  Returns nil for nil/blank input or
+  when no well-formed bracketed token is found (rejects mids with
+  whitespace inside)."
   [v]
   (when v
     (let [s (if (vector? v) (first v) (str v))]
@@ -321,30 +309,21 @@
   [headers]
   (extract-bracketed-id (get-header headers "In-Reply-To")))
 
-;; LMDB key max is 511 bytes; Datalevin's AVE-index encoding (type tag
-;; + hex of the value + metadata) roughly doubles the raw string and
-;; adds padding.  A conservative cap of 200 chars on the raw mid keeps
-;; us comfortably under the limit and rejects pathological mids (some
-;; ProtonMail addresses produce 130+ char message-ids that trigger
-;; MDB_BAD_VALSIZE on insert/lookup).  Any code that uses a mid as a
-;; lookup key or unique attribute MUST filter through `indexable-mid?`.
+;; Cap mid length to stay under LMDB's 511-byte AVE key limit (the
+;; Datalevin encoding ~doubles the raw string).  Mids above this are
+;; dropped from lookups -- pathological ProtonMail mids in the wild
+;; exceed 130 chars and trigger MDB_BAD_VALSIZE on insert.
 (def ^:const max-indexable-mid-length 200)
 
 (defn indexable-mid?
-  "True iff `mid` is non-nil and short enough to fit in the LMDB AVE
-  index for `:email/message-id` / `:report/message-id` lookups.
-  Use to short-circuit queries that would otherwise raise
-  MDB_BAD_VALSIZE on oversized mids."
+  "True iff `mid` fits in the LMDB AVE index (string ≤ 200 chars)."
   [mid]
   (and (string? mid) (<= (count mid) max-indexable-mid-length)))
 
 (defn ancestor-mids-from
-  "Pure helper -- ordered vector of ancestor message-ids from the
-  References (space-separated string) and In-Reply-To values.  Order
-  follows RFC 2822: root first, immediate parent last.  Each mid is
-  normalized (domain lowercased per RFC 5322 §3.6.4) and filtered to
-  the LMDB-indexable shape; oversized mids are dropped since they
-  cannot be looked up anyway."
+  "Ordered vector of ancestor mids (root first, parent last) from
+  References + In-Reply-To.  Mids are normalized and filtered through
+  indexable-mid?."
   [references in-reply-to]
   (let [refs (if (string? references)
                (mapv normalize-mid (re-seq mid-token-re references))
@@ -471,16 +450,9 @@
   (boolean (and from-name (re-find #"(?i) via " from-name))))
 
 (defn resolve-author
-  "Return {:address ... :name ...} for the effective author of an
-  email.  When the From header has been rewritten by the list (Mailman
-  / DMARC munging -- detected via the ` via ` pattern in the display
-  name), the real author lives in Reply-To.  Falls back to From in all
-  other cases (including the common Reply-To-different-from-From use
-  for personal correspondence).
-
-  `reply-to` is a vector of {:name :address} maps as produced by
-  mailseq (may be empty/nil).  Returns {:address from-address :name
-  from-name} when no override applies."
+  "Effective author {:address :name} of an email.  When the From has
+  been DMARC-munged by the list (detected by \" via \" in the display
+  name) the real author is in Reply-To; otherwise From wins."
   [{:keys [from-address from-name reply-to]}]
   (let [rto-addr (:address (first reply-to))
         rto-name (:name    (first reply-to))]
@@ -498,32 +470,23 @@
 ;; ---------------------------------------------------------------------------
 
 (def report-type-spec
-  "Ordered specification of each report type.  Vector order drives subject
-  detection precedence (first matching tag wins) and per-type export
-  iteration.  Each entry:
-    :type       -- keyword identifier
-    :tags       -- default subject-bracket tokens that detect this type
-    :plural     -- plural noun used in export filenames / RSS labels
-    :versioned? -- bracket's last token is parsed as :version
-    :special    -- (legacy) :patch triggers the dedicated patch parser"
+  "Ordered spec of each report type.  Vector order drives subject
+  detection precedence and per-type export iteration.  :type is the
+  keyword identifier, :tags the default subject tokens, :plural the
+  noun used in exports, :versioned? whether the bracket's last token
+  is parsed as :version.  :patch has a dedicated parser in bark.detect."
   [{:type :bug          :tags ["BUG"]                :plural "bugs"}
-   {:type :patch        :tags ["PATCH"]              :plural "patches"        :special :patch}
+   {:type :patch        :tags ["PATCH"]              :plural "patches"}
    {:type :request      :tags ["POLL" "TODO"]        :plural "requests"}
    {:type :announcement :tags ["ANN" "ANNOUNCEMENT"] :plural "announcements"}
    {:type :release      :tags ["REL" "RELEASE"]      :plural "releases"       :versioned? true}
    {:type :change       :tags ["CHG" "CHANGE"]       :plural "changes"        :versioned? true}])
 
-(def default-labels
-  "Map of type => default subject tags. Derived from `report-type-spec`."
-  (into {} (map (juxt :type :tags)) report-type-spec))
+(def default-labels (into {} (map (juxt :type :tags)) report-type-spec))
 
-(def report-type-keywords
-  "Set of all valid report type keywords."
-  (into #{} (map :type) report-type-spec))
+(def report-type-keywords (into #{} (map :type) report-type-spec))
 
-(def type->plural
-  "Map of type keyword => plural noun used in export filenames / RSS labels."
-  (into {} (map (juxt :type :plural)) report-type-spec))
+(def type->plural (into {} (map (juxt :type :plural)) report-type-spec))
 
 (def default-commands
   {:acked     ["Acked" "Confirmed" "Approved"]
@@ -605,10 +568,9 @@
                     {:value (:command-syntax source-cfg)}))))
 
 (defn patch-triggers?
-  "True when patches on this source act as triggers on the bugs/requests
-  they resolve: auto-acked + auto-owned on creation, and closure of the
-  patch as :resolved propagates to close the parent. Default true; set
-  `:patch-triggers? false` on a source to opt out."
+  "True when patches on this source auto-credit acked/owned on the
+  parent bug/request and propagate :resolved closure.  Default true;
+  source-level \":patch-triggers? false\" opts out."
   [source-cfg]
   (let [v (:patch-triggers? source-cfg)]
     (if (nil? v) true (boolean v))))
@@ -648,10 +610,8 @@
          (= (str/lower-case addr) lead))))
 
 (defn maintainer?
-  "True if addr has maintainer status on this source.
-  2-arity: any currently-active tenure matches.
-  3-arity: the tenure covering `as-of` matches (from <= as-of < to,
-  with nil bounds meaning unbounded)."
+  "True if `addr` has maintainer status.  2-arity: any active tenure;
+  3-arity: tenure covering `as-of` (nil bounds = unbounded)."
   ([tenures addr]
    (and addr
         (let [a (str/lower-case addr)]
@@ -681,12 +641,9 @@
        (edn/read-string (slurp f))))))
 
 (defn load-mailmap
-  "Load ./mailmap.edn (or `path`) and return `{email-lc -> canonical-name}`.
-  Input shape: `{\"Canonical Name\" [\"e1@x\" \"e2@y\"]}`.  Multiple
-  emails per person are inverted to a flat lookup.  Returns `{}` if
-  the file is absent.  Used at export time only -- never read by the
-  ingest path, so the DB stays the single source of truth for what
-  each address sent under what name."
+  "Load ./mailmap.edn (shape `{\"Canonical Name\" [emails…]}`) and return
+  `{email-lc -> canonical-name}` (inverted, flat).  Returns `{}` if
+  the file is absent.  Export-only -- never read on the ingest path."
   ([] (load-mailmap "mailmap.edn"))
   ([path]
    (let [f (io/file path)]
@@ -757,16 +714,10 @@
 ;; ---------------------------------------------------------------------------
 
 (def report-pull-pattern
-  ;; Each `:report/<state>` ref carries :email/author-address and
-  ;; :email/date-sent so consumers can display "set by X on Y"
-  ;; without a second query.  Paired `-value` attrs carry the business
-  ;; datum posed alongside the setter identity.
-  ;;
-  ;; Qualified relations (:resolves, :supersedes, :duplicates,
-  ;; :related-to) are pulled via the reverse refs :rel/_from and
-  ;; :rel/_to.  Since asymmetric kinds store two datoms (one per
-  ;; direction), each report sees both its outgoing and incoming sides;
-  ;; consumers pick whichever is appropriate for display.
+  ;; Each :report/<state> ref pulls its email's author + date so
+  ;; consumers can show "set by X on Y" without a second query.
+  ;; Relations come via :rel/_from and :rel/_to (both directions are
+  ;; stored for asymmetric kinds, consumer picks the relevant side).
   '[:db/id :report/type :report/version
     :report/patch-seq :report/patch-source :report/message-id
     {:report/acked [:email/author-address :email/date-sent]}

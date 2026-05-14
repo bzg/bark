@@ -3,11 +3,10 @@
 ;; License-Filename: LICENSES/EPL-2.0.txt
 
 (ns bark.periods
-  "Per-source time-windowed overrides. A source may carry a :periods
-  vector declaring how :maintainers / :commands / :command-syntax /
-  :labels change over time. Each period inherits unspecified fields
-  from the source level. Periods are contiguous half-open windows
-  [from, to). Pure -- no DB, no I/O."
+  "Per-source time-windowed overrides.  A source's :periods vector
+  declares how :maintainers / :commands / :command-syntax / :labels
+  change over time.  Periods are contiguous half-open [from, to)
+  windows; unspecified fields inherit source-level defaults.  Pure."
   (:require [bark.common :as common]))
 
 (def ^:private overridable-keys
@@ -17,8 +16,8 @@
   (boolean (and (string? s) (re-matches #"\d{4}-\d{2}-\d{2}" s))))
 
 (defn- normalize-period
-  "Return {:from Date|nil :to Date|nil + overridable keys} resolved
-  against `source-defaults`."
+  "{:from Date|nil :to Date|nil + overridable keys} resolved against
+  `source-defaults`."
   [period source-defaults]
   (merge (select-keys source-defaults overridable-keys)
          (select-keys period overridable-keys)
@@ -26,17 +25,15 @@
           :to   (common/parse-iso-date (:end period))}))
 
 (defn source-periods
-  "Chronologically ordered normalized periods for `source`. When
-  :periods is absent, returns a single all-time period derived from
-  source-level fields."
+  "Chronological normalized periods for `source`.  Without :periods,
+  returns a single all-time period from source-level fields."
   [source]
   (if-let [periods (:periods source)]
     (mapv #(normalize-period % source) periods)
     [(normalize-period {} source)]))
 
 (defn period-at-date
-  "Return the first period in `periods` whose half-open window
-  [from, to) contains `date`. nil bounds are unbounded."
+  "First period whose [from, to) contains `date` (nil bounds = unbounded)."
   [periods ^java.util.Date date]
   (when date
     (some (fn [{:keys [^java.util.Date from ^java.util.Date to] :as p}]
@@ -46,10 +43,8 @@
           periods)))
 
 (defn source-cfg-at-date
-  "Effective source-cfg for `source` at `date` -- source-level fields
-  plus the period-level overrides covering `date`. Falls back to the
-  last period when no period covers `date` (defensive; contiguous
-  periods with an unbounded first :start cover every date)."
+  "Effective source-cfg at `date`: source-level + period overrides.
+  Falls back to the last period if none covers `date` (defensive)."
   [source ^java.util.Date date]
   (let [periods (source-periods source)
         active  (or (period-at-date periods date)
@@ -88,8 +83,7 @@
                [])))
 
 (defn validate-periods
-  "Return a vector of error strings for `source`'s :periods. Empty vec
-  = valid. Returns [] when :periods is absent."
+  "Vector of error strings for `source`'s :periods ([] = valid or absent)."
   [source]
   (let [periods (:periods source)]
     (if-not periods

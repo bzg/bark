@@ -40,9 +40,8 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- active-as-of
-  "Tenures whose half-open window [:from, :to) contains `as-of`. A nil
-  `as-of` (dawn of time, first period without :start) has no active
-  state yet -- returns []."
+  "Tenures whose half-open window [:from, :to) contains `as-of`.
+  nil `as-of` (dawn of time) returns []."
   [tenures ^Date as-of]
   (when as-of
     (filter (fn [{:keys [^Date from ^Date to]}]
@@ -65,14 +64,11 @@
   (some #(and (= email (:email %)) (= from (:from %)) %) tenures))
 
 (defn- sync-period-boundary!
-  "Reconcile tenures with `period` at its start.
-  - Opens declared emails that have no tenure matching this boundary's
-    :from yet. Idempotent: re-running does not create duplicates, and
-    does NOT reinstate emails closed by a mail directive -- the mail
-    action is authoritative. Use --fresh to replay from scratch.
-  - Closes active emails absent from the declared list at :from.
-    When :from is nil (first unbounded-past period), closures are
-    skipped with a warning since no close date is available."
+  "Reconcile tenures with `period` at its start: open declared emails
+  missing a tenure at :from, close active emails dropped from the list.
+  Idempotent and respects mail-directive closures (use --fresh to replay).
+  Closures need a non-nil :from; first unbounded period skips them
+  with a warning."
   [conn source-name {:keys [^Date from maintainers]}]
   (let [all       (get-tenures (d/db conn) source-name)
         declared  (into [] (distinct (map str/lower-case (or maintainers []))))
@@ -112,8 +108,7 @@
                        (common/format-date-iso from) ")"))))))
 
 (defn sync-source-tenures!
-  "Iterate `source`'s periods chronologically and sync tenures at each
-  boundary. See `sync-period-boundary!` for the reconciliation rules."
+  "Walk `source` periods chronologically, syncing tenures at each."
   [conn source]
   (doseq [period (periods/source-periods source)]
     (sync-period-boundary! conn (:name source) period)))
@@ -139,12 +134,9 @@
     (re-pattern (str "<(" addr ")>|(" addr ")"))))
 
 (defn- parse-addresses
-  "Extract email addresses from the argument to `Add maintainer:` or
-  `Remove maintainer:`.  Accepts bare addresses (`alice@example.com`)
-  as well as the RFC 5322 `Display Name <alice@example.com>` form;
-  words outside bracketed addresses that do not themselves look like
-  an address are ignored.  Returns addresses in the order they
-  appear."
+  "Extract email addresses from a maintainer-directive argument.
+  Accepts bare `a@b` or RFC 5322 `Name <a@b>` forms; junk words are
+  ignored.  Order-preserving."
   [s]
   (when s
     (->> (re-seq address-pattern s)
@@ -175,11 +167,9 @@
       (mapv str/lower-case opens))))
 
 (defn- close-tenure!
-  "Close the active tenure for each given address (by setting :to = email-date).
-  The lead maintainer's tenure is never closed. Returns the list of addresses
-  whose tenure was actually closed.  Attempts to close the lead maintainer
-  are recorded as `:insufficient-scope` failures (audience `:maintainers`)
-  when `failure-ctx` is provided."
+  "Close active tenures for `addresses` (setting :to = email-date).
+  The lead maintainer is never closed (attempts are logged + recorded
+  as :insufficient-scope failures via `failure-ctx`)."
   [conn tenures source-name addresses email-date failure-ctx]
   (let [lead (common/lead-maintainer tenures)]
     (->> addresses
@@ -197,24 +187,18 @@
                                    :command  (str "Remove maintainer: " a))))
                          nil)
                      :else
-                     ;; Refresh the snapshot per iteration: closing one
-                     ;; tenure mutates the DB and later lookups must see
-                     ;; the updated state.
+                     ;; Per-iteration DB refresh: closing one tenure
+                     ;; mutates state that later lookups must see.
                      (when-let [eid (active-tenure-eid (d/db conn) source-name a)]
                        (d/transact! conn [[:db/add eid :maint-tenure/to email-date]])
                        a)))))
          vec)))
 
 (defn apply-role-controls!
-  "Apply `Add maintainer:` / `Remove maintainer:` directives found in
-  `body-text`. `tenures` is the pre-directive snapshot used for permission
-  checks; the DB is re-read between operations so effects chain correctly.
-  `strict-syntax?` (default false) controls whether the `!` prefix is
-  required.
-
-  Denied attempts are written to the failures file as
-  `:insufficient-scope`/`:maintainers` so the lead maintainer (and any
-  other notified maintainer) sees them in the next digest."
+  "Apply Add/Remove maintainer directives from `body-text`. `tenures`
+  is the pre-directive snapshot for permission checks; DB is re-read
+  between operations.  Denied attempts go to the failures file as
+  :insufficient-scope/:maintainers so the lead sees them."
   ([conn tenures source-name from-addr body-text email-date]
    (apply-role-controls! conn tenures source-name from-addr body-text email-date false))
   ([conn tenures source-name from-addr body-text email-date strict-syntax?]
@@ -309,13 +293,9 @@
                               :notify/min-status   1}]))))))
 
 (defn apply-notify-controls!
-  "Apply a `Notify:` control found in `body-text`.  Only maintainers
-  are allowed to change their notification preferences.  A non-
-  maintainer attempt is logged and recorded as an
-  `:insufficient-scope` failure (audience `:maintainers`), so it
-  becomes visible to the lead maintainer -- otherwise the attempt
-  would leave no trace at all. `strict-syntax?` (default false)
-  controls whether the `!` prefix is required."
+  "Apply a Notify: directive from `body-text`.  Maintainers only;
+  non-maintainer attempts are recorded as :insufficient-scope failures
+  (audience :maintainers) so the lead sees them."
   ([conn roles source-name from-addr body-text email-date]
    (apply-notify-controls! conn roles source-name from-addr body-text email-date false))
   ([conn roles source-name from-addr body-text email-date strict-syntax?]
@@ -353,9 +333,9 @@
 (def announcement-types #{:announcement :release :change})
 
 (defn can-create-report?
-  "Check whether from-addr is permitted to create a report on this source.
-  Announcements/releases/changes require maintainer status.
-  All other report types are allowed (source-match gate already filtered)."
+  "True iff `from-addr` may create this report type.  Announcements/
+  releases/changes require maintainer status; other types pass (the
+  source-match gate already filtered)."
   [roles from-addr report-info email _source-cfg]
   (if (announcement-types (:type report-info))
     (common/maintainer? roles from-addr (:email/date-sent email))

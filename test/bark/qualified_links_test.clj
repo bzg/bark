@@ -8,6 +8,7 @@
   reports, and additionally :resolves when the new report is a patch
   in reply to a bug or request."
   (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datalevin.core :as d]
             [bark.commands :as commands]
@@ -386,60 +387,27 @@
 (defn- read-attrs [db eid attrs]
   (d/pull db attrs eid))
 
-(deftest r1-happy-path
-  (testing "R1: patch in reply to bug auto-acks + auto-owns the bug"
-    (let [{:keys [conn] :as setup} (fresh-conn)]
-      (try
-        (let [bug-email   (mk-email! conn "<bug@x>" "alice@x" #inst "2026-04-01")
-              bug-eid     (mk-report! conn "<bug@x>" bug-email :bug)
-              patch-email-map {:db/id (mk-email! conn "<patch@x>" "bob@x" #inst "2026-04-02")
-                               :email/author-address "bob@x"
-                               :email/date-sent #inst "2026-04-02"}
-              patch-eid   (mk-report! conn "<patch@x>" (:db/id patch-email-map) :patch)]
-          ;; Phase 2: link-rel! posts :resolves
-          (#'digest/link-rel! conn patch-eid :patch patch-email-map [bug-eid])
-          ;; Phase 4: R1 hook auto-credits bug
-          (#'digest/auto-credit-resolved-reports! conn patch-eid patch-email-map)
-          (let [bug-state (read-attrs (d/db conn) bug-eid
-                                       [:report/acked :report/acked-address
-                                        :report/owned :report/owned-address])]
-            (is (some? (:report/acked bug-state))    "bug auto-acked")
-            (is (some? (:report/owned bug-state))    "bug auto-owned")
-            (is (= "bob@x" (:report/acked-address bug-state)))
-            (is (= "bob@x" (:report/owned-address bug-state)))
-            (is (rel/auto-credit? (d/db conn) bug-eid :report/acked)
-                "auto-credit? recognises this as auto-credited (acked)")
-            (is (rel/auto-credit? (d/db conn) bug-eid :report/owned)
-                "auto-credit? recognises this as auto-credited (owned)")))
-        (finally (close-and-cleanup! setup))))))
+(defn- credit-bug!
+  "Test helper: directly transact auto-credit state on a bug, mirroring
+  what the implicit Acked/Owned mechanism in `apply-commands!` produces
+  when a patch email is processed.  Used to set up the preconditions of
+  R2/R3/R4 assertions without dragging the full digest pipeline into a
+  unit test."
+  [conn bug-eid patch-email-eid author-addr]
+  (d/transact! conn [{:db/id bug-eid
+                      :report/acked patch-email-eid
+                      :report/acked-address (str/lower-case author-addr)
+                      :report/owned patch-email-eid
+                      :report/owned-address (str/lower-case author-addr)}]))
 
-(deftest r1-garde-fou-A-existing-setter
-  (testing "R1: existing explicit setter is NOT overwritten"
-    (let [{:keys [conn] :as setup} (fresh-conn)]
-      (try
-        (let [bug-email   (mk-email! conn "<bug@x>" "alice@x" #inst "2026-04-01")
-              bug-eid     (mk-report! conn "<bug@x>" bug-email :bug)
-              ;; Manual owned by Carol on the bug
-              setter-eid  (mk-email! conn "<setter@x>" "carol@x" #inst "2026-04-01T12:00:00")
-              _ (d/transact! conn [{:db/id bug-eid
-                                    :report/owned setter-eid
-                                    :report/owned-address "carol@x"}])
-              patch-email-map {:db/id (mk-email! conn "<patch@x>" "bob@x" #inst "2026-04-02")
-                               :email/author-address "bob@x"
-                               :email/date-sent #inst "2026-04-02"}
-              patch-eid   (mk-report! conn "<patch@x>" (:db/id patch-email-map) :patch)]
-          (#'digest/link-rel! conn patch-eid :patch patch-email-map [bug-eid])
-          (#'digest/auto-credit-resolved-reports! conn patch-eid patch-email-map)
-          (let [bug-state (read-attrs (d/db conn) bug-eid
-                                       [:report/owned-address :report/acked-address])]
-            (is (= "carol@x" (:report/owned-address bug-state))
-                "owned not overridden (Carol still owner)")
-            (is (= "bob@x" (:report/acked-address bug-state))
-                "acked nevertheless posted (was nil before)")
-            (let [rels (get-relations (d/db conn) patch-eid)]
-              (is (some #(= :resolves (:kind %)) rels)
-                  ":resolves still posted (link survives garde-fou)"))))
-        (finally (close-and-cleanup! setup))))))
+;; R1 (auto-credit on patch creation) is now handled by the implicit
+;; Acked/Owned mechanism in apply-commands! and covered by integration
+;; tests in digest_test.clj (fixtures 204-205 for the credit path,
+;; 206-207 for garde-fou A, 208-209 for the :patch-triggers? gate,
+;; 210 for the report-type gate).  The unit tests below focus on
+;; R2/R3/R4 (closure propagation, cancel retraction, supersession
+;; transfer), which still need explicit setup of the bug's credit
+;; state via `credit-bug!`.
 
 (deftest r2-resolved-propagates-to-bug
   (testing "R2: Closed. (=:resolved) on patch closes the bug too"
@@ -484,7 +452,7 @@
                                :email/source "test"}
               patch-eid   (mk-report! conn "<patch@x>" (:db/id patch-email-map) :patch)
               _ (#'digest/link-rel! conn patch-eid :patch patch-email-map [bug-eid])
-              _ (#'digest/auto-credit-resolved-reports! conn patch-eid patch-email-map)
+              _ (credit-bug! conn bug-eid (:db/id patch-email-map) "bob@x")
               cmd-email-eid (mk-email! conn "<cmd@x>" "bob@x" #inst "2026-04-03")
               cmd-email     {:db/id cmd-email-eid
                              :email/author-address "bob@x"
@@ -519,8 +487,11 @@
                                :email/source "test"}
               patch-eid   (mk-report! conn "<patch@x>" (:db/id patch-email-map) :patch)
               _ (#'digest/link-rel! conn patch-eid :patch patch-email-map [bug-eid])
-              ;; auto-credit-resolved-reports! sees owned already set, leaves it
-              _ (#'digest/auto-credit-resolved-reports! conn patch-eid patch-email-map)
+              ;; Implicit credit would have respected garde-fou A; here we
+              ;; simulate it by only crediting acked (owned stays Carol's).
+              _ (d/transact! conn [{:db/id bug-eid
+                                    :report/acked (:db/id patch-email-map)
+                                    :report/acked-address "bob@x"}])
               cmd-email-eid (mk-email! conn "<cmd@x>" "bob@x" #inst "2026-04-03")
               cmd-email     {:db/id cmd-email-eid
                              :email/author-address "bob@x"
@@ -548,7 +519,7 @@
                             :email/source "test"}
               p1-eid    (mk-report! conn "<p1@x>" (:db/id p1-email-map) :patch)
               _ (#'digest/link-rel! conn p1-eid :patch p1-email-map [bug-eid])
-              _ (#'digest/auto-credit-resolved-reports! conn p1-eid p1-email-map)
+              _ (credit-bug! conn bug-eid (:db/id p1-email-map) "bob@x")
               p2-email-map {:db/id (mk-email! conn "<p2@x>" "dave@x" #inst "2026-04-03")
                             :email/author-address "dave@x"
                             :email/date-sent #inst "2026-04-03"
@@ -588,7 +559,7 @@
                             :email/source "test"}
               p1-eid    (mk-report! conn "<p1@x>" (:db/id p1-email-map) :patch)
               _ (#'digest/link-rel! conn p1-eid :patch p1-email-map [bug-eid])
-              _ (#'digest/auto-credit-resolved-reports! conn p1-eid p1-email-map)
+              _ (credit-bug! conn bug-eid (:db/id p1-email-map) "bob@x")
               p2-email-map {:db/id (mk-email! conn "<p2@x>" "dave@x" #inst "2026-04-03")
                             :email/author-address "dave@x"
                             :email/date-sent #inst "2026-04-03"

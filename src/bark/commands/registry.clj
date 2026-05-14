@@ -3,26 +3,17 @@
 ;; License-Filename: LICENSES/EPL-2.0.txt
 
 (ns bark.commands.registry
-  "Pure command registry -- static data only, no runtime dependencies.
-  Loadable by Babashka scripts (e.g. validate-config.clj) since it does
-  not pull in datalevin."
+  "Pure command registry -- static data, no runtime deps (loadable from bb)."
   (:require [clojure.string :as str]))
 
-;; ---------------------------------------------------------------------------
-;; Command registry
-;;
-;; :scope values:
+;; Command registry.  :scope values:
 ;;   :user                 -- anyone
 ;;   :maintainer           -- any maintainer
-;;   :setter-or-maintainer -- the address that previously set the attribute,
-;;                           or any maintainer (maintainers keep their
-;;                           administrative override)
-;;
-;; :setter-or-maintainer is only meaningful for unset-style directives
-;; whose target has a recoverable "setter": either a ref to the
-;; pose-email (see `setter-ref-attrs` below), or a :rel/setter on a
-;; qualified relation (see `setter-scoped-command-ids` below).
-;; `validate-config.clj` rejects that scope on any other command.
+;;   :setter-or-maintainer -- the address that set the attribute, plus
+;;                            any maintainer.  Only meaningful for unset
+;;                            directives whose target has a recoverable
+;;                            setter (`setter-ref-attrs` /
+;;                            `setter-scoped-command-ids`).
 ;; ---------------------------------------------------------------------------
 
 (def commands
@@ -67,32 +58,25 @@
     :syntax "Topic" :param :word}
    {:id :untopic     :kind :directive :action :unset-topic :attr :report/topic :scope :setter-or-maintainer
     :syntax "No topic"}
-   ;; Supersede -- backed by qualified relations (:rel/supersedes) since the
-   ;; qualified-links refactor; :attr is retained for registry shape
-   ;; compatibility but no longer drives schema lookup (the attr is gone).
+   ;; Supersede -- backed by :rel/supersedes; :attr kept for registry shape.
    {:id :superseded-by  :kind :directive :action :set-superseded   :attr :rel/supersedes :scope :user
     :syntax "Superseded-by" :param :message-id :report-types #{:bug :patch :request}}
    {:id :unsuperseded   :kind :directive :action :unset-superseded :attr :rel/supersedes :scope :setter-or-maintainer
     :syntax "Not superseded" :report-types #{:bug :patch :request}}
-   ;; Supersedes -- symmetric of Superseded-by from the replacement's POV.
-   ;; Posed on the new report, it closes the target as :superseded.
-   ;; Same canonical :rel/supersedes relation; only the role is flipped
-   ;; (current = :rel/to, target = :rel/from = the closed report).
+   ;; Supersedes -- inverse role of Superseded-by (posed on the replacement;
+   ;; current = :rel/to, target = :rel/from = the closed report).
    {:id :supersedes     :kind :directive :action :set-supersedes   :attr :rel/supersedes :scope :user
     :syntax "Supersedes" :param :message-id :report-types #{:bug :patch :request}}
    {:id :unsupersedes   :kind :directive :action :unset-supersedes :attr :rel/supersedes :scope :setter-or-maintainer
     :syntax "Not superseding" :report-types #{:bug :patch :request}}
-   ;; Duplicate-of -- same shape as Superseded-by, but encodes "this is a
-   ;; duplicate of another report" (close-reason :canceled).  Same-type
-   ;; constraint enforced (bug=>bug, patch=>patch, request=>request).
+   ;; Duplicate-of -- same shape as Superseded-by; close-reason :canceled.
+   ;; Same-type constraint enforced (bug=>bug, patch=>patch, request=>request).
    {:id :duplicate-of   :kind :directive :action :set-duplicate    :attr :rel/duplicates :scope :user
     :syntax "Duplicate-of" :param :message-id :report-types #{:bug :patch :request}}
    {:id :unduplicate    :kind :directive :action :unset-duplicate  :attr :rel/duplicates :scope :setter-or-maintainer
     :syntax "Not duplicate" :report-types #{:bug :patch :request}}
-   ;; Related-to -- neutral cross-reference. No type constraint, no
-   ;; closure effect, multiple targets per report allowed.  Scope :user
-   ;; on both ends because the link is informational and the symmetric
-   ;; kind canonicalises duplicates away by :rel/id.
+   ;; Related-to -- neutral cross-reference (no closure, multi-target,
+   ;; symmetric canonicalised by :rel/id).
    {:id :related-to :kind :directive :action :set-related   :attr :rel/related-to :scope :user
     :syntax "Related-to"     :param :message-id}
    {:id :unrelated  :kind :directive :action :unset-related :attr :rel/related-to :scope :user
@@ -107,16 +91,12 @@
 (def attr->trigger-cmd
   (into {} (map (juxt :attr identity)) trigger-commands))
 
-;; The five state attrs that support the `-by` proxy form (e.g.
-;; `Acked-by: bob@example.com`, where the sender credits Bob instead
-;; of themselves).  Paired with `-address` caches below so the
-;; designated address survives the proxy indirection.
+;; State attrs that support the `-by` proxy form (e.g. Acked-by:
+;; bob@x credits Bob instead of the sender).  The credited address
+;; lives in `address-attrs`.
 (def proxy-state-attrs
   [:report/acked :report/owned :report/closed :report/urgent :report/important])
 
-;; Proxy-state attr → paired `-address` cache.  The cache holds the
-;; credited address, which may differ from the pose-email's
-;; author-address when the `-by` form is used.
 (def address-attrs
   {:report/acked     :report/acked-address
    :report/owned     :report/owned-address
@@ -124,18 +104,12 @@
    :report/urgent    :report/urgent-address
    :report/important :report/important-address})
 
-;; All report attributes that Bark tracks as refs to the pose-email.
-;; Shape: `{ref-attr paired-value-attr-or-nil}`.
-;; The paired attr holds the business datum posed alongside the
-;; setter identity -- a scalar for topic/deadline/expiry (`-value`).
-;; The five proxy-state attrs (acked/owned/closed/urgent/important)
-;; carry no paired value -- their "value" is just the fact that the
-;; state was set, and the proxy-designated address lives in
-;; `address-attrs`.
-;;
-;; Note: :report/superseded-by left the table when supersede was
-;; migrated to qualified relations (:rel/supersedes).  The setter for
-;; that command is now read from :rel/setter, not from a paired-attr.
+;; Report attrs tracked as refs to the pose-email.
+;;   {ref-attr paired-value-attr-or-nil}
+;; The paired attr holds the business datum (topic/deadline/expiry use
+;; `-value`).  Proxy-state attrs carry no paired value -- the credited
+;; address lives in `address-attrs`.  Supersede left the table when it
+;; migrated to :rel/supersedes (setter now in :rel/setter).
 (def setter-ref-attrs
   {:report/acked         nil
    :report/owned         nil
@@ -146,11 +120,9 @@
    :report/deadline      :report/deadline-value
    :report/expiry        :report/expiry-value})
 
-;; Commands accepting :scope :setter-or-maintainer.  Two flavours:
-;; - unset-style directives whose target attribute is tracked by a ref
-;;   to the pose-email (derived from `setter-ref-attrs`);
-;; - explicitly-listed commands backed by qualified relations whose
-;;   setter is recorded in :rel/setter (:unsuperseded, :unduplicate).
+;; Commands accepting :scope :setter-or-maintainer:
+;; - unset directives keyed on a setter-ref attribute, plus
+;; - explicit relation-backed unsets (:unsuperseded, :unduplicate).
 (def setter-scoped-command-ids
   (into #{:unsuperseded :unsupersedes :unduplicate}
         (comp (filter #(str/starts-with? (name (:action %)) "unset"))

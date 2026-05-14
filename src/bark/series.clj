@@ -48,13 +48,9 @@
          db topic sender)))
 
 (defn find-open-series-via-parents
-  "Find an open series among parent reports' :report/series, restricted
-  to series with the given sender and expected total. Threading is the
-  reliable signal for series membership: the per-message :topic parsed
-  from the subject can vary across patches when each patch carries its
-  own `subdir:` colon-prefix, but threading via In-Reply-To/References
-  consistently links every patch back to the cover letter (or to a
-  sibling already in the series)."
+  "Open series reachable via parents' :report/series, restricted to
+  `sender`/`total`.  Threading is more reliable than per-message
+  :topic, which can diverge across patches in a series."
   [db parent-report-eids sender total]
   (when (seq parent-report-eids)
     (d/q '[:find ?s .
@@ -100,8 +96,7 @@
                        (d/db conn) series-eid report-eid)]
     (d/transact! conn [[:db/add series-eid :series/patches report-eid]
                        {:db/id report-eid :report/series series-eid}])
-    ;; Cross-link this patch with siblings via :related-to (symmetric,
-    ;; canonicalized).  Idempotent via :rel/id unique-identity.
+    ;; Cross-link siblings via :related-to (idempotent via :rel/id).
     (let [opts {:from-eid  report-eid
                 :kind      :related-to
                 :setter    (:email/author-address email)
@@ -168,12 +163,9 @@
                                        (pr-str (series-id topic from-addr m))
                                        "(expecting" m "patches)")
                              sid))]
-        ;; Series supersession is encoded indirectly via `:series/closed`
-        ;; on the old series (set above by `close-series!`), which points
-        ;; to the email that triggered the supersession.  No structural
-        ;; pointer from old series → new series is needed; consumers that
-        ;; care about "what replaced this series" can look at the new
-        ;; series created in the same thread.
+        ;; Series supersession is implicit: the old series carries
+        ;; :series/closed pointing to the triggering email; the new
+        ;; series lives in the same thread.
         (if (zero? n)
           (do (set-cover-letter! conn series-eid email-eid)
               (d/transact! conn [{:db/id report-eid :report/series series-eid}]))

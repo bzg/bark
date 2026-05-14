@@ -36,6 +36,8 @@
   (d/pull db
           '[:report/type :report/version :report/topic-value
             :report/patch-seq :report/patch-source :report/message-id
+            {:report/patches [:patch/filename :patch/source :patch/author
+                              :patch/subject :patch/date :patch/text]}
             :report/acked :report/owned :report/closed
             :report/close-reason
             :report/urgent :report/important
@@ -1057,7 +1059,60 @@
         (testing "Inline diff 121 is open (latest)"
           (let [r121 (get-report db "<121@test.org>")]
             (is (= :patch (:report/type r121)))
-            (is (nil? (:report/closed r121)) "latest diff should remain open"))))
+            (is (nil? (:report/closed r121)) "latest diff should remain open")))
+
+        ;; --- Email 203: [BUG] + .patch attachment ---
+        (testing "Bug 203 stores attached patch as metadata"
+          (let [r203 (get-report db "<203@test.org>")]
+            (is (= :bug (:report/type r203))
+                "label decides: [BUG] + .patch attachment is a :bug")
+            (is (nil? (:report/acked r203))
+                "a root [BUG]+.patch must NOT self-credit its reporter")
+            (is (nil? (:report/owned r203))
+                "the implicit Acked/Owned only fires on replies, not on the root")
+            (let [patches (:report/patches r203)]
+              (is (= 1 (count patches))
+                  ":report/patches is filled on the bug")
+              (let [p (first patches)]
+                (is (= "fix-save-crash.patch" (:patch/filename p)))
+                (is (= :attachment (:patch/source p)))
+                (is (= "User A <user-a@test.org>" (:patch/author p))
+                    "format-patch headers are parsed and stored")
+                (is (= "Fix crash on save" (:patch/subject p)))))))
+
+        ;; --- Emails 204-205: implicit Acked/Owned from inline diff ---
+        (testing "Bug 204 auto-credited by inline-diff reply 205"
+          (let [r204 (get-report db "<204@test.org>")]
+            (is (= :bug (:report/type r204)))
+            (is (some? (:report/acked r204))
+                "Phase 3: reply with patch content implicitly credits acked")
+            (is (some? (:report/owned r204))
+                "Phase 3: reply with patch content implicitly credits owned")
+            (is (= "fixer@test.org" (:report/acked-address r204)))
+            (is (= "fixer@test.org" (:report/owned-address r204)))))
+
+        ;; --- Emails 206-207: garde-fou A preserves manual setter ---
+        (testing "Bug 206 keeps manual owner despite implicit signal in 207"
+          (let [r206 (get-report db "<206@test.org>")]
+            (is (= :bug (:report/type r206)))
+            (is (= "admin@test.org" (:report/owned-address r206))
+                "garde-fou A: pre-existing Owned-by setter is preserved")))
+
+        ;; --- Emails 208-209: :patch-triggers? false suppresses implicit ---
+        (testing "Bug 208 on no-triggers source skips implicit Acked/Owned"
+          (let [r208 (get-report db "<208@test.org>")]
+            (is (= :bug (:report/type r208)))
+            (is (nil? (:report/acked r208))
+                ":patch-triggers? false gates the implicit trigger")
+            (is (nil? (:report/owned r208)))))
+
+        ;; --- Email 210: report-type gate ---
+        (testing "Announcement 210 with inline diff is NOT auto-credited"
+          (let [r210 (get-report db "<210@test.org>")]
+            (is (= :announcement (:report/type r210)))
+            (is (nil? (:report/acked r210))
+                "implicit Acked/Owned is restricted to #{:bug :patch :request}")
+            (is (nil? (:report/owned r210))))))
       (finally
         (teardown! ctx)))))
 

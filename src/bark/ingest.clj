@@ -25,10 +25,9 @@
   (when v (some? (d/entid (d/db conn) [attr v]))))
 
 (defn- id-collision?
-  "True iff an email is already stored under the composite
-  (:email/source, :email/id) pair.  Mailseq ids are not globally
-  unique (IMAP UIDs are per-folder, Maildir filenames are per-folder)
-  so dedup must be source-scoped."
+  "True iff (:email/source, :email/id) is already stored.  Mailseq
+  ids (IMAP UID, Maildir filename) are per-folder, so dedup is
+  source-scoped."
   [conn source-name id]
   (when (and source-name id)
     (some? (d/q '[:find ?e . :in $ ?src ?id
@@ -44,8 +43,7 @@
   (d/transact! conn [{:watermark/id "default" :watermark/imap-uid imap-uid}]))
 
 (defn stored-uid-validity
-  "Return the UIDVALIDITY recorded alongside the current UID watermark,
-  or nil if none has ever been stored (fresh DB or pre-upgrade)."
+  "Recorded UIDVALIDITY for the current UID watermark (nil if never set)."
   [conn]
   (d/q '[:find ?uv .
          :where [?e :watermark/id "default"] [?e :watermark/imap-uid-validity ?uv]]
@@ -53,13 +51,9 @@
 
 (defn sync-uid-validity!
   "Align the stored UIDVALIDITY with the mailbox's live value.
-  Returns :match, :stamped (first time), or :reset (changed -- watermark
-  cleared). On :reset, the caller will see max-imap-uid return 0 and
-  fall through to the first-run fetch path.
-
-  `live-uv` may be nil if the backend cannot report UIDVALIDITY
-  (Maildir, non-UIDFolder IMAP). In that case we leave the stored
-  value untouched and return :unsupported."
+  Returns :match, :stamped (first time), :reset (changed -- watermark
+  cleared, caller falls back to first-run fetch), or :unsupported
+  (backend cannot report UIDVALIDITY, e.g. Maildir)."
   [conn live-uv]
   (if (nil? live-uv)
     :unsupported
@@ -98,8 +92,7 @@
              (d/db conn))))
 
 (defn mark-ids-seen!
-  "Record Maildir ids as seen on the watermark entity so they are
-  excluded from future incremental diffs."
+  "Record Maildir ids as seen so future incremental diffs skip them."
   [conn ids]
   (d/transact! conn [{:watermark/id "default"
                       :watermark/seen-ids (set ids)}]))
@@ -118,9 +111,8 @@
 ;; ---------------------------------------------------------------------------
 
 (def default-max-attachment-size
-  "Default maximum size (in characters) for extracted attachment text data
-  (.patch, .diff, .ics, text/plain, text/x-log). Attachments exceeding
-  this limit are stored without their text content. 1 MB."
+  "Cap (in chars) on extracted attachment text -- .patch/.diff/.ics
+  /text/plain/text/x-log.  Larger payloads are stored without content."
   (* 1024 1024))
 
 ;; ---------------------------------------------------------------------------
@@ -145,11 +137,8 @@
            nil))))
 
 (defn- parse-message-ids
-  "Parse a References header value into a single space-separated string
-  of message-ids, preserving RFC 2822 order (root -> parent).  Each
-  mid is normalized (domain lowercased per RFC 5322 §3.6.4).  Tokens
-  with whitespace or nested brackets are rejected.  Returns the
-  string, or nil if no well-formed mid is found."
+  "Parse a References value into a space-separated mid string (root
+  first), normalized and deduplicated.  Returns nil if none found."
   [s]
   (when s
     (let [ids (->> (re-seq #"<[^<>\s]+>" s)
@@ -163,9 +152,9 @@
 ;; ---------------------------------------------------------------------------
 
 (defn email->txdata
-  "Convert a mailseq message map to Datalevin transaction data.
-  No source is stamped here -- that is resolved at digest time from headers.
-  `opts` may contain :max-attachment-size to override the default (1 MB)."
+  "Mailseq message → Datalevin tx-data.  Source is NOT stamped here
+  (resolved at digest time from headers).  `opts :max-attachment-size`
+  overrides the default 1 MB cap."
   ([msg] (email->txdata msg {}))
   ([msg opts]
   (let [max-att-size (or (:max-attachment-size opts)
@@ -258,16 +247,10 @@
   (when (string? s) (subs s 0 (min n (count s)))))
 
 (defn store-email!
-  "Store a single parsed email in Datalevin.
-  Skips if Message-ID is nil, oversized, or already exists.
-  Returns true if the email was stored, false/nil otherwise.
-
-  `opts` may contain:
-    :source              -- source name to stamp on the entity and to
-                           scope the (:email/source, :email/id) dedup
-                           check.  Required for live ingestion; tests
-                           that bypass classification may omit it.
-    :max-attachment-size -- override the default (1 MB) limit."
+  "Store a parsed email.  Skips nil/oversized/duplicate Message-IDs.
+  Returns true if stored.
+  Opts: :source (stamps the email + scopes (source,id) dedup; required
+  for live ingestion), :max-attachment-size (override 1 MB default)."
   ([conn msg] (store-email! conn msg {}))
   ([conn msg opts]
   (let [message-id (common/extract-bracketed-id (:message-id msg))

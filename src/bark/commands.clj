@@ -12,6 +12,7 @@
             [bark.commands.registry :refer [commands-by-id directive-commands
                                             attr->trigger-cmd proxy-state-attrs
                                             address-attrs setter-ref-attrs]]
+            [bark.detect :as detect]
             [bark.periods :as periods]
             [bark.relations :as rel]
             [bark.tracking :as tracking])
@@ -54,24 +55,20 @@
        :message-id       (str "^" prefix qs ":\\s+(?:.*<(" mid ")>|.*/(" mid-path ")/?|(" mid-path "))" trailing-punct "?\\s*$")
        (str "^" prefix qs trailing-punct "?\\s*$")))))
 
-(defn- compile-trigger-words [strict-syntax? action-map]
-  (into {}
-        (map (fn [[k words]]
-               [k (apply trigger-pattern
-                         (contains? strict-punct-actions k)
-                         strict-syntax?
-                         words)]))
-        action-map))
-
-(def default-compiled-commands
-  "Precompiled default trigger regex for :loose mode. Strict mode
-  recompiles on demand in build-source-commands."
-  (compile-trigger-words false common/default-commands))
+(def ^:private compile-trigger-words
+  "Compile an action=>words map into action=>regex."
+  (memoize
+   (fn [strict-syntax? action-map]
+     (into {}
+           (map (fn [[k words]]
+                  [k (apply trigger-pattern
+                            (contains? strict-punct-actions k)
+                            strict-syntax?
+                            words)]))
+           action-map))))
 
 (def ^:private compile-directives
-  "Memoized directive compilation keyed on strict-syntax? -- only two
-  shapes exist (loose/strict), so memoizing collapses to at most two
-  calls per process."
+  "Compile directive patterns for a syntax mode."
   (memoize
    (fn [strict-syntax?]
      (mapv (fn [cmd] [cmd (directive-pattern strict-syntax? cmd)]) directive-commands))))
@@ -87,10 +84,7 @@
   (let [commands       (common/resolve-commands-map source-cfg)
         strict-syntax? (= :strict (common/resolve-command-syntax source-cfg))]
     {:commands       commands
-     :compiled       (if (and (not strict-syntax?)
-                              (= commands common/default-commands))
-                       default-compiled-commands
-                       (compile-trigger-words strict-syntax? commands))
+     :compiled       (compile-trigger-words strict-syntax? commands)
      :directives     (compile-directives strict-syntax?)
      :strict-syntax? strict-syntax?
      :overrides      (common/resolve-command-overrides source-cfg)}))
@@ -227,11 +221,11 @@
   "Append a command failure to the failures file for later notification.
   Prunes entries older than 1 year.
 
-  `:audience` controls who the notifier will route the entry to:
-  - `:author`      -- the address that sent the command (the default,
+  :audience controls who the notifier will route the entry to:
+  - :author      -- the address that sent the command (the default,
                      used for typo-class failures like `Superseded-by:`
                      with an unknown target).
-  - `:maintainers` -- all maintainer subscribers on the source, so a
+  - :maintainers -- all maintainer subscribers on the source, so a
                      permission denial is visible to the people who can
                      act on it."
   [{:keys [source from-addr email-date reason command report-mid audience]}]
@@ -302,23 +296,24 @@
 
 (defn- ref-eid [v] (if (map? v) (:db/id v) v))
 
-(defn- apply-vote! [conn report-eid from-addr body-text email delivery source-cfg]
-  (when-let [vote (detect-vote body-text)]
-    (if-not (common/sent-via-source-channel? delivery source-cfg)
-      (log/info "Vote ignored (private email on public source)" from-addr)
-      (let [report-mid (:report/message-id (d/entity (d/db conn) report-eid))
-            vote-key   (str report-mid ":" from-addr)]
-        ;; :vote/key has :db.unique/identity -- if this voter already voted,
-        ;; the upsert overwrites silently (first vote wins in practice,
-        ;; since we only transact when key is new).
-        (when-not (d/entid (d/db conn) [:vote/key vote-key])
-          (d/transact! conn [{:vote/key    vote-key
-                              :vote/report report-eid
-                              :vote/email  (:db/id email)
-                              :vote/value  vote
-                              :vote/voter  from-addr}])
-          (tracking/bump-report-updated! conn report-eid)
-          (log/info "Vote" (case vote :up "+1" :down "-1" "0") "by" from-addr))))))
+(defn- apply-vote!
+  "Record a pre-detected `vote` (caller runs `detect-vote`)."
+  [conn report-eid from-addr vote email delivery source-cfg]
+  (if-not (common/sent-via-source-channel? delivery source-cfg)
+    (log/info "Vote ignored (private email on public source)" from-addr)
+    (let [report-mid (:report/message-id (d/entity (d/db conn) report-eid))
+          vote-key   (str report-mid ":" from-addr)]
+      ;; :vote/key has :db.unique/identity -- if this voter already voted,
+      ;; the upsert overwrites silently (first vote wins in practice,
+      ;; since we only transact when key is new).
+      (when-not (d/entid (d/db conn) [:vote/key vote-key])
+        (d/transact! conn [{:vote/key    vote-key
+                            :vote/report report-eid
+                            :vote/email  (:db/id email)
+                            :vote/value  vote
+                            :vote/voter  from-addr}])
+        (tracking/bump-report-updated! conn report-eid)
+        (log/info "Vote" (case vote :up "+1" :down "-1" "0") "by" from-addr)))))
 
 (defn- build-unset-tx
   "Build retraction datoms for unsetting attributes and their address attrs."
@@ -336,7 +331,7 @@
   "Build assertion datoms for setting attributes via -by directives.
   Points the attr to the real email and stores the designated address
   in its lowercased form so downstream comparisons against
-  `:email/author-address` are case-insensitive."
+  :email/author-address are case-insensitive."
   [report-eid email-eid set-map]
   (into []
         (mapcat (fn [[attr addr]]
@@ -348,7 +343,7 @@
   "Build transaction data for trigger results.
   `current` is the report's current state (pulled with
   `proxy-state-attrs`).  The `-address` cache is stored lowercased
-  so downstream comparisons against `:email/author-address` are
+  so downstream comparisons against :email/author-address are
   case-insensitive.
   Returns [tx-data new-sets] or nil if nothing to do."
   [report-eid trig-result email-eid from-addr current]
@@ -378,7 +373,7 @@
                   (str "(by " email-mid ")"))
         ;; Propagate trigger-driven closure of a patch to the
         ;; bugs/requests it resolves (no successor in the trigger path).
-        ;; Sources with `:patch-triggers? false` opt out of the :resolved
+        ;; Sources with ":patch-triggers? false" opt out of the :resolved
         ;; propagation; :canceled retraction still runs (no-op when no
         ;; auto-credit was posed in the first place).
         (when (and (= :patch rtype) close-reason (:report/closed new-sets)
@@ -535,7 +530,7 @@
   For proxy-capable state attrs, reads the `-address` cache (which
   captures the designated setter in the `-by` case).  For all other
   setter-tracked attrs, follows the email ref and reads the pose
-  email's `:email/author-address`."
+  email's :email/author-address."
   [current attr]
   (or (get current (address-attrs attr))
       (:email/author-address (get current attr))))
@@ -543,8 +538,8 @@
 (defn- scope-permits?
   "Check whether a directive scope permits `from-addr` to act on `attr`.
   `current-d` is a `delay` that pulls the report's current state -- it
-  is only forced in the `:setter-or-maintainer` branch, so emails that
-  contain only `:user`/`:maintainer`-scoped directives pay no pull cost.
+  is only forced in the :setter-or-maintainer branch, so emails that
+  contain only :user/:maintainer-scoped directives pay no pull cost.
 
   - :user                 -- anyone
   - :setter-or-maintainer -- the address that previously set `attr`, or any
@@ -571,7 +566,7 @@
   "Rebuild a short, human-readable form of a parsed directive for use
   in failure records and logs.  Dates are formatted as ISO (yyyy-MM-dd)
   so the failure record stays readable when rendered verbatim in a
-  notification email.  Falls back to the `:syntax` of the looked-up
+  notification email.  Falls back to the :syntax of the looked-up
   command when the directive carries no parameter."
   [{:keys [id action email-address date topic target-message-id]}]
   (let [cmd    (get commands-by-id id)
@@ -592,11 +587,11 @@
   "Return the subset of `directives` whose scope permits `from-addr` to
   act, further filtered by `action-pred`. `current-d` is the delay
   passed through to `scope-permits?` -- only forced when at least one
-  directive has scope `:setter-or-maintainer`.
+  directive has scope :setter-or-maintainer.
 
   When `failure-ctx` is non-nil, directives that are rejected by the
   scope check (but pass `action-pred`) are written to the failures
-  file as `:insufficient-scope`, audience `:maintainers`, so they
+  file as :insufficient-scope, audience :maintainers, so they
   surface in the next notification round."
   [directives current-d from-addr is-maintainer? action-pred failure-ctx]
   ;; Eager realization via `filterv` so the recording side effect in
@@ -632,7 +627,7 @@
 (defn- resolve-target
   "Look up the target report-eid for a relation directive (Superseded-by:
   or Duplicate-of:).  Returns {:target-eid :target-type :valid?} where
-  `:valid?` is true iff the target exists AND the type constraint passes
+  :valid? is true iff the target exists AND the type constraint passes
   for `kind`.  A `target-mid` that resolves to a descendant of a report
   resolves to the containing report (parity with threading)."
   [db kind report-eid source-type target-mid]
@@ -740,7 +735,7 @@
     :current-as-to   (relation-source-eid db report-eid kind)))
 
 (defn- relation-setter
-  "`:rel/setter` address of the active `kind` relation involving
+  ":rel/setter address of the active `kind` relation involving
   `report-eid`, or nil.  `role` controls which side `report-eid` is on."
   [db report-eid kind role]
   (case role
@@ -760,10 +755,10 @@
                           db report-eid kind)))
 
 (defn- relation-setters-as-pull
-  "Build a partial pull map exposing relation setters under `:setter-attr`
-  so `scope-permits?` can resolve `:setter-or-maintainer` on relation
-  unset directives.  `rows` is a seq carrying `:kind`, `:role` and
-  `:setter-attr`.
+  "Build a partial pull map exposing relation setters under :setter-attr
+  so `scope-permits?` can resolve :setter-or-maintainer on relation
+  unset directives.  `rows` is a seq carrying :kind, :role and
+  :setter-attr.
 
   Batches the per-row d/q calls into at most two queries (one per role)
   to avoid N+1 lookups when several rows share a role."
@@ -816,7 +811,7 @@
     :unset-key     -- key in resolved holding the unset flag
     :setter-attr   -- key under which the relation's :rel/setter is
                       surfaced in the pull map so `scope-permits?` can
-                      resolve `:setter-or-maintainer` on the unset
+                      resolve :setter-or-maintainer on the unset
                       directive in the open-report path."
   [{:id :superseded-by :kind :supersedes :role :current-as-from
     :propagate :superseded :propagate-tgt true
@@ -899,7 +894,7 @@
   "Process one closure-relation unset directive that has a matching
   active relation.  Retracts the :supersedes pair AND the :related-to
   companion, then reopens the previously-closed party.  Which side is
-  current vs counterparty depends on `:role`."
+  current vs counterparty depends on :role."
   [conn report-eid {:keys [kind role counterparty]} email-eid]
   (case role
     :current-as-from
@@ -921,7 +916,7 @@
                          failure-ctx]
   (let [db         (d/db conn)
         ;; Surface relation setters under their :setter-attr so the
-        ;; scope check on `:unsuperseded` / `:unsupersedes` / `:unduplicate`
+        ;; scope check on :unsuperseded / :unsupersedes / :unduplicate
         ;; works on the open-report path (mirrors the same trick in
         ;; `try-unclosed!`).
         current-d  (delay (merge (d/pull db directive-pull-pattern report-eid)
@@ -1062,8 +1057,8 @@
 (defn- filter-triggers-by-scope
   "Filter `trig-result` to the subset allowed by the effective scope
   for each trigger.  When `failure-ctx` is non-nil, triggers that fail
-  the scope check are recorded as `:insufficient-scope` failures with
-  `:audience :maintainers`, so denied attempts surface to maintainer
+  the scope check are recorded as :insufficient-scope failures with
+  \":audience :maintainers\", so denied attempts surface to maintainer
   subscribers via the notification loop."
   [trig-result overrides is-maintainer? failure-ctx]
   (when trig-result
@@ -1087,42 +1082,52 @@
                                                     (:report/close-reason trig-result)))))))
 
 (defn apply-commands!
-  "Detect and apply all commands from an email's body text.
-  Returns true when at least one command (trigger, directive, or vote)
-  was detected, false otherwise."
+  "Apply commands from `email` against `report-eid`.
+  A reply shipping patch content also fires an implicit `Acked. Owned.`,
+  gated by :patch-triggers? and report-type ∈ #{:bug :patch :request}.
+  Returns true if anything was applied."
   [conn report-eid report-type email source-map roles delivery]
-  (if-let [body-text (common/email-body-text email)]
-    (let [db          (d/db conn)
-          from-addr   (:email/author-address email)
-          eid         (:db/id email)
-          report-mid  (:report/message-id (d/entity db report-eid))
-          src-name    (d/q '[:find ?src . :in $ ?rid
-                             :where [?rid :report/email ?e] [?e :email/source ?src]] db report-eid)
-          source-cfg  (when-let [cfg (get source-map src-name)]
-                          (periods/source-cfg-at-date cfg (:email/date-sent email)))
-          src-cmds    (build-source-commands source-cfg)
-          overrides   (:overrides src-cmds)
-          is-maint?   (common/maintainer? roles from-addr (:email/date-sent email))
-          fail-ctx    (when (and from-addr src-name)
-                        {:source     src-name
-                         :from-addr  from-addr
-                         :email-date (:email/date-sent email)
-                         :report-mid report-mid})
-          trig-result (-> (detect-triggers report-type body-text src-cmds)
-                          (filter-triggers-by-scope overrides is-maint? fail-ctx))
-          directives  (detect-directives report-type body-text overrides
+  (let [body-text   (common/email-body-text email)
+        db          (d/db conn)
+        from-addr   (:email/author-address email)
+        eid         (:db/id email)
+        report-mid  (:report/message-id (d/entity db report-eid))
+        src-name    (d/q '[:find ?src . :in $ ?rid
+                           :where [?rid :report/email ?e] [?e :email/source ?src]] db report-eid)
+        source-cfg  (when-let [cfg (get source-map src-name)]
+                      (periods/source-cfg-at-date cfg (:email/date-sent email)))
+        src-cmds    (build-source-commands source-cfg)
+        overrides   (:overrides src-cmds)
+        is-maint?   (common/maintainer? roles from-addr (:email/date-sent email))
+        fail-ctx    (when (and from-addr src-name)
+                      {:source     src-name
+                       :from-addr  from-addr
+                       :email-date (:email/date-sent email)
+                       :report-mid report-mid})
+        body-trig   (when body-text
+                      (detect-triggers report-type body-text src-cmds))
+        ;; Reply-guard: a root [BUG]+.patch must not self-credit its reporter.
+        implicit    (when (and (contains? #{:bug :patch :request} report-type)
+                               (common/patch-triggers? source-cfg)
+                               (:email/in-reply-to email)
+                               (detect/has-patch-content? email))
+                      {:report/acked true :report/owned true})
+        trig-result (filter-triggers-by-scope (merge implicit body-trig)
+                                              overrides is-maint? fail-ctx)
+        directives  (when body-text
+                      (detect-directives report-type body-text overrides
                                          (:email/date-sent email)
-                                         (:directives src-cmds))
-          closed?     (some? (:report/closed (d/pull db [:report/closed] report-eid)))]
-
-      (if closed?
-        (do (try-unclosed! conn report-eid directives eid is-maint? from-addr fail-ctx)
-            (boolean (seq directives)))
-        (let [voted? (when (and (= :request report-type) from-addr)
-                       (apply-vote! conn report-eid from-addr body-text email delivery source-cfg)
-                       (some? (detect-vote body-text)))]
-          (apply-triggers! conn report-eid trig-result eid (:email/message-id email) from-addr
-                           source-cfg)
-          (apply-directives! conn report-eid directives eid from-addr is-maint? fail-ctx)
-          (boolean (or (seq trig-result) (seq directives) voted?)))))
-    false))
+                                         (:directives src-cmds)))
+        closed?     (some? (:report/closed (d/pull db [:report/closed] report-eid)))]
+    (if closed?
+      (do (when (seq directives)
+            (try-unclosed! conn report-eid directives eid is-maint? from-addr fail-ctx))
+          (boolean (seq directives)))
+      (let [voted? (when-let [vote (and (= :request report-type) from-addr body-text
+                                         (detect-vote body-text))]
+                     (apply-vote! conn report-eid from-addr vote email delivery source-cfg)
+                     true)]
+        (apply-triggers! conn report-eid trig-result eid (:email/message-id email) from-addr
+                         source-cfg)
+        (apply-directives! conn report-eid directives eid from-addr is-maint? fail-ctx)
+        (boolean (or (seq trig-result) (seq directives) voted?))))))

@@ -13,9 +13,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn exception-msg
-  "Return `(.getMessage e)` when present, else the exception's class name.
-  Avoids the `nil` that some exception types (NPE, AssertionError with no
-  message) would otherwise render in log output."
+  "(.getMessage e) or the exception class name (avoids nil-rendered logs)."
   [^Throwable e]
   (or (.getMessage e) (str (class e))))
 
@@ -24,8 +22,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn parse-size
-  "Parse a size string like \"10MB\" into bytes. Supports KB, MB, GB.
-  Returns nil if the numeric part is not a valid integer."
+  "\"10MB\" → bytes (supports KB/MB/GB).  Returns nil on bad input."
   [s]
   (let [s (str/upper-case (str/trim (str s)))]
     (cond
@@ -56,8 +53,7 @@
 (def ^:private file-log-lock (Object.))
 
 (defn configure-file-logging!
-  "If logging-cfg contains :file, add a Timbre file appender
-  that persists logs at or above the specified :level."
+  "Attach a Timbre file appender when `:file` is set."
   [{:keys [file level max-size backlog]
     :or   {level :warn max-size "10MB" backlog 5}}]
   (when file

@@ -3,32 +3,11 @@
 ;; License-Filename: LICENSES/EPL-2.0.txt
 
 (ns bark.relations
-  "Helpers for qualified relations between reports.
-
-  Two layers:
-  - Pure helpers (no datalevin call): relation IDs, kind metadata,
-    validation, tx-data builders.  The namespace itself requires
-    datalevin for the IO layer below; if a Babashka consumer ever
-    needs the pure layer, split it into a dedicated `bark.relations.pure`.
-  - IO (with datalevin): pose/retract helpers that read the current
-    DB to enforce idempotence and resolve relation entities.
-
-  A relation is a Datalevin entity carrying:
-    :rel/id        -- deterministic '<from>:<kind>:<to>' (unique identity)
-    :rel/from      -- source report eid
-    :rel/to        -- target report eid
-    :rel/kind      -- keyword from `all-kinds`
-    :rel/setter    -- credited address (lowercased)
-    :rel/email     -- email eid that posed/deduced the relation
-    :rel/posed-at  -- instant
-    :rel/value     -- optional payload (e.g. target message-id for :supersedes)
-    :rel/active?   -- boolean (false after retract)
-    :rel/retracted-by -- email eid that retracted (audit)
-
+  "Qualified relations between reports.  Pure helpers (no datalevin)
+  for IDs, validation, tx-builders, then IO helpers that pose/retract.
   Asymmetric kinds (:resolves, :supersedes, :duplicates) store two
-  datoms -- one per direction -- so queries are O(1) in either sense.
-  The symmetric kind :related-to stores a single datom canonicalized
-  by ascending eid order."
+  datoms (one per direction); :related-to stores one canonicalized
+  by ascending eid order.  See bark-schema.edn for the :rel/* attrs."
   (:require [clojure.string :as str]
             [datalevin.core :as d]))
 
@@ -71,8 +50,8 @@
   (str from-eid ":" (name kind) ":" to-eid))
 
 (defn canonicalize
-  "For symmetric kinds, return [from to] in ascending eid order so two
-  reciprocal poses produce the same :rel/id. Asymmetric kinds pass through."
+  "Symmetric kinds: [from to] in ascending eid order (so reciprocal
+  poses produce the same :rel/id).  Asymmetric kinds pass through."
   [kind from-eid to-eid]
   (if (and (symmetric-kinds kind)
            (neg? (compare to-eid from-eid)))
@@ -80,16 +59,15 @@
     [from-eid to-eid]))
 
 (defn- valid-resolves-pair?
-  "True iff source/target types form a legal `:resolves` pose
-  (a patch resolving a bug or request).  `:resolved-by` is checked by
-  passing the inverse pair."
+  "True iff source/target form a legal :resolves pose (patch resolves
+  bug or request).  :resolved-by is checked by inverting the pair."
   [source-type target-type]
   (and (= source-type :patch)
        (contains? #{:bug :request} target-type)))
 
 (defn valid-pose?
-  "True when a relation of `kind` can legally be posed between these
-  reports. False if: kind unknown, self-loop, type constraint violated."
+  "True when a relation of `kind` is legal between these reports
+  (kind known, no self-loop, type constraints satisfied)."
   [kind source-eid target-eid source-type target-type]
   (boolean
    (and (all-kinds kind)
@@ -105,15 +83,10 @@
           true))))
 
 (defn pose-tx
-  "Datoms to pose a relation. Returns 2 entity maps for asymmetric
-  kinds (one per direction) or 1 for symmetric.
-
-  Caller responsibilities:
-  - validate via `valid-pose?` first;
-  - check idempotence via :rel/id lookup before transacting (do not
-    reactivate a retracted relation by re-posing).
-
-  `value` is optional (nil = no :rel/value datom written)."
+  "Datoms to pose a relation: 2 entity maps for asymmetric kinds, 1
+  for symmetric.  Caller must have validated via `valid-pose?` and
+  must check idempotence via :rel/id (do not reactivate a retracted
+  relation by re-posing).  `value` is optional."
   [{:keys [from-eid to-eid kind setter email-eid posed-at value]}]
   (let [mk-rel (fn [f t k]
                  (cond-> {:rel/id       (make-relation-id f k t)
@@ -153,9 +126,8 @@
 ;; ---------------------------------------------------------------------------
 
 (defn pose-if-absent!
-  "Pose a relation iff no datom with the same :rel/id exists (active or
-  retracted).  Caller has already validated via `valid-pose?`.
-  Idempotent on replay; never reactivates a retracted relation."
+  "Pose a relation iff no datom with the same :rel/id exists (active
+  or retracted).  Idempotent; never reactivates a retract."
   [conn opts]
   (let [db        (d/db conn)
         ids       (paired-relation-ids (:kind opts) (:from-eid opts) (:to-eid opts))
@@ -164,12 +136,10 @@
       (d/transact! conn (pose-tx opts)))))
 
 (defn pose-from-email!
-  "Pose a relation triggered by `email` (pull map or entity carrying
-  :db/id, :email/author-address, :email/date-sent).  Derives :setter /
-  :email-eid / :posed-at from the email; missing :email/date-sent
-  falls back to now.  `opts` must carry :from-eid / :to-eid / :kind ;
-  :value defaults to nil but may be overridden.  Caller must have
-  validated via `valid-pose?`."
+  "Pose a relation triggered by `email` (a pull/entity with :db/id,
+  :email/author-address, :email/date-sent).  Sets :setter, :email-eid,
+  :posed-at from the email; :from-eid/:to-eid/:kind come from `opts`.
+  Caller must have validated via `valid-pose?`."
   [conn email opts]
   (pose-if-absent! conn
                    (merge {:setter    (:email/author-address email)
@@ -179,9 +149,8 @@
                           opts)))
 
 (defn retract-pair!
-  "Retract a specific (from, kind, to) relation if active.  Handles
-  symmetric kinds by canonicalizing the lookup, so callers can pass
-  either direction.  Returns true when something was retracted."
+  "Retract a (from, kind, to) relation if active.  Symmetric kinds
+  accept either direction.  Returns true when anything was retracted."
   [conn from-eid kind to-eid retracted-by-email-eid]
   (let [db        (d/db conn)
         ids       (paired-relation-ids kind from-eid to-eid)
@@ -200,12 +169,9 @@
         true))))
 
 (defn active-inverse-relation
-  "Return the eid of an active relation of `kind` whose direction is
-  reversed relative to (`from-eid`, `to-eid`) -- i.e. the stored
-  relation has :rel/from = `to-eid` and :rel/to = `from-eid`.  Returns
-  nil when no such relation is active.  Used by the closure-relation
-  directive flow to enforce 'last-write-wins' when a new pose would
-  conflict with a prior pose in the inverse direction."
+  "Eid of an active relation of `kind` posed in the reverse direction
+  (:rel/from = to-eid, :rel/to = from-eid), or nil.  Used to enforce
+  last-write-wins on conflicting closure-relation directives."
   [db from-eid to-eid kind]
   (d/q '[:find ?e .
          :in $ ?new-from ?new-to ?kind
@@ -217,9 +183,8 @@
        db from-eid to-eid kind))
 
 (defn retract-by-from!
-  "Retract (set :rel/active? false) all active relations of `kind`
-  whose :rel/from is `from-eid`.  For asymmetric kinds, also retracts
-  the inverse direction.  `retracted-by-email-eid` is recorded for audit."
+  "Retract every active relation of `kind` with :rel/from = `from-eid`
+  (plus its inverse-direction sibling for asymmetric kinds)."
   [conn from-eid kind retracted-by-email-eid]
   (let [db   (d/db conn)
         eids (d/q '[:find [?e ...]
@@ -247,10 +212,7 @@
         (count eids)))))
 
 (defn retract-by-to!
-  "Retract (set :rel/active? false) all active relations of `kind`
-  whose :rel/to is `to-eid`.  For asymmetric kinds, also retracts the
-  inverse-direction sibling (entities with :rel/from = `to-eid` and
-  :rel/kind = inverse-kind).  Mirror of `retract-by-from!`."
+  "Mirror of `retract-by-from!` keyed on :rel/to."
   [conn to-eid kind retracted-by-email-eid]
   (let [db   (d/db conn)
         eids (d/q '[:find [?e ...]
@@ -280,10 +242,11 @@
 ;; ---------------------------------------------------------------------------
 
 (defn auto-credit?
-  "True iff the pose-email currently set on `bug-eid`.`attr` is the
-  source-email of a patch that resolves `bug-eid`, i.e. it was posted
-  by the auto-credit hook rather than by a human command.
-  `attr` is :report/acked or :report/owned."
+  "True iff `bug-eid`.`attr` was set by a labelled patch report that
+  :resolves the bug (i.e. via the implicit hook on a \"[PATCH]\" reply).
+  Labelless credits (\"Re: [BUG]\" + diff) return false -- no :resolves
+  exists, so R3/R4 don't retract them.  `attr` is :report/acked or
+  :report/owned."
   [db bug-eid attr]
   (when-let [pose-eid (some-> (d/pull db [{attr [:db/id]}] bug-eid)
                               (get attr)
@@ -325,25 +288,17 @@
     addr-attr (some-> new-addr str/lower-case)}])
 
 (defn propagate-patch-closure!
-  "When a patch transitions to :report/closed with a given
-  `close-reason`, propagate to the bugs/requests it resolves:
-
-  - :resolved   close them too
-  - :canceled   retract auto-credits posed by the patch
-  - :superseded transfer auto-credits to `successor-eid`
-
-  Caller MUST pass the patch's report-type; no-op if not :patch.
-  `successor-eid` is the report :supersedes points to (nil if absent
-  or unknown, only meaningful for :superseded)."
+  "Propagate a patch's closure to the bugs/requests it :resolves:
+  :resolved closes them, :canceled retracts auto-credits, :superseded
+  transfers them to `successor-eid`.  No-op if `patch-type` ≠ :patch."
   [conn patch-eid patch-type email-eid close-reason successor-eid]
   (when (= :patch patch-type)
     (let [db   (d/db conn)
           bugs (active-targets db patch-eid :resolves)]
       (case close-reason
         :resolved
-        ;; Bugs already closed are filtered up-front in a single query.
-        ;; Safe with one snapshot: each bug-eid is distinct, so closing
-        ;; bug-A does not affect the closed status of bug-B.
+        ;; One snapshot is safe: bug-eids are distinct, so closing
+        ;; bug-A doesn't change bug-B's :report/closed.
         (let [closed-bugs (when (seq bugs)
                             (set (d/q '[:find [?b ...]
                                         :in $ [?b ...]

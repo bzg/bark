@@ -37,9 +37,7 @@
           (assoc v :delay-days d))))))
 
 (defn- report-activity-score
-  "Compute activity score from a pulled report: acked (1) + owned (2).
-  Range 0–3. The open/closed bit is excluded because expiry candidates
-  are already filtered to open reports only."
+  "Activity score: acked=1, owned=2 (range 0-3, open-only)."
   [report]
   (+ (if (:report/owned report) 2 0)
      (if (:report/acked report) 1 0)))
@@ -73,17 +71,15 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- find-or-create-expiry-email!
-  "Look up or create the synthetic email entity for an expiry event.
-  Uses a fresh (d/db conn) -- NOT the read-only snapshot -- so that
-  re-runs within the same reduce are idempotent (they see earlier inserts)."
+  "Get or create the synthetic email for an expiry event.  Uses a
+  fresh (d/db conn) -- not a snapshot -- so re-runs within the same
+  reduce see earlier inserts."
   [conn src report-mid now]
   (let [synth-mid (str "<bark-expired-" report-mid ">")]
     (or (d/entid (d/db conn) [:email/message-id synth-mid])
         (let [tempid -1
-              ;; Synthetic actor: mirror "bark-system" on both the raw
-              ;; from-address and the resolved author-address so that
-              ;; downstream consumers (which read author-address) and
-              ;; raw-header inspectors (which read from-address) agree.
+              ;; Stamp "bark-system" on both :from-address and
+              ;; :author-address so all consumers see the synthetic actor.
               tx (d/transact!
                   conn [{:db/id                tempid
                          :email/message-id     synth-mid
@@ -95,9 +91,8 @@
           (get (:tempids tx) tempid)))))
 
 (defn should-expire?
-  "Decide whether a report candidate should be expired.
-  Returns truthy when the report matches either its explicit expiry
-  or the source-level expiry rules."
+  "True when a report matches its explicit :expiry-value or the
+  source-level expiry rule for its type."
   [report-data source-map src rtype now]
   (let [explicit-expiry (:report/expiry-value report-data)]
     (if explicit-expiry
@@ -108,9 +103,8 @@
           (rule-matches? rule report-data now))))))
 
 (defn filter-expirable
-  "Given candidates and a DB snapshot, return a seq of
-  {:rid :rtype :src :report-mid} maps for reports that should expire.
-  Skips reports already closed between the query and this filter."
+  "Seq of {:rid :rtype :src :report-mid} for candidates that should
+  expire (open + matching the expiry rule)."
   [candidates db-snap source-map now]
   (keep (fn [[rid rtype src]]
           (let [report-data (d/pull db-snap [:report/acked :report/owned
@@ -125,8 +119,8 @@
         candidates))
 
 (defn expire-reports!
-  "Close open reports whose age and state match the :expiry rules for
-  their source. Sets :report/close-reason to :expired."
+  "Close open reports matching the source's :expiry rule.  Sets
+  :report/close-reason :expired."
   [conn source-map]
   (let [now (Date.)
         candidates (d/q '[:find ?r ?type ?src

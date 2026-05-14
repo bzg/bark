@@ -40,24 +40,18 @@
 ;; ---------------------------------------------------------------------------
 
 (defn ancestor-mids
-  "Ordered vector of ancestor message-ids on `email`.  Order follows
-  RFC 2822: root first, immediate parent last (so `rseq` walks
-  nearest-first).
-
-  Recomputed from `:email/references` / `:email/in-reply-to` rather
-  than read from `:email/ancestor-mids`, which is multi-valued (no
-  ordering guarantee) and only suited to the unordered lookup used by
-  `retry-pending-in-shared-thread!`."
+  "Ordered ancestor mids (root first, parent last) recomputed from
+  :email/references + :email/in-reply-to.  The cardinality/many
+  :email/ancestor-mids attr loses ordering and is only used for the
+  unordered lookup in `retry-pending-in-shared-thread!`."
   [email]
   (common/ancestor-mids-from (:email/references email)
                               (:email/in-reply-to email)))
 
 (defn- safe-mid-query
-  "Run `f` (a thunk wrapping mid-keyed DB queries) and swallow
-  MDB_BAD_VALSIZE (-30781) -- raised by Datalevin's AVE scan on mids
-  that pass the conservative `indexable-mid?` guard but still exceed
-  the stricter encoding limit used at scan time.  Logs the offending
-  mid at warn level and returns `fallback`."
+  "Run a mid-keyed DB query thunk, swallowing MDB_BAD_VALSIZE (-30781)
+  raised on mids that pass `indexable-mid?` but exceed Datalevin's
+  scan-time encoding limit.  Returns `fallback` on that error."
   [mid f fallback]
   (try (f)
        (catch Exception e
@@ -68,9 +62,8 @@
              (throw e))))))
 
 (defn- lookup-reports-by-mid
-  "Find report eids matching a message-id, either as report root or
-  descendant.  Returns #{} for mids that fail the indexable guard or
-  that trigger MDB_BAD_VALSIZE during the AVE scan."
+  "Report eids whose root or any descendant has `mid`.  Returns #{}
+  for non-indexable mids."
   [db mid]
   (when (common/indexable-mid? mid)
     (safe-mid-query mid
@@ -84,11 +77,8 @@
                     #{})))
 
 (defn- email-ancestors-by-mid
-  "Ancestor mids of a stored email identified by `mid`, in root-first
-  RFC 2822 order. Returns nil when `mid` is not indexable, no
-  matching email exists, or the AVE scan hits MDB_BAD_VALSIZE.  Used
-  by `thread-lookup` to splice through a stored-but-pending
-  intermediate email."
+  "Ancestor mids of the stored email with `mid` (root first).  Used by
+  `thread-lookup` to splice through stored-but-pending intermediates."
   [db mid]
   (when (common/indexable-mid? mid)
     (safe-mid-query mid
@@ -100,23 +90,17 @@
                     nil)))
 
 (def ^:private thread-lookup-max-splices
-  "Upper bound on transitive ancestor splicing per `thread-lookup`
-  call. Bounds worst-case walks on threads where many intermediate
-  emails are stored but unattached to any report."
+  "Upper bound on transitive ancestor splicing per `thread-lookup` call."
   32)
 
 (defn thread-lookup
-  "Walk an email's ancestor mids nearest-first and return
-  `{:all #{eids} :nearest #{eids}}`.
-  - `:all`     -- every report matched by any ancestor
-  - `:nearest` -- reports matched by the closest matching ancestor,
-                  or `nil` if no ancestor matches.
-
-  When an ancestor mid matches a stored email but no report (an
-  intermediate email held pending, or simply attached to no report),
-  that email's own ancestor mids are spliced into the walk so the
-  pending intermediate cannot orphan its descendants. Splicing is
-  bounded by `thread-lookup-max-splices`."
+  "Walk `email`'s ancestor mids nearest-first.  Returns
+  `{:all #{eids} :nearest #{eids}}` -- :all is every report matched
+  by any ancestor, :nearest is the closest match (nil if none).
+  When an ancestor mid matches a stored email with no report, that
+  email's own ancestors are spliced into the walk (bounded by
+  `thread-lookup-max-splices`) so pending intermediates don't orphan
+  descendants."
   [email db]
   (loop [stack   (vec (ancestor-mids email))  ; root-first; peek = nearest
          seen    #{}
@@ -145,9 +129,8 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- ensure-participant!
-  "Record a participant (and optionally mark as contributor for patches).
-  Creates the entity on first encounter; on subsequent calls for a patch,
-  stamps :participant/contributor-since if not already set."
+  "Record a participant on `source-name`; with `:contributor? true`,
+  stamp :participant/contributor-since on first patch (idempotent)."
   [conn source-name from-addr from-name date-sent & {:keys [contributor?]}]
   (when (and source-name from-addr)
     (let [k     (str (common/slugify source-name) ":" (str/lower-case from-addr))
@@ -204,8 +187,8 @@
   (d/entid (d/db conn) [:report/message-id message-id]))
 
 (defn descendant-tx
-  "Build transaction data to add an email as descendant of a report.
-  `current-activity` is the report's current :report/last-activity (or nil)."
+  "Tx-data to add an email as descendant of a report, bumping
+  :report/last-activity when `email-date` is newer than `current-activity`."
   [report-eid email-eid email-date from-address current-activity]
   (let [tx [[:db/add report-eid :report/descendants email-eid]]]
     (if email-date
@@ -223,14 +206,9 @@
     (d/transact! conn (descendant-tx report-eid email-eid email-date from-address current))))
 
 (defn- link-rel!
-  "Post-creation linker: posts qualified relations between the new
-  report and its threaded parents.
-
-  - `:related-to` (neutral) is posted between the new report and every
-    parent (was the role of the old `link-related-reports!`).
-  - `:resolves`/`:resolved-by` is *additionally* posted when the new
-    report is a patch and the parent is a bug or request -- this is
-    the structural support for auto-crediting and closure propagation."
+  "Pose qualified relations between the new report and its threaded
+  parents: :related-to to every parent, plus :resolves when the new
+  report is a patch and the parent a bug/request."
   [conn new-report-eid new-report-type email parent-report-eids]
   (when (seq parent-report-eids)
     (let [db      (d/db conn)
@@ -266,9 +244,6 @@
                          db version)
           release-email-eid (:db/id release-email)]
       (when (seq open-chgs)
-        ;; Close the changes atomically.  Linking via :related-to comes
-        ;; right after -- :rel/* posing is non-destructive (rel entities)
-        ;; so atomicity with the close is no longer mandatory.
         (let [close-tx (mapv (fn [r] {:db/id r
                                       :report/closed release-email-eid
                                       :report/close-reason :resolved})
@@ -287,10 +262,8 @@
   (when v (when-let [[_ n] (re-find #"^v(\d+)$" v)] (parse-long n))))
 
 (defn- auto-supersede-patch!
-  "Close `old-rid` as :superseded by `new-report-eid`, post the
-  :supersedes (+ :related-to companion) link, and propagate auto-credit
-  transfers.  `log-msg` is the human-readable detail appended to the
-  Auto-closed log line.  Idempotent on the relation pose."
+  "Close `old-rid` as :superseded by `new-report-eid`, pose the
+  :supersedes + :related-to relations, propagate auto-credit transfers."
   [conn old-rid new-report-eid email log-msg]
   (let [email-eid (:db/id email)
         endpoints {:from-eid old-rid :to-eid new-report-eid}]
@@ -312,11 +285,9 @@
       (let [versions-to-close (cond-> #{new-version}
                                 (> n 1) (conj (str "v" (dec n))))
             new-topic-lc      (some-> new-topic str/lower-case)
-            ;; Single snapshot: nearest-report-eids contains distinct
-            ;; rids and the daemon is single-threaded on this section,
-            ;; so no concurrent mutation of :report/closed can happen
-            ;; between pulls.  If that invariant changes, restore the
-            ;; per-iteration refresh.
+            ;; Single snapshot is safe: the daemon is single-threaded
+            ;; on this section.  Restore per-iteration refresh if that
+            ;; invariant breaks.
             db                (d/db conn)
             candidates        (keep
                                (fn [rid]
@@ -353,9 +324,8 @@
         str/lower-case)))
 
 (defn- close-superseded-thread-patches!
-  "When a new patch report is created in a thread, close open ancestor patch
-  reports that share the same base subject (ignoring Re:/[TAG] prefixes).
-  This handles re-sent patches/diffs without explicit version numbers."
+  "Close open ancestor patch reports sharing the new patch's base
+  subject (Re:/[TAG] stripped).  Handles unnumbered re-sends."
   [conn report-eid email nearest-report-eids]
   (let [new-subj (normalize-subject (:email/subject email))
         db       (d/db conn)]
@@ -376,9 +346,8 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- source-from-in-reply-to
-  "Lookup the source of the email referenced by `in-reply-to`, or nil.
-  Skips mids exceeding the LMDB index limit; the caller falls back to
-  header-based classification."
+  "Source of the email referenced by `in-reply-to`, or nil.  Skips
+  non-indexable mids; caller falls back to header-based classification."
   [db in-reply-to]
   (when (common/indexable-mid? in-reply-to)
     (d/q '[:find ?src . :in $ ?mid
@@ -432,9 +401,8 @@
 ;; ---------------------------------------------------------------------------
 
 (defn creation-decision
-  "Decide whether a report should be created for this email.
-  Returns :create, :denied-channel, :denied-role, or nil (no report detected
-  or report already exists)."
+  "Decide whether to create a report.  Returns :create, :denied-channel,
+  :denied-role, or nil (no report detected or already exists)."
   [report-info from-addr via-channel? rroles email source-cfg already-exists?]
   (when (and report-info (not already-exists?))
     (let [permitted? (and from-addr via-channel?
@@ -452,15 +420,17 @@
   (let [rtype (:type report-info)]
     (cond-> #{}
       (seq parent-eids)                                       (conj :link-related)
-      ;; A patch in reply to a bug/request auto-credits the parent
-      ;; (acked + owned).  Runs AFTER :link-related so :resolves exists.
-      (and (= :patch rtype) (seq parent-eids))                (conj :auto-credit-resolves)
       (and (= :release rtype) (:version report-info))        (conj :close-changes)
       (and (= :patch rtype) (:version report-info)
            (seq nearest-eids))                                (conj :close-previous-version)
       (and (= :patch rtype) (seq nearest-eids))               (conj :close-superseded-thread)
       (and (= :patch rtype) (:patch-seq report-info))         (conj :manage-series)
-      (and (= :patch rtype) (seq patches))                    (conj :store-patches)
+      ;; Store patch entities on ANY report type carrying patch content,
+      ;; not just :patch reports.  A [BUG] with a .patch attachment
+      ;; gets the patch stored as metadata on the bug.
+      (seq patches)                                           (conj :store-patches)
+      ;; :auto-series stays patch-only: a synthetic series only makes
+      ;; sense for :patch reports (series tracking is patch-specific).
       (and (= :patch rtype) (seq patches)
            (nil? (:patch-seq report-info))
            (> (count patches) 1))                             (conj :auto-series))))
@@ -483,11 +453,9 @@
                                     (:email/date-sent email) strict?))))
 
 (defn- record-creation-denial!
-  "Write a failure record for a report-creation attempt that was
-  denied.  The report doesn't exist yet, so `:report-mid` is the
-  empty string -- the notification renders the subject instead of a
-  report link.  Audience is `:maintainers` so the lead sees the
-  attempt."
+  "Record a denied report-creation attempt.  :report-mid is empty
+  (the report wasn't created) so notifications render the subject.
+  Audience :maintainers so the lead sees the attempt."
   [source-name from-addr email report-info reason]
   (when (and from-addr source-name)
     (commands/record-failure!
@@ -564,50 +532,12 @@
     (when (seq parent-eids)
       (tracking/bump-report-updated! conn parent-eids))))
 
-(defn- auto-credit-resolved-reports!
-  "For each report this patch :resolves (i.e. the bug/request the
-  patch was posted in reply to), auto-set :report/acked and :report/owned
-  on the parent, unless those attributes are already set explicitly
-  (an existing setter is preserved, the patch becomes a validator only).
-
-  Auto-credits posed here will later be detected via `auto-credit?`
-  for retraction on cancel, and on supersession transferred to the
-  new patch's author."
-  [conn patch-report-eid email]
-  (let [db        (d/db conn)
-        email-eid (:db/id email)
-        from-addr (:email/author-address email)
-        addr-lc   (some-> from-addr str/lower-case)
-        targets   (rel/active-targets db patch-report-eid :resolves)
-        patch-mid (:report/message-id
-                   (d/pull db [:report/message-id] patch-report-eid))]
-    (doseq [bug-eid targets]
-      (let [bug-state (d/pull db [:report/acked :report/owned :report/message-id] bug-eid)
-            credit    (fn [tx attr addr-attr]
-                        (cond-> tx
-                          (nil? (get bug-state attr))
-                          (conj {:db/id bug-eid attr email-eid addr-attr addr-lc})))
-            tx        (-> []
-                          (credit :report/acked :report/acked-address)
-                          (credit :report/owned :report/owned-address))]
-        (when (seq tx)
-          (d/transact! conn tx)
-          (tracking/bump-report-updated! conn bug-eid)
-          (log/info "Auto-credit:" from-addr "credited as acked+owned of"
-                    (:report/message-id bug-state)
-                    "via patch" patch-mid))))))
-
 (defn- run-post-creation-hooks!
   "Execute post-creation side effects driven by the plan."
-  [conn report-eid eid email from-addr report-info source-cfg
+  [conn report-eid eid email from-addr report-info
    parent-eids nearest-eids patches plan]
   (when (:link-related plan)
     (link-rel! conn report-eid (:type report-info) email parent-eids))
-  ;; Auto-credit must run AFTER :link-related so :resolves relations exist.
-  ;; Skipped on sources with `:patch-triggers? false`.
-  (when (and (:auto-credit-resolves plan)
-             (common/patch-triggers? source-cfg))
-    (auto-credit-resolved-reports! conn report-eid email))
   (when (:close-changes plan)
     (close-changes-for-release! conn (:version report-info) email report-eid))
   (when (:close-previous-version plan)
@@ -632,16 +562,10 @@
 
 (defn- thread-anchorable?
   "True when the email can be threaded now: at least one ancestor mid
-  (In-Reply-To or any References entry) is already stored in the DB.
-  Also true when In-Reply-To is absent (root) or exceeds the LMDB
-  index limit (cannot be looked up either way).
-
-  Accepting any References ancestor -- not only the immediate parent
-  -- approximates public-inbox's threading: a missing intermediate
-  message no longer orphans its descendants, as long as the chain
-  reaches some known ancestor.  When no anchor is found the email is
-  held pending until an ancestor arrives or the TTL flush forces
-  processing."
+  is in the DB, or In-Reply-To is absent (root) or non-indexable.
+  Accepting any References ancestor (not just the immediate parent)
+  approximates public-inbox: a missing intermediate doesn't orphan
+  its descendants as long as some ancestor is known."
   [db email]
   (let [irt (:email/in-reply-to email)]
     (or (nil? irt)
@@ -656,20 +580,13 @@
 (declare retry-pending-in-shared-thread!)
 
 (defn process-email!
-  "Process a single email: classify source, detect report, thread,
-  apply commands, manage series. Called after store-email! succeeds.
-
-  When no ancestor mid (In-Reply-To or any References entry) is
-  stored in the DB, Phase 3 (threading + commands) and Phase 4
-  (post-creation hooks) are skipped and the email is flagged
-  `:email/pending-thread? true`.  A later arrival sharing the same
-  thread triggers the retry via `retry-pending-in-shared-thread!`,
-  or the TTL flush forces processing after N days.
-
+  "Process a stored email: classify source, detect report, thread,
+  apply commands, manage series.
+  When no ancestor mid is in the DB, Phases 3-4 are skipped and the
+  email is flagged :email/pending-thread? true -- a later arrival or
+  the TTL flush will retry.
   Opts:
-    :force-thread? -- bypass the pending-thread guard, threading the
-                     email with whatever ancestors currently exist in
-                     the DB.  Used by the TTL flush."
+    :force-thread? -- bypass the pending-thread guard (TTL flush)."
   ([conn source-map sources email] (process-email! conn source-map sources email {}))
   ([conn source-map sources email {:keys [force-thread?]}]
   (let [message-id   (:email/message-id email)
@@ -730,7 +647,7 @@
                   (let [patches (detect/build-patch-entities email)
                         plan    (post-creation-plan report-info nearest-eids parent-eids patches)]
                     (run-post-creation-hooks! conn report-eid eid email from-addr report-info
-                                              source-cfg parent-eids nearest-eids patches plan)))
+                                              parent-eids nearest-eids patches plan)))
 
                 ;; Mark email as fully digested so future re-fetches can skip it.
                 (d/transact! conn [{:db/id eid :email/digested-at (Date.)}])
@@ -748,10 +665,9 @@
                           "(in-reply-to" (:email/in-reply-to email) ")")))))))))
 
 (defn- retry-pending-in-shared-thread!
-  "After processing `email` normally, retry any pending email that
-  shares at least one ancestor mid with it (or that has `email`'s own
-  mid in its ancestors).  The recursive `process-email!` call retracts
-  the pending flag if its In-Reply-To is now resolvable."
+  "Retry pending emails that share an ancestor mid with `email` (or
+  reference its own mid).  Recursive `process-email!` clears the
+  pending flag when threading now resolves."
   [conn email source-map sources]
   (let [own-mid   (:email/message-id email)
         ancestors (cond-> (set (:email/ancestor-mids email))
@@ -773,9 +689,8 @@
 ;; ---------------------------------------------------------------------------
 
 (defn flush-stale-pending!
-  "Force-process pending emails older than `max-age-days`. The pending
-  flag is retracted and threading runs against whatever ancestors
-  currently exist in the DB. Returns the count of flushed emails."
+  "Force-process pending emails older than `max-age-days`.  Returns
+  the count of flushed emails."
   [conn source-map sources max-age-days]
   (let [cutoff   (Date. (- (System/currentTimeMillis)
                            (* max-age-days 24 60 60 1000)))

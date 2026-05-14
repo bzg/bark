@@ -13,28 +13,22 @@
 
 (def ^:private ml-prefix "(?:\\[[^\\]]*\\]\\s*)*")
 
-(defn compile-labels
-  "Compile a type=>tags map into type=>regex.  The label must take a
-  strict bracket form anchored at the start of the subject: `[TAG]` or
-  `[TAG <inner>]`, with the tag matched case-sensitively against the
-  configured tokens and followed by whitespace or end-of-subject after
-  the closing `]`.  Optional mailing-list bracket prefixes (e.g.
-  `[my-list] [BUG] ...`) are tolerated."
-  [st]
-  (update-vals st
-               (fn [tags]
-                 (let [alts (str/join "|" (map #(java.util.regex.Pattern/quote %) tags))]
-                   (re-pattern (str "^" ml-prefix "\\[(" alts ")(?:\\s+([^\\]]*))?\\](?=\\s|$)"))))))
-
-(def default-compiled-labels (compile-labels common/default-labels))
+(def compile-labels
+  "Compile a type=>tags map into type=>regex.  Strict anchor `^[TAG]`
+  or `^[TAG <inner>]`, case-sensitive tag, mandatory whitespace or EOL
+  after `]`.  Mailing-list bracket prefixes (e.g. \"[my-list] [BUG]\")
+  are tolerated."
+  (memoize
+   (fn [st]
+     (update-vals st
+                  (fn [tags]
+                    (let [alts (str/join "|" (map #(java.util.regex.Pattern/quote %) tags))]
+                      (re-pattern (str "^" ml-prefix "\\[(" alts ")(?:\\s+([^\\]]*))?\\](?=\\s|$)"))))))))
 
 (defn resolve-labels
   "Compile labels for a source-map entry."
   [source-cfg]
-  (let [merged (common/resolve-labels-map source-cfg)]
-    (if (= merged common/default-labels)
-      default-compiled-labels
-      (compile-labels merged))))
+  (compile-labels (common/resolve-labels-map source-cfg)))
 
 ;; ---------------------------------------------------------------------------
 ;; Colon-based topic extraction
@@ -62,8 +56,8 @@
       (when-not (str/blank? t) t))))
 
 ;; Detection precedence comes from `common/report-type-spec`; we only
-;; need the per-row :type / :versioned? / :special fields here (the
-;; lookup key into the compiled patterns map equals :type).
+;; need the per-row :type and :versioned? fields here (the lookup key
+;; into the compiled patterns map equals :type).
 
 (defn- detect-tag-with-topic
   "Non-versioned subject tag: the inner text (if any) becomes the topic,
@@ -73,7 +67,7 @@
     (cond-> {:type rtype} topic (assoc :topic topic))))
 
 (defn- detect-versioned-tag
-  "Versioned subject tag ([REL], [CHG]): the last space-separated token
+  "Versioned subject tag (\"[REL]\", \"[CHG]\"): the last space-separated token
   in the bracket is the version; preceding tokens form the topic,
   again falling back to the colon-based topic."
   [rtype subject inner]
@@ -96,7 +90,13 @@
         (detect-versioned-tag rtype subject inner)
         (detect-tag-with-topic rtype subject inner)))))
 
-(defn detect-patch-subject [subject patterns]
+;; Re: only.  Fwd: stays untouched -- forwards are cross-postings,
+;; not v2/v3 submissions.
+(def ^:private reply-prefix-re #"(?i)^(?:Re:\s*)+")
+
+(defn detect-patch-subject
+  "Match [PATCH] in a subject (strict, no Re: stripping)."
+  [subject patterns]
   (when subject
     (when-let [m (re-find (:patch patterns) subject)]
       (let [inner   (extract-inner m)
@@ -137,57 +137,53 @@
 (defn has-inline-patch? [body-text]
   (when body-text (>= (count (filter #(re-find % body-text) inline-patch-indicators)) 2)))
 
-(defn detect-patch [subject attachments body-text patterns]
-  (let [from-subject    (detect-patch-subject subject patterns)
-        from-attachment (when (has-patch-attachment? attachments) :attachment)
-        from-inline     (when (has-inline-patch? body-text) :inline)
-        sources         (cond-> #{}
-                          from-subject    (into (:patch-source from-subject))
-                          from-attachment (conj :attachment)
-                          from-inline     (conj :inline))]
-    (when (seq sources)
-      (cond-> {:type :patch :patch-source sources}
-        (:patch-seq from-subject) (assoc :patch-seq (:patch-seq from-subject))
-        (:version from-subject)   (assoc :version (:version from-subject))
-        (:topic from-subject)     (assoc :topic (:topic from-subject))))))
+(defn has-patch-content?
+  "True if an email carries patch content (attachment or inline diff)."
+  [email]
+  (or (has-patch-attachment? (:email/attachments email))
+      (has-inline-patch? (common/email-body-text email))))
 
 (defn detect-report
-  "Detect report type from an email.
-
-  Priority rules:
-    1. Attachment or inline patch content ALWAYS wins, even if the subject
-       carries another tag like [BUG].  A [BUG]-tagged email with a .patch
-       attachment becomes a :patch report, not a :bug.
-    2. Otherwise walks detection-table in order; first matching subject tag wins.
-
-  Returns a report-info map or nil."
-  ([email] (detect-report email default-compiled-labels nil))
+  "Detect a report's type from an email.  Priority:
+    1. Subject label (strict regex, anchored at start) -- authoritative.
+    2. `Re: [PATCH]` reply WITH patch content (v2/v3 workflow).
+    3. Patch content alone, only on fresh threads (no In-Reply-To)."
+  ([email] (detect-report email (compile-labels common/default-labels) nil))
   ([email patterns] (detect-report email patterns nil))
   ([email patterns allowed-types]
-   (let [allowed?    (fn [result]
-                       (when (and result
-                                  (or (nil? allowed-types)
-                                      (contains? allowed-types (:type result))))
-                         result))
-         subject     (:email/subject email)
-         attachments (:email/attachments email)
-         body-text   (common/email-body-text email)
-         has-patch?  (or (has-patch-attachment? attachments)
-                         (has-inline-patch? body-text))]
+   (let [allowed?       (fn [result]
+                          (when (and result
+                                     (or (nil? allowed-types)
+                                         (contains? allowed-types (:type result))))
+                            result))
+         subject        (:email/subject email)
+         attachments    (:email/attachments email)
+         body-text      (common/email-body-text email)
+         in-reply-to    (:email/in-reply-to email)
+         attachment?    (has-patch-attachment? attachments)
+         inline?        (has-inline-patch? body-text)
+         has-patch?     (or attachment? inline?)]
      (or
-      ;; 1. Attachment or inline patch content → always a patch
-      (when has-patch?
-        (allowed? (detect-patch subject attachments body-text patterns)))
-      ;; 2. Subject tag walk (no patch content present)
+      ;; 1. Strict subject tag walk -- explicit label is authoritative
       (when subject
-        (some (fn [{:keys [type versioned? special]}]
+        (some (fn [{:keys [type versioned?]}]
                 (when-let [pattern (get patterns type)]
                   (allowed?
-                   (if (= special :patch)
-                     ;; [PATCH] in subject but no attachment/inline -- subject-only patch
+                   (if (= type :patch)
                      (detect-patch-subject subject patterns)
                      (detect-simple-tag type subject pattern versioned?)))))
-              common/report-type-spec))))))
+              common/report-type-spec))
+      ;; 2. Re: [PATCH] reply WITH content (a bare discussion does not qualify).
+      (when (and subject has-patch?)
+        (let [stripped (str/replace-first subject reply-prefix-re "")]
+          (when (not= stripped subject)
+            (allowed? (detect-patch-subject stripped patterns)))))
+      ;; 3. Fallback (no label, fresh thread).
+      (when (and has-patch? (nil? in-reply-to))
+        (allowed? {:type :patch
+                   :patch-source (cond-> #{}
+                                   attachment? (conj :attachment)
+                                   inline?     (conj :inline))}))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Patch content extraction (pure)
