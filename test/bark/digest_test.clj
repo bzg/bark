@@ -1130,21 +1130,21 @@
             (is (= "carol@test.org" (:report/owned-address r214))
                 "implicit owned still fires -- self-ownership is allowed")))
 
-        ;; --- Emails 216-217: reply that creates a report carries
-        ;; its commands onto the new report, not the parent. ---
-        (testing "Reply that creates v2 patch carries Topic/Important onto v2"
+        ;; --- Emails 216-217: a reply targets the nearest report,
+        ;; even when the reply itself creates a new report. ---
+        (testing "Reply that creates v2 patch hands its commands to v1 (nearest)"
           (let [r216 (get-report db "<216@test.org>")
                 r217 (get-report db "<217@test.org>")]
             (is (= :patch (:report/type r216)))
             (is (= :patch (:report/type r217)))
-            (is (= "lexer" (:report/topic-value r217))
-                "Topic directive lands on the new v2 patch")
-            (is (some? (:report/important r217))
-                "Important trigger lands on the new v2 patch")
-            (is (= "parser" (:report/topic-value r216))
-                "v1's topic from the label is preserved")
-            (is (nil? (:report/important r216))
-                "v1's importance is untouched -- directive did not leak to parent"))))
+            (is (= "lexer" (:report/topic-value r216))
+                "Topic directive lands on v1 (nearest), overriding the label topic")
+            (is (some? (:report/important r216))
+                "Important trigger lands on v1 (nearest), not on the new v2")
+            (is (= "parser" (:report/topic-value r217))
+                "v2 keeps the topic from its own [PATCH parser] label")
+            (is (nil? (:report/important r217))
+                "v2 carries no directive: the body annotates the thread, not the carrier"))))
       (finally
         (teardown! ctx)))))
 

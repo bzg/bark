@@ -641,14 +641,14 @@
                   (when (seq parent-eids)
                     (attach-as-descendant! conn eid email from-addr parent-eids))
 
-                  ;; Commands and directives target the report the
-                  ;; email introduces, if any.  Otherwise they target
-                  ;; the nearest reports in the thread.  The implicit
-                  ;; Acked/Owned credit on a patch-in-reply is a
-                  ;; distinct mechanism, gated inside apply-commands!
-                  ;; by report-type and therefore unaffected here.
+                  ;; A command targets the thread, never the mail
+                  ;; that carries it -- unless that mail opens its
+                  ;; thread.  Concretely: a root mail (no
+                  ;; In-Reply-To) that introduces a report carries
+                  ;; its commands onto that report; any reply hands
+                  ;; them to the nearest report in the thread.
                   (cond
-                    report-eid
+                    (and report-eid (nil? (:email/in-reply-to email)))
                     (commands/apply-commands! conn report-eid (:type report-info)
                                               email source-map rroles delivery)
 

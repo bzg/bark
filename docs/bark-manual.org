@@ -147,10 +147,11 @@ before scanning, so command-like words in signatures are ignored.
 A reporter cannot ack their own report; =Acked= requires a second
 party.  Ownership has no such restriction.
 
-Commands target the report the email introduces, if any; otherwise
-the nearest report in its thread.  A new =[BUG]= annotates itself;
-a plain reply annotates its parent; a reply that itself creates a
-report (a =Re: [PATCH]= v2) annotates that new report.
+A command targets the thread, never the mail that carries it --
+unless that mail opens its thread.  A root mail that introduces a
+report (e.g. =[BUG] foo=) annotates that report; any reply hands
+its commands to the nearest report in the thread, even when the
+reply itself creates a new report (e.g. a =Re: [PATCH]= v2).
 
 See the [[#all-commands][complete list of commands]] for the full registry.
 
@@ -231,14 +232,11 @@ To undo a cross-reference, reply with =Not related-to:
 :END:
 
 Replying to an open bug or request with a =.patch= or =.diff=
-attachment credits you as =Acked= and =Owned= on that parent.  The
-credit follows the command-dispatch rule and only fires when the
-target is a bug or a request: a plain =Re: [BUG]= or =Re: [POLL]=
-reply credits the parent; a =Re: [PATCH]= reply credits nothing
-implicitly, since its target is the new patch.  When you are the
-parent's own reporter, only =Owned= is credited.  An existing
-explicit setter is preserved; opt out with =Not acked.= or
-=Not owned.=.
+attachment credits you as =Acked= and =Owned= on that parent.
+This credit only fires when the nearest parent is a bug or a
+request.  When you are the parent's own reporter, only =Owned= is
+credited.  An existing explicit setter is preserved; opt out with
+=Not acked.= or =Not owned.=.
 
 When the same reply also produces a separate patch report
 (labelled =Re: [PATCH]=, or carrying a =git format-patch=
