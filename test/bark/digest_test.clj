@@ -1030,7 +1030,11 @@
             (is (some? (:report/closed r117)) "first patch should be closed")
             (is (= :superseded (:report/close-reason r117)))
             (is (= "<118@test.org>"
-                    (some-> (superseded-by-target r117) :report/message-id)))))
+                    (some-> (superseded-by-target r117) :report/message-id)))
+            (is (nil? (:report/acked r117))
+                "v2 reply must not spuriously credit v1 patch as acked")
+            (is (nil? (:report/owned r117))
+                "v2 reply must not spuriously credit v1 patch as owned")))
 
         (testing "Patch 118 superseded by same-subject reply 119"
           (let [r118 (get-report db "<118@test.org>")]
@@ -1102,7 +1106,29 @@
             (is (= :bug (:report/type r208)))
             (is (nil? (:report/acked r208))
                 ":patch-triggers? false gates the implicit trigger")
-            (is (nil? (:report/owned r208))))))
+            (is (nil? (:report/owned r208)))))
+
+        ;; --- Emails 211-213: Acked requires a distinct second party ---
+        (testing "Self-ack ignored, third-party ack succeeds; self-owned allowed"
+          ;; Alice (212) tries to Acked + Owned her own bug.  Bob (213)
+          ;; later writes "Confirmed".  Alice's self-Acked was dropped,
+          ;; so the acked slot was free for Bob.  Alice's self-Owned
+          ;; stuck (self-ownership is allowed).
+          (let [r211 (get-report db "<211@test.org>")]
+            (is (= :bug (:report/type r211)))
+            (is (= "bob@test.org" (:report/acked-address r211))
+                "Bob (third party) acks -- Alice's self-ack was dropped")
+            (is (= "alice@test.org" (:report/owned-address r211))
+                "Alice owns her own bug -- self-ownership is allowed")))
+
+        ;; --- Emails 214-215: implicit Acked from patch reply is also gated ---
+        (testing "Reporter sending a patch in reply owns but does not ack"
+          (let [r214 (get-report db "<214@test.org>")]
+            (is (= :bug (:report/type r214)))
+            (is (nil? (:report/acked r214))
+                "implicit ack is dropped when the patch sender is the reporter")
+            (is (= "carol@test.org" (:report/owned-address r214))
+                "implicit owned still fires -- self-ownership is allowed"))))
       (finally
         (teardown! ctx)))))
 

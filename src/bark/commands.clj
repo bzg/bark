@@ -1084,7 +1084,7 @@
 (defn apply-commands!
   "Apply commands from `email` against `report-eid`.
   A reply shipping patch content also fires an implicit `Acked. Owned.`,
-  gated by :patch-triggers? and report-type ∈ #{:bug :patch :request}.
+  gated by :patch-triggers? and report-type ∈ #{:bug :request}.
   Returns true if anything was applied."
   [conn report-eid report-type email source-map roles delivery]
   (let [body-text   (common/email-body-text email)
@@ -1106,18 +1106,37 @@
                        :report-mid report-mid})
         body-trig   (when body-text
                       (detect-triggers report-type body-text src-cmds))
-        ;; Reply-guard: a root [BUG]+.patch must not self-credit its reporter.
-        implicit    (when (and (contains? #{:bug :patch :request} report-type)
+        ;; A reply shipping patch content credits its author on the parent
+        ;; bug/request -- NOT on a parent patch report (a v2 reply would
+        ;; otherwise spuriously mark v1 as owned by v2's author; super-
+        ;; session handles patch->patch ownership transfer separately).
+        ;; The reply-guard prevents a root [BUG]+.patch from self-crediting.
+        implicit    (when (and (contains? #{:bug :request} report-type)
                                (common/patch-triggers? source-cfg)
                                (:email/in-reply-to email)
                                (detect/has-patch-content? email))
                       {:report/acked true :report/owned true})
-        trig-result (filter-triggers-by-scope (merge implicit body-trig)
-                                              overrides is-maint? fail-ctx)
+        ;; Acked is a second-party validation: the reporter cannot ack
+        ;; their own report.  Owned, by contrast, may stay with the
+        ;; reporter ("I filed this and I'll fix it").
+        reporter    (some-> (d/pull db [{:report/email [:email/author-address]}]
+                                    report-eid)
+                            :report/email :email/author-address str/lower-case)
+        self-ack?   (and from-addr reporter (= (str/lower-case from-addr) reporter))
+        trig-result (cond-> (merge implicit body-trig)
+                      self-ack? (dissoc :report/acked)
+                      :always   (filter-triggers-by-scope overrides is-maint? fail-ctx))
         directives  (when body-text
-                      (detect-directives report-type body-text overrides
-                                         (:email/date-sent email)
-                                         (:directives src-cmds)))
+                      (->> (detect-directives report-type body-text overrides
+                                              (:email/date-sent email)
+                                              (:directives src-cmds))
+                           (remove (fn [d]
+                                     (and (= :set (:action d))
+                                          (= :report/acked (:attr d))
+                                          reporter
+                                          (= (some-> (:email-address d) str/lower-case)
+                                             reporter))))
+                           vec))
         closed?     (some? (:report/closed (d/pull db [:report/closed] report-eid)))]
     (if closed?
       (do (when (seq directives)

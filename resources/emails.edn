@@ -1986,4 +1986,66 @@
   :email/references  "<208@test.org>"
   :email/body-text  "Proposed fix.\n\ndiff --git a/queue.clj b/queue.clj\nindex abc..def 100644\n--- a/queue.clj\n+++ b/queue.clj\n@@ -1,3 +1,3 @@\n-old\n+fixed\n"}
 
+ ;; =========================================================================
+ ;; 211-213 — Self-ack rule: the reporter cannot ack their own bug, but
+ ;; can still own it.  A third party acks normally.
+ ;; =========================================================================
+ {:email/id        "211"
+  :email/source      "direct"
+  :email/message-id  "<211@test.org>"
+  :email/subject     "[BUG] memory growth"
+  :email/from-address "alice@test.org"
+  :email/date-sent  #inst "2026-03-15T09:00:00"
+  :email/ingested-at #inst "2026-03-15T09:00:00"
+  :email/body-text  "Heap grows over time.\n"}
+
+ {:email/id        "212"
+  :email/source      "direct"
+  :email/message-id  "<212@test.org>"
+  :email/subject     "Re: [BUG] memory growth"
+  :email/from-address "alice@test.org"
+  :email/date-sent  #inst "2026-03-15T10:00:00"
+  :email/ingested-at #inst "2026-03-15T10:00:00"
+  :email/in-reply-to "<211@test.org>"
+  :email/references  "<211@test.org>"
+  :email/body-text  "Acked.\nOwned.\n"}
+
+ {:email/id        "213"
+  :email/source      "direct"
+  :email/message-id  "<213@test.org>"
+  :email/subject     "Re: [BUG] memory growth"
+  :email/from-address "bob@test.org"
+  :email/date-sent  #inst "2026-03-15T11:00:00"
+  :email/ingested-at #inst "2026-03-15T11:00:00"
+  :email/in-reply-to "<211@test.org>"
+  :email/references  "<211@test.org>"
+  :email/body-text  "Confirmed, I see it too.\n"}
+
+ ;; =========================================================================
+ ;; 214-215 — Self-ack via patch content: the reporter sends a fix in
+ ;; reply.  Owned fires (Phase 3 implicit), acked is blocked by the
+ ;; self-ack rule.
+ ;; =========================================================================
+ {:email/id        "214"
+  :email/source      "direct"
+  :email/message-id  "<214@test.org>"
+  :email/subject     "[BUG] off-by-one in parser"
+  :email/from-address "carol@test.org"
+  :email/date-sent  #inst "2026-03-16T09:00:00"
+  :email/ingested-at #inst "2026-03-16T09:00:00"
+  :email/body-text  "Parser drops the last char.\n"}
+
+ {:email/id        "215"
+  :email/source      "direct"
+  :email/message-id  "<215@test.org>"
+  :email/subject     "Re: [BUG] off-by-one in parser"
+  :email/from-address "carol@test.org"
+  :email/date-sent  #inst "2026-03-16T10:00:00"
+  :email/ingested-at #inst "2026-03-16T10:00:00"
+  :email/in-reply-to "<214@test.org>"
+  :email/references  "<214@test.org>"
+  :email/body-text  "Here's the fix.\n"
+  :email/attachments [{:attachment/filename "fix-parser.patch"
+                       :attachment/content-type "text/x-patch"
+                       :attachment/data "diff --git a/parser.el b/parser.el\n--- a/parser.el\n+++ b/parser.el\n@@ -1,3 +1,3 @@\n-old\n+fixed\n"}]}
 ]

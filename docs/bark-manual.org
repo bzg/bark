@@ -148,6 +148,9 @@ note:").
 Email signatures (delimited by =-- = per RFC 3676) are stripped before
 scanning, so command-like words in signatures are ignored.
 
+=Acked= requires a second party: the reporter cannot ack their own
+report.  =Owned= may stay with the reporter.
+
 See the [[#all-commands][complete list of commands]] below for the full list.
 
 ** Retracting your own updates
@@ -224,15 +227,17 @@ email post several links.  Works on closed reports.  To undo:
 
 Replying to an open bug or request with a =.patch=/=.diff=
 attachment credits you as =Acked= + =Owned= on the *nearest* parent
-report.  An existing explicit setter is preserved; opt out with
-=Not acked.= / =Not owned.=.
+report.  When the patch sender is the report's reporter, only
+=Owned= is credited.  An existing explicit setter is preserved;
+opt out with =Not acked.= / =Not owned.=.
 
 When the reply also produces a separate =:patch= report (labelled
 =Re: [PATCH]=, or a =git format-patch= attachment), the patch is
 linked to the parent via =:resolves=.  Closing that patch with
 =Applied.= / =Fixed.= propagates the closure to the parent (reason
-=:resolved=).  Cancelling it retracts the auto-credit; superseding it
-transfers ownership to the new author.
+=:resolved=).  Cancelling it retracts the auto-credit; superseding
+it transfers =Owned= to the new author.  =Acked= is historical and
+stays with whoever first confirmed the parent.
 
 The source-level =:patch-triggers? false= flag disables both the
 implicit credit and the closure propagation.

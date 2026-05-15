@@ -539,8 +539,8 @@
                 rels-bug (get-relations (d/db conn) bug-eid)]
             (is (= "dave@x" (:report/owned-address bug-state))
                 "ownership transferred to P2 author (Dave)")
-            (is (= "dave@x" (:report/acked-address bug-state))
-                "acked also transferred")
+            (is (= "bob@x" (:report/acked-address bug-state))
+                "acked is historical -- stays with the original acker (Bob)")
             (is (some #(and (= :resolves (:kind %)) (= p2-eid (:from %))
                             (= bug-eid (:to %)))
                       rels-bug)

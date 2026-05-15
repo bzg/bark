@@ -289,8 +289,10 @@
 
 (defn propagate-patch-closure!
   "Propagate a patch's closure to the bugs/requests it :resolves:
-  :resolved closes them, :canceled retracts auto-credits, :superseded
-  transfers them to `successor-eid`.  No-op if `patch-type` ≠ :patch."
+  :resolved closes them; :canceled retracts auto-credits; :superseded
+  transfers :owned to `successor-eid` (acked stays with the original
+  acker -- a historical act, not transferable).  No-op if
+  `patch-type` ≠ :patch."
   [conn patch-eid patch-type email-eid close-reason successor-eid]
   (when (= :patch patch-type)
     (let [db   (d/db conn)
@@ -324,6 +326,9 @@
               (d/transact! conn tx))))
 
         :superseded
+        ;; Transfer :owned to the successor; :acked is a historical act
+        ;; -- whoever first confirmed the bug remains its acker, even
+        ;; when the resolving patch is replaced.
         (when successor-eid
           (let [succ (d/pull db [{:report/email [:db/id :email/author-address
                                                  :email/date-sent]}]
@@ -334,15 +339,10 @@
                                  (java.util.Date.))]
             (doseq [bug-eid bugs]
               (let [db' (d/db conn)
-                    tx  (cond-> []
-                          (auto-credit? db' bug-eid :report/acked)
-                          (into (transfer-auto-credit-tx
-                                  bug-eid :report/acked :report/acked-address
-                                  succ-eml-eid succ-addr))
-                          (auto-credit? db' bug-eid :report/owned)
-                          (into (transfer-auto-credit-tx
-                                  bug-eid :report/owned :report/owned-address
-                                  succ-eml-eid succ-addr)))]
+                    tx  (when (auto-credit? db' bug-eid :report/owned)
+                          (transfer-auto-credit-tx
+                            bug-eid :report/owned :report/owned-address
+                            succ-eml-eid succ-addr))]
                 (when (seq tx)
                   (d/transact! conn tx))
                 ;; Successor inherits the :resolves link (idempotent).
