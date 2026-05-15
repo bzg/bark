@@ -502,23 +502,30 @@
       ;; nil -- no report detected
       [nil report-info])))
 
-(defn- thread-and-apply-commands!
-  "Add email as descendant of parent reports and apply commands on nearest reports.
-  Returns true if any command was applied."
-  [conn eid email from-addr source-name rroles source-map delivery
-   parent-eids nearest-eids new-report?]
+(defn- attach-as-descendant!
+  "Record the email under its threaded parents and bump their
+  updated-at timestamp.  Threading is independent from command
+  dispatch -- it happens whenever the email is a reply, regardless
+  of whether the email also created a report."
+  [conn eid email from-addr parent-eids]
   (doseq [rid parent-eids]
     (add-descendant! conn rid eid (:email/date-sent email) from-addr))
-  (let [rid-info (when (seq nearest-eids)
-                   (reduce (fn [m [r t s]] (assoc m r [t s]))
-                           {}
-                           (d/q '[:find ?r ?t ?src
-                                  :in $ [?r ...]
-                                  :where
-                                  [?r :report/type ?t]
-                                  [?r :report/email ?e]
-                                  [?e :email/source ?src]]
-                                (d/db conn) nearest-eids)))
+  (tracking/bump-report-updated! conn parent-eids))
+
+(defn- apply-commands-on-nearest!
+  "Apply commands to the nearest reports of a reply, refreshing roles
+  per source when reports come from different sources.  Ensures the
+  author is recorded as a participant if any command matched."
+  [conn email from-addr source-name rroles source-map delivery nearest-eids]
+  (let [rid-info (reduce (fn [m [r t s]] (assoc m r [t s]))
+                         {}
+                         (d/q '[:find ?r ?t ?src
+                                :in $ [?r ...]
+                                :where
+                                [?r :report/type ?t]
+                                [?r :report/email ?e]
+                                [?e :email/source ?src]]
+                              (d/db conn) nearest-eids))
         any-cmd? (reduce (fn [acc rid]
                            (if-let [[rtype rsrc] (get rid-info rid)]
                              (let [rroles (if rsrc (roles/get-tenures (d/db conn) rsrc) rroles)]
@@ -526,11 +533,9 @@
                                  true acc))
                              acc))
                          false nearest-eids)]
-    (when (and any-cmd? (not new-report?))
+    (when any-cmd?
       (ensure-participant! conn source-name from-addr
-                           (:email/author-name email) (:email/date-sent email)))
-    (when (seq parent-eids)
-      (tracking/bump-report-updated! conn parent-eids))))
+                           (:email/author-name email) (:email/date-sent email)))))
 
 (defn- run-post-creation-hooks!
   "Execute post-creation side effects driven by the plan."
@@ -627,20 +632,29 @@
                                                 (report-exists? db message-id))
                                        (d/entid db [:report/message-id message-id])))]
 
-                (when (and (seq parent-eids) via-channel?)
-                  (thread-and-apply-commands! conn eid email from-addr source-name rroles
-                                              source-map delivery parent-eids nearest-eids
-                                              (some? report-eid)))
+                ;; Channel gating: an email that did not reach the
+                ;; source's public channel is excluded from both
+                ;; threading and command dispatch -- private replies
+                ;; cannot annotate a public thread.
+                (when via-channel?
+                  ;; Threading: attach as descendant of every parent.
+                  (when (seq parent-eids)
+                    (attach-as-descendant! conn eid email from-addr parent-eids))
 
-                ;; Initial-mail directives: when the email is the first
-                ;; of a new thread (no parents) AND it created a new
-                ;; report, apply directives on the new report itself.
-                ;; This makes `Supersedes: <mid>` (and other cross-
-                ;; report directives) work in the opening mail of a
-                ;; new bug/patch/request, not only in replies.
-                (when (and report-eid via-channel? (empty? parent-eids))
-                  (commands/apply-commands! conn report-eid (:type report-info)
-                                            email source-map rroles delivery))
+                  ;; Commands and directives target the report the
+                  ;; email introduces, if any.  Otherwise they target
+                  ;; the nearest reports in the thread.  The implicit
+                  ;; Acked/Owned credit on a patch-in-reply is a
+                  ;; distinct mechanism, gated inside apply-commands!
+                  ;; by report-type and therefore unaffected here.
+                  (cond
+                    report-eid
+                    (commands/apply-commands! conn report-eid (:type report-info)
+                                              email source-map rroles delivery)
+
+                    (seq nearest-eids)
+                    (apply-commands-on-nearest! conn email from-addr source-name rroles
+                                                source-map delivery nearest-eids)))
 
                 ;; Phase 4: post-creation hooks (plan is pure, execution is effectful)
                 (when report-eid

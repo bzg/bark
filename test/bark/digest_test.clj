@@ -1128,7 +1128,23 @@
             (is (nil? (:report/acked r214))
                 "implicit ack is dropped when the patch sender is the reporter")
             (is (= "carol@test.org" (:report/owned-address r214))
-                "implicit owned still fires -- self-ownership is allowed"))))
+                "implicit owned still fires -- self-ownership is allowed")))
+
+        ;; --- Emails 216-217: reply that creates a report carries
+        ;; its commands onto the new report, not the parent. ---
+        (testing "Reply that creates v2 patch carries Topic/Important onto v2"
+          (let [r216 (get-report db "<216@test.org>")
+                r217 (get-report db "<217@test.org>")]
+            (is (= :patch (:report/type r216)))
+            (is (= :patch (:report/type r217)))
+            (is (= "lexer" (:report/topic-value r217))
+                "Topic directive lands on the new v2 patch")
+            (is (some? (:report/important r217))
+                "Important trigger lands on the new v2 patch")
+            (is (= "parser" (:report/topic-value r216))
+                "v1's topic from the label is preserved")
+            (is (nil? (:report/important r216))
+                "v1's importance is untouched -- directive did not leak to parent"))))
       (finally
         (teardown! ctx)))))
 

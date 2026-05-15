@@ -611,20 +611,23 @@
 
 (defn maintainer?
   "True if `addr` has maintainer status.  2-arity: any active tenure;
-  3-arity: tenure covering `as-of` (nil bounds = unbounded)."
+  3-arity: tenure covering `as-of` (nil bounds = unbounded).  A nil
+  `as-of` falls back to the 2-arity for emails missing a Date header."
   ([tenures addr]
    (and addr
         (let [a (str/lower-case addr)]
           (boolean (some #(and (= a (:email %)) (nil? (:to %))) tenures)))))
   ([tenures addr as-of]
-   (and addr
-        (let [a (str/lower-case addr)]
-          (boolean
-           (some (fn [{:keys [email from to]}]
-                   (and (= a email)
-                        (or (nil? from) (not (.before ^Date as-of ^Date from)))
-                        (or (nil? to)   (.before ^Date as-of ^Date to))))
-                 tenures))))))
+   (if (nil? as-of)
+     (maintainer? tenures addr)
+     (and addr
+          (let [a (str/lower-case addr)]
+            (boolean
+             (some (fn [{:keys [email from to]}]
+                     (and (= a email)
+                          (or (nil? from) (not (.before ^Date as-of ^Date from)))
+                          (or (nil? to)   (.before ^Date as-of ^Date to))))
+                   tenures)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Config and source-map

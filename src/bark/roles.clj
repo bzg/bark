@@ -66,9 +66,10 @@
 (defn- sync-period-boundary!
   "Reconcile tenures with `period` at its start: open declared emails
   missing a tenure at :from, close active emails dropped from the list.
-  Idempotent and respects mail-directive closures (use --fresh to replay).
-  Closures need a non-nil :from; first unbounded period skips them
-  with a warning."
+  Idempotent and respects mail-directive closures (use --fresh to
+  replay).  The first unbounded period (`:from` nil) only adds; it
+  never closes, since `active-as-of` returns no tenure without a
+  reference instant."
   [conn source-name {:keys [^Date from maintainers]}]
   (let [all       (get-tenures (d/db conn) source-name)
         declared  (into [] (distinct (map str/lower-case (or maintainers []))))
@@ -90,10 +91,6 @@
                                   (when-let [t (covering-tenure all email from)]
                                     [[:db/add (:eid t) :maint-tenure/to from] email])))
                           drops))]
-    (when (and (seq drops) (nil? from))
-      (doseq [email drops]
-        (log/warn "Cannot close tenure for" email "on" source-name
-                  "-- period has no :start")))
     (when (seq adds)
       (d/transact! conn adds)
       (doseq [{email :maint-tenure/email f :maint-tenure/from} adds]
