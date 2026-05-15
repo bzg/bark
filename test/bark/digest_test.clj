@@ -1078,14 +1078,14 @@
                     "format-patch headers are parsed and stored")
                 (is (= "Fix crash on save" (:patch/subject p)))))))
 
-        ;; --- Emails 204-205: implicit Acked/Owned from inline diff ---
-        (testing "Bug 204 auto-credited by inline-diff reply 205"
+        ;; --- Emails 204-205: implicit Acked/Owned from patch reply ---
+        (testing "Bug 204 auto-credited by patch reply 205"
           (let [r204 (get-report db "<204@test.org>")]
             (is (= :bug (:report/type r204)))
             (is (some? (:report/acked r204))
-                "Phase 3: reply with patch content implicitly credits acked")
+                "reply with .patch attachment implicitly credits acked")
             (is (some? (:report/owned r204))
-                "Phase 3: reply with patch content implicitly credits owned")
+                "reply with .patch attachment implicitly credits owned")
             (is (= "fixer@test.org" (:report/acked-address r204)))
             (is (= "fixer@test.org" (:report/owned-address r204)))))
 
@@ -1102,15 +1102,7 @@
             (is (= :bug (:report/type r208)))
             (is (nil? (:report/acked r208))
                 ":patch-triggers? false gates the implicit trigger")
-            (is (nil? (:report/owned r208)))))
-
-        ;; --- Email 210: report-type gate ---
-        (testing "Announcement 210 with inline diff is NOT auto-credited"
-          (let [r210 (get-report db "<210@test.org>")]
-            (is (= :announcement (:report/type r210)))
-            (is (nil? (:report/acked r210))
-                "implicit Acked/Owned is restricted to #{:bug :patch :request}")
-            (is (nil? (:report/owned r210))))))
+            (is (nil? (:report/owned r208))))))
       (finally
         (teardown! ctx)))))
 

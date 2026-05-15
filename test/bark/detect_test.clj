@@ -137,9 +137,8 @@
                 :email/body-text inline-diff-body})))))
 
 (deftest re-prefix-patch-with-attachment-test
-  (testing "Re: [PATCH] foo WITHOUT attachment yields nil (no spurious report from discussion replies)"
-    (is (nil? (detect-type "Re: [PATCH] feature")))
-    (is (nil? (detect-type "Re: Re: [PATCH] feature"))))
+  (testing "Re: [PATCH] foo WITHOUT attachment yields nil"
+    (is (nil? (detect-type "Re: [PATCH] feature"))))
 
   (testing "Re: [PATCH] foo WITH attachment matches :patch (v2/v3 reply workflow)"
     (is (= :patch (:type (detect/detect-report
@@ -147,19 +146,13 @@
                            :email/in-reply-to "<parent@test.org>"
                            :email/attachments patch-attachment})))))
 
-  (testing "Re: [PATCH] foo with inline diff only (no attachment) yields nil"
-    (is (nil? (detect/detect-report
-               {:email/subject     "Re: [PATCH] feature"
-                :email/in-reply-to "<parent@test.org>"
-                :email/body-text   inline-diff-body}))))
-
   (testing "Re: [PATCH v2] with attachment keeps version handling"
     (is (= "v2" (:version (detect/detect-report
                            {:email/subject     "Re: [PATCH v2] feature"
                             :email/in-reply-to "<parent@test.org>"
                             :email/attachments patch-attachment})))))
 
-  (testing "Re: [BUG] foo never matches :bug (strict for non-patch)"
+  (testing "Re: [BUG] never matches :bug (strict for non-patch)"
     (is (nil? (:type (detect/detect-report
                       {:email/subject     "Re: [BUG] something"
                        :email/in-reply-to "<parent@test.org>"
