@@ -130,18 +130,13 @@
   (or (common/has-ics-attachment? (:email/attachments email))
       (common/has-inline-ics? (common/email-body-text email))))
 
-(def inline-patch-indicators
-  [#"(?m)^diff --git " #"(?m)^--- a/" #"(?m)^\+\+\+ b/"
-   #"(?m)^@@ [-+]\d+" #"(?m)^index [0-9a-f]+\.\.[0-9a-f]+"])
-
-(defn has-inline-patch? [body-text]
-  (when body-text (>= (count (filter #(re-find % body-text) inline-patch-indicators)) 2)))
-
 (defn has-patch-content?
-  "True if an email carries patch content (attachment or inline diff)."
+  "True if an email has a .patch/.diff attachment.  Inline diffs in
+  the body are intentionally not a signal: only the explicit gesture
+  of attaching a file (or labelling the subject [PATCH]) carries
+  enough intent to warrant a patch report."
   [email]
-  (or (has-patch-attachment? (:email/attachments email))
-      (has-inline-patch? (common/email-body-text email))))
+  (has-patch-attachment? (:email/attachments email)))
 
 (def ^:private format-patch-start #"(?m)^From [0-9a-f]{40} ")
 
@@ -189,30 +184,26 @@
          (:email/attachments email))))
 
 (defn detect-report
-  "Detect a report's type from an email.  Priority:
-    1. Subject label (strict regex, anchored at start) -- authoritative.
-    2. `Re: [PATCH]` reply WITH patch content (v2/v3 workflow).
-    3. Real `git format-patch` attachment (inner Subject: [PATCH]) --
-       creates a :patch even in a reply, escape hatch for the label-
-       first rule when the patch is clearly meant to be applied.
-    4. Patch content alone, only on fresh threads (no In-Reply-To)."
+  "Detect a report's type from an email.  Two signals, in order:
+    1. Subject label (strict regex, anchored at start).  Includes the
+       `Re: [PATCH]` v2/v3 reply workflow: stripping `Re:` and re-
+       matching the [PATCH] pattern when an attachment is present.
+    2. Real `git format-patch` attachment (inner Subject: [PATCH]) --
+       escape hatch for serious submissions whose outer subject does
+       not carry [PATCH] (e.g. a reply without re-labelling)."
   ([email] (detect-report email (compile-labels common/default-labels) nil))
   ([email patterns] (detect-report email patterns nil))
   ([email patterns allowed-types]
-   (let [allowed?       (fn [result]
-                          (when (and result
-                                     (or (nil? allowed-types)
-                                         (contains? allowed-types (:type result))))
-                            result))
-         subject        (:email/subject email)
-         attachments    (:email/attachments email)
-         body-text      (common/email-body-text email)
-         in-reply-to    (:email/in-reply-to email)
-         attachment?    (has-patch-attachment? attachments)
-         inline?        (has-inline-patch? body-text)
-         has-patch?     (or attachment? inline?)]
+   (let [allowed?    (fn [result]
+                       (when (and result
+                                  (or (nil? allowed-types)
+                                      (contains? allowed-types (:type result))))
+                         result))
+         subject     (:email/subject email)
+         attachments (:email/attachments email)
+         attachment? (has-patch-attachment? attachments)]
      (or
-      ;; 1. Strict subject tag walk -- explicit label is authoritative
+      ;; 1. Strict subject tag walk -- explicit label is authoritative.
       (when subject
         (some (fn [{:keys [type versioned?]}]
                 (when-let [pattern (get patterns type)]
@@ -221,21 +212,15 @@
                      (detect-patch-subject subject patterns)
                      (detect-simple-tag type subject pattern versioned?)))))
               common/report-type-spec))
-      ;; 2. Re: [PATCH] reply WITH content (a bare discussion does not qualify).
-      (when (and subject has-patch?)
+      ;; 1b. Re: [PATCH] reply with an attached patch (v2/v3 workflow).
+      (when (and subject attachment?)
         (let [stripped (str/replace-first subject reply-prefix-re "")]
           (when (not= stripped subject)
             (allowed? (detect-patch-subject stripped patterns)))))
-      ;; 3. Real git format-patch attachment -- escape hatch for replies
-      ;; where the outer subject doesn't carry [PATCH].
+      ;; 2. Real git format-patch attachment -- catches replies whose
+      ;; outer subject does not carry [PATCH].
       (when (format-patch-submission? email)
-        (allowed? {:type :patch :patch-source #{:attachment}}))
-      ;; 4. Fallback (no label, fresh thread).
-      (when (and has-patch? (nil? in-reply-to))
-        (allowed? {:type :patch
-                   :patch-source (cond-> #{}
-                                   attachment? (conj :attachment)
-                                   inline?     (conj :inline))}))))))
+        (allowed? {:type :patch :patch-source #{:attachment}}))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Patch content extraction (pure)

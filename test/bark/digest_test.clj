@@ -310,11 +310,9 @@
             (is (= :patch (:report/type r)))
             (is (contains? (set (:report/patch-source r)) :attachment))))
 
-        ;; --- Patch 09 inline ---
-        (testing "Patch 09 inline diff"
-          (let [r (get-report db "<09@test.org>")]
-            (is (= :patch (:report/type r)))
-            (is (contains? (set (:report/patch-source r)) :inline))))
+        ;; --- Email 09 inline diff, no label: no report (inline-only is not a signal) ---
+        (testing "Inline diff alone (no label, no attachment) does not create a patch report"
+          (is (false? (report-exists? db "<09@test.org>"))))
 
         ;; --- POLL 11 votes ---
         (testing "POLL 11 votes"

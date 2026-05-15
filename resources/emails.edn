@@ -126,10 +126,13 @@
   :email/body-text  "Attached patch.\n"
   :email/attachments [{:attachment/filename "fix-display.patch"
                         :attachment/content-type "text/x-patch"
+                        :attachment/data "From 1234567890abcdef1234567890abcdef12345678 Mon Sep 17 00:00:00 2026\nFrom: User <user@test.org>\nSubject: [PATCH] Fix the display issue\nDate: Fri, 2 Jan 2026 11:00:00 +0000\n\ndiff --git a/display.el b/display.el\n--- a/display.el\n+++ b/display.el\n@@ -1,3 +1,3 @@\n-old\n+fixed\n"
                         :attachment/size 1234}]}
 
  ;; =========================================================================
- ;; 09 — Patch via inline diff (no subject tag, no attachment)
+ ;; 09 — Inline diff in a fresh thread with no label: no longer detected
+ ;; as a patch (inline alone is not a signal).  The email is stored, no
+ ;; report is created.
  ;; =========================================================================
  {
   :email/id        "9"
@@ -1602,7 +1605,10 @@
   :email/in-reply-to "<117@test.org>"
   :email/references  "<117@test.org>"
   :email/headers-edn "{\"list-id\" \"list.test.org\"}"
-  :email/body-text  "Updated version of the patch.\n\ndiff --git a/feature.el b/feature.el\n--- a/feature.el\n+++ b/feature.el\n@@ -1,3 +1,3 @@\n-old\n+newer\n"}
+  :email/body-text  "Updated version of the patch.\n"
+  :email/attachments [{:attachment/filename "feature-v2.patch"
+                       :attachment/content-type "text/x-patch"
+                       :attachment/data "diff --git a/feature.el b/feature.el\n--- a/feature.el\n+++ b/feature.el\n@@ -1,3 +1,3 @@\n-old\n+newer\n"}]}
 
  ;; =========================================================================
  ;; 119 — Third reply with yet another patch: should supersede 118 (and 117)
@@ -1617,7 +1623,10 @@
   :email/in-reply-to "<118@test.org>"
   :email/references  "<117@test.org> <118@test.org>"
   :email/headers-edn "{\"list-id\" \"list.test.org\"}"
-  :email/body-text  "Third version.\n\ndiff --git a/feature.el b/feature.el\n--- a/feature.el\n+++ b/feature.el\n@@ -1,3 +1,3 @@\n-old\n+newest\n"}
+  :email/body-text  "Third version.\n"
+  :email/attachments [{:attachment/filename "feature-v3.patch"
+                       :attachment/content-type "text/x-patch"
+                       :attachment/data "diff --git a/feature.el b/feature.el\n--- a/feature.el\n+++ b/feature.el\n@@ -1,3 +1,3 @@\n-old\n+newest\n"}]}
 
  ;; =========================================================================
  ;; 120 — Inline diff in a fresh thread (no label, no In-Reply-To):
@@ -1626,16 +1635,20 @@
  {:email/id        "120"
   :email/source      "public-list"
   :email/message-id  "<120@test.org>"
-  :email/subject     "Improve error handling"
+  :email/subject     "[PATCH] Improve error handling"
   :email/from-address "dev@test.org"
   :email/date-sent  #inst "2026-03-02T10:00:00"
   :email/ingested-at #inst "2026-03-02T10:00:00"
   :email/headers-edn "{\"list-id\" \"list.test.org\"}"
-  :email/body-text  "Here is my proposed change.\n\ndiff --git a/errors.el b/errors.el\nindex abc..def 100644\n--- a/errors.el\n+++ b/errors.el\n@@ -1,3 +1,3 @@\n-old\n+new\n"}
+  :email/body-text  "Here is my proposed change.\n"
+  :email/attachments [{:attachment/filename "errors-v1.patch"
+                       :attachment/content-type "text/x-patch"
+                       :attachment/data "diff --git a/errors.el b/errors.el\nindex abc..def 100644\n--- a/errors.el\n+++ b/errors.el\n@@ -1,3 +1,3 @@\n-old\n+new\n"}]}
 
  ;; =========================================================================
- ;; 121 — Reply carrying a [PATCH] label (Re: [PATCH] ...): the label
- ;; is preserved through `Re:`, so 121 supersedes 120.
+ ;; 121 — Reply carrying a [PATCH] label (Re: [PATCH] ...) with an
+ ;; attached patch: the label is preserved through `Re:`, so 121
+ ;; supersedes 120.
  ;; =========================================================================
  {:email/id        "121"
   :email/source      "public-list"
@@ -1647,7 +1660,10 @@
   :email/in-reply-to "<120@test.org>"
   :email/references  "<120@test.org>"
   :email/headers-edn "{\"list-id\" \"list.test.org\"}"
-  :email/body-text  "Updated diff based on review.\n\ndiff --git a/errors.el b/errors.el\nindex abc..def 100644\n--- a/errors.el\n+++ b/errors.el\n@@ -1,3 +1,3 @@\n-old\n+better\n"}
+  :email/body-text  "Updated diff based on review.\n"
+  :email/attachments [{:attachment/filename "errors-v2.patch"
+                       :attachment/content-type "text/x-patch"
+                       :attachment/data "diff --git a/errors.el b/errors.el\nindex abc..def 100644\n--- a/errors.el\n+++ b/errors.el\n@@ -1,3 +1,3 @@\n-old\n+better\n"}]}
 
  ;; =========================================================================
  ;; 122 — Narrow bug report filed by user-a
@@ -1751,7 +1767,10 @@
   :email/ingested-at #inst "2026-03-05T10:00:00"
   :email/in-reply-to "<128@test.org>"
   :email/references  "<128@test.org>"
-  :email/body-text  "Patch attached.\n\ndiff --git a/init.clj b/init.clj\n--- a/init.clj\n+++ b/init.clj\n@@ -1,3 +1,3 @@\n-old\n+new\n"}
+  :email/body-text  "Patch attached.\n"
+  :email/attachments [{:attachment/filename "fix-segfault.patch"
+                       :attachment/content-type "text/x-patch"
+                       :attachment/data "diff --git a/init.clj b/init.clj\n--- a/init.clj\n+++ b/init.clj\n@@ -1,3 +1,3 @@\n-old\n+new\n"}]}
 
  ;; =========================================================================
  ;; 130-131 — Supersedes: directive (symmetric of Superseded-by).
@@ -1909,7 +1928,10 @@
   :email/ingested-at #inst "2026-03-11T10:00:00"
   :email/in-reply-to "<204@test.org>"
   :email/references  "<204@test.org>"
-  :email/body-text  "Here's a candidate fix inline.\n\ndiff --git a/obscure.el b/obscure.el\nindex abc..def 100644\n--- a/obscure.el\n+++ b/obscure.el\n@@ -1,3 +1,3 @@\n-old\n+fixed\n"}
+  :email/body-text  "Here's a candidate fix.\n"
+  :email/attachments [{:attachment/filename "fix-obscure.patch"
+                       :attachment/content-type "text/x-patch"
+                       :attachment/data "diff --git a/obscure.el b/obscure.el\nindex abc..def 100644\n--- a/obscure.el\n+++ b/obscure.el\n@@ -1,3 +1,3 @@\n-old\n+fixed\n"}]}
 
  ;; =========================================================================
  ;; 206 — Fresh [BUG] from admin with manual Owned-by: directive in

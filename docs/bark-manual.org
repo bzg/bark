@@ -97,11 +97,19 @@ The subject label decides the report's type: =[BUG]=, =[PATCH]=,
 =[POLL]= / =[TODO]= for requests (and a few more, see
 [[#report-types][report types]] below).
 
-A label-less email with patch content (inline diff or =.patch=
-attachment) is also recognised as a patch, but only in a new thread,
-with no =In-Reply-To=. To promote a reply as patch, you need to change
-the subject and add the =[PATCH]= prefix or to attach a proper patch,
-real =git format-patch= output.
+A patch report is created in two cases, and only two:
+
+1. The subject starts with =[PATCH]= -- either directly, or as
+   =Re: [PATCH] ...= when the reply also carries a =.patch=/=.diff=
+   attachment (the v2/v3 reply workflow).
+2. The email attaches a =git format-patch= file -- the patch's own
+   inner =Subject:= line starts with =[PATCH]=.
+
+Anything else is *not* a patch report: a bare inline diff, a quick
+=git diff > x.patch= attached in a reply without re-labelling, a
+quoted diff in a discussion.  If you want BARK to track your fix as
+a patch, attach a real =git format-patch= file *or* relabel the
+subject with =[PATCH]=.
 
 Attaching a patch to a =[BUG]= or =[FR]= email does not change the
 report's type; the patch is stored as metadata on the parent.
@@ -210,21 +218,21 @@ email post several links.  Works on closed reports.  To undo:
 =Not related-to: <other-message-id@example.com>=.
 
 ** Resolving a bug or request with a patch
+:PROPERTIES:
+:CUSTOM_ID: resolving-a-bug-or-request-with-a-patch
+:END:
 
-Replying to an open bug or request with patch content (inline diff
-or =.patch=/=.diff= attachment) credits you as =Acked= + =Owned= on
-the *nearest* parent report.  An existing explicit setter is
-preserved; opt out with =Not acked.= / =Not owned.=.
+Replying to an open bug or request with a =.patch=/=.diff=
+attachment credits you as =Acked= + =Owned= on the *nearest* parent
+report.  An existing explicit setter is preserved; opt out with
+=Not acked.= / =Not owned.=.
 
 When the reply also produces a separate =:patch= report (labelled
-=Re: [PATCH]=, or a real =git format-patch= attachment), the patch is
+=Re: [PATCH]=, or a =git format-patch= attachment), the patch is
 linked to the parent via =:resolves=.  Closing that patch with
 =Applied.= / =Fixed.= propagates the closure to the parent (reason
 =:resolved=).  Cancelling it retracts the auto-credit; superseding it
 transfers ownership to the new author.
-
-A bare diff in a thread that does not become a patch report does not
-propagate -- the parent must still be closed manually.
 
 The source-level =:patch-triggers? false= flag disables both the
 implicit credit and the closure propagation.
@@ -361,10 +369,10 @@ For example:
 
 Only the most recent patch (3) remains open.
 
-The reply still needs to qualify as a patch report (=Re: [PATCH]= with
-content, or a real =git format-patch= attachment in the reply) -- a
-bare =Re:= with a quoted diff does not create a new report and so
-does not supersede anything.
+The reply must itself qualify as a patch report (=Re: [PATCH]= with
+an attached patch, or a real =git format-patch= attachment) -- a bare
+=Re:= without an attached patch creates no report and supersedes
+nothing.
 
 Patches with explicit version numbers (=[PATCH v2]=) are handled by
 a separate mechanism that matches on version and topic.

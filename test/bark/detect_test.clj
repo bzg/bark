@@ -122,11 +122,6 @@
                         {:email/subject    "[BUG] something broken"
                          :email/attachments patch-attachment})))))
 
-  (testing "[BUG] + inline diff yields :bug"
-    (is (= :bug (:type (detect/detect-report
-                        {:email/subject    "[BUG] another issue"
-                         :email/body-text  inline-diff-body})))))
-
   (testing "[POLL] + .patch attachment yields :request"
     (is (= :request (:type (detect/detect-report
                             {:email/subject    "[POLL] new feature?"
@@ -134,59 +129,41 @@
 
   (testing "[PATCH] subject still yields :patch (even without attachment)"
     (is (= :patch (:type (detect/detect-report
-                          {:email/subject "[PATCH] subject-only patch"}))))))
+                          {:email/subject "[PATCH] subject-only patch"})))))
 
-(deftest patch-fallback-only-on-fresh-thread-test
-  (testing "no label + no In-Reply-To + attachment -> :patch (fallback)"
-    (is (= :patch (:type (detect/detect-report
-                          {:email/subject    "Fix for the display issue"
-                           :email/attachments patch-attachment})))))
-
-  (testing "no label + no In-Reply-To + inline diff -> :patch (fallback)"
-    (is (= :patch (:type (detect/detect-report
-                          {:email/subject   "Small cleanup"
-                           :email/body-text inline-diff-body})))))
-
-  (testing "no label + In-Reply-To + attachment -> nil (reply, no fallback)"
+  (testing "inline diff alone in the body is no longer a patch signal"
     (is (nil? (detect/detect-report
-               {:email/subject     "Re: something broken"
-                :email/in-reply-to "<parent@test.org>"
-                :email/attachments patch-attachment}))))
+               {:email/subject   "Small cleanup"
+                :email/body-text inline-diff-body})))))
 
-  (testing "no label + In-Reply-To + inline diff -> nil"
-    (is (nil? (detect/detect-report
-               {:email/subject     "Re: discussion"
-                :email/in-reply-to "<parent@test.org>"
-                :email/body-text   inline-diff-body})))))
-
-(deftest re-prefix-needs-content-for-patch-test
-  (testing "Re: [PATCH] foo WITHOUT content yields nil (no spurious report from discussion replies)"
+(deftest re-prefix-patch-with-attachment-test
+  (testing "Re: [PATCH] foo WITHOUT attachment yields nil (no spurious report from discussion replies)"
     (is (nil? (detect-type "Re: [PATCH] feature")))
     (is (nil? (detect-type "Re: Re: [PATCH] feature"))))
 
-  (testing "Re: [PATCH] foo WITH inline diff matches :patch (v2/v3 reply workflow)"
-    (is (= :patch (:type (detect/detect-report
-                          {:email/subject     "Re: [PATCH] feature"
-                           :email/in-reply-to "<parent@test.org>"
-                           :email/body-text   inline-diff-body})))))
-
-  (testing "Re: [PATCH] foo WITH attachment matches :patch"
+  (testing "Re: [PATCH] foo WITH attachment matches :patch (v2/v3 reply workflow)"
     (is (= :patch (:type (detect/detect-report
                           {:email/subject     "Re: [PATCH] feature"
                            :email/in-reply-to "<parent@test.org>"
                            :email/attachments patch-attachment})))))
 
-  (testing "Re: [PATCH v2] with content keeps version handling"
+  (testing "Re: [PATCH] foo with inline diff only (no attachment) yields nil"
+    (is (nil? (detect/detect-report
+               {:email/subject     "Re: [PATCH] feature"
+                :email/in-reply-to "<parent@test.org>"
+                :email/body-text   inline-diff-body}))))
+
+  (testing "Re: [PATCH v2] with attachment keeps version handling"
     (is (= "v2" (:version (detect/detect-report
                            {:email/subject     "Re: [PATCH v2] feature"
                             :email/in-reply-to "<parent@test.org>"
-                            :email/body-text   inline-diff-body})))))
+                            :email/attachments patch-attachment})))))
 
-  (testing "Re: [BUG] foo never matches :bug (strict for non-patch, even with content)"
+  (testing "Re: [BUG] foo never matches :bug (strict for non-patch)"
     (is (nil? (:type (detect/detect-report
                       {:email/subject     "Re: [BUG] something"
                        :email/in-reply-to "<parent@test.org>"
-                       :email/body-text   inline-diff-body}))))))
+                       :email/attachments patch-attachment}))))))
 
 (def ^:private format-patch-attachment
   "A .patch attachment that looks like real `git format-patch` output."

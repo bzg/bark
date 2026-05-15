@@ -89,34 +89,34 @@ clj -M:test
 
 All source code lives under =src/bark/=:
 
-| Namespace     | Role                                                |
-|---------------+-----------------------------------------------------|
-| =bark.main=     | Entry point (batch by default, =--watch= for IDLE)    |
-| =bark.ingest=   | Datalevin connection, email parsing and storage     |
-| =bark.digest=   | Single-email processing (classify, detect, thread)  |
-| =bark.detect=   | Report type detection from subject/body/attachments |
-| =bark.commands= | Triggers, directives, votes                         |
-| =bark.roles=    | Permission checks and role management               |
-| =bark.series=   | Patch series tracking                               |
-| =bark.expire=   | Periodic report expiry (runs inside daemon)         |
-| =bark.tracking= | Change-tracking for incremental export              |
-| =bark.common=   | Shared utilities (JVM)                              |
-| =bark.logging=  | File and email log appenders                        |
+| Namespace     | Role                                               |
+|---------------+----------------------------------------------------|
+| =bark.main=     | Entry point (batch by default, =--watch= for IDLE)   |
+| =bark.ingest=   | Datalevin connection, email parsing and storage    |
+| =bark.digest=   | Single-email processing (classify, detect, thread) |
+| =bark.detect=   | Report type detection from subject + attachments   |
+| =bark.commands= | Triggers, directives, votes                        |
+| =bark.roles=    | Permission checks and role management              |
+| =bark.series=   | Patch series tracking                              |
+| =bark.expire=   | Periodic report expiry (runs inside daemon)        |
+| =bark.tracking= | Change-tracking for incremental export             |
+| =bark.common=   | Shared utilities (JVM)                             |
+| =bark.logging=  | File and email log appenders                       |
 
 Read-only bb scripts live under =scripts/=:
 
-| Script                | Role                                                  |
-|-----------------------+-------------------------------------------------------|
-| =bark-common.clj=       | Shared utilities (bb)                                 |
-| =bark-export.clj=       | Report export (JSON, RSS, Org, patches, events, text) |
-| =bark-notify.clj=       | Notification emails                                   |
-| =bark-index.clj=        | HTML index page generation                            |
-| =bark-stats.clj=        | Statistics and data page generation                   |
-| =bark-docs.clj=         | Documentation page generation                         |
-| =bark-html.clj=         | HTML template helpers                                 |
-| =bark-maintenance.clj=  | Orphan email purge                                    |
-| =bark-email-test.clj=   | SMTP configuration test                               |
-| =validate-config.clj=   | Config validation                                     |
+| Script               | Role                                                  |
+|----------------------+-------------------------------------------------------|
+| =bark-common.clj=      | Shared utilities (bb)                                 |
+| =bark-export.clj=      | Report export (JSON, RSS, Org, patches, events, text) |
+| =bark-notify.clj=      | Notification emails                                   |
+| =bark-index.clj=       | HTML index page generation                            |
+| =bark-stats.clj=       | Statistics and data page generation                   |
+| =bark-docs.clj=        | Documentation page generation                         |
+| =bark-html.clj=        | HTML template helpers                                 |
+| =bark-maintenance.clj= | Orphan email purge                                    |
+| =bark-email-test.clj=  | SMTP configuration test                               |
+| =validate-config.clj=  | Config validation                                     |
 
 * bb tasks
 
