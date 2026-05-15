@@ -44,12 +44,15 @@
 
 (defn source-cfg-at-date
   "Effective source-cfg at `date`: source-level + period overrides.
-  Falls back to the last period if none covers `date` (defensive)."
+  Mails dated outside any declared period (in a gap, or past the
+  last period's :end) fall back to the source-level config without
+  any period override -- an expired period must not bleed past its
+  :to.  Without :periods, source-periods produces a single all-time
+  period covering every date."
   [source ^java.util.Date date]
-  (let [periods (source-periods source)
-        active  (or (period-at-date periods date)
-                    (last periods))]
-    (merge source (select-keys active overridable-keys))))
+  (let [active (period-at-date (source-periods source) date)]
+    (cond-> source
+      active (merge (select-keys active overridable-keys)))))
 
 (defn- validate-entry [idx period]
   (if-not (map? period)

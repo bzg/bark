@@ -92,12 +92,22 @@
     (is (= ["a@x.org"]
            (:maintainers (p/source-cfg-at-date src (d "2024-01-01")))))))
 
-(deftest source-cfg-at-date-falls-back-to-last-period-on-gap
-  (let [src {:periods [{:end "2020-01-01" :maintainers ["a@x"]}
-                      {:start "2023-01-01" :maintainers ["b@x"]}]}]
-    ;; date in the gap → defensive fallback to the last period
-    (is (= ["b@x"]
-           (:maintainers (p/source-cfg-at-date src (d "2022-01-01")))))))
+(deftest source-cfg-at-date-out-of-period-uses-source-level
+  (testing "date in a gap falls back to source-level, not the nearest period"
+    (let [src {:maintainers ["src@x"]
+               :periods     [{:end "2020-01-01" :maintainers ["a@x"]}
+                             {:start "2023-01-01" :maintainers ["b@x"]}]}]
+      (is (= ["src@x"]
+             (:maintainers (p/source-cfg-at-date src (d "2022-01-01")))))))
+  (testing "date past the last :end falls back to source-level"
+    (let [src {:maintainers ["src@x"]
+               :commands    {:closed {:words ["Closed"]}}
+               :periods     [{:start "2020-01-01" :end "2026-04-18"
+                              :commands {:closed {:words ["Done"]}}}]}
+          cfg (p/source-cfg-at-date src (d "2026-05-13"))]
+      (is (= ["src@x"] (:maintainers cfg)))
+      (is (= {:closed {:words ["Closed"]}} (:commands cfg))
+          "expired period's overrides do not bleed past its :to"))))
 
 ;; ---------------------------------------------------------------------------
 ;; validate-periods
