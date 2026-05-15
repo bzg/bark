@@ -187,3 +187,46 @@
                       {:email/subject     "Re: [BUG] something"
                        :email/in-reply-to "<parent@test.org>"
                        :email/body-text   inline-diff-body}))))))
+
+(def ^:private format-patch-attachment
+  "A .patch attachment that looks like real `git format-patch` output."
+  [{:attachment/filename "0001-fix-it.patch"
+    :attachment/content-type "text/x-patch"
+    :attachment/data (str "From 0123456789abcdef0123456789abcdef01234567 Mon Sep 17 00:00:00 2026\n"
+                          "From: Alice <alice@test.org>\n"
+                          "Date: Mon, 11 May 2026 09:00:00 +0000\n"
+                          "Subject: [PATCH] Fix it\n\n"
+                          "diff --git a/foo b/foo\n--- a/foo\n+++ b/foo\n@@ -1,1 +1,1 @@\n-old\n+new\n")}])
+
+(deftest format-patch-attachment-escapes-thread-test
+  (testing "Re: <no PATCH label> + real git-format-patch attachment -> :patch"
+    (is (= :patch (:type (detect/detect-report
+                          {:email/subject     "Re: Add font lock for structures"
+                           :email/in-reply-to "<parent@test.org>"
+                           :email/attachments format-patch-attachment})))))
+
+  (testing "Re: <no label> + format-patch attachment without [PATCH] in inner Subject -> nil"
+    (let [att-no-patch [{:attachment/filename "0001-demo.patch"
+                         :attachment/content-type "text/x-patch"
+                         :attachment/data (str "From 0123456789abcdef0123456789abcdef01234567 Mon Sep 17 00:00:00 2026\n"
+                                               "From: Alice <alice@test.org>\n"
+                                               "Subject: [DEMO] Just a demo\n\n"
+                                               "diff --git a/foo b/foo\n")}]]
+      (is (nil? (detect/detect-report
+                 {:email/subject     "Re: Something"
+                  :email/in-reply-to "<parent@test.org>"
+                  :email/attachments att-no-patch})))))
+
+  (testing "[BUG] subject + real format-patch attachment -> :bug (label still wins)"
+    (is (= :bug (:type (detect/detect-report
+                        {:email/subject     "[BUG] crash on save"
+                         :email/attachments format-patch-attachment})))))
+
+  (testing "Re: discussion + git-diff (no format-patch headers) attachment -> nil"
+    (let [att-diff [{:attachment/filename "debug.patch"
+                     :attachment/content-type "text/x-patch"
+                     :attachment/data "diff --git a/foo b/foo\n--- a/foo\n+++ b/foo\n@@ -1 +1 @@\n-old\n+new\n"}]]
+      (is (nil? (detect/detect-report
+                 {:email/subject     "Re: Discussion"
+                  :email/in-reply-to "<parent@test.org>"
+                  :email/attachments att-diff}))))))

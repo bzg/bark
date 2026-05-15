@@ -143,11 +143,59 @@
   (or (has-patch-attachment? (:email/attachments email))
       (has-inline-patch? (common/email-body-text email))))
 
+(def ^:private format-patch-start #"(?m)^From [0-9a-f]{40} ")
+
+(defn parse-format-patch-headers
+  "Parse `git format-patch` headers (`From`, `Subject`, `Date`) from
+  patch `text`.  Returns nil when `text` lacks the `^From <sha40>`
+  signature, else a map with the headers found (possibly empty)."
+  [text]
+  (when (and text (re-find format-patch-start text))
+    (let [lines (str/split-lines text)
+          header-lines (rest lines)
+          headers (loop [hs {} last-k nil [line & more] header-lines]
+                    (cond
+                      (nil? line)          hs
+                      (str/blank? line)    hs
+                      (re-matches #"^\s+.*" line)
+                      (recur (if last-k (update hs last-k str " " (str/trim line)) hs)
+                             last-k more)
+                      :else
+                      (let [[_ k v] (re-find #"^([^:]+):\s*(.*)" line)]
+                        (if k
+                          (let [lk (str/lower-case k)]
+                            (recur (assoc hs lk (str/trim v)) lk more))
+                          (recur hs last-k more)))))]
+      (cond-> {}
+        (get headers "from")    (assoc :author  (get headers "from"))
+        (get headers "subject") (assoc :subject (get headers "subject"))
+        (get headers "date")    (assoc :date    (get headers "date"))))))
+
+(defn format-patch-submission?
+  "True when the email ships an attachment whose contents look like a
+  real `git format-patch` output (has the `From <sha40>` signature)
+  AND whose internal `Subject:` header starts with `[PATCH]`.
+  Distinguishes a serious submission from a quick `git diff` debug
+  patch or quoted content -- the in-thread escape hatch for the
+  label-first rule."
+  [email]
+  (boolean
+   (some (fn [att]
+           (when (and (common/patch-file? (:attachment/filename att))
+                      (:attachment/data att))
+             (when-let [subj (:subject (parse-format-patch-headers
+                                        (:attachment/data att)))]
+               (re-find #"^\s*\[PATCH(\s|\])" subj))))
+         (:email/attachments email))))
+
 (defn detect-report
   "Detect a report's type from an email.  Priority:
     1. Subject label (strict regex, anchored at start) -- authoritative.
     2. `Re: [PATCH]` reply WITH patch content (v2/v3 workflow).
-    3. Patch content alone, only on fresh threads (no In-Reply-To)."
+    3. Real `git format-patch` attachment (inner Subject: [PATCH]) --
+       creates a :patch even in a reply, escape hatch for the label-
+       first rule when the patch is clearly meant to be applied.
+    4. Patch content alone, only on fresh threads (no In-Reply-To)."
   ([email] (detect-report email (compile-labels common/default-labels) nil))
   ([email patterns] (detect-report email patterns nil))
   ([email patterns allowed-types]
@@ -178,7 +226,11 @@
         (let [stripped (str/replace-first subject reply-prefix-re "")]
           (when (not= stripped subject)
             (allowed? (detect-patch-subject stripped patterns)))))
-      ;; 3. Fallback (no label, fresh thread).
+      ;; 3. Real git format-patch attachment -- escape hatch for replies
+      ;; where the outer subject doesn't carry [PATCH].
+      (when (format-patch-submission? email)
+        (allowed? {:type :patch :patch-source #{:attachment}}))
+      ;; 4. Fallback (no label, fresh thread).
       (when (and has-patch? (nil? in-reply-to))
         (allowed? {:type :patch
                    :patch-source (cond-> #{}
@@ -188,30 +240,6 @@
 ;; ---------------------------------------------------------------------------
 ;; Patch content extraction (pure)
 ;; ---------------------------------------------------------------------------
-
-(def ^:private format-patch-start #"(?m)^From [0-9a-f]{40} ")
-
-(defn parse-format-patch-headers [text]
-  (when (and text (re-find format-patch-start text))
-    (let [lines (str/split-lines text)
-          header-lines (rest lines)
-          headers (loop [hs {} last-k nil [line & more] header-lines]
-                    (cond
-                      (nil? line)          hs
-                      (str/blank? line)    hs
-                      (re-matches #"^\s+.*" line)
-                      (recur (if last-k (update hs last-k str " " (str/trim line)) hs)
-                             last-k more)
-                      :else
-                      (let [[_ k v] (re-find #"^([^:]+):\s*(.*)" line)]
-                        (if k
-                          (let [lk (str/lower-case k)]
-                            (recur (assoc hs lk (str/trim v)) lk more))
-                          (recur hs last-k more)))))]
-      (cond-> {}
-        (get headers "from")    (assoc :author  (get headers "from"))
-        (get headers "subject") (assoc :subject (get headers "subject"))
-        (get headers "date")    (assoc :date    (get headers "date"))))))
 
 (def ^:private inline-patch-start-patterns
   [#"^From [0-9a-f]{40} " #"^diff --git " #"^--- a/"])

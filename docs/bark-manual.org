@@ -30,7 +30,7 @@ Imagine Alice sends this email to a mailing list:
 Then Bob replies:
 
 : From: bob@email.com
-: Subject: [BUG] Wrong output
+: Subject: Re: [BUG] Wrong output
 : To: alice@email.com
 : Cc: project-mailing-list@lists.org
 : Date: Fri, 6 Mar 2026 16:38:42 +0000
@@ -42,7 +42,7 @@ Then Bob replies:
 And Eve, the maintainer, concludes:
 
 : From: eve@email.com
-: Subject: [BUG] Wrong output
+: Subject: Re: [BUG] Wrong output
 : To: project-mailing-list@lists.org
 : Date: Fri, 6 Mar 2026 16:42:03 +0000
 : 
@@ -93,15 +93,18 @@ BARK is for: storing reports sent to a mailbox in a database.
 * As a user
 ** Bug, Patch, Request
 
-As a user, you can report bugs, propose patches and make other
-requests:
+The subject label decides the report's type: =[BUG]=, =[PATCH]=,
+=[POLL]= / =[TODO]= for requests (and a few more, see
+[[#report-types][report types]] below).
 
-- You create a bug report by adding =[BUG]= to the subject.
-- You send a patch by adding an inline or attached patch, usually with
-  [PATCH] in the subject.
-- You can also create a =[POLL]= or a =[TODO]=.
+A label-less email with patch content (inline diff or =.patch=
+attachment) is also recognised as a patch, but only in a new thread,
+with no =In-Reply-To=. To promote a reply as patch, you need to change
+the subject and add the =[PATCH]= prefix or to attach a proper patch,
+real =git format-patch= output.
 
-See below the list of [[#report-types][report types]].
+Attaching a patch to a =[BUG]= or =[FR]= email does not change the
+report's type; the patch is stored as metadata on the parent.
 
 ** Setting a topic
 
@@ -151,7 +154,7 @@ with the matching "Not" command:
 : Not urgent.
 : Not important.
 
-Only the person who set the state can undo it this way — except
+Only the person who set the state can undo it this way -- except
 maintainers, who can undo anyone's action (see [[#undoing-updates][Undoing updates]] below).
 
 ** Superseding a report
@@ -208,19 +211,23 @@ email post several links.  Works on closed reports.  To undo:
 
 ** Resolving a bug or request with a patch
 
-A patch sent in reply to a bug or request links the two reports and
-credits you for what it resolves:
+Replying to an open bug or request with patch content (inline diff
+or =.patch=/=.diff= attachment) credits you as =Acked= + =Owned= on
+the *nearest* parent report.  An existing explicit setter is
+preserved; opt out with =Not acked.= / =Not owned.=.
 
-| What you do                  | Effect on the bug/request     |
-|------------------------------+-------------------------------|
-| Send the patch               | =Acked= + =Owned= by you          |
-| =Closed.= the patch (applied)  | =Closed=, reason =:resolved=      |
-| =Cancelled.= the patch         | Auto-acked/owned removed      |
-| =Superseded-by:= a newer patch | =Owned= transfers to new author |
+When the reply also produces a separate =:patch= report (labelled
+=Re: [PATCH]=, or a real =git format-patch= attachment), the patch is
+linked to the parent via =:resolves=.  Closing that patch with
+=Applied.= / =Fixed.= propagates the closure to the parent (reason
+=:resolved=).  Cancelling it retracts the auto-credit; superseding it
+transfers ownership to the new author.
 
-Only the *nearest* bug or request in the thread is affected.  An
-existing explicit =Acked= or =Owned= setter is preserved (the link
-is still posted).  To opt out: =Not acked.= / =Not owned.=
+A bare diff in a thread that does not become a patch report does not
+propagate -- the parent must still be closed manually.
+
+The source-level =:patch-triggers? false= flag disables both the
+implicit credit and the closure propagation.
 
 ** Voting on requests
 
@@ -336,15 +343,15 @@ the original setter or by any maintainer.  Either retracts the
 relation, reopens the closed report, and clears the close-reason; the
 =:related-to= link is kept.
 
-*** Automatic supersession of patches and diffs
+*** Automatic supersession of patches
 
-When a patch or inline diff creates a new report in a thread where an
-earlier open patch report exists with the same base subject (ignoring
-=Re:=, =Fwd:= prefixes and =[TAG]= brackets), the new report automatically
-supersedes the previous one.  This covers re-sent patches without
-explicit version numbers.
+When a new patch report is created in a thread where an earlier open
+patch report shares the same base subject (ignoring =Re:= / =Fwd:=
+prefixes and =[TAG]= brackets), the new report automatically supersedes
+the previous one.  This covers re-sent patches without explicit version
+numbers.
 
-For example, in this thread:
+For example:
 
 #+begin_example
 [PATCH] A new feature          : patch report (1)
@@ -352,11 +359,15 @@ For example, in this thread:
     Re: [PATCH] A new feature  : patch report (3), supersedes (2)
 #+end_example
 
-Only the most recent patch (3) remains open. The same applies to
-emails containing an inline diff without a =[PATCH]= tag.
+Only the most recent patch (3) remains open.
 
-Note: patches with explicit version numbers (=[PATCH v2]=) are handled
-by a separate mechanism that matches on version and topic.
+The reply still needs to qualify as a patch report (=Re: [PATCH]= with
+content, or a real =git format-patch= attachment in the reply) -- a
+bare =Re:= with a quoted diff does not create a new report and so
+does not supersede anything.
+
+Patches with explicit version numbers (=[PATCH v2]=) are handled by
+a separate mechanism that matches on version and topic.
 
 ** Acting as an update proxy
 
@@ -555,9 +566,9 @@ Each entry is a map with any of =:words=, =:scope=, =:report-types=
 
 - =:scope= overrides the default permission for that command. Possible
   values:
-  - =:user= — anyone
-  - =:maintainer= — maintainer only
-  - =:setter-or-maintainer= — the address that previously set the
+  - =:user= -- anyone
+  - =:maintainer= -- maintainer only
+  - =:setter-or-maintainer= -- the address that previously set the
     attribute, or any maintainer (maintainers keep their administrative
     override)
 
@@ -615,46 +626,45 @@ timeline logic.
 
 /Commands/ can all be sent publicly, by users or maintainers.  In the
 "Permission" column, "setter or maintainer" means the user who
-previously set the attribute — or any maintainer (maintainers retain a
+previously set the attribute -- or any maintainer (maintainers retain a
 full override).
 
-| ID             | Syntax / Words                                 | Permission           | Report types        |
-|----------------+------------------------------------------------+----------------------+---------------------|
-| =:closed=        | =Canceled=, =Cancelled=, =Expired=, =Closed=, =Resolved= | any user             | all                 |
-| =:closed=        | =Fixed=                                          | any user             | bug                 |
-| =:closed=        | =Applied=                                        | any user             | patch               |
-| =:closed=        | =Completed=                                      | any user             | request             |
-| =:acked=         | =Acked=, =Confirmed=, =Approved=                     | any user             | bug, patch, request |
-| =:owned=         | =Owned=                                          | any user             | bug, patch, request |
-|----------------+------------------------------------------------+----------------------+---------------------|
-| =:urgent=        | =Urgent.=                                        | any user             | all                 |
-| =:important=     | =Important.=                                     | any user             | all                 |
-| =:topic=         | =Topic: word=                                    | any user             | all                 |
-| =:superseded-by= | =Superseded-by: <msg-id>=                        | any user             | all                 |
-| =:supersedes=    | =Supersedes: <msg-id>=                           | any user             | all                 |
-| =:deadline=      | =Deadline: 2025-03-19= or =Deadline: 30d=          | any user             | bug, patch, request |
-| =:expiry=        | =Expiry: 2025-06-15= or =Expiry: 30d=              | any user             | bug, patch, request |
-|----------------+------------------------------------------------+----------------------+---------------------|
-| vote up        | =+1= or =1+=                                       | any user (once)      | request             |
-| vote down      | =-1= or =1-=                                       | any user (once)      | request             |
-| vote null      | =+0= / =0+= / =-0= / =0-=                              | any user (once)      | request             |
-|----------------+------------------------------------------------+----------------------+---------------------|
-| =:unclosed=      | =Not closed=                                     | setter or maintainer | all                 |
-| =:unurgent=      | =Not urgent=                                     | setter or maintainer | all                 |
-| =:unimportant=   | =Not important=                                  | setter or maintainer | all                 |
-| =:untopic=       | =No topic=                                       | setter or maintainer | all                 |
-| =:unsuperseded=  | =Not superseded=                                 | setter or maintainer | all                 |
-| =:unsupersedes=  | =Not superseding=                                | setter or maintainer | all                 |
-| =:unacked=       | =Not acked=                                      | setter or maintainer | bug, patch, request |
-| =:unowned=       | =Not owned=                                      | setter or maintainer | bug, patch, request |
-| =:undeadline=    | =No deadline=                                    | setter or maintainer | bug, patch, request |
-| =:unexpiry=      | =No expiry=                                      | setter or maintainer | bug, patch, request |
-|----------------+------------------------------------------------+----------------------+---------------------|
-| =:closed-by=     | =Closed-by: addr@host=                           | maintainer           | all                 |
-| =:urgent-by=     | =Urgent-by: addr@host=                           | maintainer           | all                 |
-| =:important-by=  | =Important-by: addr@host=                        | maintainer           | all                 |
-| =:acked-by=      | =Acked-by: addr@host=                            | maintainer           | bug, patch, request |
-| =:owned-by=      | =Owned-by: addr@host=                            | maintainer           | bug, patch, request |
+| ID                 | Syntax / Words                              | Permission           | Report types        |
+|--------------------+---------------------------------------------+----------------------+---------------------|
+| =:closed= (resolved) | =Closed=, =Resolved=, =Applied=, =Fixed=, =Completed= | any user             | all                 |
+| =:closed= (canceled) | =Canceled=, =Cancelled=                         | any user             | all                 |
+| =:closed= (expired)  | =Expired=                                     | any user             | all                 |
+| =:acked=             | =Acked=, =Confirmed=, =Approved=                  | any user             | bug, patch, request |
+| =:owned=             | =Owned=                                       | any user             | bug, patch, request |
+|--------------------+---------------------------------------------+----------------------+---------------------|
+| =:urgent=            | =Urgent.=                                     | any user             | all                 |
+| =:important=         | =Important.=                                  | any user             | all                 |
+| =:topic=             | =Topic: word=                                 | any user             | all                 |
+| =:superseded-by=     | =Superseded-by: <msg-id>=                     | any user             | all                 |
+| =:supersedes=        | =Supersedes: <msg-id>=                        | any user             | all                 |
+| =:deadline=          | =Deadline: 2025-03-19= or =Deadline: 30d=       | any user             | bug, patch, request |
+| =:expiry=            | =Expiry: 2025-06-15= or =Expiry: 30d=           | any user             | bug, patch, request |
+|--------------------+---------------------------------------------+----------------------+---------------------|
+| vote up            | =+1= or =1+=                                    | any user (once)      | request             |
+| vote down          | =-1= or =1-=                                    | any user (once)      | request             |
+| vote null          | =+0= / =0+= / =-0= / =0-=                           | any user (once)      | request             |
+|--------------------+---------------------------------------------+----------------------+---------------------|
+| =:unclosed=          | =Not closed=                                  | setter or maintainer | all                 |
+| =:unurgent=          | =Not urgent=                                  | setter or maintainer | all                 |
+| =:unimportant=       | =Not important=                               | setter or maintainer | all                 |
+| =:untopic=           | =No topic=                                    | setter or maintainer | all                 |
+| =:unsuperseded=      | =Not superseded=                              | setter or maintainer | all                 |
+| =:unsupersedes=      | =Not superseding=                             | setter or maintainer | all                 |
+| =:unacked=           | =Not acked=                                   | setter or maintainer | bug, patch, request |
+| =:unowned=           | =Not owned=                                   | setter or maintainer | bug, patch, request |
+| =:undeadline=        | =No deadline=                                 | setter or maintainer | bug, patch, request |
+| =:unexpiry=          | =No expiry=                                   | setter or maintainer | bug, patch, request |
+|--------------------+---------------------------------------------+----------------------+---------------------|
+| =:closed-by=         | =Closed-by: addr@host=                        | maintainer           | all                 |
+| =:urgent-by=         | =Urgent-by: addr@host=                        | maintainer           | all                 |
+| =:important-by=      | =Important-by: addr@host=                     | maintainer           | all                 |
+| =:acked-by=          | =Acked-by: addr@host=                         | maintainer           | bug, patch, request |
+| =:owned-by=          | =Owned-by: addr@host=                         | maintainer           | bug, patch, request |
 #+TBLFM: $1=:closed= (bug)
 
 ** All controls
@@ -799,7 +809,7 @@ Notify: on
 
 ** Setting preferences
 
-Notification preferences are set via the same =Notify:= conrol.
+Notification preferences are set via the same =Notify:= control.
 Parameters can be combined on a single line:
 
 | Parameter | Description                        | Default |
@@ -813,14 +823,14 @@ Parameters can be combined on a single line:
 Examples:
 
 #+begin_example
-Notify: d:7                 — every 7 days
-Notify: d:1                 — daily
-Notify: p:1                 — only important reports
-Notify: d:3 s:4 p:2         — every 3 days, only open reports with priority >= 2
+Notify: d:7                 -- every 7 days
+Notify: d:1                 -- daily
+Notify: p:1                 -- only important reports
+Notify: d:3 s:4 p:2         -- every 3 days, only open reports with priority >= 2
 #+end_example
 
-Like role controls, =Notify:= controls are only processed from direct
-emails, not from the mailing list.
+Unlike role controls, =Notify:= controls are personal and accepted on
+any channel (private email or mailing list).
 
 * Config
 
@@ -954,11 +964,11 @@ All rules are conjunctive: a report is only expired when *all*
 conditions are met.  Only =:inactive-after= is required; the others are
 optional filters.
 
-| =:inactive-after= value | Trigger                                                              |
-|-----------------------+----------------------------------------------------------------------|
+| =:inactive-after= value | Trigger                                                                |
+|-----------------------+------------------------------------------------------------------------|
 | Duration (e.g. =30d=)   | Last email in the thread is older than the duration (any reply resets) |
-| ISO date              | The fixed date has passed, regardless of activity                    |
-| =:deadline=             | The report's deadline is in the past (no deadline => never expires)   |
+| ISO date              | The fixed date has passed, regardless of activity                      |
+| =:deadline=             | The report's deadline is in the past (no deadline => never expires)    |
 
 The =:max-status= value uses an activity score that only counts acked
 and owned (since expiry candidates are always open reports):
@@ -995,23 +1005,23 @@ report has an explicit expiry date, only that date is checked.
          :max-size 1048576}       ;; skip emails > 1 MB (optional)
 #+end_src
 
-- =:fetch= — first-run fetch window (no watermark yet).  Exactly one
+- =:fetch= -- first-run fetch window (no watermark yet).  Exactly one
   of three disjoint map shapes (no key mixing, empty map rejected);
   default is ={:limit 50}=:
 
-  | Config form                       | CLI shortcut            | Meaning                                                   |
-  |-----------------------------------+-------------------------+-----------------------------------------------------------|
-  | ={:limit N}=                        | =--fetch 50=              | Latest N messages (positive integer)                      |
-  | ={:since "Nd"}=                     | =--fetch 30d=             | Relative duration from now (=Nd=, =Nw=, =Nm=, =Ny=)             |
-  | ={:start "yyyy-MM-dd" :end "..."}=  | =--fetch 2020-01-01=      | Absolute half-open window =[start, end)=; both keys optional, at least one required |
+  | Config form                      | CLI shortcut       | Meaning                                                                           |
+  |----------------------------------+--------------------+-----------------------------------------------------------------------------------|
+  | ={:limit N}=                       | =--fetch 50=         | Latest N messages (positive integer)                                              |
+  | ={:since "Nd"}=                    | =--fetch 30d=        | Relative duration from now (=Nd=, =Nw=, =Nm=, =Ny=)                                       |
+  | ={:start "yyyy-MM-dd" :end "..."}= | =--fetch 2020-01-01= | Absolute half-open window =[start, end)=; both keys optional, at least one required |
 
-- =:max-size= — skip emails larger than N bytes.  No limit by default.
+- =:max-size= -- skip emails larger than N bytes.  No limit by default.
 
 Text content of =.patch=, =.diff=, =.ics=, =text/plain= and =text/x-log=
-attachments is extracted and stored in the database.  Attachments larger
-than 1 MB (1,048,576 characters) are skipped with a warning — only
-metadata (filename, size, content-type) is kept.  Override the limit
-with =:max-attachment-size= in the =:ingest= config section.
+attachments is extracted and stored in the database. Attachments
+larger than 1 MB (1,048,576 characters) are skipped with a warning --
+only metadata (filename, size, content-type) is kept. Override the
+limit with =:max-attachment-size= in the =:ingest= config section.
 
 ** Maintenance
 
@@ -1037,16 +1047,16 @@ maintainer.
 
 Two practical ways to keep BARK running:
 
-- *Watch mode under systemd* — the daemon stays up, reacts to IMAP
-  IDLE or Maildir filesystem events, reconnects on failure.  A
-  ready-to-edit unit file lives in =docs/deploy/bark.service=.  Install to
+- *Watch mode under systemd* -- the daemon stays up, reacts to IMAP IDLE
+  or Maildir filesystem events, reconnects on failure. A ready-to-edit
+  unit file lives in =docs/deploy/bark.service=. Install to
   =/etc/systemd/system/bark.service= (root) or =~/.config/systemd/user/=
   (user), then =systemctl [--user] daemon-reload && systemctl [--user]
   enable --now bark=.
 
-- *Batch mode under cron* — =clj -M:run= is a one-shot: connect,
-  fetch new mail since the watermark, digest, expire, exit.  Chain
-  =bb export= and =bb notify= after it.  An example crontab lives in
+- *Batch mode under cron* -- =clj -M:run= is a one-shot: connect, fetch
+  new mail since the watermark, digest, expire, exit. Chain =bb export=
+  and =bb notify= after it. An example crontab lives in
   =docs/deploy/crontab.example=.
 
 Both modes can be backed by an uberjar instead of =clj -M:run= to
@@ -1057,9 +1067,9 @@ avoid paying the Clojure startup cost on every invocation; see the
 
 Historical evolution (vocabulary, syntax, maintainers) is declared
 per-source via =:periods= entries --- see [[#source-periods][Source periods]] for the full
-format and rules.  At startup, =bark= materialises the tenure history
-by syncing at each period boundary, and resolves the effective config
-for every email based on its date.
+format and rules. At startup, =bark= materialises the tenure history by
+syncing at each period boundary, and resolves the effective config for
+every email based on its date.
 
 To replay from scratch after editing periods (or after any config
 change you want reflected retroactively), wipe the DB:
@@ -1068,8 +1078,8 @@ change you want reflected retroactively), wipe the DB:
 clj -M:run -- --fresh   # interactive confirm, then full replay
 #+end_src
 
-=bb test-config= validates the =:periods= on each source: contiguity,
-ISO date format, =:start= strictly before =:end=.
+=bb test-config= validates the =:periods= on each source: contiguity, ISO
+date format, =:start= strictly before =:end=.
 
 ** Notifications (SMTP)
 
@@ -1094,7 +1104,7 @@ ISO date format, =:start= strictly before =:end=.
                      :level :error}}
 #+end_src
 
-Log file rotation is automatic.  Email alerts require SMTP to be
+Log file rotation is automatic. Email alerts require SMTP to be
 configured.
 
 * CLI reference
