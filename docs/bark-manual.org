@@ -153,6 +153,13 @@ report (e.g. =[BUG] foo=) annotates that report; any reply hands
 its commands to the nearest report in the thread, even when the
 reply itself creates a new report (e.g. a =Re: [PATCH]= v2).
 
+Two relation commands -- =Supersedes:= and =Related-to:= -- name
+an explicit external message-id, so their intent is unambiguous.
+When a reply *also* creates a new report (e.g. a fresh =[BUG]= filed
+as =Re:= of an existing discussion), these two commands apply to
+the *new* report rather than the thread parent.  Every other command
+in the same body still flows to the thread parent.
+
 See the [[#all-commands][complete list of commands]] for the full registry.
 
 ** Retracting your own updates
@@ -680,12 +687,12 @@ timeline logic.
 ** All commands
 
 A _command_ is a keyword sent in a public reply, by a user or a
-maintainer.  In the "Permission" column, "setter or maintainer"
-denotes the user who previously set the attribute; a maintainer
-retains a full override in every case.
+maintainer. In the "Permission" column, "setter or maintainer" denotes
+the user who previously set the attribute; a maintainer retains a full
+override in every case.
 
-Triggers act on existing reports only.  Annotations also apply to
-the carrying mail when that mail itself becomes a new report.
+Triggers act on existing reports only. Annotations also apply to the
+carrying mail when that mail itself becomes a new report.
 
 *** Triggers
 

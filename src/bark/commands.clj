@@ -1154,71 +1154,109 @@
           (:report/close-reason word-result) (assoc :report/close-reason
                                                     (:report/close-reason word-result)))))))
 
+(def carrier-eligible-ids
+  "Command ids whose intent is unambiguously cross-report: when carried
+  by a mail that also creates a new report, they apply to that new
+  report rather than the thread parent.  Restricted to two relation
+  annotations with explicit external mids:
+  - :supersedes  -- 'this new report supersedes <old>'
+  - :related-to  -- 'this new report is related to <other>'
+
+  Excluded by design:
+  - :superseded-by / :duplicate-of (no one opens a new report just to
+    declare it's superseded or a duplicate);
+  - state-change triggers (close/ack/own) -- ambiguous on a brand-new
+    report;
+  - non-relation annotations (urgent/important/topic/deadline/expiry)
+    -- the intent is usually 'this thread', not the new report.
+
+  Unsets (:unsupersedes, :unrelated-to) are intentionally NOT in the
+  carrier set: there is nothing to undo on a freshly-created report."
+  #{:supersedes :related-to})
+
 (defn apply-commands!
   "Apply commands from `email` against `report-eid`.
   A reply shipping patch content also fires an implicit `Acked. Owned.`,
   gated by :patch-triggers? and report-type ∈ #{:bug :request}.
-  Returns true if anything was applied."
-  [conn report-eid report-type email source-map roles delivery]
-  (let [body-text   (common/email-body-text email)
-        db          (d/db conn)
-        from-addr   (:email/author-address email)
-        eid         (:db/id email)
-        report-mid  (:report/message-id (d/entity db report-eid))
-        src-name    (d/q '[:find ?src . :in $ ?rid
-                           :where [?rid :report/email ?e] [?e :email/source ?src]] db report-eid)
-        source-cfg  (when-let [cfg (get source-map src-name)]
-                      (periods/source-cfg-at-date cfg (:email/date-sent email)))
-        src-cmds    (build-source-commands source-cfg)
-        overrides   (:overrides src-cmds)
-        is-maint?   (common/maintainer? roles from-addr (:email/date-sent email))
-        fail-ctx    (when (and from-addr src-name)
-                      {:source     src-name
-                       :from-addr  from-addr
-                       :email-date (:email/date-sent email)
-                       :report-mid report-mid})
-        body-words  (when body-text
-                      (detect-words report-type body-text src-cmds))
-        ;; A reply shipping patch content credits its author on the parent
-        ;; bug/request -- NOT on a parent patch report (a v2 reply would
-        ;; otherwise spuriously mark v1 as owned by v2's author; super-
-        ;; session handles patch->patch ownership transfer separately).
-        ;; The reply-guard prevents a root [BUG]+.patch from self-crediting.
-        implicit    (when (and (contains? #{:bug :request} report-type)
-                               (common/patch-triggers? source-cfg)
-                               (:email/in-reply-to email)
-                               (detect/has-patch-content? email))
-                      {:report/acked true :report/owned true})
-        ;; Acked is a second-party validation: the reporter cannot ack
-        ;; their own report.  Owned, by contrast, may stay with the
-        ;; reporter ("I filed this and I'll fix it").
-        reporter    (some-> (d/pull db [{:report/email [:email/author-address]}]
-                                    report-eid)
-                            :report/email :email/author-address str/lower-case)
-        self-ack?   (and from-addr reporter (= (str/lower-case from-addr) reporter))
-        word-result (cond-> (merge implicit body-words)
-                      self-ack? (dissoc :report/acked)
-                      :always   (filter-words-by-scope overrides is-maint? fail-ctx))
-        lines       (when body-text
-                      (->> (detect-lines report-type body-text overrides
-                                         (:email/date-sent email)
-                                         (:line-patterns src-cmds))
-                           (remove (fn [d]
-                                     (and (= :set (:action d))
-                                          (= :report/acked (:attr d))
-                                          reporter
-                                          (= (some-> (:email-address d) str/lower-case)
-                                             reporter))))
-                           vec))
-        closed?     (some? (:report/closed (d/pull db [:report/closed] report-eid)))]
+  Returns true if anything was applied.
+
+  `line-filter` is one of:
+    nil           -- process every command, no filtering.
+    :carrier-only -- process ONLY lines whose id is in
+                     `carrier-eligible-ids`; skip words, votes,
+                     and implicit ack/own.  Used when this email
+                     is a reply that also creates a new report:
+                     Supersedes:/Related-to: in its body apply to
+                     the new report unambiguously, the rest goes
+                     to the thread parent via a separate call.
+    :no-carrier   -- process everything EXCEPT carrier-eligible
+                     lines.  Used for the thread-parent call in the
+                     same scenario, so carrier lines are not
+                     double-applied."
+  [conn report-eid report-type email source-map roles delivery line-filter]
+  (let [carrier-only? (= :carrier-only line-filter)
+        no-carrier?   (= :no-carrier   line-filter)
+        body-text     (common/email-body-text email)
+        db            (d/db conn)
+        from-addr     (:email/author-address email)
+        eid           (:db/id email)
+        report-mid    (:report/message-id (d/entity db report-eid))
+        src-name      (d/q '[:find ?src . :in $ ?rid
+                             :where [?rid :report/email ?e] [?e :email/source ?src]] db report-eid)
+        source-cfg    (when-let [cfg (get source-map src-name)]
+                        (periods/source-cfg-at-date cfg (:email/date-sent email)))
+        src-cmds      (build-source-commands source-cfg)
+        overrides     (:overrides src-cmds)
+        is-maint?     (common/maintainer? roles from-addr (:email/date-sent email))
+        fail-ctx      (when (and from-addr src-name)
+                        {:source     src-name
+                         :from-addr  from-addr
+                         :email-date (:email/date-sent email)
+                         :report-mid report-mid})
+        ;; In :carrier-only mode we don't credit anyone on the brand-
+        ;; new report -- words, votes, implicit ack/own all go to the
+        ;; thread parent through the sibling :no-carrier call.
+        body-words    (when (and body-text (not carrier-only?))
+                        (detect-words report-type body-text src-cmds))
+        implicit      (when (and (not carrier-only?)
+                                 (contains? #{:bug :request} report-type)
+                                 (common/patch-triggers? source-cfg)
+                                 (:email/in-reply-to email)
+                                 (detect/has-patch-content? email))
+                        {:report/acked true :report/owned true})
+        reporter      (some-> (d/pull db [{:report/email [:email/author-address]}]
+                                      report-eid)
+                              :report/email :email/author-address str/lower-case)
+        self-ack?     (and from-addr reporter (= (str/lower-case from-addr) reporter))
+        word-result   (cond-> (merge implicit body-words)
+                        self-ack? (dissoc :report/acked)
+                        :always   (filter-words-by-scope overrides is-maint? fail-ctx))
+        line-id-ok?   (cond
+                        carrier-only? carrier-eligible-ids
+                        no-carrier?   (complement carrier-eligible-ids)
+                        :else         (constantly true))
+        lines         (when body-text
+                        (->> (detect-lines report-type body-text overrides
+                                           (:email/date-sent email)
+                                           (:line-patterns src-cmds))
+                             (filter #(line-id-ok? (:id %)))
+                             (remove (fn [d]
+                                       (and (= :set (:action d))
+                                            (= :report/acked (:attr d))
+                                            reporter
+                                            (= (some-> (:email-address d) str/lower-case)
+                                               reporter))))
+                             vec))
+        closed?       (some? (:report/closed (d/pull db [:report/closed] report-eid)))]
     (if closed?
       (do (when (seq lines)
             (try-unclosed! conn report-eid lines eid is-maint? from-addr fail-ctx))
           (boolean (seq lines)))
-      (let [voted? (when-let [vote (and (= :request report-type) from-addr body-text
-                                        (detect-vote body-text))]
-                     (apply-vote! conn report-eid from-addr vote email delivery source-cfg)
-                     true)]
+      (let [voted? (when (and (not carrier-only?) body-text)
+                     (when-let [vote (and (= :request report-type) from-addr
+                                          (detect-vote body-text))]
+                       (apply-vote! conn report-eid from-addr vote email delivery source-cfg)
+                       true))]
         (apply-words! conn report-eid word-result eid (:email/message-id email) from-addr
                       source-cfg)
         (apply-lines! conn report-eid lines eid from-addr is-maint? fail-ctx)

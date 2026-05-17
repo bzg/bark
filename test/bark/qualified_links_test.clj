@@ -158,7 +158,7 @@
                              :email/body-text (str "Hi.\n\nSuperseded-by: " tgt-mid "\n")}]
           ;; Apply directive on src-eid
           (commands/apply-commands! conn src-eid :patch cmd-email
-                                    {} {} :direct)
+                                    {} {} :direct nil)
           (let [src-after (d/pull (d/db conn)
                                   [:report/closed :report/close-reason] src-eid)
                 rels (get-relations (d/db conn) src-eid)
@@ -189,7 +189,7 @@
                              :email/date-sent #inst "2026-02-03"
                              :email/body-text (str "Superseded-by: " patch-mid "\n")}]
           (commands/apply-commands! conn bug-eid :bug cmd-email
-                                    {} {} :direct)
+                                    {} {} :direct nil)
           (let [src-after (d/pull (d/db conn)
                                   [:report/closed :report/close-reason] bug-eid)
                 rels (get-relations (d/db conn) bug-eid)
@@ -217,7 +217,7 @@
                          :email/date-sent #inst "2026-02-03"
                          :email/body-text (str "Superseded-by: " tgt-mid "\n")}
               _ (commands/apply-commands! conn src-eid :patch set-email
-                                          {} {} :direct)
+                                          {} {} :direct nil)
               ;; Now retract -- same setter (alice)
               unset-email-eid (mk-email! conn "<unset@x>" "alice@x" #inst "2026-02-04")
               unset-email {:db/id unset-email-eid
@@ -225,7 +225,7 @@
                            :email/date-sent #inst "2026-02-04"
                            :email/body-text (str "Not superseded-by: " tgt-mid "\n")}]
           (commands/apply-commands! conn src-eid :patch unset-email
-                                    {} {} :direct)
+                                    {} {} :direct nil)
           (let [src-after (d/pull (d/db conn)
                                   [:report/closed :report/close-reason] src-eid)
                 ;; All relations of kind :supersedes from src-eid should be inactive
@@ -268,7 +268,7 @@
                          :email/date-sent #inst "2026-02-03"
                          :email/body-text (str "Superseded-by: " tgt-mid "\n")}
               _ (commands/apply-commands! conn src-eid :patch set-email
-                                          {} {} :direct)
+                                          {} {} :direct nil)
               ;; Alice tries to retract with the WRONG mid
               unset-email-eid (mk-email! conn "<unset@x>" "alice@x" #inst "2026-02-04")
               unset-email {:db/id unset-email-eid
@@ -276,7 +276,7 @@
                            :email/date-sent #inst "2026-02-04"
                            :email/body-text (str "Not superseded-by: " other-mid "\n")}]
           (commands/apply-commands! conn src-eid :patch unset-email
-                                    {} {} :direct)
+                                    {} {} :direct nil)
           (let [src-after (d/pull (d/db conn)
                                   [:report/closed :report/close-reason] src-eid)
                 active-supersedes (d/q '[:find [?e ...] :in $ ?from
@@ -311,7 +311,7 @@
               recorded    (atom [])]
           (with-redefs [commands/record-failure! (fn [entry] (swap! recorded conj entry))]
             (commands/apply-commands! conn bug-eid :bug cmd-email
-                                      {} {} :direct))
+                                      {} {} :direct nil))
           (let [after (d/pull (d/db conn)
                               [:report/closed :report/close-reason] bug-eid)]
             (is (nil? (:report/closed after))
@@ -346,7 +346,7 @@
                              :email/date-sent #inst "2026-03-03"
                              :email/body-text (str "Duplicate-of: " orig-mid "\n")}]
           (commands/apply-commands! conn dup-eid :bug cmd-email
-                                    {} {} :direct)
+                                    {} {} :direct nil)
           (let [src-after (d/pull (d/db conn)
                                   [:report/closed :report/close-reason] dup-eid)
                 rels (get-relations (d/db conn) dup-eid)
@@ -377,7 +377,7 @@
                              :email/date-sent #inst "2026-03-03"
                              :email/body-text (str "Duplicate-of: " bug-mid "\n")}]
           (commands/apply-commands! conn req-eid :request cmd-email
-                                    {} {} :direct)
+                                    {} {} :direct nil)
           (let [src-after (d/pull (d/db conn)
                                   [:report/closed :report/close-reason] req-eid)
                 rels (get-relations (d/db conn) req-eid)]
@@ -403,14 +403,14 @@
                          :email/author-address "carol@x"
                          :email/date-sent #inst "2026-03-03"
                          :email/body-text (str "Duplicate-of: " orig-mid "\n")}
-              _ (commands/apply-commands! conn dup-eid :bug set-email {} {} :direct)
+              _ (commands/apply-commands! conn dup-eid :bug set-email {} {} :direct nil)
               ;; Carol retracts (same setter)
               unset-email-eid (mk-email! conn "<unset@x>" "carol@x" #inst "2026-03-04")
               unset-email {:db/id unset-email-eid
                            :email/author-address "carol@x"
                            :email/date-sent #inst "2026-03-04"
                            :email/body-text (str "Not duplicate-of: " orig-mid "\n")}]
-          (commands/apply-commands! conn dup-eid :bug unset-email {} {} :direct)
+          (commands/apply-commands! conn dup-eid :bug unset-email {} {} :direct nil)
           (let [after (d/pull (d/db conn)
                               [:report/closed :report/close-reason] dup-eid)
                 active-dup (d/q '[:find [?e ...] :in $ ?from
@@ -453,7 +453,7 @@
                              :email/date-sent #inst "2026-04-04"
                              :email/body-text (str "Related-to: " comment-mid "\n")}]
           (commands/apply-commands! conn other-eid :bug cmd-email
-                                    {} {} :direct)
+                                    {} {} :direct nil)
           (let [rels (get-relations (d/db conn) other-eid)
                 related (filter #(= :related-to (:kind %)) rels)]
             (is (some #(or (= bug-eid (:to %))
@@ -512,7 +512,7 @@
                              :email/body-text "Closed.\n"
                              :email/message-id "<cmd@x>"}]
           (commands/apply-commands! conn patch-eid :patch cmd-email
-                                    {} {} :direct)
+                                    {} {} :direct nil)
           (let [bug-state (read-attrs (d/db conn) bug-eid
                                        [:report/closed :report/close-reason])
                 patch-state (read-attrs (d/db conn) patch-eid
@@ -544,7 +544,7 @@
                              :email/body-text "Cancelled.\n"
                              :email/message-id "<cmd@x>"}]
           (commands/apply-commands! conn patch-eid :patch cmd-email
-                                    {} {} :direct)
+                                    {} {} :direct nil)
           (let [bug-state (read-attrs (d/db conn) bug-eid
                                        [:report/acked :report/owned
                                         :report/acked-address :report/owned-address])]
@@ -583,7 +583,7 @@
                              :email/body-text "Cancelled.\n"
                              :email/message-id "<cmd@x>"}]
           (commands/apply-commands! conn patch-eid :patch cmd-email
-                                    {} {} :direct)
+                                    {} {} :direct nil)
           (let [bug-state (read-attrs (d/db conn) bug-eid
                                        [:report/owned-address])]
             (is (= "carol@x" (:report/owned-address bug-state))
@@ -616,7 +616,7 @@
                              :email/source "test"
                              :email/body-text "Superseded-by: <p2@x>\n"
                              :email/message-id "<cmd@x>"}]
-          (commands/apply-commands! conn p1-eid :patch cmd-email {} {} :direct)
+          (commands/apply-commands! conn p1-eid :patch cmd-email {} {} :direct nil)
           (let [bug-state (read-attrs (d/db conn) bug-eid
                                        [:report/owned-address :report/acked-address])
                 rels-bug (get-relations (d/db conn) bug-eid)]
@@ -654,7 +654,7 @@
                         :email/date-sent #inst "2026-04-04" :email/source "test"
                         :email/body-text "Superseded-by: <p2@x>\n"
                         :email/message-id "<cmd1@x>"}
-              _ (commands/apply-commands! conn p1-eid :patch cmd1 {} {} :direct)
+              _ (commands/apply-commands! conn p1-eid :patch cmd1 {} {} :direct nil)
               ;; Now P3 arrives
               p3-email-map {:db/id (mk-email! conn "<p3@x>" "eve@x" #inst "2026-04-05")
                             :email/author-address "eve@x"
@@ -667,7 +667,7 @@
                         :email/date-sent #inst "2026-04-06" :email/source "test"
                         :email/body-text "Superseded-by: <p3@x>\n"
                         :email/message-id "<cmd2@x>"}]
-          (commands/apply-commands! conn p2-eid :patch cmd2 {} {} :direct)
+          (commands/apply-commands! conn p2-eid :patch cmd2 {} {} :direct nil)
           (let [bug-state (read-attrs (d/db conn) bug-eid
                                        [:report/owned-address])]
             (is (= "eve@x" (:report/owned-address bug-state))
@@ -720,7 +720,7 @@
                           :email/date-sent #inst "2026-03-03"
                           :email/body-text (str "Related-to: " tgt-mid "\n")}]
           (commands/apply-commands! conn src-eid :bug cmd-email
-                                    {} {} :direct)
+                                    {} {} :direct nil)
           (let [src-after (d/pull (d/db conn)
                                   [:report/closed :report/close-reason] src-eid)
                 rels (get-relations (d/db conn) src-eid)
@@ -749,7 +749,7 @@
                           :email/date-sent #inst "2026-03-03"
                           :email/body-text "Related-to: <ann@x>\n"}]
           (commands/apply-commands! conn bug-eid :bug cmd-email
-                                    {} {} :direct)
+                                    {} {} :direct nil)
           (let [rels (get-relations (d/db conn) bug-eid)]
             (is (some #(= :related-to (:kind %)) rels)
                 "bug<->announcement related-to allowed")
@@ -775,7 +775,7 @@
                           :email/date-sent #inst "2026-03-03"
                           :email/body-text "Related-to: <a@x>\nRelated-to: <b@x>\n"}]
           (commands/apply-commands! conn src-eid :bug cmd-email
-                                    {} {} :direct)
+                                    {} {} :direct nil)
           (let [rels (filter #(= :related-to (:kind %))
                              (get-relations (d/db conn) src-eid))]
             (is (= 2 (count rels))
@@ -800,7 +800,7 @@
                           :email/date-sent #inst "2026-03-03"
                           :email/body-text (str "Related-to: " tgt-mid "\n")}
               _          (commands/apply-commands! conn src-eid :bug pose-email
-                                                    {} {} :direct)
+                                                    {} {} :direct nil)
               ;; Then retract via Not related-to:
               ret-eid    (mk-email! conn "<ret@x>" "carol@x" #inst "2026-03-04")
               ret-email  {:db/id ret-eid
@@ -808,7 +808,7 @@
                           :email/date-sent #inst "2026-03-04"
                           :email/body-text (str "Not related-to: " tgt-mid "\n")}]
           (commands/apply-commands! conn src-eid :bug ret-email
-                                    {} {} :direct)
+                                    {} {} :direct nil)
           (let [rels (filter #(= :related-to (:kind %))
                              (get-relations (d/db conn) src-eid))]
             (is (every? (complement :active?) rels)
@@ -839,7 +839,7 @@
                           :email/date-sent #inst "2026-03-04"
                           :email/body-text (str "Related-to: " tgt-mid "\n")}]
           (commands/apply-commands! conn src-eid :bug cmd-email
-                                    {} {} :direct)
+                                    {} {} :direct nil)
           (let [src-after (d/pull (d/db conn)
                                   [:report/closed :report/close-reason] src-eid)
                 rels (filter #(= :related-to (:kind %))

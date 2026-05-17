@@ -1244,6 +1244,56 @@
         (finally
           (teardown! ctx))))))
 
+(deftest carrier-dispatch-supersedes-applies-to-new-report
+  (testing "A reply that creates a new report AND carries Supersedes:
+            <external-mid> applies the relation to the new report
+            (closes the external target), not to the thread parent."
+    (let [{:keys [conn] :as ctx} (setup-db!)]
+      (try
+        ;; 1. Old bug (will be superseded).
+        (store-and-process! conn
+                            (mk-email {:mid "<old-bug@test.org>"
+                                       :subject "[BUG] narrow framing"
+                                       :from "alice@test.org"
+                                       :date #inst "2026-05-01T10:00:00"
+                                       :body "narrow report\n"})
+                            "direct")
+        ;; 2. Unrelated parent thread (will be the In-Reply-To target).
+        (store-and-process! conn
+                            (mk-email {:mid "<thread-root@test.org>"
+                                       :subject "[BUG] something else"
+                                       :from "bob@test.org"
+                                       :date #inst "2026-05-01T11:00:00"
+                                       :body "another bug\n"})
+                            "direct")
+        ;; 3. A reply that itself opens a new [BUG] and supersedes the
+        ;;    old bug from step 1.  Before the carrier loosening the
+        ;;    Supersedes: would have been dispatched to <thread-root>
+        ;;    (the nearest report in the thread), where it would have
+        ;;    no useful meaning.  With the loosening it lands on the
+        ;;    new report and closes <old-bug>.
+        (store-and-process! conn
+                            (mk-email {:mid "<new-bug@test.org>"
+                                       :subject "[BUG] broader framing"
+                                       :from "carol@test.org"
+                                       :date #inst "2026-05-01T12:00:00"
+                                       :in-reply-to "<thread-root@test.org>"
+                                       :body "Supersedes: <old-bug@test.org>\n"})
+                            "direct")
+        (let [db (d/db conn)
+              old   (get-report db "<old-bug@test.org>")
+              new   (get-report db "<new-bug@test.org>")
+              root  (get-report db "<thread-root@test.org>")]
+          (is (some? new)        "new report was created")
+          (is (= :bug (:report/type new)))
+          (is (some? (:report/closed old))
+              "old bug was closed via Supersedes: from the new report's body")
+          (is (= :superseded (:report/close-reason old)))
+          (is (nil? (:report/closed root))
+              "the thread parent (unrelated to the supersede) is untouched"))
+        (finally
+          (teardown! ctx))))))
+
 (deftest pending-thread-references-anchor
   (testing "Reply with missing IRT but a known References ancestor is threaded immediately."
     (let [{:keys [conn] :as ctx} (setup-db!)]

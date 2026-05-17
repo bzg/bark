@@ -512,8 +512,10 @@
 (defn- apply-commands-on-nearest!
   "Apply commands to the nearest reports of a reply, refreshing roles
   per source when reports come from different sources.  Ensures the
-  author is recorded as a participant if any command matched."
-  [conn email from-addr source-name rroles source-map delivery nearest-eids]
+  author is recorded as a participant if any command matched.
+
+  `line-filter` is forwarded to `apply-commands!`; see its docstring."
+  [conn email from-addr source-name rroles source-map delivery nearest-eids line-filter]
   (let [rid-info (reduce (fn [m [r t s]] (assoc m r [t s]))
                          {}
                          (d/q '[:find ?r ?t ?src
@@ -526,7 +528,8 @@
         any-cmd? (reduce (fn [acc rid]
                            (if-let [[rtype rsrc] (get rid-info rid)]
                              (let [rroles (if rsrc (roles/get-tenures (d/db conn) rsrc) rroles)]
-                               (if (commands/apply-commands! conn rid rtype email source-map rroles delivery)
+                               (if (commands/apply-commands! conn rid rtype email source-map
+                                                             rroles delivery line-filter)
                                  true acc))
                              acc))
                          false nearest-eids)]
@@ -638,20 +641,37 @@
                   (when (seq parent-eids)
                     (attach-as-descendant! conn eid email from-addr parent-eids))
 
-                  ;; A command targets the thread, never the mail
-                  ;; that carries it -- unless that mail opens its
-                  ;; thread.  Concretely: a root mail (no
-                  ;; In-Reply-To) that introduces a report carries
-                  ;; its commands onto that report; any reply hands
-                  ;; them to the nearest report in the thread.
-                  (cond
-                    (and report-eid (nil? (:email/in-reply-to email)))
-                    (commands/apply-commands! conn report-eid (:type report-info)
-                                              email source-map rroles delivery)
+                  ;; Command dispatch:
+                  ;; - Root mail opening a report (no In-Reply-To):
+                  ;;   carry every command onto that report.
+                  ;; - Reply with no new report:
+                  ;;   hand every command to the nearest thread report.
+                  ;; - Reply that itself creates a new report (e.g. a
+                  ;;   fresh `[BUG] ...` filed as `Re:` of a discussion):
+                  ;;   split the body in two -- the carrier-eligible
+                  ;;   relation lines (Supersedes:, Related-to:) name
+                  ;;   external mids and unambiguously apply to the
+                  ;;   *new* report; everything else (triggers, other
+                  ;;   annotations, words, votes, implicit ack/own)
+                  ;;   still flows to the thread parent.
+                  (let [is-reply?       (some? (:email/in-reply-to email))
+                        creates-report? (some? report-eid)]
+                    (cond
+                      (and creates-report? (not is-reply?))
+                      (commands/apply-commands! conn report-eid (:type report-info)
+                                                email source-map rroles delivery nil)
 
-                    (seq nearest-eids)
-                    (apply-commands-on-nearest! conn email from-addr source-name rroles
-                                                source-map delivery nearest-eids)))
+                      (and creates-report? is-reply? (seq nearest-eids))
+                      (do (commands/apply-commands! conn report-eid (:type report-info)
+                                                    email source-map rroles delivery
+                                                    :carrier-only)
+                          (apply-commands-on-nearest! conn email from-addr source-name rroles
+                                                      source-map delivery nearest-eids
+                                                      :no-carrier))
+
+                      (seq nearest-eids)
+                      (apply-commands-on-nearest! conn email from-addr source-name rroles
+                                                  source-map delivery nearest-eids nil))))
 
                 ;; Phase 4: post-creation hooks (plan is pure, execution is effectful)
                 (when report-eid
