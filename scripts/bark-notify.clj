@@ -244,7 +244,7 @@
   (let [present (filter some? sections)]
     (when (seq present)
       (str (str/join "\n" present)
-           "\n-- \nSent by BARK.  Contact the operator to change your subscription."))))
+           "\n-- \nSent by BARK -- reply to change your subscription"))))
 
 (defn build-email-body
   "Build the notification email body for one (email, subscription) pair.
@@ -281,16 +281,18 @@
 (defn send-notification!
   "Send a plain-text notification email via SMTP."
   [smtp-config to-addr source body]
-  (let [{:keys [host port tls user password from]} smtp-config]
-    (mail/send-mail {:host     host
-                     :port     port
-                     :tls      (boolean tls)
-                     :username user
-                     :password password
-                     :from     from
-                     :to       [to-addr]
-                     :subject  (str "[BARK " source "] Open reports")
-                     :text     body})))
+  (let [{:keys [host port tls user password from reply-to]} smtp-config]
+    (mail/send-mail
+     (cond-> {:host     host
+              :port     port
+              :tls      (boolean tls)
+              :username user
+              :password password
+              :from     from
+              :to       [to-addr]
+              :subject  (str "[BARK " source "] Open reports")
+              :text     body}
+       reply-to (assoc :reply-to reply-to)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Main

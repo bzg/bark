@@ -1064,7 +1064,8 @@ limit with =:max-attachment-size= in the =:ingest= config section.
         :tls      true
         :user     "notify@example.com"
         :password "secret"
-        :from     "bark@example.com"}
+        :from     "bark@example.com"
+        :reply-to "lead@example.com"}   ;; optional
  :subscribers
  {"a@example.org"
   [{:source "my-list"}]

@@ -148,10 +148,11 @@
 (s/def :smtp/user ::non-blank-string)
 (s/def :smtp/password ::non-blank-string)
 (s/def :smtp/from ::email)
+(s/def :smtp/reply-to ::email)
 (s/def :smtp/tls boolean?)
 
 (s/def :notif/smtp (s/keys :req-un [:smtp/host :smtp/port :smtp/user :smtp/password :smtp/from]
-                           :opt-un [:smtp/tls]))
+                           :opt-un [:smtp/tls :smtp/reply-to]))
 (s/def :notif/enabled boolean?)
 
 ;; Subscriber filters (all optional except :source)
