@@ -19,26 +19,9 @@ BARK reports can be read with other tools:
 
 For a more extensive documentation, please read the [[docs/bark-manual.org][BARK manual]].
 
+For the codebase, architecture and development setup, see [[CONTRIBUTING.md][CONTRIBUTING.md]].
+
 [[bark-capture.jpg]]
-
-* How it works
-
-- *JVM* (=clojure -M:run=) :: Connects to an IMAP server or a local
-  Maildir directory, fetches new emails since the last run, digests
-  them into reports, applies commands and roles, expires stale
-  reports, then exits. Use =--watch= to keep the process running (IMAP
-  IDLE for IMAP, filesystem events for Maildir). All database writes
-  happen here.
-- *bb export* :: Exports reports as JSON, RSS, Org, ICS (calendar), and
-  generates HTML and stats pages. Read-only (no database writes).
-- *bb notify* :: Sends notification emails to maintainers. Read-only (no
-  database writes).
-
-* Dependencies
-
-- [[https://babashka.org/][Babashka]] (bb) for export, notify, and utility scripts
-- [[https://github.com/datalevin/datalevin][Datalevin]] (pod for bb scripts, library for JVM)
-- Java 17+ (for the daemon)
 
 * Quick start
 
@@ -84,39 +67,6 @@ bb maintenance --delete   # actually purge
 # 7. Run tests
 clj -M:test
 #+end_example
-
-* Architecture
-
-All source code lives under =src/bark/=:
-
-| Namespace     | Role                                               |
-|---------------+----------------------------------------------------|
-| =bark.main=     | Entry point (batch by default, =--watch= for IDLE)   |
-| =bark.ingest=   | Datalevin connection, email parsing and storage    |
-| =bark.digest=   | Single-email processing (classify, detect, thread) |
-| =bark.detect=   | Report type detection from subject + attachments   |
-| =bark.commands= | Triggers, directives, votes                        |
-| =bark.roles=    | Permission checks and role management              |
-| =bark.series=   | Patch series tracking                              |
-| =bark.expire=   | Periodic report expiry (runs inside daemon)        |
-| =bark.tracking= | Change-tracking for incremental export             |
-| =bark.common=   | Shared utilities (JVM)                             |
-| =bark.logging=  | File and email log appenders                       |
-
-Read-only bb scripts live under =scripts/=:
-
-| Script               | Role                                                  |
-|----------------------+-------------------------------------------------------|
-| =bark-common.clj=      | Shared utilities (bb)                                 |
-| =bark-export.clj=      | Report export (JSON, RSS, Org, patches, events, text) |
-| =bark-notify.clj=      | Notification emails                                   |
-| =bark-index.clj=       | HTML index page generation                            |
-| =bark-stats.clj=       | Statistics and data page generation                   |
-| =bark-docs.clj=        | Documentation page generation                         |
-| =bark-html.clj=        | HTML template helpers                                 |
-| =bark-maintenance.clj= | Orphan email purge                                    |
-| =bark-email-test.clj=  | SMTP configuration test                               |
-| =validate-config.clj=  | Config validation                                     |
 
 * bb tasks
 
@@ -350,10 +300,8 @@ the lead maintainer.
 
 * Contributing
 
-- Send a [[mailto:~bzg/barkyard@lists.sr.ht][bug report]] with =[BUG] bark: <SHORT EXPLICIT BUG DESCRIPTION>=
-- Send a [[mailto:~bzg/barkyard@lists.sr.ht][patch]] with =[PATCH] bark: <COMMIT SUMMARY>=
-- Send a [[mailto:~bzg/barkyard@lists.sr.ht][feature request]] with =[FR] bark: <FEATURE REQUEST>=
-- Share any [[mailto:~bzg/barkyard@lists.sr.ht][other question or idea]]
+See [[CONTRIBUTING.md][CONTRIBUTING.md]] for reporting bugs, sending patches, and working on
+the codebase.
 
 You can also [[mailto:bzg@bzg.fr][send me an email]] and support my work on [[https://liberapay.com/bzg/][liberapay]].
 
