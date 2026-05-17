@@ -9,6 +9,11 @@
 ;; and sends emails via SMTP.  The cadence is the operator's
 ;; responsibility: schedule bb notify from cron or a systemd timer.
 ;;
+;; Operational state lives in public/.last-notify-failures.edn -- a
+;; per-(subscriber, source) timestamp of the last successful send,
+;; used to avoid re-mailing the same failures.  Delete the file to
+;; replay all failures on the next run.
+;;
 ;; Usage:
 ;;   bb notify           -- send notifications
 ;;   bb notify --dry-run -- show what would be sent without sending
@@ -16,6 +21,8 @@
 
 (require '[babashka.pods :as pods]
          '[clojure.string :as str]
+         '[clojure.edn :as edn]
+         '[clojure.java.io :as io]
          '[taoensso.timbre :as log]
          '[bark.common :refer [get-header format-date format-date-iso
                                report-priority report-status report-descendant-count
@@ -31,6 +38,43 @@
 (require '[pod.tzzh.mail :as mail])
 
 ;; ---------------------------------------------------------------------------
+;; Per-(subscriber, source) failures-shown tracking
+;; ---------------------------------------------------------------------------
+;;
+;; We persist the timestamp of the last successful notification per
+;; (subscriber, source) pair to avoid re-sending the same failure on
+;; every run.  This is operational state, not configuration -- subscriber
+;; identity and filters live in config.edn.
+
+(def ^:private last-failures-file "public/.last-notify-failures.edn")
+
+(defn- load-last-failures-shown
+  "Read {key -> epoch-millis} from the state file, or {}.  A corrupt
+  file would re-spam every subscriber with old failures, so log at warn
+  before returning the empty default."
+  []
+  (let [f (io/file last-failures-file)]
+    (if (.exists f)
+      (try (edn/read-string (slurp f))
+           (catch Exception e
+             (log/warn "Could not parse" last-failures-file
+                       "-- starting from empty state.  Subscribers may"
+                       "see previously-shown failures on this run."
+                       (.getMessage e))
+             {}))
+      {})))
+
+(defn- save-last-failures-shown!
+  [m]
+  (io/make-parents last-failures-file)
+  (spit last-failures-file (pr-str m)))
+
+(defn- failures-key
+  "Key under which we track the last-shown timestamp for a subscription."
+  [email source]
+  (str source ":" (str/lower-case email)))
+
+;; ---------------------------------------------------------------------------
 ;; Failure queries
 ;; ---------------------------------------------------------------------------
 
@@ -43,18 +87,21 @@
                                   (.getMessage e)))))
 
 (defn- failures-for-subscriber
-  "Return failures on `source` routed to `email-addr`.
+  "Return failures on `source` routed to `email-addr`, posted after
+  `since-date` (or all of them if since-date is nil).
 
   Routing is driven by the `:audience` field on each failure entry:
   - `:author`      -- shown only to the address that triggered the
                      failure (someone seeing their own typo); default
                      for legacy entries that predate the field.
   - `:maintainers` -- shown to every subscriber on the source."
-  [all-failures email-addr source]
+  [all-failures email-addr source since-date]
   (let [addr (str/lower-case email-addr)]
     (->> all-failures
-         (filter (fn [{:keys [from audience] src :source}]
+         (filter (fn [{:keys [from audience date] src :source}]
                    (and (= source src)
+                        (or (nil? since-date)
+                            (and date (.after ^java.util.Date date since-date)))
                         (case (or audience :author)
                           :author      (= addr from)
                           :maintainers true
@@ -134,18 +181,15 @@
          "\n")))
 
 (defn- filter-relevant-reports
-  "Filter the full report set against a subscription's filters: actionable
-  type, open, on-source, meets min-priority and min-status, and (optionally)
-  the :subject-match / :topic substring filters."
-  [reports {:keys [source min-pri min-sts subj-match topic]}]
+  "Filter the full report set against scope filters: actionable type,
+  open, on-source, plus optional :subject-match / :topic substrings."
+  [reports {:keys [source subj-match topic]}]
   (let [subj-lc (some-> subj-match str/lower-case)
         topic-lc (some-> topic str/lower-case)]
     (cond->> reports
       true       (filter #(contains? actionable-types (:report/type %)))
       true       (filter open?)
       true       (filter #(= source (get-in % [:report/email :email/source])))
-      true       (filter #(>= (report-priority %) min-pri))
-      true       (filter #(>= (report-status %) min-sts))
       subj-lc    (filter #(some-> (get-in % [:report/email :email/subject])
                                   str/lower-case
                                   (str/includes? subj-lc)))
@@ -154,8 +198,11 @@
                                   (str/includes? topic-lc))))))
 
 (defn- build-sections
-  "Group relevant reports into the three body sections."
-  [relevant email]
+  "Group relevant reports into the three body sections.  Sections 1
+  and 2 (owned by you, with or without deadline) always show what you
+  own.  Section 3 (unacked & unowned) is the noisy one and is the
+  only one filtered by min-priority and min-status."
+  [relevant email {:keys [min-pri min-sts]}]
   (let [owned (filter #(owned-by? % email) relevant)]
     {:dl      (->> owned
                    (filter :report/deadline-value)
@@ -165,7 +212,9 @@
                    (sort-by #(- (report-priority %))))
      :unacked (->> relevant
                    (filter unacked?)
-                   (filter unowned?))}))
+                   (filter unowned?)
+                   (filter #(>= (report-priority %) min-pri))
+                   (filter #(>= (report-status %) min-sts)))}))
 
 (defn- failure-subjects-map
   "Build {message-id -> subject} for the message-ids referenced by `failures`."
@@ -203,14 +252,14 @@
   [db reports email subscription failures]
   (let [source     (:source subscription)
         prefs      {:source     source
-                    :min-pri    (:min-priority subscription 0)
+                    :min-pri    (:min-priority subscription 1)
                     :min-sts    (:min-status subscription 0)
                     :subj-match (:subject-match subscription)
                     :topic      (:topic subscription)}
         relevant   (->> (filter-relevant-reports reports prefs)
                         (sort-by (juxt report-priority report-descendant-count)
                                  #(compare %2 %1)))
-        {:keys [dl owned unacked]} (build-sections relevant email)
+        {:keys [dl owned unacked]} (build-sections relevant email prefs)
         sec-fail   (failures-section db source failures)
         sec-dl     (section
                     (str "== Upcoming deadlines -- owned by you (" source ") ==")
@@ -287,44 +336,58 @@
         (log/info "No :subscribers configured.")
         (System/exit 0))
       (try
-        (let [db           (d/db conn)
-              src-map      (build-source-map config)
-              reports      (all-reports db)
-              all-failures (load-failures)
-              pairs        (expand-subscribers subscribers)
-              _            (log/debug (count pairs) "subscription(s) configured")
-              live-pairs   (filter (fn [[_ s]] (source-notify-enabled? src-map (:source s))) pairs)
-              _            (do (when (< (count live-pairs) (count pairs))
-                                 (doseq [[email s] pairs
-                                         :when (not (source-notify-enabled? src-map (:source s)))]
-                                   (log/debug "SKIPPED" email
-                                              "-- notifications disabled for source"
-                                              (:source s))))
-                               (log/debug (count live-pairs) "after per-source filter"))
-              sent         (atom 0)]
-          (if (empty? live-pairs)
-            (log/info "No active subscriptions.")
-            (doseq [[email subscription] live-pairs]
-              (let [source   (:source subscription)
-                    failures (failures-for-subscriber all-failures email source)
-                    body     (build-email-body db reports email subscription failures)]
-                (if body
-                  (do (log/info (if dry-run? "[dry-run]" "")
-                                "Notifying" email (str "(source: " source ")"))
-                      (when-not dry-run?
-                        (try
-                          (send-notification! smtp email source body)
-                          (swap! sent inc)
-                          (catch Exception e
-                            (log/error "Failed to send to" email
-                                       (str "(source: " source "):")
-                                       (.getMessage e)))))
-                      (when dry-run?
-                        (println "---")
-                        (println body)
-                        (println "---")))
-                  (log/info "No open items for" email
-                            (str "(source: " source "),") "skipping.")))))
-          (log/info "Done." (if dry-run? "Dry run, no emails sent." (str @sent " email(s) sent."))))
+        (let [db            (d/db conn)
+              src-map       (build-source-map config)
+              reports       (all-reports db)
+              all-failures  (load-failures)
+              last-shown    (load-last-failures-shown)
+              pairs         (expand-subscribers subscribers)
+              _             (log/debug (count pairs) "subscription(s) configured")
+              live-pairs    (filter (fn [[_ s]] (source-notify-enabled? src-map (:source s))) pairs)
+              _             (do (when (< (count live-pairs) (count pairs))
+                                  (doseq [[email s] pairs
+                                          :when (not (source-notify-enabled? src-map (:source s)))]
+                                    (log/debug "SKIPPED" email
+                                               "-- notifications disabled for source"
+                                               (:source s))))
+                                (log/debug (count live-pairs) "after per-source filter"))
+              sent          (atom 0)
+              updated-shown (atom last-shown)]
+          (try
+            (if (empty? live-pairs)
+              (log/info "No active subscriptions.")
+              (doseq [[email subscription] live-pairs]
+                (let [source   (:source subscription)
+                      k        (failures-key email source)
+                      since-ms (get last-shown k)
+                      since    (when since-ms (java.util.Date. (long since-ms)))
+                      failures (failures-for-subscriber all-failures email source since)
+                      body     (build-email-body db reports email subscription failures)]
+                  (if body
+                    (do (log/info (if dry-run? "[dry-run]" "")
+                                  "Notifying" email (str "(source: " source ")"))
+                        (when-not dry-run?
+                          (try
+                            (send-notification! smtp email source body)
+                            (swap! updated-shown assoc k (.getTime (java.util.Date.)))
+                            (swap! sent inc)
+                            (catch Exception e
+                              ;; Don't advance the timestamp on failure so the
+                              ;; same failures are retried next run.
+                              (log/error "Failed to send to" email
+                                         (str "(source: " source "):")
+                                         (.getMessage e)))))
+                        (when dry-run?
+                          (println "---")
+                          (println body)
+                          (println "---")))
+                    (log/info "No open items for" email
+                              (str "(source: " source "),") "skipping.")))))
+            (log/info "Done." (if dry-run? "Dry run, no emails sent." (str @sent " email(s) sent.")))
+            (finally
+              (when-not dry-run?
+                (try (save-last-failures-shown! @updated-shown)
+                     (catch Exception e
+                       (log/error "Failed to persist last-notify-failures:" (.getMessage e))))))))
         (finally
           (d/close conn))))))

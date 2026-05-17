@@ -227,9 +227,6 @@ To undo a cross-reference, reply with =Not related-to:
 <other-message-id@example.com>=.
 
 ** Resolving a bug or request with a patch
-:PROPERTIES:
-:CUSTOM_ID: resolving-a-bug-or-request-with-a-patch
-:END:
 
 Replying to an open bug or request with a =.patch= or =.diff=
 attachment credits you as =Acked= and =Owned= on that parent.
@@ -1081,17 +1078,27 @@ a recipient on three sources receives three separate emails per
 
 Optional per-subscription filters:
 
-| Key             | Description                                |
-|-----------------+--------------------------------------------|
-| =:min-priority=   | Skip reports below this priority (0--3)    |
-| =:min-status=     | Skip reports below this activity score     |
-| =:subject-match=  | Substring match on the report subject      |
-| =:topic=          | Substring match on the report topic        |
+| Key            | Description                                                  |
+|----------------+--------------------------------------------------------------|
+| =:min-priority=  | Min priority for the "unacked & unowned" section (default 1) |
+| =:min-status=    | Min activity score for the "unacked & unowned" section       |
+| =:subject-match= | Substring match on the report subject (all sections)         |
+| =:topic=         | Substring match on the report topic (all sections)           |
+
+=:min-priority= and =:min-status= only filter the "unacked &
+unowned" section -- the section with the most volume.  Reports you
+own (with or without deadline) are always listed regardless of
+their priority or status.
 
 =bb notify= does not track per-recipient cadence: it sends every
 time it is invoked.  Schedule it from cron or a systemd timer.
 =bb test-config= verifies that every =:source= named under
 =:subscribers= matches an existing source =:name=.
+
+A small operational state file, =public/.last-notify-failures.edn=,
+records the last successful send per (subscriber, source) so the
+same failed-command entries are not re-mailed at every run.  Delete
+the file to replay all current failures on the next invocation.
 
 ** Logging
 
