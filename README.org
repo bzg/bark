@@ -52,9 +52,8 @@ bb export --topics-filter "event"  # only reports with topic "event"
 #   bb export json, bb export rss, bb export stats, …
 
 # 4. Send notification emails
-bb notify              # send due notifications
+bb notify              # send notifications
 bb notify --dry-run    # preview without sending
-bb notify --force      # ignore intervals
 bb notify --debug      # verbose filtering diagnostics
 
 # 5. Test SMTP configuration (dry-run by default; --send to actually send)
@@ -82,7 +81,7 @@ bb export [--force] [--index-only]        Incremental export of all formats
        [--topics-filter TOPICS]           Only export matching topics (csv)
        [--page-size N]                    Paginate HTML table (N rows/page)
        [--closed-retention DUR]           Drop reports closed before cutoff
-bb notify [--dry-run] [--force] [--debug] Send notification emails
+bb notify [--dry-run] [--debug]           Send notification emails
 bb maintenance [--delete] [--verbose] [-n source]  Purge orphan emails
        [--retention DUR]                  Orphan retention (default 90d)
        [--failures]                       List recent command failures

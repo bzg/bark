@@ -81,7 +81,7 @@
                    (not= (:end a) (:start b))
                    (conj errs (str "gap/overlap between periods " ai
                                    " and " bi ": :end " (:end a)
-                                   " ≠ :start " (:start b)))
+                                   " != :start " (:start b)))
                    :else errs))
                [])))
 

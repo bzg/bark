@@ -9,7 +9,7 @@
   export     {:doc  "Export reports: bb export [--force] [--index-only] [-n source] [-p 1|2|3] [-s 1-7]"
               :task (apply shell "bb scripts/bark-export.clj" *command-line-args*)}
 
-  notify     {:doc  "Send notification emails: bb notify [--dry-run] [--force] [--debug]"
+  notify     {:doc  "Send notification emails: bb notify [--dry-run] [--debug]"
               :task (apply shell "bb scripts/bark-notify.clj" *command-line-args*)}
 
   clean      {:doc  "Remove all files in public/"

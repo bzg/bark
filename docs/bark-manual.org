@@ -618,7 +618,7 @@ Each entry is a map with any of =:words=, =:scope=, =:report-types=
   applies to. When absent, the registry default is used.
 - Any command ID from the table below can be overridden, both triggers
   and directives.
-- Controls (role and notify) cannot be overridden.
+- Role controls cannot be overridden.
 
 Per-source settings take precedence over the global =:commands=, which
 in turn take precedence over the built-in defaults.
@@ -1194,7 +1194,7 @@ The export, notification and maintenance tasks are run through
 |                                 | patches, text, events (for power users)                        |
 | =bb notify=                       | Send notification emails                                       |
 | =bb notify --dry-run=             | Preview notifications without sending                          |
-| =bb notify --force=               | Ignore per-subscriber interval                                 |
+| =bb notify --debug=               | Verbose filtering diagnostics                                  |
 | =bb maintenance=                  | Show orphan emails (add =--delete= to purge)                     |
 | =bb maintenance --retention 6m=   | Override orphan retention (default 90d)                        |
 | =bb maintenance --failures=       | List recent command failures                                   |
