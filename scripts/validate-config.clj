@@ -151,8 +151,22 @@
 (s/def :notif/smtp (s/keys :req-un [:smtp/host :smtp/port :smtp/user :smtp/password :smtp/from]
                            :opt-un [:smtp/tls]))
 (s/def :notif/enabled boolean?)
+
+;; Subscriber filters (all optional except :source)
+(s/def :sub/source ::non-blank-string)
+(s/def :sub/min-priority (s/and int? #(<= 0 % 3)))
+(s/def :sub/min-status   (s/and int? #(<= 0 % 7)))
+(s/def :sub/subject-match ::non-blank-string)
+(s/def :sub/topic ::non-blank-string)
+(s/def :notif/subscription
+  (s/keys :req-un [:sub/source]
+          :opt-un [:sub/min-priority :sub/min-status :sub/subject-match :sub/topic]))
+(s/def :notif/subscribers
+  (s/map-of ::email
+            (s/coll-of :notif/subscription :kind vector? :min-count 1)))
+
 (s/def :bark/notifications (s/keys :req-un [:notif/enabled]
-                                   :opt-un [:notif/smtp]))
+                                   :opt-un [:notif/smtp :notif/subscribers]))
 
 ;; Valid report type keywords -- derived from common/report-type-spec.
 (def valid-report-types common/report-type-keywords)
@@ -370,9 +384,27 @@
                   (periods/validate-periods src)))
            (:sources config))))
 
+(defn- pre-check-subscribers
+  "Verify every :source named under :notifications :subscribers
+  matches an existing source :name.  Skips if the shape is wrong
+  (spec validation reports the structural error)."
+  [config]
+  (when-let [subs (get-in config [:notifications :subscribers])]
+    (when (map? subs)
+      (let [known (set (map :name (:sources config)))
+            errs  (for [[email subscriptions] subs
+                        :when (sequential? subscriptions)
+                        {:keys [source]} subscriptions
+                        :when (and source (not (contains? known source)))]
+                    (str ":notifications :subscribers [" (pr-str email)
+                         "] :source " (pr-str source)
+                         " does not match any :sources :name"))]
+        (seq errs)))))
+
 (defn validate-config [config]
   (if-let [errs (or (pre-check-commands config)
-                    (pre-check-periods config))]
+                    (pre-check-periods config)
+                    (pre-check-subscribers config))]
     {:valid? false
      :explanation (str/join "\n" errs)}
     (if (s/valid? ::config config)
@@ -436,7 +468,11 @@
             (when-let [notif (:notifications config)]
               (log/info "  Notifications:" (if (:enabled notif) "enabled" "disabled"))
               (when-let [smtp (:smtp notif)]
-                (log/info "  SMTP:" (str (:user smtp) "@" (:host smtp)))))
+                (log/info "  SMTP:" (str (:user smtp) "@" (:host smtp))))
+              (when-let [subs (:subscribers notif)]
+                (let [total (reduce + (map count (vals subs)))]
+                  (log/info "  Subscribers:" (count subs) "email(s),"
+                            total "subscription(s)"))))
             (when-let [rt (:report-types config)]
               (log/info "  Report types:" (pr-str rt)))
             (when-let [cs (:command-syntax config)]

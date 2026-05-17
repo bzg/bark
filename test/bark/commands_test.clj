@@ -3,7 +3,7 @@
 
   The matrix being verified: every Bark instruction (trigger, negative
   trigger, -by directive, Date/Topic/Expiry/Deadline directive,
-  Superseded-by, role directive, Notify) must be:
+  Superseded-by, role directive) must be:
 
     - accepted with and without `!` prefix in :loose mode
     - accepted only with `!` prefix in :strict mode"
@@ -97,10 +97,10 @@
   (is (= 1 (count (roles/parse-role-controls "!Add maintainer: a@b.com" true)))))
 
 ;; ---------------------------------------------------------------------------
-;; Notify: pattern via the pattern generator
+;; Role control pattern -- strict mode requires the bang prefix
 ;; ---------------------------------------------------------------------------
 
-(deftest notify-pattern-mode-aware
+(deftest role-control-pattern-mode-aware
   (let [loose  (roles/role-control-pattern false)
         strict (roles/role-control-pattern true)]
     (is (some? (re-find loose "Add maintainer: x@y.z")))

@@ -440,17 +440,14 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- apply-controls!
-  "Apply role and notify controls from the email body."
+  "Apply role controls from the email body."
   [conn rroles source-name source-cfg from-addr email via-channel?]
   (let [body-text (common/email-body-text email)
         src-cmds  (commands/build-source-commands source-cfg)
         strict?   (:strict-syntax? src-cmds)]
-    (when (and from-addr body-text source-name)
-      (when via-channel?
-        (roles/apply-role-controls! conn rroles source-name from-addr
-                                    body-text (:email/date-sent email) strict?))
-      (roles/apply-notify-controls! conn rroles source-name from-addr body-text
-                                    (:email/date-sent email) strict?))))
+    (when (and from-addr body-text source-name via-channel?)
+      (roles/apply-role-controls! conn rroles source-name from-addr
+                                  body-text (:email/date-sent email) strict?))))
 
 (defn- record-creation-denial!
   "Record a denied report-creation attempt.  :report-mid is empty

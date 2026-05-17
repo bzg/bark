@@ -544,26 +544,6 @@
             (is (nil? (:report/owned r)))
             (is (some? (:report/urgent r)))))
 
-        ;; --- Emails 56-57-74 notify prefs (final state after email 74) ---
-        (testing "Emails 56-57-74 notify prefs"
-          (let [pref (d/pull db '[:notify/enabled :notify/interval-days :notify/min-priority]
-                             [:notify/key "direct:maint@test.org"])]
-            (is (:notify/enabled pref))
-            ;; Email 57 sets d:7, but email 74 (now allowed via list) overrides to d:1
-            (is (= 1 (:notify/interval-days pref)))
-            (is (= 2 (:notify/min-priority pref)))))
-
-        ;; --- Email 58 notify from regular user ---
-        (testing "Email 58 notify from regular user"
-          (is (nil? (d/q '[:find ?e . :in $ ?k :where [?e :notify/key ?k]]
-                         db "direct:user@test.org"))))
-
-        ;; --- Email 74 notify via mailing list (now allowed) ---
-        (testing "Email 74 notify via mailing list"
-          (let [pref (d/pull db '[:notify/interval-days]
-                             [:notify/key "direct:maint@test.org"])]
-            (is (= 1 (:notify/interval-days pref)))))
-
         ;; --- Email 59 properly tagged [BUG] ---
         (testing "Email 59 properly tagged [BUG]"
           (is (= :bug (:report/type (get-report db "<59@test.org>")))))

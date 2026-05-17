@@ -761,45 +761,6 @@
   :email/body-text  "Approved.\nOwned.\nUrgent.\n"}
 
  ;; =========================================================================
- ;; 56 — Notify: off (unsubscribe)
- ;; =========================================================================
- {
-  :email/id        "56"
-  :email/source     "direct"
-  :email/message-id "<56@test.org>"
-  :email/subject    "Unsubscribe notifications"
-  :email/from-address "maint@test.org"
-  :email/date-sent  #inst "2026-01-20T12:00:00"
-  :email/ingested-at #inst "2026-01-20T12:00:00"
-  :email/body-text  "Notify: off\n"}
-
- ;; =========================================================================
- ;; 57 — Notify: on d:7 p:2 (resubscribe with prefs)
- ;; =========================================================================
- {
-  :email/id        "57"
-  :email/source     "direct"
-  :email/message-id "<57@test.org>"
-  :email/subject    "Resubscribe with prefs"
-  :email/from-address "maint@test.org"
-  :email/date-sent  #inst "2026-01-20T13:00:00"
-  :email/ingested-at #inst "2026-01-20T13:00:00"
-  :email/body-text  "Notify: on d:7 p:2\n"}
-
- ;; =========================================================================
- ;; 58 — Notify command from regular user (ignored)
- ;; =========================================================================
- {
-  :email/id        "58"
-  :email/source     "direct"
-  :email/message-id "<58@test.org>"
-  :email/subject    "User tries notify"
-  :email/from-address "user@test.org"
-  :email/date-sent  #inst "2026-01-20T14:00:00"
-  :email/ingested-at #inst "2026-01-20T14:00:00"
-  :email/body-text  "Notify: d:1\n"}
-
- ;; =========================================================================
  ;; 59 — Properly tagged [BUG] (anchors a thread for 61/62/64)
  ;; =========================================================================
  {
@@ -999,20 +960,6 @@
   :email/date-sent  #inst "2026-01-24T12:00:00"
   :email/ingested-at #inst "2026-01-24T12:00:00"
   :email/body-text  "Unauthorized change.\n"}
-
- ;; =========================================================================
- ;; 74 — Notify command via mailing list (should be ignored)
- ;; =========================================================================
- {
-  :email/id        "74"
-  :email/source     "direct"
-  :email/message-id "<74@test.org>"
-  :email/subject    "Notify via list"
-  :email/from-address "maint@test.org"
-  :email/date-sent  #inst "2026-01-24T13:00:00"
-  :email/ingested-at #inst "2026-01-24T13:00:00"
-  :email/body-text  "Notify: d:1\n"
-  :email/headers-edn "{\"List-Id\" \"<emacs-orgmode.gnu.org>\" \"List-Post\" \"<mailto:list@test.org>\"}"}
 
  ;; =========================================================================
  ;; 75 — POLL for vote-format tests

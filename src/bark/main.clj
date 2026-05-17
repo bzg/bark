@@ -467,19 +467,13 @@
    :fetch-opts   (parse-fetch (or (:fetch ingest-cfg) {:limit 50}))
    :ingest-opts  (select-keys ingest-cfg [:max-size :max-attachment-size])})
 
-(defn- init-roles! [db-conn config]
-  (roles/sync-all-sources! db-conn config)
-  (doseq [{:keys [name]} (:sources config)]
-    (roles/ensure-notify-defaults! db-conn name
-                                   (roles/get-tenures (d/db db-conn) name))))
-
 (defn- load-context
   "Re-read config, seed maintainers into tenures, return source-map+sources.
   Called once in batch mode, on every reconnect in watch mode (so
   config edits take effect without restart).  Idempotent."
   [db-conn config-path]
   (let [config (or (common/load-config config-path) {})]
-    (init-roles! db-conn config)
+    (roles/sync-all-sources! db-conn config)
     {:source-map (common/build-source-map config)
      :sources    (or (:sources config) [])}))
 

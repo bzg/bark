@@ -644,7 +644,6 @@ removes false positives on common English words such as "Done.",
 | Supersede        | =Superseded-by: <mid>=   | =!Superseded-by: <mid>=  |
 | Supersede (sym.) | =Supersedes: <mid>=      | =!Supersedes: <mid>=     |
 | Role control     | =Add maintainer: a@b.c=  | =!Add maintainer: a@b.c= |
-| Notify           | =Notify: on=             | =!Notify: on=            |
 
 Set globally or per source (per-source wins):
 
@@ -709,15 +708,13 @@ retains a full override in every case.
 
 ** All controls
 
-A _control_ manages a role or a notification preference.  Role
-controls must be sent through the source's public channel;
-notification controls may be sent privately.
+A _control_ manages a role.  Role controls must be sent through
+the source's public channel.
 
-| ID     | Syntax / Words                     | Permission      | Channel |
-|--------+------------------------------------+-----------------+---------|
-| notify | =Notify: on= / =off= / =d:7 p:2 s:4 ...= | maintainer      | any     |
-| role   | =Add maintainer: addr@host=          | maintainer      | public  |
-| role   | =Remove maintainer: addr@host=       | lead maintainer | public  |
+| ID   | Syntax / Words                 | Permission      | Channel |
+|------+--------------------------------+-----------------+---------|
+| role | =Add maintainer: addr@host=      | maintainer      | public  |
+| role | =Remove maintainer: addr@host=   | lead maintainer | public  |
 
 * Exploring reports
 
@@ -821,67 +818,39 @@ look forward.
 
 * Notifications
 
-BARK sends periodic email digests to maintainers, summarising
-open reports.  Notifications are restricted to maintainers;
-regular users never receive them.
+BARK can send email digests of open reports.  Subscribers and
+their filters are declared by the operator in =config.edn=, under
+=:notifications :subscribers= (see [[#notifications-smtp][Notifications (SMTP)]] under
+Deploying BARK for the full configuration).
 
-Sending notifications requires SMTP configuration (see [[#config][Config]]).
-The =bb notify= task -- typically run from a cron job -- builds
-and sends the digests; =bb notify --dry-run= prints them without
-sending.
+Each digest contains the failed commands relevant to the
+recipient, the open bugs, patches and requests they own (with
+upcoming deadlines first), and the open bugs, patches and
+requests that nobody has acknowledged or owned yet.
 
-Each digest contains two sections: the open bugs, patches and
-requests owned by the recipient, and the open bugs, patches and
-requests that remain unacked and unowned by anyone.
+** Subscribing or changing preferences
 
-** (Un)subscribing
+Subscriptions are not managed by email.  To subscribe,
+unsubscribe, or adjust filters (minimum priority, subject match,
+topic), ask the operator to edit =config.edn=.  This is a
+deliberate trade-off: notifications are configured the same way
+as SMTP and the maintainer list, so the operator owns the full
+declaration of who receives what.
 
-Maintainers are subscribed to notifications by default the first
-time the daemon runs.  To unsubscribe, send an email to the BARK
-inbox with this body:
+The =bb notify= task -- run by the operator from cron or a
+systemd timer -- builds and sends the digests; =bb notify
+--dry-run= prints them without sending.  Cadence is the
+operator's choice; the task does not track per-recipient
+intervals.
 
-#+begin_example
-Notify: off
-#+end_example
+* Deploying BARK
 
-To re-subscribe:
+This section addresses anyone running a BARK instance, whether for
+an organisation, a project, or a personal mailbox on a single
+machine.  BARK reads its configuration from a single =config.edn=
+file; validate it after editing with =bb test-config=.
 
-#+begin_example
-Notify: on
-#+end_example
-
-** Setting preferences
-
-The =Notify:= control also sets a recipient's preferences.
-Parameters can be combined on a single line:
-
-| Parameter | Description                        | Default |
-|-----------+------------------------------------+---------|
-| =d:N=       | Receive notifications every N days |      30 |
-| =p:N=       | Minimum priority (0--3)            |       1 |
-| =s:N=       | Minimum status (0--7)              |       1 |
-| =m:<match>= | Restrict to subject <match>        |         |
-| =t:<topic>= | Restrict to topic <topic>          |         |
-
-Examples:
-
-#+begin_example
-Notify: d:7                 -- every 7 days
-Notify: d:1                 -- daily
-Notify: p:1                 -- only important reports
-Notify: d:3 s:4 p:2         -- every 3 days, only open reports with priority >= 2
-#+end_example
-
-Unlike role controls, =Notify:= controls are personal and accepted
-on any channel: a private email to the BARK inbox, or a reply on
-the mailing list.
-
-* Config
-
-BARK reads its configuration from a single =config.edn= file.  To
-validate a configuration after editing it, run =bb test-config=.
-
-** Minimal example
+** Setting up an instance
 
 The shortest valid configuration declares an IMAP mailbox and one
 source:
@@ -916,6 +885,22 @@ uses filesystem events rather than polling.
            :folder "INBOX"}
  :sources [{:name "my-list" :list "my-list.example.org"}]}
 #+end_src
+
+** Monitoring your local mail
+
+BARK can run on a single machine to watch your own mail.  In that
+mode:
+
+- The mail source is a Maildir (see the example above).  Watch mode
+  reacts to filesystem events -- no polling, no IMAP credentials.
+- SMTP notifications are usually unnecessary: you're already reading
+  the same mailbox BARK watches.  Either omit =:notifications= or
+  set =:enabled false=.
+- One source is enough.  Match on =:to= or =:list= depending on
+  which header your local MDA stamps.
+
+To keep BARK in the background, install the user-level systemd unit
+from =docs/deploy/bark.service= (see [[#running-bark-in-production][Running BARK in production]]).
 
 ** Source types and matching
 
@@ -1045,7 +1030,7 @@ per-report expiry date using the =Expiry:= directive (see [[#report-expiry][repo
 expiry]]). A per-report expiry overrides the source-level rules: if a
 report has an explicit expiry date, only that date is checked.
 
-** Ingestion
+** Tuning ingestion
 
 #+begin_src edn
 :ingest {:fetch    {:limit 50}    ;; or {:since "30d"} or {:start "…" :end "…"}
@@ -1070,26 +1055,57 @@ larger than 1 MB (1,048,576 characters) are skipped with a warning --
 only metadata (filename, size, content-type) is kept. Override the
 limit with =:max-attachment-size= in the =:ingest= config section.
 
-** Maintenance
+** Notifications (SMTP)
 
-The =bb maintenance= task reports and prunes orphan emails.  Run
-it while the daemon is stopped.
-
-#+begin_src shell
-bb maintenance                  # dry run, show orphan counts
-bb maintenance --delete         # actually delete orphan emails
-bb maintenance --verbose        # list individual orphan message-ids
-bb maintenance --failures       # list recent command failures recorded
-                                # for maintainers (denied actions, bad
-                                # syntax, etc.)
-bb maintenance --retention 6m   # override default orphan retention
-                                # (90 days). Accepts "30d", "6m", "1y"
-                                # or an ISO date.
-bb maintenance -n my-source     # scope to a single source
+#+begin_src edn
+:notifications
+{:enabled true
+ :smtp {:host     "smtp.example.com"
+        :port     587
+        :tls      true
+        :user     "notify@example.com"
+        :password "secret"
+        :from     "bark@example.com"}
+ :subscribers
+ {"a@example.org"
+  [{:source "my-list"}]
+  "b@example.org"
+  [{:source "my-list" :min-priority 2}
+   {:source "another-list" :topic "release"}]}}
 #+end_src
 
-An _orphan email_ is one that no report references and that no
-maintainer has sent.
+Each key under =:subscribers= is a recipient's address.  The
+associated vector lists their subscriptions, one per source --
+a recipient on three sources receives three separate emails per
+=bb notify= run.
+
+Optional per-subscription filters:
+
+| Key             | Description                                |
+|-----------------+--------------------------------------------|
+| =:min-priority=   | Skip reports below this priority (0--3)    |
+| =:min-status=     | Skip reports below this activity score     |
+| =:subject-match=  | Substring match on the report subject      |
+| =:topic=          | Substring match on the report topic        |
+
+=bb notify= does not track per-recipient cadence: it sends every
+time it is invoked.  Schedule it from cron or a systemd timer.
+=bb test-config= verifies that every =:source= named under
+=:subscribers= matches an existing source =:name=.
+
+** Logging
+
+#+begin_src edn
+:logging {:file     "logs/bark.log"
+          :level    :warn
+          :max-size "10MB"
+          :backlog  5
+          :email    {:to    "ops@example.com"
+                     :level :error}}
+#+end_src
+
+Log file rotation is automatic. Email alerts require SMTP to be
+configured.
 
 ** Running BARK in production
 
@@ -1113,6 +1129,27 @@ Either mode can be backed by an uberjar instead of =clj -M:run= to
 avoid the Clojure startup cost on every invocation; see the Quick
 start section of =README.org=.
 
+** Maintenance
+
+The =bb maintenance= task reports and prunes orphan emails.  Run
+it while the daemon is stopped.
+
+#+begin_src shell
+bb maintenance                  # dry run, show orphan counts
+bb maintenance --delete         # actually delete orphan emails
+bb maintenance --verbose        # list individual orphan message-ids
+bb maintenance --failures       # list recent command failures recorded
+                                # for maintainers (denied actions, bad
+                                # syntax, etc.)
+bb maintenance --retention 6m   # override default orphan retention
+                                # (90 days). Accepts "30d", "6m", "1y"
+                                # or an ISO date.
+bb maintenance -n my-source     # scope to a single source
+#+end_src
+
+An _orphan email_ is one that no report references and that no
+maintainer has sent.
+
 ** Rebuilding history
 
 A source's historical evolution -- vocabulary, syntax, maintainer
@@ -1131,32 +1168,6 @@ clj -M:run -- --fresh   # interactive confirm, then full replay
 
 =bb test-config= validates the =:periods= on each source: contiguity, ISO
 date format, =:start= strictly before =:end=.
-
-** Notifications (SMTP)
-
-#+begin_src edn
-:notifications {:enabled true
-                :smtp {:host     "smtp.example.com"
-                       :port     587
-                       :tls      true
-                       :user     "notify@example.com"
-                       :password "secret"
-                       :from     "bark@example.com"}}
-#+end_src
-
-** Logging
-
-#+begin_src edn
-:logging {:file     "logs/bark.log"
-          :level    :warn
-          :max-size "10MB"
-          :backlog  5
-          :email    {:to    "ops@example.com"
-                     :level :error}}
-#+end_src
-
-Log file rotation is automatic. Email alerts require SMTP to be
-configured.
 
 * CLI reference
 
