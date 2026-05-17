@@ -177,13 +177,17 @@
 ;; Command IDs (for extended :commands format)
 (def valid-command-ids
   #{:acked :owned :closed :urgent :important
-    :acked-by :owned-by :closed-by :urgent-by :important-by
+    :acked-by :owned-by :closed-by
     :unacked :unowned :unclosed :unurgent :unimportant
     :deadline :undeadline :expiry :unexpiry
-    :topic :untopic :superseded-by :unsuperseded})
+    :topic :untopic
+    :superseded-by :unsuperseded-by
+    :supersedes :unsupersedes
+    :duplicate-of :unduplicate-of
+    :related-to :unrelated-to})
 
 ;; The :setter-or-maintainer scope is only valid on the unset-style
-;; directives whose target attribute is tracked by a ref to the
+;; commands whose target attribute is tracked by a ref to the
 ;; pose-email.  The authoritative set is derived from the shared
 ;; `bark.commands.registry`.
 (def valid-plain-scopes  #{:user :maintainer})

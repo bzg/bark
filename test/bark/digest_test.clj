@@ -239,20 +239,20 @@
     (is (nil? (commands/detect-vote "")))
     (is (nil? (commands/detect-vote nil)))))
 
-(deftest trigger-scope-denial-recording
-  (testing "non-maintainer trigger on a source that overrides :closed to :maintainer"
-    (let [filter-triggers   (var-get #'bark.commands/filter-triggers-by-scope)
-          describe-trigger  (var-get #'bark.commands/describe-denied-trigger)
+(deftest word-scope-denial-recording
+  (testing "non-maintainer bareword on a source that overrides :closed to :maintainer"
+    (let [filter-words      (var-get #'bark.commands/filter-words-by-scope)
+          describe-word     (var-get #'bark.commands/describe-denied-word)
           recorded          (atom [])]
-      (testing "describe-denied-trigger labels"
-        (is (= "Closed." (describe-trigger :report/closed)))
-        (is (= "Acked." (describe-trigger :report/acked)))
-        (is (= "Urgent." (describe-trigger :report/urgent))))
+      (testing "describe-denied-word labels"
+        (is (= "Closed." (describe-word :report/closed)))
+        (is (= "Acked." (describe-word :report/acked)))
+        (is (= "Urgent." (describe-word :report/urgent))))
       (with-redefs [commands/record-failure! (fn [entry] (swap! recorded conj entry))]
-        (let [trig-result {:report/closed true :report/acked true}
+        (let [word-result {:report/closed true :report/acked true}
               overrides   {:closed {:scope :maintainer}}
               failure-ctx {:source "src" :from-addr "user@test" :email-date nil :report-mid "<r@test>"}
-              filtered    (filter-triggers trig-result overrides false failure-ctx)]
+              filtered    (filter-words word-result overrides false failure-ctx)]
           (is (= {:report/acked true} filtered)
               "acked (default :user scope) survives, closed (maintainer-only override) is dropped")
           (is (= 1 (count @recorded)) "exactly one failure recorded")
@@ -625,70 +625,69 @@
             (is (not (contains? (set (map :voter votes)) "admin@test.org")))))
 
         ;; --- Directive unit tests ---
-        (testing "detect-directives"
+        (testing "detect-lines"
           (is (= [{:action :set :attr :report/acked :email-address "a@b.com" :scope :maintainer :id :acked-by}]
-                 (commands/detect-directives :bug "Acked-by: a@b.com\n")))
-          (is (= [{:action :set :attr :report/owned :email-address "x@y.com" :scope :maintainer :id :owned-by}
-                  {:action :set :attr :report/urgent :email-address "x@y.com" :scope :maintainer :id :urgent-by}]
-                 (commands/detect-directives :bug "Owned-by: x@y.com\nUrgent-by: x@y.com\n")))
+                 (commands/detect-lines :bug "Acked-by: a@b.com\n")))
+          (is (= [{:action :set :attr :report/owned :email-address "x@y.com" :scope :maintainer :id :owned-by}]
+                 (commands/detect-lines :bug "Owned-by: x@y.com\nIgnore this line\n")))
           (is (= [{:action :unset :attr :report/acked :scope :setter-or-maintainer :id :unacked}]
-                 (commands/detect-directives :bug "Not acked\n")))
+                 (commands/detect-lines :bug "Not acked\n")))
           (is (= [{:action :unset :attr :report/urgent :scope :setter-or-maintainer :id :unurgent}]
-                 (commands/detect-directives :bug "Not urgent\n")))
+                 (commands/detect-lines :bug "Not urgent\n")))
           (is (= [{:action :unset :attr :report/important :scope :setter-or-maintainer :id :unimportant}]
-                 (commands/detect-directives :bug "Not important\n")))
+                 (commands/detect-lines :bug "Not important\n")))
           (is (= [{:action :set-deadline :date (parse-date-iso "2026-06-15") :scope :user :id :deadline}]
-                 (commands/detect-directives :bug "Deadline: 2026-06-15\n")))
+                 (commands/detect-lines :bug "Deadline: 2026-06-15\n")))
           (is (= [{:action :unset-deadline :scope :setter-or-maintainer :id :undeadline}]
-                 (commands/detect-directives :bug "No deadline\n")))
+                 (commands/detect-lines :bug "No deadline\n")))
           (is (= [{:action :unset-topic :scope :setter-or-maintainer :id :untopic}]
-                 (commands/detect-directives :bug "No topic\n")))
+                 (commands/detect-lines :bug "No topic\n")))
           (is (= [{:action :set-topic :topic "my-topic" :scope :user :id :topic}]
-                 (commands/detect-directives :bug "Topic: my-topic\n")))
+                 (commands/detect-lines :bug "Topic: my-topic\n")))
           (is (= [{:action :set :attr :report/acked :email-address "a@b.com" :scope :maintainer :id :acked-by}
                   {:action :set-deadline :date (parse-date-iso "2026-07-01") :scope :user :id :deadline}
                   {:action :set-topic :topic "urgent-fix" :scope :user :id :topic}]
-                 (commands/detect-directives :bug "Acked-by: a@b.com\nDeadline: 2026-07-01\nTopic: urgent-fix\n")))
+                 (commands/detect-lines :bug "Acked-by: a@b.com\nDeadline: 2026-07-01\nTopic: urgent-fix\n")))
           (is (= [{:action :set :attr :report/owned :email-address "x@y.com" :scope :maintainer :id :owned-by}]
-                 (commands/detect-directives :bug "Thanks for the report.\nOwned-by: x@y.com\nWill look into it.\n")))
+                 (commands/detect-lines :bug "Thanks for the report.\nOwned-by: x@y.com\nWill look into it.\n")))
           ;; RFC 5322 "Display Name <addr>" format
           (is (= [{:action :set :attr :report/owned :email-address "x@y.com" :scope :maintainer :id :owned-by}]
-                 (commands/detect-directives :bug "Owned-by: Some User <x@y.com>\n")))
+                 (commands/detect-lines :bug "Owned-by: Some User <x@y.com>\n")))
           ;; Bracketed address without display name: angle brackets must be stripped
           (is (= [{:action :set :attr :report/owned :email-address "x@y.com" :scope :maintainer :id :owned-by}]
-                 (commands/detect-directives :bug "Owned-by: <x@y.com>\n")))
+                 (commands/detect-lines :bug "Owned-by: <x@y.com>\n")))
           ;; Address must contain a dot in the domain part
-          (is (= [] (commands/detect-directives :bug "Owned-by: alice@localhost\n")))
+          (is (= [] (commands/detect-lines :bug "Owned-by: alice@localhost\n")))
           ;; Address must not contain stray @ characters
-          (is (= [] (commands/detect-directives :bug "Owned-by: alice@@host.com\n")))
-          (is (= [] (commands/detect-directives :bug "Just a normal reply.\n")))
-          (is (nil? (commands/detect-directives :bug nil)))
+          (is (= [] (commands/detect-lines :bug "Owned-by: alice@@host.com\n")))
+          (is (= [] (commands/detect-lines :bug "Just a normal reply.\n")))
+          (is (nil? (commands/detect-lines :bug nil)))
           ;; Expiry directive
           (is (= [{:action :set-expiry :date (parse-date-iso "2026-09-01") :scope :user :id :expiry}]
-                 (commands/detect-directives :bug "Expiry: 2026-09-01\n")))
+                 (commands/detect-lines :bug "Expiry: 2026-09-01\n")))
           (is (= [{:action :unset-expiry :scope :setter-or-maintainer :id :unexpiry}]
-                 (commands/detect-directives :bug "No expiry\n")))
+                 (commands/detect-lines :bug "No expiry\n")))
           ;; "Expiry: deadline" is no longer a valid command (use :inactive-after :deadline in config)
-          (is (= [] (commands/detect-directives :bug "Expiry: deadline\n")))
+          (is (= [] (commands/detect-lines :bug "Expiry: deadline\n")))
           ;; Deadline with duration (relative to email date)
           (let [email-date (parse-date-iso "2026-01-10")
-                result (commands/detect-directives :bug "Deadline: 30d\n" nil email-date)]
+                result (commands/detect-lines :bug "Deadline: 30d\n" nil email-date)]
             (is (= 1 (count result)))
             (is (= :set-deadline (:action (first result))))
             (is (= (parse-date-iso "2026-02-09") (:date (first result)))))
           ;; Expiry with duration (relative to email date)
           (let [email-date (parse-date-iso "2026-01-03")
-                result (commands/detect-directives :bug "Expiry: 3d\n" nil email-date)]
+                result (commands/detect-lines :bug "Expiry: 3d\n" nil email-date)]
             (is (= 1 (count result)))
             (is (= :set-expiry (:action (first result))))
             (is (= (parse-date-iso "2026-01-06") (:date (first result)))))
           ;; Compound duration
           (let [email-date (parse-date-iso "2026-01-01")
-                result (commands/detect-directives :bug "Expiry: 1m 2w\n" nil email-date)]
+                result (commands/detect-lines :bug "Expiry: 1m 2w\n" nil email-date)]
             (is (= 1 (count result)))
             (is (= (parse-date-iso "2026-02-14") (:date (first result)))))
           ;; Expiry not applicable to announcements
-          (is (= [] (commands/detect-directives :announcement "Expiry: 2026-09-01\n"))))
+          (is (= [] (commands/detect-lines :announcement "Expiry: 2026-09-01\n"))))
 
         ;; --- resolve-commands unit tests ---
         (testing "resolve-commands"
@@ -719,14 +718,12 @@
                                              {:action :unset-topic}]))))
 
         ;; --- Bug 81 directives ---
-        (testing "Bug 81 Acked-by directive"
+        (testing "Bug 81 Acked-by"
           (let [r (get-report db "<81@test.org>")]
             (is (nil? (:report/acked r)))
             (is (nil? (:report/acked-address r)))
             (is (some? (:report/owned r)))
-            (is (some? (:report/urgent r)))
-            (is (= "fixer@test.org" (:report/owned-address r)))
-            (is (= "fixer@test.org" (:report/urgent-address r)))))
+            (is (= "fixer@test.org" (:report/owned-address r)))))
 
         ;; --- Bug 81 user directive denied ---
         (testing "Bug 81 user directive denied"
@@ -736,14 +733,12 @@
         (testing "Bug 86 last-one-wins"
           (is (nil? (:report/acked (get-report db "<86@test.org>")))))
 
-        ;; --- Bug 88 Closed-by + Important-by ---
-        (testing "Bug 88 Closed-by + Important-by"
+        ;; --- Bug 88 Closed-by ---
+        (testing "Bug 88 Closed-by"
           (let [r (get-report db "<88@test.org>")]
             (is (some? (:report/closed r)))
             (is (= :resolved (:report/close-reason r)))
-            (is (some? (:report/important r)))
-            (is (= "closer@test.org" (:report/closed-address r)))
-            (is (= "closer@test.org" (:report/important-address r)))))
+            (is (= "closer@test.org" (:report/closed-address r)))))
 
         ;; --- Bug 90 trigger + directive ---
         (testing "Bug 90 Confirmed trigger + Owned-by directive"
@@ -756,12 +751,10 @@
         (testing "Bug 90 Fixed + Unclosed (directive wins)"
           (is (nil? (:report/closed (get-report db "<90@test.org>")))))
 
-        ;; --- Bug 93 Confirmed + Urgent-by ---
-        (testing "Bug 93 Confirmed + Urgent-by"
+        ;; --- Bug 93 Confirmed ---
+        (testing "Bug 93 Confirmed"
           (let [r (get-report db "<93@test.org>")]
-            (is (some? (:report/acked r)))
-            (is (some? (:report/urgent r)))
-            (is (= "user@test.org" (:report/urgent-address r)))))
+            (is (some? (:report/acked r)))))
 
         ;; --- Bug 90 Topic directive ---
         (testing "Bug 90 Topic directive"
@@ -811,7 +804,7 @@
                       (all-related r106)))))
 
         ;; --- Emails 108-110 Supersede then unsupersede ---
-        ;; 109 admin supersedes 108 by 106, 110 admin "Not superseded"
+        ;; 109 admin supersedes 108 by 106, 110 admin "Not superseded-by"
         ;; reopens it.  Email 111 is a neutral user reply (no command),
         ;; so the final state of 108 is cleanly "reopened".
         (testing "Bug 108 superseded then unsuperseded"
@@ -858,38 +851,38 @@
                 "reverse related link is removed")))
 
         ;; --- Directive unit tests for supersede ---
-        (testing "detect-directives: Superseded-by with angle brackets"
+        (testing "detect-lines: Superseded-by with angle brackets"
           (is (= [{:action :set-superseded :attr :rel/supersedes :target-message-id "<msg@example.com>" :scope :user :id :superseded-by}]
-                 (commands/detect-directives :bug "Superseded-by: <msg@example.com>\n"))))
+                 (commands/detect-lines :bug "Superseded-by: <msg@example.com>\n"))))
 
-        (testing "detect-directives: Superseded-by tolerates an URL prefix"
+        (testing "detect-lines: Superseded-by tolerates an URL prefix"
           (is (= [{:action :set-superseded :attr :rel/supersedes :target-message-id "<msg@example.com>" :scope :user :id :superseded-by}]
-                 (commands/detect-directives :bug "Superseded-by: https://orgmode.org/list/<msg@example.com>\n"))))
+                 (commands/detect-lines :bug "Superseded-by: https://orgmode.org/list/<msg@example.com>\n"))))
 
-        (testing "detect-directives: Superseded-by accepts a public-inbox URL"
+        (testing "detect-lines: Superseded-by accepts a public-inbox URL"
           (is (= [{:action :set-superseded :attr :rel/supersedes :target-message-id "<msg@example.com>" :scope :user :id :superseded-by}]
-                 (commands/detect-directives :bug "Superseded-by: https://list.orgmode.org/orgmode/msg@example.com/\n")))
+                 (commands/detect-lines :bug "Superseded-by: https://list.orgmode.org/orgmode/msg@example.com/\n")))
           (is (= [{:action :set-superseded :attr :rel/supersedes :target-message-id "<msg@example.com>" :scope :user :id :superseded-by}]
-                 (commands/detect-directives :bug "Superseded-by: https://list.orgmode.org/orgmode/msg@example.com\n"))))
+                 (commands/detect-lines :bug "Superseded-by: https://list.orgmode.org/orgmode/msg@example.com\n"))))
 
-        (testing "detect-directives: Superseded-by accepts a bare message-id"
+        (testing "detect-lines: Superseded-by accepts a bare message-id"
           (is (= [{:action :set-superseded :attr :rel/supersedes :target-message-id "<msg@example.com>" :scope :user :id :superseded-by}]
-                 (commands/detect-directives :bug "Superseded-by: msg@example.com\n"))))
+                 (commands/detect-lines :bug "Superseded-by: msg@example.com\n"))))
 
-        (testing "detect-directives: Superseded-by rejects URLs where the @ segment is non-terminal"
-          (is (= [] (commands/detect-directives :bug "Superseded-by: https://example.com/foo@bar/baz.html\n"))))
+        (testing "detect-lines: Superseded-by rejects URLs where the @ segment is non-terminal"
+          (is (= [] (commands/detect-lines :bug "Superseded-by: https://example.com/foo@bar/baz.html\n"))))
 
-        (testing "detect-directives: Not superseded"
-          (is (= [{:action :unset-superseded :attr :rel/supersedes :scope :setter-or-maintainer :id :unsuperseded}]
-                 (commands/detect-directives :bug "Not superseded\n"))))
+        (testing "detect-lines: Not superseded-by"
+          (is (= [{:action :unset-superseded :attr :rel/supersedes :scope :setter-or-maintainer :id :unsuperseded-by :target-message-id "<msg@example.com>"}]
+                 (commands/detect-lines :bug "Not superseded-by: <msg@example.com>\n"))))
 
-        (testing "detect-directives: Supersedes (symmetric of Superseded-by)"
+        (testing "detect-lines: Supersedes (symmetric of Superseded-by)"
           (is (= [{:action :set-supersedes :attr :rel/supersedes :target-message-id "<msg@example.com>" :scope :user :id :supersedes}]
-                 (commands/detect-directives :bug "Supersedes: <msg@example.com>\n"))))
+                 (commands/detect-lines :bug "Supersedes: <msg@example.com>\n"))))
 
-        (testing "detect-directives: Not superseding"
-          (is (= [{:action :unset-supersedes :attr :rel/supersedes :scope :setter-or-maintainer :id :unsupersedes}]
-                 (commands/detect-directives :bug "Not superseding\n"))))
+        (testing "detect-lines: Not supersedes"
+          (is (= [{:action :unset-supersedes :attr :rel/supersedes :scope :setter-or-maintainer :id :unsupersedes :target-message-id "<msg@example.com>"}]
+                 (commands/detect-lines :bug "Not supersedes: <msg@example.com>\n"))))
 
         (testing "resolve-commands: superseded-by"
           (is (= {:set {} :unset #{} :superseded-by "<mid@host>"}
@@ -897,11 +890,11 @@
                   [{:action :set-superseded :target-message-id "<mid@host>"}]))))
 
         (testing "resolve-commands: unsuperseded"
-          (is (= {:set {} :unset #{} :unsuperseded? true}
+          (is (= {:set {} :unset #{} :unsuperseded-by? true}
                  (commands/resolve-commands [{:action :unset-superseded}]))))
 
         (testing "resolve-commands: supersede then unsupersede"
-          (is (= {:set {} :unset #{} :unsuperseded? true}
+          (is (= {:set {} :unset #{} :unsuperseded-by? true}
                  (commands/resolve-commands
                   [{:action :set-superseded :target-message-id "<mid@host>"}
                    {:action :unset-superseded}]))))
@@ -934,16 +927,16 @@
             (is (some #(= "<130@test.org>" (:report/message-id %))
                       (all-related r131)))))
 
-        ;; --- Emails 132-134 Supersedes then Not superseding ---
-        (testing "Bug 132 superseded by 133 then reopened via Not superseding"
+        ;; --- Emails 132-134 Supersedes then Not supersedes ---
+        (testing "Bug 132 superseded by 133 then reopened via Not supersedes"
           (let [r132 (get-report db "<132@test.org>")
                 r133 (get-report db "<133@test.org>")]
-            (is (nil? (:report/closed r132)) "Not superseding reopens the previously-closed target")
+            (is (nil? (:report/closed r132)) "Not supersedes reopens the previously-closed target")
             (is (nil? (:report/close-reason r132)))
             (is (nil? (superseded-by-target r132)))
             (is (not (some #(= "<133@test.org>" (:report/message-id %))
                            (all-related r132)))
-                "Not superseding retracts the :related-to companion too")
+                "Not supersedes retracts the :related-to companion too")
             (is (nil? (:report/closed r133)) "the superseder stays open throughout")))
 
         ;; --- Emails 135-137 Cycle flip via cross-directive ---

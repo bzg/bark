@@ -175,7 +175,7 @@ Maintainers have broader retraction rights, described in
 
 One report can replace another -- a newer patch version, or a
 fresh bug report that captures the real issue.  Two equivalent
-directives mark a supersession; which one you use depends on the
+commands mark a supersession; which one you use depends on the
 thread you write from.
 
 From the old report's thread, write:
@@ -192,8 +192,9 @@ A _message-id_ takes one of three forms: =<id@host>=, the bare
 =https://list.orgmode.org/orgmode/id@host/=.  Both reports must be
 of the same type: bug to bug, patch to patch, request to request.
 
-To undo, reply with =Not superseded= from the closed report's
-thread, or with =Not superseding= from the replacement's thread.
+To undo, reply with =Not superseded-by: <new-message-id@example.com>=
+from the closed report's thread, or with =Not supersedes:
+<old-message-id@example.com>= from the replacement's thread.
 
 For the automatic actions BARK performs on supersession, see the
 [[#superseding-a-report-1][maintainer section]].
@@ -212,7 +213,8 @@ To mark a report as a duplicate of another, reply with:
 
 Message-id forms and type constraints match =Superseded-by:= (see
 above).  The duplicate is closed with reason =:cancelled= and
-linked to the target.  To undo, reply with =Not duplicate.=
+linked to the target.  To undo, reply with =Not duplicate-of:
+<target-message-id@example.com>=.
 
 ** Cross-referencing reports
 
@@ -220,7 +222,7 @@ To cross-reference another report, reply with:
 
 : Related-to: <other-message-id@example.com>
 
-This directive accepts any pair of reports, including closed
+This annotation accepts any pair of reports, including closed
 ones, and uses the same message-id forms as =Superseded-by:=.
 Several =Related-to:= lines in a single email post several links.
 To undo a cross-reference, reply with =Not related-to:
@@ -294,7 +296,7 @@ but any announcement with ICS content is included regardless of topic.
 ** Undoing updates
 
 A maintainer can undo any update on a report through the same
-"Not" or "No" directives that a regular user has at their
+"Not" or "No" commands that a regular user has at their
 disposal:
 
 : Not acked.
@@ -305,11 +307,14 @@ disposal:
 : No deadline.
 : No expiry.
 : No topic.
-: Not superseded.
+: Not superseded-by: <new-message-id@example.com>
+: Not supersedes: <old-message-id@example.com>
+: Not duplicate-of: <target-message-id@example.com>
+: Not related-to: <other-message-id@example.com>
 
 A regular user can only retract their own actions (see
 [[#retracting-your-own-updates][Retracting your own updates]]).  A maintainer applies the same
-directives without that restriction.
+commands without that restriction.
 
 ** Setting a deadline
 
@@ -348,7 +353,7 @@ To remove a per-report expiry, reply with =No expiry.=.
 
 ** Superseding a report
 
-A =Supersedes:= or =Superseded-by:= directive (see [[#superseding-a-report][the user
+A =Supersedes:= or =Superseded-by:= command (see [[#superseding-a-report][the user
 section]] for syntax and message-id forms) triggers three automatic
 actions:
 
@@ -363,15 +368,18 @@ In the HTML index, a superseded report appears struck through,
 with an "S" status flag.  Its subject tooltip shows the
 replacement's title.
 
-A later directive may flip the direction.  When =Supersedes: <X>=
+A later command may flip the direction.  When =Supersedes: <X>=
 is posed at time t1 and =Superseded-by: <X>= at time t2 on the
 same report, the second pose retracts the first, reopens the
 previously closed report, and applies the new direction.
 
 To undo a supersession, the original setter or any maintainer can
-reply with =Not superseded= or =Not superseding=.  Either form
-retracts the relation, reopens the closed report, and clears the
-close-reason; the =:related-to= link is kept.
+reply with =Not superseded-by: <new@x>= or =Not supersedes:
+<old@x>=.  The message-id must match the currently-active
+relation; a mismatched id is a no-op (so an unrelated supersede
+posed from elsewhere is not retracted by accident).  On a match,
+the relation is retracted, the closed report reopens, and the
+close-reason is cleared; the =:related-to= link is kept.
 
 *** Automatic supersession of patches
 
@@ -403,13 +411,11 @@ follow a separate mechanism, which matches on version and topic.
 
 A maintainer can update a report on behalf of another user by
 writing directly to the BARK inbox with one of the following
-directives:
+=-by= lines:
 
 : Acked-by: a-user@example.com
 : Owned-by: a-user@example.com
 : Closed-by: a-user@example.com
-: Urgent-by: a-user@example.com
-: Important-by: a-user@example.com
 
 The RFC 5322 =Display Name <addr>= form is also accepted:
 
@@ -507,17 +513,30 @@ which in turn takes precedence over the built-in defaults.
 * Commands
 
 A _command_ is a keyword recognised at the start of a line in a
-thread reply, followed by punctuation (=.= =,= =;= =:= =?= =!=),
-whitespace, or end of line.  Two commands are stricter: =Urgent=
-and =Important= require punctuation or end of line, never
-whitespace (see [[#priority-commands][priority commands]]).
+thread reply.  BARK distinguishes two kinds:
 
-A _directive_ is a command that takes a parameter.  The directives
-=Topic:=, =Deadline:=, =Expiry:=, =Acked-by:=, =Owned-by:=,
-=Closed-by:=, =Urgent-by:=, =Important-by:= and =Superseded-by:=
-require at least one whitespace character between the colon and
-the value.  =Topic: parser= is recognised; =Topic:parser= is
-silently ignored.
+- A *trigger* changes a report's state -- open/closed, acked,
+  owned, superseded, duplicate.  Triggers never apply to the mail
+  that carries them, even when that mail opens a new thread.
+  Examples: =Closed.=, =Acked.=, =Owned-by:=, =Superseded-by:=,
+  =Duplicate-of:=.
+
+- An *annotation* sets or unsets a property -- urgency, importance,
+  topic, deadline, expiry, or a non-closing relation.  When the
+  carrying mail itself becomes a new report, the annotation
+  applies to it; otherwise it targets the nearest report in the
+  thread.  Examples: =Urgent.=, =Important.=, =Topic:=, =Deadline:=,
+  =Supersedes:=, =Related-to:=.
+
+Two annotations are stricter on punctuation: =Urgent= and
+=Important= require punctuation or end of line, never whitespace
+(see [[#priority-commands][priority commands]]).
+
+Colon-prefixed commands -- =Topic:=, =Deadline:=, =Expiry:=,
+=Acked-by:=, =Owned-by:=, =Closed-by:=, =Superseded-by:=,
+=Supersedes:=, =Duplicate-of:=, =Related-to:= -- require at least one
+whitespace character between the colon and the value.  =Topic:
+parser= is recognised; =Topic:parser= is silently ignored.
 
 ** Status commands
 
@@ -608,16 +627,16 @@ Each entry is a map with any of =:words=, =:scope=, =:report-types=
     attribute, or any maintainer (maintainers keep their administrative
     override)
 
-  =:setter-or-maintainer= is only valid on unset directives whose
+  =:setter-or-maintainer= is only valid on unset commands whose
   target attribute is tracked by a ref to the pose-email: =:unacked=,
   =:unowned=, =:unclosed=, =:unurgent=, =:unimportant=, =:untopic=,
-  =:undeadline=, =:unexpiry=, =:unsuperseded=, =:unsupersedes=,
-  =:unduplicate=.  =bb test-config= rejects this scope on any other
+  =:undeadline=, =:unexpiry=, =:unsuperseded-by=, =:unsupersedes=,
+  =:unduplicate-of=.  =bb test-config= rejects this scope on any other
   command.
 - =:report-types= replaces the default set of report types the command
   applies to. When absent, the registry default is used.
 - Any command ID from the table below can be overridden, both triggers
-  and directives.
+  and annotations.
 - Role controls cannot be overridden.
 
 Per-source settings take precedence over the global =:commands=, which
@@ -633,10 +652,10 @@ removes false positives on common English words such as "Done.",
 
 | Form             | Loose                  | Strict                 |
 |------------------+------------------------+------------------------|
-| Trigger          | =Closed.= / =!Closed.=     | =!Closed.=               |
-| Negative trigger | =Not acked= / =!Not acked= | =!Not acked=             |
-| =-by= directive    | =Acked-by: a@b.c=        | =!Acked-by: a@b.c=       |
-| Date directive   | =Deadline: 2026-06-01=   | =!Deadline: 2026-06-01=  |
+| Bareword         | =Closed.= / =!Closed.=     | =!Closed.=               |
+| Negative bareword| =Not acked= / =!Not acked= | =!Not acked=             |
+| =-by= line       | =Acked-by: a@b.c=        | =!Acked-by: a@b.c=       |
+| Date line        | =Deadline: 2026-06-01=   | =!Deadline: 2026-06-01=  |
 | Topic            | =Topic: event=           | =!Topic: event=          |
 | Supersede        | =Superseded-by: <mid>=   | =!Superseded-by: <mid>=  |
 | Supersede (sym.) | =Supersedes: <mid>=      | =!Supersedes: <mid>=     |
@@ -665,43 +684,50 @@ maintainer.  In the "Permission" column, "setter or maintainer"
 denotes the user who previously set the attribute; a maintainer
 retains a full override in every case.
 
+Triggers act on existing reports only.  Annotations also apply to
+the carrying mail when that mail itself becomes a new report.
+
+*** Triggers
+
 | ID                 | Syntax / Words                              | Permission           | Report types        |
 |--------------------+---------------------------------------------+----------------------+---------------------|
 | =:closed= (resolved) | =Closed=, =Resolved=, =Applied=, =Fixed=, =Completed= | any user             | all                 |
 | =:closed= (canceled) | =Canceled=, =Cancelled=                         | any user             | all                 |
 | =:closed= (expired)  | =Expired=                                     | any user             | all                 |
+| =:closed-by=         | =Closed-by: addr@host=                        | maintainer           | all                 |
+| =:unclosed=          | =Not closed=                                  | setter or maintainer | all                 |
 | =:acked=             | =Acked=, =Confirmed=, =Approved=                  | any user             | bug, patch, request |
+| =:acked-by=          | =Acked-by: addr@host=                         | maintainer           | bug, patch, request |
+| =:unacked=           | =Not acked=                                   | setter or maintainer | bug, patch, request |
 | =:owned=             | =Owned=                                       | any user             | bug, patch, request |
-|--------------------+---------------------------------------------+----------------------+---------------------|
-| =:urgent=            | =Urgent.=                                     | any user             | all                 |
-| =:important=         | =Important.=                                  | any user             | all                 |
-| =:topic=             | =Topic: word=                                 | any user             | all                 |
-| =:superseded-by=     | =Superseded-by: <msg-id>=                     | any user             | all                 |
-| =:supersedes=        | =Supersedes: <msg-id>=                        | any user             | all                 |
-| =:deadline=          | =Deadline: 2025-03-19= or =Deadline: 30d=       | any user             | bug, patch, request |
-| =:expiry=            | =Expiry: 2025-06-15= or =Expiry: 30d=           | any user             | bug, patch, request |
-|--------------------+---------------------------------------------+----------------------+---------------------|
+| =:owned-by=          | =Owned-by: addr@host=                         | maintainer           | bug, patch, request |
+| =:unowned=           | =Not owned=                                   | setter or maintainer | bug, patch, request |
 | vote up            | =+1= or =1+=                                    | any user (once)      | request             |
 | vote down          | =-1= or =1-=                                    | any user (once)      | request             |
 | vote null          | =+0= / =0+= / =-0= / =0-=                           | any user (once)      | request             |
-|--------------------+---------------------------------------------+----------------------+---------------------|
-| =:unclosed=          | =Not closed=                                  | setter or maintainer | all                 |
-| =:unurgent=          | =Not urgent=                                  | setter or maintainer | all                 |
-| =:unimportant=       | =Not important=                               | setter or maintainer | all                 |
-| =:untopic=           | =No topic=                                    | setter or maintainer | all                 |
-| =:unsuperseded=      | =Not superseded=                              | setter or maintainer | all                 |
-| =:unsupersedes=      | =Not superseding=                             | setter or maintainer | all                 |
-| =:unacked=           | =Not acked=                                   | setter or maintainer | bug, patch, request |
-| =:unowned=           | =Not owned=                                   | setter or maintainer | bug, patch, request |
-| =:undeadline=        | =No deadline=                                 | setter or maintainer | bug, patch, request |
-| =:unexpiry=          | =No expiry=                                   | setter or maintainer | bug, patch, request |
-|--------------------+---------------------------------------------+----------------------+---------------------|
-| =:closed-by=         | =Closed-by: addr@host=                        | maintainer           | all                 |
-| =:urgent-by=         | =Urgent-by: addr@host=                        | maintainer           | all                 |
-| =:important-by=      | =Important-by: addr@host=                     | maintainer           | all                 |
-| =:acked-by=          | =Acked-by: addr@host=                         | maintainer           | bug, patch, request |
-| =:owned-by=          | =Owned-by: addr@host=                         | maintainer           | bug, patch, request |
-#+TBLFM: $1=:closed= (bug)
+| =:superseded-by=     | =Superseded-by: <msg-id>=                     | any user             | all                 |
+| =:unsuperseded-by=   | =Not superseded-by: <msg-id>=                 | setter or maintainer | all                 |
+| =:duplicate-of=      | =Duplicate-of: <msg-id>=                      | any user             | all                 |
+| =:unduplicate-of=    | =Not duplicate-of: <msg-id>=                  | setter or maintainer | all                 |
+
+*** Annotations
+
+| ID            | Syntax / Words                        | Permission           | Report types        |
+|---------------+---------------------------------------+----------------------+---------------------|
+| =:urgent=       | =Urgent.=                               | any user             | all                 |
+| =:unurgent=     | =Not urgent=                            | setter or maintainer | all                 |
+| =:important=    | =Important.=                            | any user             | all                 |
+| =:unimportant=  | =Not important=                         | setter or maintainer | all                 |
+| =:topic=        | =Topic: word=                           | any user             | all                 |
+| =:untopic=      | =No topic=                              | setter or maintainer | all                 |
+| =:deadline=     | =Deadline: 2025-03-19= or =Deadline: 30d= | any user             | bug, patch, request |
+| =:undeadline=   | =No deadline=                           | setter or maintainer | bug, patch, request |
+| =:expiry=       | =Expiry: 2025-06-15= or =Expiry: 30d=     | any user             | bug, patch, request |
+| =:unexpiry=     | =No expiry=                             | setter or maintainer | bug, patch, request |
+| =:supersedes=   | =Supersedes: <msg-id>=                  | any user             | all                 |
+| =:unsupersedes= | =Not supersedes: <msg-id>=              | setter or maintainer | all                 |
+| =:related-to=   | =Related-to: <msg-id>=                  | any user             | all                 |
+| =:unrelated-to= | =Not related-to: <msg-id>=              | any user             | all                 |
 
 ** All controls
 
@@ -1025,7 +1051,7 @@ and owned (since expiry candidates are always open reports):
 This can be set globally or per source (per-source takes precedence).
 
 In addition to these source-level rules, maintainers can set a
-per-report expiry date using the =Expiry:= directive (see [[#report-expiry][report
+per-report expiry date using the =Expiry:= annotation (see [[#report-expiry][report
 expiry]]). A per-report expiry overrides the source-level rules: if a
 report has an explicit expiry date, only that date is checked.
 

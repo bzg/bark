@@ -1,9 +1,9 @@
 (ns bark.commands-test
   "Unit tests for the loose/strict :command-syntax modes.
 
-  The matrix being verified: every Bark instruction (trigger, negative
-  trigger, -by directive, Date/Topic/Expiry/Deadline directive,
-  Superseded-by, role directive) must be:
+  The matrix being verified: every Bark command (bareword, negative
+  bareword, -by line, Date/Topic/Expiry/Deadline line, Superseded-by,
+  role command) must be:
 
     - accepted with and without `!` prefix in :loose mode
     - accepted only with `!` prefix in :strict mode"
@@ -16,33 +16,33 @@
    {:command-syntax (if strict? :strict :loose)}))
 
 ;; ---------------------------------------------------------------------------
-;; Triggers (simple + negative)
+;; Barewords (simple + negative)
 ;; ---------------------------------------------------------------------------
 
-(deftest trigger-loose-accepts-both-forms
+(deftest word-loose-accepts-both-forms
   (let [sc (src-cmds false)]
     (testing "bare form"
-      (is (some? (commands/detect-triggers :bug "Closed.\n" sc))))
+      (is (some? (commands/detect-words :bug "Closed.\n" sc))))
     (testing "!-prefixed form"
-      (is (some? (commands/detect-triggers :bug "!Closed.\n" sc))))))
+      (is (some? (commands/detect-words :bug "!Closed.\n" sc))))))
 
-(deftest trigger-strict-rejects-bare-form
+(deftest word-strict-rejects-bare-form
   (let [sc (src-cmds true)]
     (testing "bare form rejected"
-      (is (nil? (commands/detect-triggers :bug "Closed.\n" sc))))
+      (is (nil? (commands/detect-words :bug "Closed.\n" sc))))
     (testing "!-prefixed form accepted"
-      (is (some? (commands/detect-triggers :bug "!Closed.\n" sc))))))
+      (is (some? (commands/detect-words :bug "!Closed.\n" sc))))))
 
 ;; ---------------------------------------------------------------------------
-;; Directives (-by, Deadline, Topic, Superseded-by) and negatives
+;; Colon-line commands (-by, Deadline, Topic, Superseded-by) and negatives
 ;; ---------------------------------------------------------------------------
 
 (defn- detect-with [strict? body]
   (let [sc (src-cmds strict?)]
-    (commands/detect-directives :bug body nil nil (:directives sc))))
+    (commands/detect-lines :bug body nil nil (:line-patterns sc))))
 
-(deftest directive-loose-accepts-both-forms
-  (testing "-by directive"
+(deftest line-loose-accepts-both-forms
+  (testing "-by line"
     (is (seq (detect-with false "Acked-by: a@b.com\n")))
     (is (seq (detect-with false "!Acked-by: a@b.com\n"))))
   (testing "Deadline"
@@ -60,12 +60,12 @@
   (testing "Supersedes"
     (is (seq (detect-with false "Supersedes: <msg@example.com>\n")))
     (is (seq (detect-with false "!Supersedes: <msg@example.com>\n"))))
-  (testing "Not superseding"
-    (is (seq (detect-with false "Not superseding\n")))
-    (is (seq (detect-with false "!Not superseding\n")))))
+  (testing "Not supersedes"
+    (is (seq (detect-with false "Not supersedes: <msg@example.com>\n")))
+    (is (seq (detect-with false "!Not supersedes: <msg@example.com>\n")))))
 
-(deftest directive-strict-rejects-bare-form
-  (testing "-by directive"
+(deftest line-strict-rejects-bare-form
+  (testing "-by line"
     (is (empty? (detect-with true "Acked-by: a@b.com\n")))
     (is (seq    (detect-with true "!Acked-by: a@b.com\n"))))
   (testing "Deadline"
@@ -80,9 +80,9 @@
   (testing "Supersedes"
     (is (empty? (detect-with true "Supersedes: <msg@example.com>\n")))
     (is (seq    (detect-with true "!Supersedes: <msg@example.com>\n"))))
-  (testing "Not superseding"
-    (is (empty? (detect-with true "Not superseding\n")))
-    (is (seq    (detect-with true "!Not superseding\n")))))
+  (testing "Not supersedes"
+    (is (empty? (detect-with true "Not supersedes: <msg@example.com>\n")))
+    (is (seq    (detect-with true "!Not supersedes: <msg@example.com>\n")))))
 
 ;; ---------------------------------------------------------------------------
 ;; Role directives (Add/Remove maintainer) via pure parse-role-controls
@@ -116,8 +116,8 @@
   (testing "scalar :strict produces strict-syntax? true"
     (let [sc (commands/build-source-commands {:command-syntax :strict})]
       (is (true? (:strict-syntax? sc)))
-      (is (some? (:compiled sc)))
-      (is (some? (:directives sc)))))
+      (is (some? (:word-patterns sc)))
+      (is (some? (:line-patterns sc)))))
   (testing "scalar :loose produces strict-syntax? false"
     (let [sc (commands/build-source-commands {:command-syntax :loose})]
       (is (false? (:strict-syntax? sc)))))
@@ -129,11 +129,11 @@
 ;; Case-insensitive address caches
 ;; ---------------------------------------------------------------------------
 
-(deftest trigger-tx-lowercases-address-cache
-  (testing "build-trigger-tx stores :report/*-address lowercased regardless of
+(deftest word-tx-lowercases-address-cache
+  (testing "build-word-tx stores :report/*-address lowercased regardless of
             the sender's from-address casing -- so downstream :setter-or-maintainer
             comparisons are stable even if the user's MUA rewrites address case"
-    (let [trig-result {:report/acked 999}
-          [tx _ _] (commands/build-trigger-tx 42 trig-result 999 "Alice@Example.COM" {})]
+    (let [word-result {:report/acked 999}
+          [tx _ _] (commands/build-word-tx 42 word-result 999 "Alice@Example.COM" {})]
       (is (some (fn [datom] (= datom [:db/add 42 :report/acked-address "alice@example.com"]))
                 tx)))))

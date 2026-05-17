@@ -9,8 +9,8 @@
             [datalevin.core :as d]
             [taoensso.timbre :as log]
             [bark.common :as common]
-            [bark.commands.registry :refer [commands-by-id directive-commands
-                                            attr->trigger-cmd proxy-state-attrs
+            [bark.commands.registry :refer [commands-by-id line-commands
+                                            attr->word-cmd proxy-state-attrs
                                             address-attrs setter-ref-attrs]]
             [bark.detect :as detect]
             [bark.periods :as periods]
@@ -34,13 +34,13 @@
   (too many false positives with ordinary prose, e.g. \"Important note:\")."
   #{:urgent :important})
 
-(defn- trigger-pattern [strict-punct? strict-syntax? & words]
+(defn- word-pattern [strict-punct? strict-syntax? & words]
   (re-pattern
    (str "(?m)^" (common/bang-prefix strict-syntax?)
         "(" (str/join "|" (map #(java.util.regex.Pattern/quote %) words))
         ")(?:" trailing-punct (when-not strict-punct? "|\\s") "|$)")))
 
-(defn- directive-pattern [strict-syntax? {:keys [syntax param]}]
+(defn- line-pattern [strict-syntax? {:keys [syntax param]}]
   (let [qs       (java.util.regex.Pattern/quote syntax)
         prefix   (common/bang-prefix strict-syntax?)
         addr     "[^@<>\\s]+@[^@<>\\s]+\\.[^@<>\\s]+"   ; email address (dot required)
@@ -55,37 +55,37 @@
        :message-id       (str "^" prefix qs ":\\s+(?:.*<(" mid ")>|.*/(" mid-path ")/?|(" mid-path "))" trailing-punct "?\\s*$")
        (str "^" prefix qs trailing-punct "?\\s*$")))))
 
-(def ^:private compile-trigger-words
+(def ^:private compile-word-patterns
   "Compile an action=>words map into action=>regex."
   (memoize
    (fn [strict-syntax? action-map]
      (into {}
            (map (fn [[k words]]
-                  [k (apply trigger-pattern
+                  [k (apply word-pattern
                             (contains? strict-punct-actions k)
                             strict-syntax?
                             words)]))
            action-map))))
 
-(def ^:private compile-directives
-  "Compile directive patterns for a syntax mode."
+(def ^:private compile-line-patterns
+  "Compile colon-line command patterns for a syntax mode."
   (memoize
    (fn [strict-syntax?]
-     (mapv (fn [cmd] [cmd (directive-pattern strict-syntax? cmd)]) directive-commands))))
+     (mapv (fn [cmd] [cmd (line-pattern strict-syntax? cmd)]) line-commands))))
 
 (defn build-source-commands
   "Return a source-commands descriptor with keys:
     :commands       -- {cmd-id [strings]} active vocabulary
-    :compiled       -- {cmd-id regex} compiled trigger patterns
-    :directives     -- [[cmd pattern] …] compiled directive patterns
+    :word-patterns  -- {cmd-id regex} compiled bareword patterns
+    :line-patterns  -- [[cmd pattern] ...] compiled colon-line patterns
     :strict-syntax? -- boolean (true when :command-syntax is :strict)
     :overrides      -- per-command :scope/:report-types overrides"
   [source-cfg]
   (let [commands       (common/resolve-commands-map source-cfg)
         strict-syntax? (= :strict (common/resolve-command-syntax source-cfg))]
     {:commands       commands
-     :compiled       (compile-trigger-words strict-syntax? commands)
-     :directives     (compile-directives strict-syntax?)
+     :word-patterns  (compile-word-patterns strict-syntax? commands)
+     :line-patterns  (compile-line-patterns strict-syntax?)
      :strict-syntax? strict-syntax?
      :overrides      (common/resolve-command-overrides source-cfg)}))
 
@@ -95,7 +95,7 @@
 
 (defn- detect-close-reason [closed-words body-text strict-syntax?]
   (when (seq closed-words)
-    (let [pattern (apply trigger-pattern false strict-syntax? closed-words)]
+    (let [pattern (apply word-pattern false strict-syntax? closed-words)]
       (when-let [[_ matched] (re-find pattern body-text)]
         (get common/close-reasons matched :resolved)))))
 
@@ -103,7 +103,7 @@
   (try
     (-> (LocalDate/parse s) (.atStartOfDay ZoneOffset/UTC) .toInstant Date/from)
     (catch Exception _
-      (log/warn "Invalid ISO date in directive:" s)
+      (log/warn "Invalid ISO date in command:" s)
       nil)))
 
 (defn- parse-date-or-duration
@@ -119,25 +119,25 @@
                    (-> as-of ^Date .toInstant (LocalDate/ofInstant ZoneOffset/UTC))
                    (LocalDate/now ZoneOffset/UTC))]
         (-> base (.plusDays days) (.atStartOfDay ZoneOffset/UTC) .toInstant Date/from))
-      (do (log/warn "Unparseable date/duration in directive:" s)
+      (do (log/warn "Unparseable date/duration in command:" s)
           nil))))
 
-(defn- match-triggers [triggers body-text]
-  (into {} (keep (fn [[k p]] (when (re-find p body-text) [(keyword "report" (name k)) true]))) triggers))
+(defn- match-words [patterns body-text]
+  (into {} (keep (fn [[k p]] (when (re-find p body-text) [(keyword "report" (name k)) true]))) patterns))
 
-(defn detect-triggers
-  "Detect trigger matches in `body-text` for a given `report-type`,
-  using the precompiled vocabulary in `source-commands`."
-  [report-type body-text {:keys [compiled commands strict-syntax? overrides]}]
+(defn detect-words
+  "Detect bareword command matches in `body-text` for a given
+  `report-type`, using the precompiled vocabulary in `source-commands`."
+  [report-type body-text {:keys [word-patterns commands strict-syntax? overrides]}]
   (when body-text
-    (let [all-sets (match-triggers compiled body-text)
-          ;; Pre-compute close-reason from unfiltered triggers so it survives
+    (let [all-sets (match-words word-patterns body-text)
+          ;; Pre-compute close-reason from unfiltered matches so it survives
           ;; any future refactoring of the filter step.
           reason   (when (:report/closed all-sets)
                      (detect-close-reason (:closed commands) body-text strict-syntax?))
           filtered (into {}
                         (keep (fn [[attr :as entry]]
-                                (let [cmd (attr->trigger-cmd attr)
+                                (let [cmd (attr->word-cmd attr)
                                       rt  (or (:report-types (get overrides (:id cmd)))
                                               (:report-types cmd))]
                                   (when (or (nil? rt) (contains? rt report-type)) entry))))
@@ -148,20 +148,20 @@
                      (assoc :report/close-reason reason))]
       (when (seq result) result))))
 
-(def ^:private compiled-directives-loose (compile-directives false))
+(def ^:private compiled-lines-loose (compile-line-patterns false))
 
-(defn detect-directives
-  "Detect directives in `body-text`. The optional `compiled-dirs`
-  arg provides the precompiled directive patterns (from
+(defn detect-lines
+  "Detect colon-line commands in `body-text`. The optional `compiled`
+  arg provides the precompiled line patterns (from
   `build-source-commands`); if omitted, the loose-mode defaults are
   used."
-  ([report-type body-text] (detect-directives report-type body-text nil nil compiled-directives-loose))
-  ([report-type body-text overrides] (detect-directives report-type body-text overrides nil compiled-directives-loose))
-  ([report-type body-text overrides email-date] (detect-directives report-type body-text overrides email-date compiled-directives-loose))
-  ([report-type body-text overrides email-date compiled-dirs]
+  ([report-type body-text] (detect-lines report-type body-text nil nil compiled-lines-loose))
+  ([report-type body-text overrides] (detect-lines report-type body-text overrides nil compiled-lines-loose))
+  ([report-type body-text overrides email-date] (detect-lines report-type body-text overrides email-date compiled-lines-loose))
+  ([report-type body-text overrides email-date compiled]
    (when body-text
      (let [lines (str/split-lines body-text)
-           all-directives compiled-dirs]
+           all-lines compiled]
        (->> lines
             (keep (fn [line]
                     (some (fn [[{:keys [id action attr _param scope report-types]} pattern]]
@@ -187,15 +187,15 @@
                                                                    {:action :set-topic :topic t})
                                                :unset-topic      {:action :unset-topic}
                                                :set-superseded   (mid-result :set-superseded)
-                                               :unset-superseded {:action :unset-superseded :attr attr}
+                                               :unset-superseded (mid-result :unset-superseded)
                                                :set-supersedes   (mid-result :set-supersedes)
-                                               :unset-supersedes {:action :unset-supersedes :attr attr}
+                                               :unset-supersedes (mid-result :unset-supersedes)
                                                :set-duplicate    (mid-result :set-duplicate)
-                                               :unset-duplicate  {:action :unset-duplicate :attr attr}
+                                               :unset-duplicate  (mid-result :unset-duplicate)
                                                :set-related      (mid-result :set-related)
                                                :unset-related    (mid-result :unset-related))]
                                     (when base (assoc base :scope sc :id id)))))))
-                          all-directives)))
+                          all-lines)))
             vec)))))
 
 ;; ---------------------------------------------------------------------------
@@ -247,9 +247,9 @@
               (str "(audience: " (name (:audience entry)) ")"))))
 
 (defn resolve-commands
-  "Fold a seq of parsed directives into a summary map.
-  NOT for trigger results (which map attrs to `true`, not addresses)."
-  [directives]
+  "Fold a seq of parsed colon-line commands into a summary map.
+  NOT for bareword results (which map attrs to `true`, not addresses)."
+  [lines]
   (reduce (fn [acc {:keys [action attr email-address date topic target-message-id]}]
             (case action
               :set   (-> acc (assoc-in [:set attr] email-address) (update :unset disj attr))
@@ -260,12 +260,27 @@
               :unset-expiry   (-> acc (dissoc :expiry) (assoc :unexpiry? true))
               :set-topic      (assoc acc :topic topic)
               :unset-topic    (-> acc (dissoc :topic) (assoc :untopic? true))
-              :set-superseded   (-> acc (assoc :superseded-by target-message-id) (dissoc :unsuperseded?))
-              :unset-superseded (-> acc (dissoc :superseded-by) (assoc :unsuperseded? true))
-              :set-supersedes   (-> acc (assoc :supersedes target-message-id) (dissoc :unsupersedes?))
-              :unset-supersedes (-> acc (dissoc :supersedes) (assoc :unsupersedes? true))
-              :set-duplicate    (-> acc (assoc :duplicate-of target-message-id) (dissoc :unduplicate?))
-              :unset-duplicate  (-> acc (dissoc :duplicate-of) (assoc :unduplicate? true))
+              :set-superseded   (cond-> acc
+                                  :always           (assoc :superseded-by target-message-id)
+                                  :always           (dissoc :unsuperseded-by? :unsuperseded-by-mid))
+              :unset-superseded (cond-> acc
+                                  :always           (dissoc :superseded-by)
+                                  :always           (assoc :unsuperseded-by? true)
+                                  target-message-id (assoc :unsuperseded-by-mid target-message-id))
+              :set-supersedes   (cond-> acc
+                                  :always           (assoc :supersedes target-message-id)
+                                  :always           (dissoc :unsupersedes? :unsupersedes-mid))
+              :unset-supersedes (cond-> acc
+                                  :always           (dissoc :supersedes)
+                                  :always           (assoc :unsupersedes? true)
+                                  target-message-id (assoc :unsupersedes-mid target-message-id))
+              :set-duplicate    (cond-> acc
+                                  :always           (assoc :duplicate-of target-message-id)
+                                  :always           (dissoc :unduplicate-of? :unduplicate-of-mid))
+              :unset-duplicate  (cond-> acc
+                                  :always           (dissoc :duplicate-of)
+                                  :always           (assoc :unduplicate-of? true)
+                                  target-message-id (assoc :unduplicate-of-mid target-message-id))
               :set-related      (-> acc
                                     (update :related-to-set   (fnil conj #{}) target-message-id)
                                     (update :related-to-unset (fnil disj #{}) target-message-id))
@@ -273,7 +288,7 @@
                                     (update :related-to-unset (fnil conj #{}) target-message-id)
                                     (update :related-to-set   (fnil disj #{}) target-message-id))))
           {:set {} :unset #{}}
-          directives))
+          lines))
 
 ;; ---------------------------------------------------------------------------
 ;; Vote detection (pure)
@@ -327,8 +342,8 @@
                       addr-cur (conj [:db/retract report-eid (address-attrs attr) addr-cur])))))
         attrs))
 
-(defn- build-directive-set-tx
-  "Build assertion datoms for setting attributes via -by directives.
+(defn- build-line-set-tx
+  "Build assertion datoms for setting attributes via -by lines.
   Points the attr to the real email and stores the designated address
   in its lowercased form so downstream comparisons against
   :email/author-address are case-insensitive."
@@ -339,16 +354,16 @@
                    [:db/add report-eid (address-attrs attr) (str/lower-case addr)]]))
         set-map))
 
-(defn build-trigger-tx
-  "Build transaction data for trigger results.
+(defn build-word-tx
+  "Build transaction data for bareword detection results.
   `current` is the report's current state (pulled with
   `proxy-state-attrs`).  The `-address` cache is stored lowercased
   so downstream comparisons against :email/author-address are
   case-insensitive.
   Returns [tx-data new-sets] or nil if nothing to do."
-  [report-eid trig-result email-eid from-addr current]
-  (let [close-reason (:report/close-reason trig-result)
-        ref-result   (dissoc trig-result :report/close-reason)
+  [report-eid word-result email-eid from-addr current]
+  (let [close-reason (:report/close-reason word-result)
+        ref-result   (dissoc word-result :report/close-reason)
         new-sets     (into {} (remove (fn [[k _]] (get current k))) ref-result)
         addr-lc      (some-> from-addr str/lower-case)
         all-tx       (cond-> (when (seq new-sets)
@@ -359,20 +374,20 @@
                        (conj [:db/add report-eid :report/close-reason close-reason]))]
     (when (seq all-tx) [(vec all-tx) new-sets close-reason])))
 
-(defn apply-triggers! [conn report-eid trig-result email-eid email-mid from-addr source-cfg]
-  (when trig-result
+(defn apply-words! [conn report-eid word-result email-eid email-mid from-addr source-cfg]
+  (when word-result
     (let [db      (d/db conn)
           current (d/pull db proxy-state-attrs report-eid)
           rtype   (:report/type (d/pull db [:report/type] report-eid))]
       (when-let [[all-tx new-sets close-reason]
-                 (build-trigger-tx report-eid trig-result email-eid from-addr current)]
+                 (build-word-tx report-eid word-result email-eid from-addr current)]
         (d/transact! conn all-tx)
         (tracking/bump-report-updated! conn report-eid)
         (log/info (str/join ", " (cond-> (mapv (comp name key) new-sets)
                                    close-reason (conj (str "close-reason:" (name close-reason)))))
                   (str "(by " email-mid ")"))
-        ;; Propagate trigger-driven closure of a patch to the
-        ;; bugs/requests it resolves (no successor in the trigger path).
+        ;; Propagate bareword-driven closure of a patch to the
+        ;; bugs/requests it resolves (no successor in this path).
         ;; Sources with ":patch-triggers? false" opt out of the :resolved
         ;; propagation; :canceled retraction still runs (no-op when no
         ;; auto-credit was posed in the first place).
@@ -382,7 +397,7 @@
           (rel/propagate-patch-closure! conn report-eid rtype email-eid
                                         close-reason nil))))))
 
-(def ^:private directive-pull-pattern
+(def ^:private line-pull-pattern
   ;; Proxy-state attrs are pulled as bare refs (we only need :db/id
   ;; for retractions; the setter address comes from their paired
   ;; `-address` cache, pulled separately below).  The other ref
@@ -421,7 +436,7 @@
       ref-cur (conj [:db/retract report-eid attr (ref-eid ref-cur)])
       val-cur (conj [:db/retract report-eid value-attr val-cur]))))
 
-(def ^:private paired-directive-attrs
+(def ^:private paired-line-attrs
   "Directives that share the same {pose-email ref + paired `-value` scalar}
   tx shape.  Each row maps [resolved-set-key resolved-unset-key attr]:
     - set-key   -- value in the resolved map that triggers an assertion
@@ -431,8 +446,8 @@
    [:expiry   :unexpiry?   :report/expiry]
    [:topic    :untopic?    :report/topic]])
 
-(defn- build-paired-directive-tx
-  "Apply every set/unset from `paired-directive-attrs` to `tx`, reading
+(defn- build-paired-line-tx
+  "Apply every set/unset from `paired-line-attrs` to `tx`, reading
   the value/flag pair from `resolved`."
   [tx report-eid email-eid current resolved]
   (reduce (fn [tx [set-k unset-k attr]]
@@ -441,12 +456,12 @@
               (into (set-ref-value-tx report-eid email-eid attr (get resolved set-k)))
               (get resolved unset-k)
               (into (retract-ref-value-tx report-eid current attr))))
-          tx paired-directive-attrs))
+          tx paired-line-attrs))
 
 (defn- close-with-reason-tx
   "Tx datoms to close `report-eid` with `close-reason`.  The relation
   pose (:supersedes / :duplicates plus :related-to) is done separately
-  by `apply-directives!` via bark.relations."
+  by `apply-lines!` via bark.relations."
   [report-eid email-eid from-addr close-reason]
   [[:db/add report-eid :report/closed email-eid]
    [:db/add report-eid :report/closed-address from-addr]
@@ -483,30 +498,31 @@
       (d/transact! conn tx)
       true)))
 
-(defn build-directives-tx
+(defn build-lines-tx
   "Build attribute-level transaction data from resolved commands and
   current report state.  Returns the tx vector (may be empty).
   Closure-relation effects (Superseded-by / Supersedes / Duplicate-of
-  posing, close/reopen) are handled separately by `apply-directives!`."
+  posing, close/reopen) are handled separately by `apply-lines!`."
   [report-eid email-eid resolved current]
   (let [{:keys [set unset]} resolved]
     (-> []
-        (into (build-directive-set-tx report-eid email-eid set))
+        (into (build-line-set-tx report-eid email-eid set))
         (cond-> (and (contains? set :report/closed)
                      (not (:report/close-reason current)))
           (conj [:db/add report-eid :report/close-reason :resolved]))
         (into (build-unset-tx report-eid current unset))
         (cond-> (and (contains? unset :report/closed) (:report/close-reason current))
           (conj [:db/retract report-eid :report/close-reason (:report/close-reason current)]))
-        (build-paired-directive-tx report-eid email-eid current resolved))))
+        (build-paired-line-tx report-eid email-eid current resolved))))
 
-(defn describe-directives
-  "Build a human-readable summary of applied directives."
+(defn describe-lines
+  "Build a human-readable summary of applied colon-line commands."
   [resolved]
   (let [{:keys [set unset deadline undeadline? expiry unexpiry?
-                topic untopic? superseded-by unsuperseded?
-                supersedes unsupersedes?
-                duplicate-of unduplicate?
+                topic untopic?
+                superseded-by unsuperseded-by? unsuperseded-by-mid
+                supersedes    unsupersedes?    unsupersedes-mid
+                duplicate-of  unduplicate-of?  unduplicate-of-mid
                 related-to-set related-to-unset]} resolved]
     (str/join ", " (concat (map (fn [[attr addr]] (str (name attr) " -> " addr)) set)
                            (map #(str "un-" (name %)) unset)
@@ -517,11 +533,11 @@
                            (when topic [(str "topic:" topic)])
                            (when untopic? ["no topic"])
                            (when superseded-by [(str "superseded-by:" superseded-by)])
-                           (when unsuperseded? ["not superseded"])
+                           (when unsuperseded-by? [(str "not superseded-by:" unsuperseded-by-mid)])
                            (when supersedes [(str "supersedes:" supersedes)])
-                           (when unsupersedes? ["not superseding"])
+                           (when unsupersedes? [(str "not supersedes:" unsupersedes-mid)])
                            (when duplicate-of [(str "duplicate-of:" duplicate-of)])
-                           (when unduplicate? ["not duplicate"])
+                           (when unduplicate-of? [(str "not duplicate-of:" unduplicate-of-mid)])
                            (map #(str "related-to:" %) related-to-set)
                            (map #(str "not-related-to:" %) related-to-unset)))))
 
@@ -536,10 +552,10 @@
       (:email/author-address (get current attr))))
 
 (defn- scope-permits?
-  "Check whether a directive scope permits `from-addr` to act on `attr`.
+  "Check whether a command scope permits `from-addr` to act on `attr`.
   `current-d` is a `delay` that pulls the report's current state -- it
   is only forced in the :setter-or-maintainer branch, so emails that
-  contain only :user/:maintainer-scoped directives pay no pull cost.
+  contain only :user/:maintainer-scoped commands pay no pull cost.
 
   - :user                 -- anyone
   - :setter-or-maintainer -- the address that previously set `attr`, or any
@@ -559,15 +575,15 @@
                                      (= (str/lower-case setter)
                                         (str/lower-case from-addr)))))
     :maintainer           (boolean is-maintainer?)
-    (do (log/warn "Unknown command scope on directive:" scope)
+    (do (log/warn "Unknown command scope on line:" scope)
         false)))
 
-(defn- describe-denied-directive
-  "Rebuild a short, human-readable form of a parsed directive for use
-  in failure records and logs.  Dates are formatted as ISO (yyyy-MM-dd)
-  so the failure record stays readable when rendered verbatim in a
-  notification email.  Falls back to the :syntax of the looked-up
-  command when the directive carries no parameter."
+(defn- describe-denied-line
+  "Rebuild a short, human-readable form of a parsed colon-line command
+  for use in failure records and logs.  Dates are formatted as ISO
+  (yyyy-MM-dd) so the failure record stays readable when rendered
+  verbatim in a notification email.  Falls back to the :syntax of the
+  looked-up command when the command carries no parameter."
   [{:keys [id action email-address date topic target-message-id]}]
   (let [cmd    (get commands-by-id id)
         syntax (or (:syntax cmd) (some-> id name))]
@@ -583,21 +599,21 @@
       :unset-related    (str syntax ": " target-message-id)
       syntax)))
 
-(defn- filter-permitted-directives
-  "Return the subset of `directives` whose scope permits `from-addr` to
+(defn- filter-permitted-lines
+  "Return the subset of `lines` whose scope permits `from-addr` to
   act, further filtered by `action-pred`. `current-d` is the delay
   passed through to `scope-permits?` -- only forced when at least one
-  directive has scope :setter-or-maintainer.
+  line has scope :setter-or-maintainer.
 
-  When `failure-ctx` is non-nil, directives that are rejected by the
+  When `failure-ctx` is non-nil, lines that are rejected by the
   scope check (but pass `action-pred`) are written to the failures
   file as :insufficient-scope, audience :maintainers, so they
   surface in the next notification round."
-  [directives current-d from-addr is-maintainer? action-pred failure-ctx]
+  [lines current-d from-addr is-maintainer? action-pred failure-ctx]
   ;; Eager realization via `filterv` so the recording side effect in
   ;; the denial branch fires deterministically, regardless of whether
   ;; callers seq or reduce over the result.
-  (filterv (fn [{:keys [scope attr action] :as directive}]
+  (filterv (fn [{:keys [scope attr action] :as line}]
              (and (action-pred action)
                   (or (scope-permits? scope attr from-addr is-maintainer? current-d)
                       (do (when failure-ctx
@@ -605,9 +621,9 @@
                              (assoc failure-ctx
                                     :reason    :insufficient-scope
                                     :audience  :maintainers
-                                    :command   (describe-denied-directive directive))))
+                                    :command   (describe-denied-line line))))
                           false))))
-           directives))
+           lines))
 
 (defn- report-eid-by-mid
   "Look up a report by `target-mid`, matching either as the report's
@@ -625,7 +641,7 @@
              db target-mid))))
 
 (defn- resolve-target
-  "Look up the target report-eid for a relation directive (Superseded-by:
+  "Look up the target report-eid for a relation command (Superseded-by:
   or Duplicate-of:).  Returns {:target-eid :target-type :valid?} where
   :valid? is true iff the target exists AND the type constraint passes
   for `kind`.  A `target-mid` that resolves to a descendant of a report
@@ -656,8 +672,8 @@
                               :command (str syntax ": " target-mid))))))
 
 (defn- apply-related-to!
-  "Pose / retract :related-to relations from a resolved directives map.
-  Independent of report closure state; called from both `apply-directives!`
+  "Pose / retract :related-to relations from a resolved commands map.
+  Independent of report closure state; called from both `apply-lines!`
   (open path) and `try-unclosed!` (closed path).  Emits failures for
   unknown targets, ignores self-loops silently.
 
@@ -757,7 +773,7 @@
 (defn- relation-setters-as-pull
   "Build a partial pull map exposing relation setters under :setter-attr
   so `scope-permits?` can resolve :setter-or-maintainer on relation
-  unset directives.  `rows` is a seq carrying :kind, :role and
+  unset lines.  `rows` is a seq carrying :kind, :role and
   :setter-attr.
 
   Batches the per-row d/q calls into at most two queries (one per role)
@@ -793,9 +809,9 @@
           rows)))
 
 (def ^:private closure-relation-rows
-  "Specs for directive-driven closure relations (Superseded-by /
+  "Specs for command-driven closure relations (Superseded-by /
   Supersedes / Duplicate-of).  Each row drives an iteration in
-  `apply-directives!`:
+  `apply-lines!`:
     :id            -- unique row id (matches the registry command :id)
     :kind          -- relation kind to pose
     :role          -- :current-as-from when the current report is the
@@ -806,42 +822,52 @@
                       relation is always the report being closed.
     :propagate     -- close-reason passed to propagate-patch-closure!
     :propagate-tgt -- when true, pass the replacement eid as `successor-eid`
-    :syntax        -- human-readable directive name (for failure logs)
+    :syntax        -- human-readable command name (for failure logs)
     :mid-key       -- key in resolved holding the target message-id
     :unset-key     -- key in resolved holding the unset flag
     :setter-attr   -- key under which the relation's :rel/setter is
                       surfaced in the pull map so `scope-permits?` can
                       resolve :setter-or-maintainer on the unset
-                      directive in the open-report path."
+                      command in the open-report path."
   [{:id :superseded-by :kind :supersedes :role :current-as-from
     :propagate :superseded :propagate-tgt true
-    :syntax "Superseded-by" :mid-key :superseded-by :unset-key :unsuperseded?
+    :syntax "Superseded-by"
+    :mid-key :superseded-by :unset-key :unsuperseded-by? :unset-mid-key :unsuperseded-by-mid
+    :unset-syntax "Not superseded-by"
     :setter-attr :rel/supersedes}
    {:id :supersedes :kind :supersedes :role :current-as-to
     :propagate :superseded :propagate-tgt true
-    :syntax "Supersedes" :mid-key :supersedes :unset-key :unsupersedes?
+    :syntax "Supersedes"
+    :mid-key :supersedes :unset-key :unsupersedes? :unset-mid-key :unsupersedes-mid
+    :unset-syntax "Not supersedes"
     :setter-attr :rel/supersedes}
    {:id :duplicate-of :kind :duplicates :role :current-as-from
     :propagate :canceled :propagate-tgt false
-    :syntax "Duplicate-of" :mid-key :duplicate-of :unset-key :unduplicate?
+    :syntax "Duplicate-of"
+    :mid-key :duplicate-of :unset-key :unduplicate-of? :unset-mid-key :unduplicate-of-mid
+    :unset-syntax "Not duplicate-of"
     :setter-attr :rel/duplicates}])
 
 (defn- compute-closure-rows
   "Enrich `closure-relation-rows` with per-row decisions derived from
   `resolved` and current DB state.  Each row gains:
-    :target-mid   -- string from `resolved`'s mid-key (or nil)
-    :resolved     -- {:target-eid :target-type :valid?} from `resolve-target`
-    :pose-from    -- eid that becomes :rel/from on the pose (= the
-                     report being closed; either current or target
-                     depending on role)
-    :pose-to      -- eid that becomes :rel/to on the pose (the replacement)
-    :counterparty -- eid of the other endpoint of the currently-active
-                     relation involving the current report (or nil)
-    :clear-now?   -- true when an active relation should be retracted
-                     on this email (explicit unset directive AND a
-                     matching active relation exists)."
+    :target-mid       -- string from `resolved`'s mid-key (or nil)
+    :resolved         -- {:target-eid :target-type :valid?} from `resolve-target`
+    :pose-from        -- eid that becomes :rel/from on the pose (= the
+                         report being closed; either current or target
+                         depending on role)
+    :pose-to          -- eid that becomes :rel/to on the pose (the replacement)
+    :counterparty     -- eid of the other endpoint of the currently-active
+                         relation involving the current report (or nil)
+    :unset-target-mid -- string from `resolved`'s unset-mid-key (or nil)
+    :unset-target-eid -- eid the unset's mid resolves to (or nil)
+    :clear-now?       -- true when an explicit unset command targets the
+                         exact mid of the currently-active relation.
+                         A mismatch (or absent active relation) is a
+                         no-op so other relations of the same kind
+                         posed from elsewhere are not collateral damage."
   [db report-eid source-type resolved]
-  (mapv (fn [{:keys [kind role unset-key mid-key] :as row}]
+  (mapv (fn [{:keys [kind role unset-key unset-mid-key mid-key] :as row}]
           (let [target-mid (get resolved mid-key)
                 r          (resolve-target db kind report-eid
                                             source-type target-mid)
@@ -849,19 +875,25 @@
                 [pose-from pose-to] (case role
                                       :current-as-from [report-eid tgt]
                                       :current-as-to   [tgt report-eid])
-                counterparty (relation-counterparty-eid db report-eid kind role)]
+                counterparty     (relation-counterparty-eid db report-eid kind role)
+                unset-target-mid (get resolved unset-mid-key)
+                unset-target-eid (when unset-target-mid
+                                   (report-eid-by-mid db unset-target-mid))]
             (assoc row
-                   :target-mid   target-mid
-                   :resolved     r
-                   :pose-from    pose-from
-                   :pose-to      pose-to
-                   :counterparty counterparty
-                   :clear-now?   (and (boolean (get resolved unset-key))
-                                      (some? counterparty)))))
+                   :target-mid       target-mid
+                   :resolved         r
+                   :pose-from        pose-from
+                   :pose-to          pose-to
+                   :counterparty     counterparty
+                   :unset-target-mid unset-target-mid
+                   :unset-target-eid unset-target-eid
+                   :clear-now?       (and (boolean (get resolved unset-key))
+                                          (some? counterparty)
+                                          (= unset-target-eid counterparty)))))
         closure-relation-rows))
 
 (defn- apply-closure-set-row!
-  "Process one valid closure-relation set directive.  Steps:
+  "Process one valid closure-relation set command.  Steps:
   1. Last-write-wins flip: if a relation of `kind` is active in the
      reversed direction, retract its :supersedes pair (the :related-to
      companion is symmetric and stays active -- the two reports remain
@@ -891,7 +923,7 @@
      propagate (when propagate-tgt pose-to))))
 
 (defn- apply-closure-clear-row!
-  "Process one closure-relation unset directive that has a matching
+  "Process one closure-relation unset command that has a matching
   active relation.  Retracts the :supersedes pair AND the :related-to
   companion, then reopens the previously-closed party.  Which side is
   current vs counterparty depends on :role."
@@ -912,19 +944,19 @@
           (tracking/bump-report-updated! conn counterparty))
         (tracking/bump-report-updated! conn report-eid))))
 
-(defn apply-directives! [conn report-eid directives email-eid from-addr is-maintainer?
-                         failure-ctx]
+(defn apply-lines! [conn report-eid lines email-eid from-addr is-maintainer?
+                    failure-ctx]
   (let [db         (d/db conn)
         ;; Surface relation setters under their :setter-attr so the
-        ;; scope check on :unsuperseded / :unsupersedes / :unduplicate
+        ;; scope check on :unsuperseded-by / :unsupersedes / :unduplicate-of
         ;; works on the open-report path (mirrors the same trick in
         ;; `try-unclosed!`).
-        current-d  (delay (merge (d/pull db directive-pull-pattern report-eid)
-                                  (relation-setters-as-pull db report-eid
-                                                             closure-relation-rows)))
-        permitted  (filter-permitted-directives directives current-d from-addr
-                                                 is-maintainer? (constantly true)
-                                                 failure-ctx)]
+        current-d  (delay (merge (d/pull db line-pull-pattern report-eid)
+                                 (relation-setters-as-pull db report-eid
+                                                           closure-relation-rows)))
+        permitted  (filter-permitted-lines lines current-d from-addr
+                                           is-maintainer? (constantly true)
+                                           failure-ctx)]
     (when (seq permitted)
       (let [current     @current-d
             resolved    (resolve-commands permitted)
@@ -932,7 +964,7 @@
             rows        (compute-closure-rows db report-eid source-type resolved)
             valid-rows  (filterv (comp :valid? :resolved) rows)
             clear-rows  (filterv :clear-now? rows)
-            attr-tx     (build-directives-tx report-eid email-eid resolved current)
+            attr-tx     (build-lines-tx report-eid email-eid resolved current)
             posed-at    (Date.)
             did-work?   (or (seq attr-tx) (seq valid-rows) (seq clear-rows))]
         (when (seq attr-tx)
@@ -948,7 +980,7 @@
                   :when t]
             (tracking/bump-report-updated! conn t))
           (log/info "Commands:"
-                    (describe-directives resolved)
+                    (describe-lines resolved)
                     (str "(by " from-addr ")")))
         (doseq [{:keys [resolved syntax target-mid]} rows
                 :let [tgt-eid (:target-eid resolved)
@@ -966,43 +998,63 @@
   Derived to keep both row sets in lockstep when a new kind is added."
   (into []
         (comp (filter #(= :current-as-from (:role %)))
-              (map #(select-keys % [:id :kind :role :unset-key :setter-attr])))
+              (map #(select-keys % [:id :kind :role :unset-key :unset-mid-key
+                                    :unset-syntax :setter-attr])))
         closure-relation-rows))
 
 (defn- try-unclosed!
-  "If a closed report has a Not closed / Not superseded / Not duplicate
-  directive, retract the closure (and the relation if any)."
-  [conn report-eid directives email-eid is-maintainer? from-addr failure-ctx]
+  "If a closed report has a Not closed / Not superseded-by / Not duplicate-of
+  line, retract the closure (and the relation if any).  Explicit unsets
+  must name the exact mid of the currently-active relation; a mismatch
+  is a no-op (so an unrelated relation of the same kind is not collateral
+  damage).  `Not closed.` retracts whatever closure relation drove the
+  closure, regardless of mid."
+  [conn report-eid lines email-eid is-maintainer? from-addr failure-ctx]
   (let [db          (d/db conn)
         current-d   (delay (merge (d/pull db close-state-pull-pattern report-eid)
                                   (relation-setters-as-pull
                                    db report-eid unclose-relation-rows)))
-        permitted   (filter-permitted-directives
-                     directives current-d from-addr is-maintainer?
+        permitted   (filter-permitted-lines
+                     lines current-d from-addr is-maintainer?
                      #{:unset :unset-superseded :unset-duplicate
                        :set-related :unset-related} failure-ctx)
         resolved    (resolve-commands permitted)
         unset       (:unset resolved)
         unset-closed? (contains? unset :report/closed)]
     (apply-related-to! conn report-eid resolved email-eid from-addr failure-ctx)
-    (when (or unset-closed? (:unsuperseded? resolved) (:unduplicate? resolved))
+    (when (or unset-closed? (:unsuperseded-by? resolved) (:unduplicate-of? resolved))
       (let [current  @current-d
-            ;; For each row: target-eid + whether to clear this relation
-            ;; (explicit Not X, or implicit when Not closed and the closure
-            ;; came from this relation).
-            rows     (mapv (fn [{:keys [kind unset-key] :as row}]
-                             (let [target (relation-target-eid db report-eid kind)]
+            ;; For each row: target-eid + whether to clear this relation.
+            ;; Explicit `Not X-by: <mid>` requires the mid to match the
+            ;; active counterparty.  Implicit `Not closed` retracts whatever
+            ;; is active (the closure was driven by exactly that relation).
+            rows     (mapv (fn [{:keys [kind unset-key unset-mid-key] :as row}]
+                             (let [target (relation-target-eid db report-eid kind)
+                                   explicit-unset? (boolean (get resolved unset-key))
+                                   unset-mid       (get resolved unset-mid-key)
+                                   unset-eid       (when unset-mid
+                                                     (report-eid-by-mid db unset-mid))]
                                (assoc row
                                       :target target
-                                      :clear? (or (boolean (get resolved unset-key))
+                                      :unset-target-mid unset-mid
+                                      :unset-target-eid unset-eid
+                                      :clear? (or (and explicit-unset?
+                                                       target
+                                                       (= unset-eid target))
                                                   (and unset-closed? target)))))
                            unclose-relation-rows)
-            attr-tx  (-> []
-                         (into (build-unset-tx report-eid current #{:report/closed}))
-                         (cond-> (:report/close-reason current)
-                           (conj [:db/retract report-eid :report/close-reason
-                                  (:report/close-reason current)])))
-            any-clear? (some :clear? rows)]
+            any-clear?     (some :clear? rows)
+            ;; Reopen only when we will actually retract a relation OR when
+            ;; the email said "Not closed." outright.  An explicit unset whose
+            ;; mid does not match any active relation is a no-op -- the
+            ;; report stays closed.
+            should-reopen? (or unset-closed? any-clear?)
+            attr-tx        (when should-reopen?
+                             (-> []
+                                 (into (build-unset-tx report-eid current #{:report/closed}))
+                                 (cond-> (:report/close-reason current)
+                                   (conj [:db/retract report-eid :report/close-reason
+                                          (:report/close-reason current)]))))]
         (when (seq attr-tx)
           (d/transact! conn attr-tx))
         (doseq [{:keys [kind target clear?]} rows :when clear?]
@@ -1015,25 +1067,25 @@
         (when (or (seq attr-tx) any-clear?)
           (tracking/bump-report-updated! conn report-eid)
           (log/info (str "Commands: "
-                         (cond (:unsuperseded? resolved) "not superseded"
-                               (:unduplicate? resolved)  "not duplicate"
-                               :else                     "not closed")
+                         (cond (:unsuperseded-by? resolved) "not superseded-by"
+                               (:unduplicate-of?  resolved) "not duplicate-of"
+                               :else                        "not closed")
                          " (by " from-addr ")")))))))
 
-(defn- trigger-scope-permits?
-  "Scope check for triggers.
+(defn- word-scope-permits?
+  "Scope check for bareword commands.
 
-  Triggers always *set* an attribute, so the scope values behave as
+  Barewords always *set* an attribute, so the scope values behave as
   follows:
   - :user                 -- anyone
   - :maintainer           -- maintainer only
   - :setter-or-maintainer -- equivalent to :user here; the sender of
-                            the trigger IS the setter.  The validator
-                            rejects this value on triggers, so this
+                            the bareword IS the setter.  The validator
+                            rejects this value on barewords, so this
                             branch only fires for configs that bypass
                             validation.  We fall back to :user silently
                             rather than logging on every incoming
-                            trigger.
+                            bareword.
 
   Truly unknown scopes (e.g. typos that also bypass validation) are
   rejected with a warning so they surface in the logs."
@@ -1042,44 +1094,44 @@
     :user                 true
     :setter-or-maintainer true
     :maintainer           (boolean is-maintainer?)
-    (do (log/warn "Unknown command scope on trigger:" scope)
+    (do (log/warn "Unknown command scope on bareword:" scope)
         false)))
 
-(defn- describe-denied-trigger
-  "Short, human-readable form of a trigger refused by scope -- always
-  the canonical English command word (\"Closed.\", \"Acked.\", …)
+(defn- describe-denied-word
+  "Short, human-readable form of a bareword refused by scope -- always
+  the canonical English command word (\"Closed.\", \"Acked.\", ...)
   derived from the command id.  Source-level word overrides aren't
   reflected: the goal is a stable label in failure logs, not a
   round-trip of the user's exact input."
   [attr]
-  (some-> (attr->trigger-cmd attr) :id name str/capitalize (str ".")))
+  (some-> (attr->word-cmd attr) :id name str/capitalize (str ".")))
 
-(defn- filter-triggers-by-scope
-  "Filter `trig-result` to the subset allowed by the effective scope
-  for each trigger.  When `failure-ctx` is non-nil, triggers that fail
+(defn- filter-words-by-scope
+  "Filter `word-result` to the subset allowed by the effective scope
+  for each bareword.  When `failure-ctx` is non-nil, barewords that fail
   the scope check are recorded as :insufficient-scope failures with
   \":audience :maintainers\", so denied attempts surface to maintainer
   subscribers via the notification loop."
-  [trig-result overrides is-maintainer? failure-ctx]
-  (when trig-result
+  [word-result overrides is-maintainer? failure-ctx]
+  (when word-result
     (let [filtered (into {}
                          (keep (fn [[attr :as entry]]
-                                 (let [cmd   (attr->trigger-cmd attr)
+                                 (let [cmd   (attr->word-cmd attr)
                                        scope (or (:scope (get overrides (:id cmd))) (:scope cmd))]
-                                   (if (trigger-scope-permits? scope is-maintainer?)
+                                   (if (word-scope-permits? scope is-maintainer?)
                                      entry
                                      (do (when failure-ctx
                                            (record-failure!
                                             (assoc failure-ctx
                                                    :reason   :insufficient-scope
                                                    :audience :maintainers
-                                                   :command  (describe-denied-trigger attr))))
+                                                   :command  (describe-denied-word attr))))
                                          nil)))))
-                         (dissoc trig-result :report/close-reason))]
+                         (dissoc word-result :report/close-reason))]
       (when (seq filtered)
         (cond-> filtered
-          (:report/close-reason trig-result) (assoc :report/close-reason
-                                                    (:report/close-reason trig-result)))))))
+          (:report/close-reason word-result) (assoc :report/close-reason
+                                                    (:report/close-reason word-result)))))))
 
 (defn apply-commands!
   "Apply commands from `email` against `report-eid`.
@@ -1104,8 +1156,8 @@
                        :from-addr  from-addr
                        :email-date (:email/date-sent email)
                        :report-mid report-mid})
-        body-trig   (when body-text
-                      (detect-triggers report-type body-text src-cmds))
+        body-words  (when body-text
+                      (detect-words report-type body-text src-cmds))
         ;; A reply shipping patch content credits its author on the parent
         ;; bug/request -- NOT on a parent patch report (a v2 reply would
         ;; otherwise spuriously mark v1 as owned by v2's author; super-
@@ -1123,13 +1175,13 @@
                                     report-eid)
                             :report/email :email/author-address str/lower-case)
         self-ack?   (and from-addr reporter (= (str/lower-case from-addr) reporter))
-        trig-result (cond-> (merge implicit body-trig)
+        word-result (cond-> (merge implicit body-words)
                       self-ack? (dissoc :report/acked)
-                      :always   (filter-triggers-by-scope overrides is-maint? fail-ctx))
-        directives  (when body-text
-                      (->> (detect-directives report-type body-text overrides
-                                              (:email/date-sent email)
-                                              (:directives src-cmds))
+                      :always   (filter-words-by-scope overrides is-maint? fail-ctx))
+        lines       (when body-text
+                      (->> (detect-lines report-type body-text overrides
+                                         (:email/date-sent email)
+                                         (:line-patterns src-cmds))
                            (remove (fn [d]
                                      (and (= :set (:action d))
                                           (= :report/acked (:attr d))
@@ -1139,14 +1191,14 @@
                            vec))
         closed?     (some? (:report/closed (d/pull db [:report/closed] report-eid)))]
     (if closed?
-      (do (when (seq directives)
-            (try-unclosed! conn report-eid directives eid is-maint? from-addr fail-ctx))
-          (boolean (seq directives)))
+      (do (when (seq lines)
+            (try-unclosed! conn report-eid lines eid is-maint? from-addr fail-ctx))
+          (boolean (seq lines)))
       (let [voted? (when-let [vote (and (= :request report-type) from-addr body-text
-                                         (detect-vote body-text))]
+                                        (detect-vote body-text))]
                      (apply-vote! conn report-eid from-addr vote email delivery source-cfg)
                      true)]
-        (apply-triggers! conn report-eid trig-result eid (:email/message-id email) from-addr
-                         source-cfg)
-        (apply-directives! conn report-eid directives eid from-addr is-maint? fail-ctx)
-        (boolean (or (seq trig-result) (seq directives) voted?))))))
+        (apply-words! conn report-eid word-result eid (:email/message-id email) from-addr
+                      source-cfg)
+        (apply-lines! conn report-eid lines eid from-addr is-maint? fail-ctx)
+        (boolean (or (seq word-result) (seq lines) voted?))))))

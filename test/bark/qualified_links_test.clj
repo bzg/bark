@@ -201,7 +201,7 @@
         (finally (close-and-cleanup! setup))))))
 
 (deftest not-superseded-retracts-relation
-  (testing "Not superseded. retracts the :supersedes relation and reopens"
+  (testing "Not superseded-by: retracts the :supersedes relation and reopens"
     (let [{:keys [conn] :as setup} (fresh-conn)]
       (try
         (let [tgt-mid   "<patch-v2@x>"
@@ -223,7 +223,7 @@
               unset-email {:db/id unset-email-eid
                            :email/author-address "alice@x"
                            :email/date-sent #inst "2026-02-04"
-                           :email/body-text "Not superseded.\n"}]
+                           :email/body-text (str "Not superseded-by: " tgt-mid "\n")}]
           (commands/apply-commands! conn src-eid :patch unset-email
                                     {} {} :direct)
           (let [src-after (d/pull (d/db conn)
@@ -241,6 +241,56 @@
                 "close-reason cleared")
             (is (empty? active-supersedes)
                 ":supersedes relation no longer active (retracted)")))
+        (finally (close-and-cleanup! setup))))))
+
+(deftest not-superseded-with-wrong-mid-is-a-no-op
+  (testing "Not superseded-by: <wrong-mid> on a closed (superseded) report
+            leaves the relation untouched -- only the explicit mid match
+            retracts."
+    (let [{:keys [conn] :as setup} (fresh-conn)]
+      (try
+        (let [tgt-mid    "<patch-v2@x>"
+              other-mid  "<other-patch@x>"
+              src-mid    "<patch-v1@x>"
+              _tgt-eid   (mk-report! conn tgt-mid
+                                     (mk-email! conn tgt-mid "carol@x" #inst "2026-02-02")
+                                     :patch)
+              _other-eid (mk-report! conn other-mid
+                                     (mk-email! conn other-mid "dave@x" #inst "2026-02-02")
+                                     :patch)
+              src-eid    (mk-report! conn src-mid
+                                     (mk-email! conn src-mid "alice@x" #inst "2026-02-01")
+                                     :patch)
+              ;; Alice supersedes src by tgt
+              set-email-eid (mk-email! conn "<set@x>" "alice@x" #inst "2026-02-03")
+              set-email {:db/id set-email-eid
+                         :email/author-address "alice@x"
+                         :email/date-sent #inst "2026-02-03"
+                         :email/body-text (str "Superseded-by: " tgt-mid "\n")}
+              _ (commands/apply-commands! conn src-eid :patch set-email
+                                          {} {} :direct)
+              ;; Alice tries to retract with the WRONG mid
+              unset-email-eid (mk-email! conn "<unset@x>" "alice@x" #inst "2026-02-04")
+              unset-email {:db/id unset-email-eid
+                           :email/author-address "alice@x"
+                           :email/date-sent #inst "2026-02-04"
+                           :email/body-text (str "Not superseded-by: " other-mid "\n")}]
+          (commands/apply-commands! conn src-eid :patch unset-email
+                                    {} {} :direct)
+          (let [src-after (d/pull (d/db conn)
+                                  [:report/closed :report/close-reason] src-eid)
+                active-supersedes (d/q '[:find [?e ...] :in $ ?from
+                                         :where
+                                         [?e :rel/from ?from]
+                                         [?e :rel/kind :supersedes]
+                                         [?e :rel/active? true]]
+                                       (d/db conn) src-eid)]
+            (is (some? (:report/closed src-after))
+                "report stays closed -- wrong mid is a no-op")
+            (is (= :superseded (:report/close-reason src-after))
+                "close-reason untouched")
+            (is (= 1 (count active-supersedes))
+                ":supersedes relation still active (not retracted)")))
         (finally (close-and-cleanup! setup))))))
 
 ;; ---------------------------------------------------------------------------
@@ -305,7 +355,7 @@
         (finally (close-and-cleanup! setup))))))
 
 (deftest not-duplicate-retracts-relation
-  (testing "Not duplicate. retracts :duplicates and reopens"
+  (testing "Not duplicate-of: retracts :duplicates and reopens"
     (let [{:keys [conn] :as setup} (fresh-conn)]
       (try
         (let [orig-mid  "<bug-orig@x>"
@@ -326,7 +376,7 @@
               unset-email {:db/id unset-email-eid
                            :email/author-address "carol@x"
                            :email/date-sent #inst "2026-03-04"
-                           :email/body-text "Not duplicate.\n"}]
+                           :email/body-text (str "Not duplicate-of: " orig-mid "\n")}]
           (commands/apply-commands! conn dup-eid :bug unset-email {} {} :direct)
           (let [after (d/pull (d/db conn)
                               [:report/closed :report/close-reason] dup-eid)

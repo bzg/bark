@@ -1078,7 +1078,7 @@
   :email/body-text  "Acked-by: reviewer@test.org\n"}
 
  ;; =========================================================================
- ;; 83 -- Maintainer uses Owned-by and Urgent-by directives on bug 81
+ ;; 83 -- Maintainer uses Owned-by line on bug 81
  ;; =========================================================================
  {
   :email/id        "83"
@@ -1090,7 +1090,7 @@
   :email/ingested-at #inst "2026-01-26T12:00:00"
   :email/in-reply-to "<81@test.org>"
   :email/references "<81@test.org>"
-  :email/body-text  "Owned-by: fixer@test.org\nUrgent-by: fixer@test.org\n"}
+  :email/body-text  "Owned-by: fixer@test.org\n"}
 
  ;; =========================================================================
  ;; 84 -- Regular user tries Closed-by directive (should be denied)
@@ -1151,7 +1151,7 @@
   :email/body-text  "Acked-by: someone@test.org\nNot acked\n"}
 
  ;; =========================================================================
- ;; 88 -- [BUG] base report for Closed-by + Important-by test
+ ;; 88 -- [BUG] base report for Closed-by test
  ;; =========================================================================
  {
   :email/id        "88"
@@ -1164,7 +1164,7 @@
   :email/body-text  "Yet another bug.\n"}
 
  ;; =========================================================================
- ;; 89 -- Admin uses Closed-by and Important-by on bug 88
+ ;; 89 -- Admin uses Closed-by on bug 88
  ;; =========================================================================
  {
   :email/id        "89"
@@ -1176,7 +1176,7 @@
   :email/ingested-at #inst "2026-01-28T11:00:00"
   :email/in-reply-to "<88@test.org>"
   :email/references "<88@test.org>"
-  :email/body-text  "Closed-by: closer@test.org\nImportant-by: closer@test.org\n"}
+  :email/body-text  "Closed-by: closer@test.org\n"}
 
  ;; =================================================================
  ;; 90-95: Mixed triggers + directives in single emails
@@ -1229,7 +1229,7 @@
   :email/source      "direct"
   :email/body-text  "Another bug here.\n"}
 
- ;; 94 -- Maintainer reply with Deadline + Urgent-by + trigger (Confirmed.)
+ ;; 94 -- Maintainer reply with Deadline + bareword (Confirmed.)
  {:email/id        "94"
   :email/message-id  "<94@test.org>"
   :email/subject     "Re: [BUG] Deadline with directives test"
@@ -1239,7 +1239,7 @@
   :email/ingested-at #inst "2026-01-30T11:00:00"
   :email/in-reply-to "<93@test.org>"
   :email/references "<93@test.org>"
-  :email/body-text  "Confirmed.\nDeadline: 2026-06-01\nUrgent-by: user@test.org\n"}
+  :email/body-text  "Confirmed.\nDeadline: 2026-06-01\n"}
 
  ;; 95 -- Maintainer reply with trigger (Confirmed.) + Topic directive
  {:email/id        "95"
@@ -1436,7 +1436,7 @@
   :email/ingested-at #inst "2026-02-21T12:00:00"
   :email/in-reply-to "<108@test.org>"
   :email/references  "<108@test.org>"
-  :email/body-text  "Actually this is a different issue.\nNot superseded\n"}
+  :email/body-text  "Actually this is a different issue.\nNot superseded-by: <106@test.org>\n"}
 
  ;; =========================================================================
  ;; 111 -- Neutral user reply on 108 (no command).  Kept to preserve
@@ -1742,7 +1742,7 @@
   :email/body-text  "After investigation the real issue is broader.\nSupersedes: <130@test.org>\n"}
 
  ;; =========================================================================
- ;; 132-134 -- Supersedes then Not superseding undoes.
+ ;; 132-134 -- Supersedes then Not supersedes undoes.
  ;; 133 supersedes 132 (closes it).  134 in reply to 133 retracts.
  ;; =========================================================================
  {:email/id        "132"
@@ -1772,7 +1772,7 @@
   :email/ingested-at #inst "2026-03-07T11:00:00"
   :email/in-reply-to "<133@test.org>"
   :email/references  "<133@test.org>"
-  :email/body-text  "On reflection these are distinct.\nNot superseding\n"}
+  :email/body-text  "On reflection these are distinct.\nNot supersedes: <132@test.org>\n"}
 
  ;; =========================================================================
  ;; 135-137 -- Cycle flip (last-write-wins).
