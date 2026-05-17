@@ -1,4 +1,4 @@
-;; bark-schema.edn — Shared schema for bark-digest and bark-export.
+;; bark-schema.edn -- Shared schema for bark-digest and bark-export.
 ;;
 ;; This file is the union of the email schema (from bark-ingest) and the
 ;; report/roles schema (from bark-digest).  Both bb scripts read it so
@@ -68,7 +68,7 @@
  ;; advanced. If the server's current UIDVALIDITY no longer matches,
  ;; the stored UID is meaningless (mailbox recreation, server migration)
  ;; and the watermark is reset to 0 to trigger a full first-run re-fetch.
- ;; IMAP-only — Maildir relies on :watermark/seen-ids instead.
+ ;; IMAP-only -- Maildir relies on :watermark/seen-ids instead.
  :watermark/imap-uid-validity {:db/valueType :db.type/long}
  :watermark/seen-ids          {:db/valueType   :db.type/string
                                :db/cardinality :db.cardinality/many}
@@ -79,7 +79,7 @@
  ;; Every "state" attribute is a ref to the email that posed it.
  ;; The setter's address is available either via the ref (follow it
  ;; to :email/author-address) or, for proxy-capable state attrs, via
- ;; the cached `-address` attr below — which may diverge from the
+ ;; the cached `-address` attr below -- which may diverge from the
  ;; email's author-address when a maintainer uses the `-by` form.
  :report/type                  {:db/valueType :db.type/keyword}
  :report/email                 {:db/valueType :db.type/ref}
@@ -91,7 +91,7 @@
                                 :db/cardinality :db.cardinality/many}
  :report/descendants           {:db/valueType   :db.type/ref
                                 :db/cardinality :db.cardinality/many}
- ;; State attributes — ref to the email that posed the state.
+ ;; State attributes -- ref to the email that posed the state.
  ;; Paired with `-address` for the proxy-capable ones (see below).
  :report/acked                 {:db/valueType :db.type/ref}
  :report/owned                 {:db/valueType :db.type/ref}

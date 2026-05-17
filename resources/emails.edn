@@ -1,22 +1,22 @@
-;; test/emails.edn — Test email fixtures for bark-digest.
+;; test/emails.edn -- Test email fixtures for bark-digest.
 ;;
 ;; Each email is a datalevin entity map, inserted directly into the DB.
 ;; Emails are processed in order of :email/ingested-at.
 ;;
 ;; Actors:
-;;   admin@test.org     — admin
-;;   maint@test.org     — maintainer (added by role control in email 01)
-;;   user@test.org      — regular user
-;;   voter1@test.org    — voter
-;;   voter2@test.org    — voter
-;;   spam@test.org      — will be ignored
+;;   admin@test.org     -- admin
+;;   maint@test.org     -- maintainer (added by role control in email 01)
+;;   user@test.org      -- regular user
+;;   voter1@test.org    -- voter
+;;   voter2@test.org    -- voter
+;;   spam@test.org      -- will be ignored
 ;;
 ;; Source: direct
 ;; Source: public-list (list-backed)
 
 [
  ;; =========================================================================
- ;; 01 — Admin adds a maintainer via role control
+ ;; 01 -- Admin adds a maintainer via role control
  ;; =========================================================================
  {
   :email/id        "1"
@@ -29,7 +29,7 @@
   :email/body-text  "Add maintainer: maint@test.org\nIgnore: spam@test.org\n"}
 
  ;; =========================================================================
- ;; 02 — Bug report (from regular user)
+ ;; 02 -- Bug report (from regular user)
  ;; =========================================================================
  {
   :email/id        "2"
@@ -42,7 +42,7 @@
   :email/body-text  "Steps to reproduce:\n1. Open org-agenda\n2. Crash\n"}
 
  ;; =========================================================================
- ;; 03 — Bug report with mailing list prefix
+ ;; 03 -- Bug report with mailing list prefix
  ;; =========================================================================
  {
   :email/id        "3"
@@ -55,7 +55,7 @@
   :email/body-text  "Another bug.\n"}
 
  ;; =========================================================================
- ;; 04 — Reply to bug 02: mark urgent + confirm
+ ;; 04 -- Reply to bug 02: mark urgent + confirm
  ;; =========================================================================
  {
   :email/id        "4"
@@ -70,7 +70,7 @@
   :email/body-text  "Confirmed.\nUrgent.\n"}
 
  ;; =========================================================================
- ;; 05 — Reply to bug 02: mark handled
+ ;; 05 -- Reply to bug 02: mark handled
  ;; =========================================================================
  {
   :email/id        "5"
@@ -85,7 +85,7 @@
   :email/body-text  "Owned.\n"}
 
  ;; =========================================================================
- ;; 06 — Reply to bug 02: mark fixed (closes the bug)
+ ;; 06 -- Reply to bug 02: mark fixed (closes the bug)
  ;; =========================================================================
  {
   :email/id        "6"
@@ -100,7 +100,7 @@
   :email/body-text  "Fixed.\n"}
 
  ;; =========================================================================
- ;; 07 — Patch via subject tag
+ ;; 07 -- Patch via subject tag
  ;; =========================================================================
  {
   :email/id        "7"
@@ -113,7 +113,7 @@
   :email/body-text  "Here is the patch.\n\ndiff --git a/agenda.el b/agenda.el\n--- a/agenda.el\n+++ b/agenda.el\n@@ -1,3 +1,3 @@\n-old\n+new\n"}
 
  ;; =========================================================================
- ;; 08 — Patch via attachment (no [PATCH] in subject)
+ ;; 08 -- Patch via attachment (no [PATCH] in subject)
  ;; =========================================================================
  {
   :email/id        "8"
@@ -130,7 +130,7 @@
                         :attachment/size 1234}]}
 
  ;; =========================================================================
- ;; 09 — Inline diff in a fresh thread with no label: no longer detected
+ ;; 09 -- Inline diff in a fresh thread with no label: no longer detected
  ;; as a patch (inline alone is not a signal).  The email is stored, no
  ;; report is created.
  ;; =========================================================================
@@ -145,7 +145,7 @@
   :email/body-text  "diff --git a/foo.el b/foo.el\nindex abc123..def456 100644\n--- a/foo.el\n+++ b/foo.el\n@@ -1,3 +1,4 @@\n+;; cleanup\n"}
 
  ;; =========================================================================
- ;; 10 — Reply to patch 07: review and apply
+ ;; 10 -- Reply to patch 07: review and apply
  ;; =========================================================================
  {
   :email/id        "10"
@@ -160,7 +160,7 @@
   :email/body-text  "Approved.\nFixed.\n"}
 
  ;; =========================================================================
- ;; 11 — POLL request
+ ;; 11 -- POLL request
  ;; =========================================================================
  {
   :email/id        "11"
@@ -173,7 +173,7 @@
   :email/body-text  "Please vote.\n"}
 
  ;; =========================================================================
- ;; 12 — Vote +1 on POLL
+ ;; 12 -- Vote +1 on POLL
  ;; =========================================================================
  {
   :email/id        "12"
@@ -188,7 +188,7 @@
   :email/body-text  "+1\n"}
 
  ;; =========================================================================
- ;; 13 — Vote -1 on POLL
+ ;; 13 -- Vote -1 on POLL
  ;; =========================================================================
  {
   :email/id        "13"
@@ -203,7 +203,7 @@
   :email/body-text  "-1\n"}
 
  ;; =========================================================================
- ;; 14 — Duplicate vote by voter1 (should be ignored)
+ ;; 14 -- Duplicate vote by voter1 (should be ignored)
  ;; =========================================================================
  {
   :email/id        "14"
@@ -218,7 +218,7 @@
   :email/body-text  "+1\n"}
 
  ;; =========================================================================
- ;; 15 — TODO request
+ ;; 15 -- TODO request
  ;; =========================================================================
  {
   :email/id        "15"
@@ -231,7 +231,7 @@
   :email/body-text  "Proposal for a new backend.\n"}
 
  ;; =========================================================================
- ;; 16 — Reply to TODO: close it
+ ;; 16 -- Reply to TODO: close it
  ;; =========================================================================
  {
   :email/id        "16"
@@ -246,7 +246,7 @@
   :email/body-text  "Fixed.\n"}
 
  ;; =========================================================================
- ;; 17 — Announcement (admin only)
+ ;; 17 -- Announcement (admin only)
  ;; =========================================================================
  {
   :email/id        "17"
@@ -259,7 +259,7 @@
   :email/body-text  "See the wiki.\n"}
 
  ;; =========================================================================
- ;; 18 — Announcement attempt by regular user (should be denied)
+ ;; 18 -- Announcement attempt by regular user (should be denied)
  ;; =========================================================================
  {
   :email/id        "18"
@@ -272,7 +272,7 @@
   :email/body-text  "Look at this.\n"}
 
  ;; =========================================================================
- ;; 19 — Change announcement
+ ;; 19 -- Change announcement
  ;; =========================================================================
  {
   :email/id        "19"
@@ -285,7 +285,7 @@
   :email/body-text  "Old export backend deprecated.\n"}
 
  ;; =========================================================================
- ;; 20 — Release announcement (auto-closes CHG 9.8)
+ ;; 20 -- Release announcement (auto-closes CHG 9.8)
  ;; =========================================================================
  {
   :email/id        "20"
@@ -298,7 +298,7 @@
   :email/body-text  "Org 9.8 is out.\n"}
 
  ;; =========================================================================
- ;; 21 — Email from ignored user (should be skipped)
+ ;; 21 -- Email from ignored user (should be skipped)
  ;; =========================================================================
  {
   :email/id        "21"
@@ -311,7 +311,7 @@
   :email/body-text  "Spam.\n"}
 
  ;; =========================================================================
- ;; 22 — Cancel announcement 17
+ ;; 22 -- Cancel announcement 17
  ;; =========================================================================
  {
   :email/id        "22"
@@ -326,7 +326,7 @@
   :email/body-text  "Canceled.\n"}
 
  ;; =========================================================================
- ;; 23 — Bug with important flag, then unset it
+ ;; 23 -- Bug with important flag, then unset it
  ;; =========================================================================
  {
   :email/id        "23"
@@ -363,7 +363,7 @@
   :email/body-text  "Noted.\n"}
 
  ;; =========================================================================
- ;; 26 — FR request
+ ;; 26 -- FR request
  ;; =========================================================================
  {
   :email/id        "26"
@@ -376,7 +376,7 @@
   :email/body-text  "We need to update CI.\n"}
 
  ;; =========================================================================
- ;; 27 — Announcement with mailing list prefix
+ ;; 27 -- Announcement with mailing list prefix
  ;; =========================================================================
  {
   :email/id        "27"
@@ -390,7 +390,7 @@
   :email/headers-edn "{\"Archived-At\" \"https://list.example.org/archive/27\"}"}
 
  ;; =========================================================================
- ;; 28 — Patch with mailing list prefix
+ ;; 28 -- Patch with mailing list prefix
  ;; =========================================================================
  {
   :email/id        "28"
@@ -403,7 +403,7 @@
   :email/body-text  "Refactor patch.\n\ndiff --git a/parser.el b/parser.el\n--- a/parser.el\n+++ b/parser.el\n@@ -1,3 +1,3 @@\n-old\n+new\n"}
 
  ;; =========================================================================
- ;; 29 — Role command sent via mailing list (has List-Id & List-Post -> ignored)
+ ;; 29 -- Role command sent via mailing list (has List-Id & List-Post -> ignored)
  ;; =========================================================================
  {
   :email/id        "29"
@@ -417,7 +417,7 @@
   :email/headers-edn "{\"List-Id\" \"<emacs-orgmode.gnu.org>\" \"List-Post\" \"<mailto:list@test.org>\"}"}
 
  ;; =========================================================================
- ;; 30 — Bug on list-backed source, correct List-Post (allowed)
+ ;; 30 -- Bug on list-backed source, correct List-Post (allowed)
  ;; =========================================================================
  {
   :email/id        "30"
@@ -431,7 +431,7 @@
   :email/headers-edn "{\"List-Post\" \"<mailto:list@test.org>\", \"List-Id\" \"<list.test.org>\"}"}
 
  ;; =========================================================================
- ;; 31 — Bug on list-backed source, sent directly (denied: no list headers,
+ ;; 31 -- Bug on list-backed source, sent directly (denied: no list headers,
  ;;      non-maintainer user cannot route direct email to a :mailing-list source)
  ;; =========================================================================
  {
@@ -444,7 +444,7 @@
   :email/body-text  "Bug sent directly, no List-Post.\n"}
 
  ;; =========================================================================
- ;; 32 — Bug via wrong mailing list (denied: List-Id doesn't match any source)
+ ;; 32 -- Bug via wrong mailing list (denied: List-Id doesn't match any source)
  ;; =========================================================================
  {
   :email/id        "32"
@@ -457,7 +457,7 @@
   :email/headers-edn "{\"List-Post\" \"<mailto:other@elsewhere.org>\", \"List-Id\" \"<other.elsewhere.org>\"}"}
 
  ;; =========================================================================
- ;; 33 — Bug on list-backed source from admin, no List-Post (allowed)
+ ;; 33 -- Bug on list-backed source from admin, no List-Post (allowed)
  ;; =========================================================================
  {
   :email/id        "33"
@@ -470,7 +470,7 @@
   :email/body-text  "Admin can bypass list check.\n"}
 
  ;; =========================================================================
- ;; 34 — Cover letter for patch series (0/3)
+ ;; 34 -- Cover letter for patch series (0/3)
  ;; =========================================================================
  {
   :email/id        "34"
@@ -483,7 +483,7 @@
   :email/body-text  "This series rewrites the parser.\n"}
 
  ;; =========================================================================
- ;; 35 — First patch in series (1/3)
+ ;; 35 -- First patch in series (1/3)
  ;; =========================================================================
  {
   :email/id        "35"
@@ -498,7 +498,7 @@
   :email/body-text  "Tokenizer rewrite.\n\ndiff --git a/tokenizer.clj b/tokenizer.clj\n--- a/tokenizer.clj\n+++ b/tokenizer.clj\n@@ -1,3 +1,3 @@\n-old\n+new\n"}
 
  ;; =========================================================================
- ;; 36 — Second patch in series (2/3)
+ ;; 36 -- Second patch in series (2/3)
  ;; =========================================================================
  {
   :email/id        "36"
@@ -513,7 +513,7 @@
   :email/body-text  "AST builder rewrite.\n\ndiff --git a/ast.clj b/ast.clj\n--- a/ast.clj\n+++ b/ast.clj\n@@ -1,3 +1,3 @@\n-old\n+new\n"}
 
  ;; =========================================================================
- ;; 37 — Third patch in series (3/3) — completes the series
+ ;; 37 -- Third patch in series (3/3) -- completes the series
  ;; =========================================================================
  {
   :email/id        "37"
@@ -528,7 +528,7 @@
   :email/body-text  "Renderer rewrite.\n\ndiff --git a/render.clj b/render.clj\n--- a/render.clj\n+++ b/render.clj\n@@ -1,3 +1,3 @@\n-old\n+new\n"}
 
  ;; =========================================================================
- ;; 38 — v2 cover letter, as reply to old series (closes old, starts new)
+ ;; 38 -- v2 cover letter, as reply to old series (closes old, starts new)
  ;; =========================================================================
  {
   :email/id        "38"
@@ -543,7 +543,7 @@
   :email/body-text  "v2 addressing review comments.\n"}
 
  ;; =========================================================================
- ;; 39 — v2 patch 1/3, reply to v2 cover letter
+ ;; 39 -- v2 patch 1/3, reply to v2 cover letter
  ;; =========================================================================
  {
   :email/id        "39"
@@ -558,7 +558,7 @@
   :email/body-text  "Tokenizer v2.\n\ndiff --git a/tokenizer.clj b/tokenizer.clj\n--- a/tokenizer.clj\n+++ b/tokenizer.clj\n@@ -1,3 +1,3 @@\n-old\n+new-v2\n"}
 
  ;; =========================================================================
- ;; 40 — Patch sent as reply to bug 23 (creates a relation)
+ ;; 40 -- Patch sent as reply to bug 23 (creates a relation)
  ;; =========================================================================
  {
   :email/id        "40"
@@ -573,7 +573,7 @@
   :email/body-text  "Here is a fix for the slow export bug.\n\ndiff --git a/export.clj b/export.clj\n--- a/export.clj\n+++ b/export.clj\n@@ -10,3 +10,3 @@\n-(defn slow-fn [] ...)\n+(defn fast-fn [] ...)\n"}
 
  ;; =========================================================================
- ;; 41 — Add then remove maintainer (admin)
+ ;; 41 -- Add then remove maintainer (admin)
  ;; =========================================================================
  {
   :email/id        "41"
@@ -596,7 +596,7 @@
   :email/body-text  "Remove maintainer: maint2@test.org\n"}
 
  ;; =========================================================================
- ;; 43 — Add admin attempt (no longer recognized, command is ignored)
+ ;; 43 -- Add admin attempt (no longer recognized, command is ignored)
  ;; =========================================================================
  {
   :email/id        "43"
@@ -609,7 +609,7 @@
   :email/body-text  "Add admin: newadmin@test.org\n"}
 
  ;; =========================================================================
- ;; 44 — Unignore a previously ignored user
+ ;; 44 -- Unignore a previously ignored user
  ;; =========================================================================
  {
   :email/id        "44"
@@ -622,7 +622,7 @@
   :email/body-text  "Unignore: spam@test.org\n"}
 
  ;; =========================================================================
- ;; 45 — Maintainer adds another maintainer (permitted)
+ ;; 45 -- Maintainer adds another maintainer (permitted)
  ;; =========================================================================
  {
   :email/id        "45"
@@ -635,7 +635,7 @@
   :email/body-text  "Add maintainer: maint3@test.org\n"}
 
  ;; =========================================================================
- ;; 46 — Maintainer tries to Add admin (denied)
+ ;; 46 -- Maintainer tries to Add admin (denied)
  ;; =========================================================================
  {
   :email/id        "46"
@@ -648,7 +648,7 @@
   :email/body-text  "Add admin: maint@test.org\n"}
 
  ;; =========================================================================
- ;; 47 — Regular user tries to add maintainer (denied)
+ ;; 47 -- Regular user tries to add maintainer (denied)
  ;; =========================================================================
  {
   :email/id        "47"
@@ -661,7 +661,7 @@
   :email/body-text  "Add maintainer: user@test.org\n"}
 
  ;; =========================================================================
- ;; 48 — Trigger with semicolon punctuation
+ ;; 48 -- Trigger with semicolon punctuation
  ;; =========================================================================
  {
   :email/id        "48"
@@ -686,7 +686,7 @@
   :email/body-text  "Approved;\n"}
 
  ;; =========================================================================
- ;; 50 — Trigger NOT at start of line (should be ignored)
+ ;; 50 -- Trigger NOT at start of line (should be ignored)
  ;; =========================================================================
  {
   :email/id        "50"
@@ -711,7 +711,7 @@
   :email/body-text  "I think this should be Fixed. But not yet.\n"}
 
  ;; =========================================================================
- ;; 52 — Closed. trigger on a request
+ ;; 52 -- Closed. trigger on a request
  ;; =========================================================================
  {
   :email/id        "52"
@@ -736,7 +736,7 @@
   :email/body-text  "Closed.\n"}
 
  ;; =========================================================================
- ;; 54 — Try to ack an announcement (should have no effect)
+ ;; 54 -- Try to ack an announcement (should have no effect)
  ;; =========================================================================
  {
   :email/id        "54"
@@ -761,7 +761,7 @@
   :email/body-text  "Approved.\nOwned.\nUrgent.\n"}
 
  ;; =========================================================================
- ;; 59 — Properly tagged [BUG] (anchors a thread for 61/62/64)
+ ;; 59 -- Properly tagged [BUG] (anchors a thread for 61/62/64)
  ;; =========================================================================
  {
   :email/id        "59"
@@ -774,7 +774,7 @@
   :email/body-text  "Strict tag.\n"}
 
  ;; =========================================================================
- ;; 60 — [ANNOUNCEMENT] long form tag
+ ;; 60 -- [ANNOUNCEMENT] long form tag
  ;; =========================================================================
  {
   :email/id        "60"
@@ -787,7 +787,7 @@
   :email/body-text  "Long form announcement.\n"}
 
  ;; =========================================================================
- ;; 61 — Threading via References only (no In-Reply-To)
+ ;; 61 -- Threading via References only (no In-Reply-To)
  ;; =========================================================================
  {
   :email/id        "61"
@@ -801,7 +801,7 @@
   :email/body-text  "Confirmed.\n"}
 
  ;; =========================================================================
- ;; 62 — Deep thread: grandchild triggers on grandparent report
+ ;; 62 -- Deep thread: grandchild triggers on grandparent report
  ;; =========================================================================
  {
   :email/id        "62"
@@ -816,7 +816,7 @@
   :email/body-text  "Fixed,\n"}
 
  ;; =========================================================================
- ;; 63 — Orphan email (no tag, no thread parent)
+ ;; 63 -- Orphan email (no tag, no thread parent)
  ;; =========================================================================
  {
   :email/id        "63"
@@ -829,9 +829,9 @@
   :email/body-text  "Nothing to see here.\n"}
 
  ;; =========================================================================
- ;; 64 — Duplicate report attempt (same subject tag, same thread)
+ ;; 64 -- Duplicate report attempt (same subject tag, same thread)
  ;; Tests that a second [BUG] email in the same thread doesn't create
- ;; a second report — it becomes a descendant instead.
+ ;; a second report -- it becomes a descendant instead.
  ;; Uses its own message-id (unlike email 59) to avoid DB-level upsert.
  ;; =========================================================================
  {
@@ -847,7 +847,7 @@
   :email/body-text  "Duplicate.\n"}
 
  ;; =========================================================================
- ;; 65 — body-text-from-html fallback (no :email/body-text)
+ ;; 65 -- body-text-from-html fallback (no :email/body-text)
  ;; =========================================================================
  {
   :email/id        "65"
@@ -872,7 +872,7 @@
   :email/body-text-from-html "Confirmed.\n"}
 
  ;; =========================================================================
- ;; 67 — Maintainer ignores an address (permitted for maintainer)
+ ;; 67 -- Maintainer ignores an address (permitted for maintainer)
  ;; =========================================================================
  {
   :email/id        "67"
@@ -885,7 +885,7 @@
   :email/body-text  "Ignore: nuisance@test.org\n"}
 
  ;; =========================================================================
- ;; 68 — Series without cover letter (starts at 1/2)
+ ;; 68 -- Series without cover letter (starts at 1/2)
  ;; =========================================================================
  {
   :email/id        "68"
@@ -910,7 +910,7 @@
   :email/body-text  "Doc update.\n\ndiff --git a/docs.md b/docs.md\n--- a/docs.md\n+++ b/docs.md\n@@ -1,3 +1,3 @@\n-old\n+new\n"}
 
  ;; =========================================================================
- ;; 70 — Series from a different sender (same topic, separate series)
+ ;; 70 -- Series from a different sender (same topic, separate series)
  ;; =========================================================================
  {
   :email/id        "70"
@@ -923,7 +923,7 @@
   :email/body-text  "Different sender same topic.\n\ndiff --git a/core.clj b/core.clj\n--- a/core.clj\n+++ b/core.clj\n@@ -1,3 +1,3 @@\n-old\n+alt\n"}
 
  ;; =========================================================================
- ;; 71 — [ANN] permission denial from regular user (proper tag)
+ ;; 71 -- [ANN] permission denial from regular user (proper tag)
  ;; =========================================================================
  {
   :email/id        "71"
@@ -936,7 +936,7 @@
   :email/body-text  "Unauthorized announcement.\n"}
 
  ;; =========================================================================
- ;; 72 — [REL] permission denial from regular user
+ ;; 72 -- [REL] permission denial from regular user
  ;; =========================================================================
  {
   :email/id        "72"
@@ -949,7 +949,7 @@
   :email/body-text  "Unauthorized release.\n"}
 
  ;; =========================================================================
- ;; 73 — [CHG] permission denial from regular user
+ ;; 73 -- [CHG] permission denial from regular user
  ;; =========================================================================
  {
   :email/id        "73"
@@ -962,7 +962,7 @@
   :email/body-text  "Unauthorized change.\n"}
 
  ;; =========================================================================
- ;; 75 — POLL for vote-format tests
+ ;; 75 -- POLL for vote-format tests
  ;; =========================================================================
  {
   :email/id        "75"
@@ -975,7 +975,7 @@
   :email/body-text  "Please vote.\n"}
 
  ;; =========================================================================
- ;; 76 — Vote "+1, great idea" (inline with punctuation after)
+ ;; 76 -- Vote "+1, great idea" (inline with punctuation after)
  ;; =========================================================================
  {
   :email/id        "76"
@@ -990,7 +990,7 @@
   :email/body-text  "+1, great idea\n"}
 
  ;; =========================================================================
- ;; 77 — Vote "1+" (reversed form)
+ ;; 77 -- Vote "1+" (reversed form)
  ;; =========================================================================
  {
   :email/id        "77"
@@ -1005,7 +1005,7 @@
   :email/body-text  "1+\n"}
 
  ;; =========================================================================
- ;; 78 — Vote "1-" (reversed down vote)
+ ;; 78 -- Vote "1-" (reversed down vote)
  ;; =========================================================================
  {
   :email/id        "78"
@@ -1020,7 +1020,7 @@
   :email/body-text  "1-\n"}
 
  ;; =========================================================================
- ;; 79 — NOT a vote: "+10" (digit follows)
+ ;; 79 -- NOT a vote: "+10" (digit follows)
  ;; =========================================================================
  {
   :email/id        "79"
@@ -1035,7 +1035,7 @@
   :email/body-text  "+10 people agree\n"}
 
  ;; =========================================================================
- ;; 80 — Vote "+0" (null vote)
+ ;; 80 -- Vote "+0" (null vote)
  ;; =========================================================================
  {
   :email/id        "80"
@@ -1050,7 +1050,7 @@
   :email/body-text  "+0\n"}
 
  ;; =========================================================================
- ;; 81 — [BUG] base report for directive tests
+ ;; 81 -- [BUG] base report for directive tests
  ;; =========================================================================
  {
   :email/id        "81"
@@ -1063,7 +1063,7 @@
   :email/body-text  "Something is broken.\n"}
 
  ;; =========================================================================
- ;; 82 — Maintainer uses Acked-by directive on bug 81
+ ;; 82 -- Maintainer uses Acked-by directive on bug 81
  ;; =========================================================================
  {
   :email/id        "82"
@@ -1078,7 +1078,7 @@
   :email/body-text  "Acked-by: reviewer@test.org\n"}
 
  ;; =========================================================================
- ;; 83 — Maintainer uses Owned-by and Urgent-by directives on bug 81
+ ;; 83 -- Maintainer uses Owned-by and Urgent-by directives on bug 81
  ;; =========================================================================
  {
   :email/id        "83"
@@ -1093,7 +1093,7 @@
   :email/body-text  "Owned-by: fixer@test.org\nUrgent-by: fixer@test.org\n"}
 
  ;; =========================================================================
- ;; 84 — Regular user tries Closed-by directive (should be denied)
+ ;; 84 -- Regular user tries Closed-by directive (should be denied)
  ;; =========================================================================
  {
   :email/id        "84"
@@ -1108,7 +1108,7 @@
   :email/body-text  "Closed-by: someone@test.org\n"}
 
  ;; =========================================================================
- ;; 85 — Maintainer uses Unacked on bug 81
+ ;; 85 -- Maintainer uses Unacked on bug 81
  ;; =========================================================================
  {
   :email/id        "85"
@@ -1123,7 +1123,7 @@
   :email/body-text  "Not acked\n"}
 
  ;; =========================================================================
- ;; 86 — [BUG] base report for last-one-wins test
+ ;; 86 -- [BUG] base report for last-one-wins test
  ;; =========================================================================
  {
   :email/id        "86"
@@ -1136,7 +1136,7 @@
   :email/body-text  "Another bug.\n"}
 
  ;; =========================================================================
- ;; 87 — Last-one-wins: Acked-by then Unacked in same email
+ ;; 87 -- Last-one-wins: Acked-by then Unacked in same email
  ;; =========================================================================
  {
   :email/id        "87"
@@ -1151,7 +1151,7 @@
   :email/body-text  "Acked-by: someone@test.org\nNot acked\n"}
 
  ;; =========================================================================
- ;; 88 — [BUG] base report for Closed-by + Important-by test
+ ;; 88 -- [BUG] base report for Closed-by + Important-by test
  ;; =========================================================================
  {
   :email/id        "88"
@@ -1164,7 +1164,7 @@
   :email/body-text  "Yet another bug.\n"}
 
  ;; =========================================================================
- ;; 89 — Admin uses Closed-by and Important-by on bug 88
+ ;; 89 -- Admin uses Closed-by and Important-by on bug 88
  ;; =========================================================================
  {
   :email/id        "89"
@@ -1182,7 +1182,7 @@
  ;; 90-95: Mixed triggers + directives in single emails
  ;; =================================================================
 
- ;; 90 — Bug report (base for mixed trigger + directive tests)
+ ;; 90 -- Bug report (base for mixed trigger + directive tests)
  {:email/id        "90"
   :email/message-id  "<90@test.org>"
   :email/subject     "[BUG] Mixed trigger and directive test"
@@ -1193,7 +1193,7 @@
   :email/source      "direct"
   :email/body-text  "Something is broken.\n"}
 
- ;; 91 — Maintainer reply with trigger (Confirmed.) + directive (Owned-by)
+ ;; 91 -- Maintainer reply with trigger (Confirmed.) + directive (Owned-by)
  {:email/id        "91"
   :email/message-id  "<91@test.org>"
   :email/subject     "Re: [BUG] Mixed trigger and directive test"
@@ -1205,7 +1205,7 @@
   :email/references "<90@test.org>"
   :email/body-text  "Confirmed.\nOwned-by: fixer@test.org\n"}
 
- ;; 92 — Maintainer reply: trigger (Fixed.) + conflicting directive (Not closed)
+ ;; 92 -- Maintainer reply: trigger (Fixed.) + conflicting directive (Not closed)
  ;; Directive wins because directives are applied after triggers.
  {:email/id        "92"
   :email/message-id  "<92@test.org>"
@@ -1218,7 +1218,7 @@
   :email/references "<90@test.org>"
   :email/body-text  "Fixed.\nNot closed\n"}
 
- ;; 93 — Bug report (base for deadline + directive test)
+ ;; 93 -- Bug report (base for deadline + directive test)
  {:email/id        "93"
   :email/message-id  "<93@test.org>"
   :email/subject     "[BUG] Deadline with directives test"
@@ -1229,7 +1229,7 @@
   :email/source      "direct"
   :email/body-text  "Another bug here.\n"}
 
- ;; 94 — Maintainer reply with Deadline + Urgent-by + trigger (Confirmed.)
+ ;; 94 -- Maintainer reply with Deadline + Urgent-by + trigger (Confirmed.)
  {:email/id        "94"
   :email/message-id  "<94@test.org>"
   :email/subject     "Re: [BUG] Deadline with directives test"
@@ -1241,7 +1241,7 @@
   :email/references "<93@test.org>"
   :email/body-text  "Confirmed.\nDeadline: 2026-06-01\nUrgent-by: user@test.org\n"}
 
- ;; 95 — Maintainer reply with trigger (Confirmed.) + Topic directive
+ ;; 95 -- Maintainer reply with trigger (Confirmed.) + Topic directive
  {:email/id        "95"
   :email/message-id  "<95@test.org>"
   :email/subject     "Re: [BUG] Mixed trigger and directive test"
@@ -1253,7 +1253,7 @@
   :email/references "<90@test.org>"
   :email/body-text  "Confirmed.\nTopic: regression\n"}
 
- ;; 96 — Admin sets deadline then unsets it in email 97
+ ;; 96 -- Admin sets deadline then unsets it in email 97
  {:email/id        "96"
   :email/message-id  "<96@test.org>"
   :email/subject     "Re: [BUG] Deadline with directives test"
@@ -1265,7 +1265,7 @@
   :email/references "<93@test.org>"
   :email/body-text  "Deadline: 2026-09-01\n"}
 
- ;; 97 — Admin removes deadline on bug 93
+ ;; 97 -- Admin removes deadline on bug 93
  {:email/id        "97"
   :email/message-id  "<97@test.org>"
   :email/subject     "Re: [BUG] Deadline with directives test"
@@ -1277,7 +1277,7 @@
   :email/references "<93@test.org>"
   :email/body-text  "No deadline\n"}
 
- ;; 98 — Bug report (base for standalone deadline test)
+ ;; 98 -- Bug report (base for standalone deadline test)
  {:email/id        "98"
   :email/message-id  "<98@test.org>"
   :email/subject     "[BUG] Standalone deadline test"
@@ -1288,7 +1288,7 @@
   :email/source      "direct"
   :email/body-text  "Need a deadline on this.\n"}
 
- ;; 99 — Admin sets deadline on bug 98 (no subsequent undeadline)
+ ;; 99 -- Admin sets deadline on bug 98 (no subsequent undeadline)
  {:email/id        "99"
   :email/message-id  "<99@test.org>"
   :email/subject     "Re: [BUG] Standalone deadline test"
@@ -1301,7 +1301,7 @@
   :email/body-text  "Deadline: 2026-08-15\n"}
 
  ;; =========================================================================
- ;; 100 — Bug report using [public-list] prefix instead of List-Id header.
+ ;; 100 -- Bug report using [public-list] prefix instead of List-Id header.
  ;; Should be classified under "public-list" source, with prefix stripped.
  ;; =========================================================================
  {:email/id        "100"
@@ -1314,7 +1314,7 @@
   :email/body-text  "Testing bark prefix classification.\n"}
 
  ;; =========================================================================
- ;; 101 — Maintainer replies off-list: no :email/source, no List-Id, no [source]
+ ;; 101 -- Maintainer replies off-list: no :email/source, no List-Id, no [source]
  ;;       Source should be resolved from In-Reply-To -> email 100 -> "direct"
  ;; =========================================================================
  {:email/id        "101"
@@ -1329,9 +1329,9 @@
   :email/body-text  "Confirmed.\n"}
 
  ;; =========================================================================
- ;; 102 — CHG 10.0 (first change announcement for version 10.0)
- ;; 103 — CHG 10.0 (second change announcement, same version, different thread)
- ;; 104 — REL 10.0 (release closes both CHGs and links them as related)
+ ;; 102 -- CHG 10.0 (first change announcement for version 10.0)
+ ;; 103 -- CHG 10.0 (second change announcement, same version, different thread)
+ ;; 104 -- REL 10.0 (release closes both CHGs and links them as related)
  ;; =========================================================================
  {:email/id        "102"
   :email/source      "direct"
@@ -1361,7 +1361,7 @@
   :email/body-text  "10.0 is out with new export and config.\n"}
 
  ;; =========================================================================
- ;; 105 — Bug report (will be superseded)
+ ;; 105 -- Bug report (will be superseded)
  ;; =========================================================================
  {:email/id        "105"
   :email/source      "direct"
@@ -1373,7 +1373,7 @@
   :email/body-text  "Crashes when input is empty.\n"}
 
  ;; =========================================================================
- ;; 106 — Broader bug report (supersedes 105)
+ ;; 106 -- Broader bug report (supersedes 105)
  ;; =========================================================================
  {:email/id        "106"
   :email/source      "direct"
@@ -1385,7 +1385,7 @@
   :email/body-text  "All invalid inputs cause crashes, not just empty.\n"}
 
  ;; =========================================================================
- ;; 107 — Maintainer marks 105 as superseded by 106
+ ;; 107 -- Maintainer marks 105 as superseded by 106
  ;; =========================================================================
  {:email/id        "107"
   :email/source      "direct"
@@ -1399,7 +1399,7 @@
   :email/body-text  "This is a subset of the broader bug.\nSuperseded-by: <106@test.org>\n"}
 
  ;; =========================================================================
- ;; 108 — Second bug (will be superseded then unsuperseded)
+ ;; 108 -- Second bug (will be superseded then unsuperseded)
  ;; =========================================================================
  {:email/id        "108"
   :email/source      "direct"
@@ -1411,7 +1411,7 @@
   :email/body-text  "Unicode chars cause parser errors.\n"}
 
  ;; =========================================================================
- ;; 109 — Maintainer supersedes 108 by 106
+ ;; 109 -- Maintainer supersedes 108 by 106
  ;; =========================================================================
  {:email/id        "109"
   :email/source      "direct"
@@ -1425,7 +1425,7 @@
   :email/body-text  "Superseded-by: 106@test.org\n"}
 
  ;; =========================================================================
- ;; 110 — Maintainer unsupersedes 108 (it was a different issue after all)
+ ;; 110 -- Maintainer unsupersedes 108 (it was a different issue after all)
  ;; =========================================================================
  {:email/id        "110"
   :email/source      "direct"
@@ -1439,7 +1439,7 @@
   :email/body-text  "Actually this is a different issue.\nNot superseded\n"}
 
  ;; =========================================================================
- ;; 111 — Neutral user reply on 108 (no command).  Kept to preserve
+ ;; 111 -- Neutral user reply on 108 (no command).  Kept to preserve
  ;;       the ingestion sequence used by other tests; the user-supersede
  ;;       scenario lives in emails 122-124 below.
  ;; =========================================================================
@@ -1455,7 +1455,7 @@
   :email/body-text  "Thanks for clarifying, I misunderstood.\n"}
 
  ;; =========================================================================
- ;; 112 — Public reply to list bug 30, sent through the list (has List-Id).
+ ;; 112 -- Public reply to list bug 30, sent through the list (has List-Id).
  ;;       Should be a descendant and trigger acked.
  ;; =========================================================================
  {:email/id        "112"
@@ -1471,7 +1471,7 @@
   :email/headers-edn "{\"List-Id\" \"<list.test.org>\"}"}
 
  ;; =========================================================================
- ;; 113 — Private reply to list bug 30, sent directly (no List-Id).
+ ;; 113 -- Private reply to list bug 30, sent directly (no List-Id).
  ;;       Should NOT be a descendant, but commands (Owned.) still apply.
  ;; =========================================================================
  {:email/id        "113"
@@ -1486,7 +1486,7 @@
   :email/body-text  "Owned.\n"}
 
  ;; =========================================================================
- ;; 114 — Bug report (will be superseded then reopened via "Not closed")
+ ;; 114 -- Bug report (will be superseded then reopened via "Not closed")
  ;; =========================================================================
  {:email/id        "114"
   :email/source      "direct"
@@ -1498,7 +1498,7 @@
   :email/body-text  "Encoding fails on certain inputs.\n"}
 
  ;; =========================================================================
- ;; 115 — Admin supersedes 114 by 106
+ ;; 115 -- Admin supersedes 114 by 106
  ;; =========================================================================
  {:email/id        "115"
   :email/source      "direct"
@@ -1512,7 +1512,7 @@
   :email/body-text  "Duplicate of the broader bug.\nSuperseded-by: <106@test.org>\n"}
 
  ;; =========================================================================
- ;; 116 — Admin reopens superseded report 114 via "Not closed"
+ ;; 116 -- Admin reopens superseded report 114 via "Not closed"
  ;;       Should clear closed, close-reason, superseded-by, AND related link.
  ;; =========================================================================
  {:email/id        "116"
@@ -1527,7 +1527,7 @@
   :email/body-text  "Actually this is a separate issue.\nNot closed\n"}
 
  ;; =========================================================================
- ;; 117 — Patch (no version): first submission
+ ;; 117 -- Patch (no version): first submission
  ;; =========================================================================
  {:email/id        "117"
   :email/source      "public-list"
@@ -1540,7 +1540,7 @@
   :email/body-text  "First version of the patch.\n\ndiff --git a/feature.el b/feature.el\n--- a/feature.el\n+++ b/feature.el\n@@ -1,3 +1,3 @@\n-old\n+new\n"}
 
  ;; =========================================================================
- ;; 118 — Reply with updated patch, same subject: should supersede 117
+ ;; 118 -- Reply with updated patch, same subject: should supersede 117
  ;; =========================================================================
  {:email/id        "118"
   :email/source      "public-list"
@@ -1558,7 +1558,7 @@
                        :attachment/data "diff --git a/feature.el b/feature.el\n--- a/feature.el\n+++ b/feature.el\n@@ -1,3 +1,3 @@\n-old\n+newer\n"}]}
 
  ;; =========================================================================
- ;; 119 — Third reply with yet another patch: should supersede 118 (and 117)
+ ;; 119 -- Third reply with yet another patch: should supersede 118 (and 117)
  ;; =========================================================================
  {:email/id        "119"
   :email/source      "public-list"
@@ -1576,7 +1576,7 @@
                        :attachment/data "diff --git a/feature.el b/feature.el\n--- a/feature.el\n+++ b/feature.el\n@@ -1,3 +1,3 @@\n-old\n+newest\n"}]}
 
  ;; =========================================================================
- ;; 120 — Inline diff in a fresh thread (no label, no In-Reply-To):
+ ;; 120 -- Inline diff in a fresh thread (no label, no In-Reply-To):
  ;; fallback rule detects :patch from content.
  ;; =========================================================================
  {:email/id        "120"
@@ -1593,7 +1593,7 @@
                        :attachment/data "diff --git a/errors.el b/errors.el\nindex abc..def 100644\n--- a/errors.el\n+++ b/errors.el\n@@ -1,3 +1,3 @@\n-old\n+new\n"}]}
 
  ;; =========================================================================
- ;; 121 — Reply carrying a [PATCH] label (Re: [PATCH] ...) with an
+ ;; 121 -- Reply carrying a [PATCH] label (Re: [PATCH] ...) with an
  ;; attached patch: the label is preserved through `Re:`, so 121
  ;; supersedes 120.
  ;; =========================================================================
@@ -1613,7 +1613,7 @@
                        :attachment/data "diff --git a/errors.el b/errors.el\nindex abc..def 100644\n--- a/errors.el\n+++ b/errors.el\n@@ -1,3 +1,3 @@\n-old\n+better\n"}]}
 
  ;; =========================================================================
- ;; 122 — Narrow bug report filed by user-a
+ ;; 122 -- Narrow bug report filed by user-a
  ;; =========================================================================
  {:email/id        "122"
   :email/source      "direct"
@@ -1625,7 +1625,7 @@
   :email/body-text  "Reproducer: start the app with an empty config.edn.\n"}
 
  ;; =========================================================================
- ;; 123 — Broader bug report filed by user-b (will supersede 122)
+ ;; 123 -- Broader bug report filed by user-b (will supersede 122)
  ;; =========================================================================
  {:email/id        "123"
   :email/source      "direct"
@@ -1637,7 +1637,7 @@
   :email/body-text  "The config loader does not validate any field.\n"}
 
  ;; =========================================================================
- ;; 124 — Regular user (user-a) marks 122 as superseded by 123.
+ ;; 124 -- Regular user (user-a) marks 122 as superseded by 123.
  ;;       :superseded-by has :scope :user, so this MUST succeed
  ;;       even though user-a is not a maintainer.
  ;; =========================================================================
@@ -1653,7 +1653,7 @@
   :email/body-text  "Yes, my bug is a special case of the broader issue.\nSuperseded-by: <123@test.org>\n"}
 
  ;; =========================================================================
- ;; 125 — Cover letter for a series with no inner-bracket topic.
+ ;; 125 -- Cover letter for a series with no inner-bracket topic.
  ;;       Each patch has a different `subdir:` colon-prefix in its
  ;;       subject, so the per-message :topic parsed from the subject
  ;;       diverges across patches. Threading via In-Reply-To must keep
@@ -1691,7 +1691,7 @@
   :email/body-text  "Patch 2.\n\ndiff --git a/style.css b/style.css\n--- a/style.css\n+++ b/style.css\n@@ -1,3 +1,3 @@\n-old\n+new\n"}
 
  ;; =========================================================================
- ;; 128-129 — :patch-triggers? false on the source.
+ ;; 128-129 -- :patch-triggers? false on the source.
  ;; A bug, then an explicitly-labelled patch in reply (Re: [PATCH] ...).
  ;; The bug must NOT be auto-acked/auto-owned on patch creation; only
  ;; the structural :resolves cross-link is recorded.
@@ -1720,7 +1720,7 @@
                        :attachment/data "diff --git a/init.clj b/init.clj\n--- a/init.clj\n+++ b/init.clj\n@@ -1,3 +1,3 @@\n-old\n+new\n"}]}
 
  ;; =========================================================================
- ;; 130-131 — Supersedes: directive (symmetric of Superseded-by).
+ ;; 130-131 -- Supersedes: directive (symmetric of Superseded-by).
  ;; 131 is a new bug whose body says it supersedes 130; 130 must close.
  ;; =========================================================================
  {:email/id        "130"
@@ -1742,7 +1742,7 @@
   :email/body-text  "After investigation the real issue is broader.\nSupersedes: <130@test.org>\n"}
 
  ;; =========================================================================
- ;; 132-134 — Supersedes then Not superseding undoes.
+ ;; 132-134 -- Supersedes then Not superseding undoes.
  ;; 133 supersedes 132 (closes it).  134 in reply to 133 retracts.
  ;; =========================================================================
  {:email/id        "132"
@@ -1775,7 +1775,7 @@
   :email/body-text  "On reflection these are distinct.\nNot superseding\n"}
 
  ;; =========================================================================
- ;; 135-137 — Cycle flip (last-write-wins).
+ ;; 135-137 -- Cycle flip (last-write-wins).
  ;; 136 (new thread) supersedes 135.  137 in reply to 136 then says
  ;; "Superseded-by: <135>", flipping the direction: 135 reopens, 136 closes.
  ;; =========================================================================
@@ -1809,7 +1809,7 @@
   :email/body-text  "Actually the other one was the better description.\nSuperseded-by: <135@test.org>\n"}
 
  ;; =========================================================================
- ;; 201 — Malformed label (lowercase): label must be case-sensitive
+ ;; 201 -- Malformed label (lowercase): label must be case-sensitive
  ;; Expected: no report created (regex rejects [bug])
  ;; =========================================================================
  {:email/id        "201"
@@ -1822,7 +1822,7 @@
   :email/body-text  "Lowercase tag, must not classify.\n"}
 
  ;; =========================================================================
- ;; 202 — Malformed label (no space after `]`): must be rejected
+ ;; 202 -- Malformed label (no space after `]`): must be rejected
  ;; Expected: no report created (regex requires \s|$ after closing bracket)
  ;; =========================================================================
  {:email/id        "202"
@@ -1835,7 +1835,7 @@
   :email/body-text  "Glued label, must not classify.\n"}
 
  ;; =========================================================================
- ;; 203 — [BUG] with a .patch attachment: label decides, patch is
+ ;; 203 -- [BUG] with a .patch attachment: label decides, patch is
  ;; stored as metadata on the bug (Phase 2: generalized :report/patches).
  ;; =========================================================================
  {:email/id        "203"
@@ -1851,7 +1851,7 @@
                        :attachment/data "From 0123456789abcdef0123456789abcdef01234567 Mon Sep 17 00:00:00 2026\nFrom: User A <user-a@test.org>\nSubject: Fix crash on save\nDate: Tue, 10 Mar 2026 09:00:00 +0000\n\ndiff --git a/save.el b/save.el\n--- a/save.el\n+++ b/save.el\n@@ -1,3 +1,3 @@\n-old\n+fixed\n"}]}
 
  ;; =========================================================================
- ;; 204 — Fresh [BUG] (no fix attached): used as parent for 205 below.
+ ;; 204 -- Fresh [BUG] (no fix attached): used as parent for 205 below.
  ;; =========================================================================
  {:email/id        "204"
   :email/source      "direct"
@@ -1863,7 +1863,7 @@
   :email/body-text  "Something is wrong, no fix yet.\n"}
 
  ;; =========================================================================
- ;; 205 — Reply with inline diff but NO [PATCH] label: Phase 3 implicit
+ ;; 205 -- Reply with inline diff but NO [PATCH] label: Phase 3 implicit
  ;; Acked/Owned should credit the replier on bug 204.
  ;; =========================================================================
  {:email/id        "205"
@@ -1881,7 +1881,7 @@
                        :attachment/data "diff --git a/obscure.el b/obscure.el\nindex abc..def 100644\n--- a/obscure.el\n+++ b/obscure.el\n@@ -1,3 +1,3 @@\n-old\n+fixed\n"}]}
 
  ;; =========================================================================
- ;; 206 — Fresh [BUG] from admin with manual Owned-by: directive in
+ ;; 206 -- Fresh [BUG] from admin with manual Owned-by: directive in
  ;; body.  Used with 207 to verify garde-fou A: manual setter is
  ;; preserved over the implicit signal in the reply.
  ;; =========================================================================
@@ -1895,7 +1895,7 @@
   :email/body-text  "Acked.\nOwned-by: admin@test.org\n"}
 
  ;; =========================================================================
- ;; 207 — Reply with patch in 206 thread: implicit must NOT overwrite
+ ;; 207 -- Reply with patch in 206 thread: implicit must NOT overwrite
  ;; the pre-existing manual owner (garde-fou A).
  ;; =========================================================================
  {:email/id        "207"
@@ -1910,7 +1910,7 @@
   :email/body-text  "Patch joined.\n\ndiff --git a/scheduler.el b/scheduler.el\nindex abc..def 100644\n--- a/scheduler.el\n+++ b/scheduler.el\n@@ -1,3 +1,3 @@\n-old\n+better\n"}
 
  ;; =========================================================================
- ;; 208-209 — Bug on no-triggers source: implicit Acked/Owned must NOT
+ ;; 208-209 -- Bug on no-triggers source: implicit Acked/Owned must NOT
  ;; fire because :patch-triggers? false on the source.
  ;; =========================================================================
  {:email/id        "208"
@@ -1934,7 +1934,7 @@
   :email/body-text  "Proposed fix.\n\ndiff --git a/queue.clj b/queue.clj\nindex abc..def 100644\n--- a/queue.clj\n+++ b/queue.clj\n@@ -1,3 +1,3 @@\n-old\n+fixed\n"}
 
  ;; =========================================================================
- ;; 211-213 — Self-ack rule: the reporter cannot ack their own bug, but
+ ;; 211-213 -- Self-ack rule: the reporter cannot ack their own bug, but
  ;; can still own it.  A third party acks normally.
  ;; =========================================================================
  {:email/id        "211"
@@ -1969,7 +1969,7 @@
   :email/body-text  "Confirmed, I see it too.\n"}
 
  ;; =========================================================================
- ;; 214-215 — Self-ack via patch content: the reporter sends a fix in
+ ;; 214-215 -- Self-ack via patch content: the reporter sends a fix in
  ;; reply.  Owned fires (Phase 3 implicit), acked is blocked by the
  ;; self-ack rule.
  ;; =========================================================================
@@ -1997,7 +1997,7 @@
                        :attachment/data "diff --git a/parser.el b/parser.el\n--- a/parser.el\n+++ b/parser.el\n@@ -1,3 +1,3 @@\n-old\n+fixed\n"}]}
 
  ;; =========================================================================
- ;; 216-217 — Command dispatch rule: a reply that itself introduces a
+ ;; 216-217 -- Command dispatch rule: a reply that itself introduces a
  ;; new report (here, a v2 patch via Re: [PATCH] + attachment) carries
  ;; its commands and directives onto that new report, not onto the v1
  ;; parent.  v1 (216) is superseded automatically; v2 (217) is the one

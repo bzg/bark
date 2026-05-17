@@ -1,4 +1,4 @@
-// bark-theme.js — Shared dark/light theme toggle.
+// bark-theme.js -- Shared dark/light theme toggle.
 // Copyright (c) 2026 Bastien Guerry <bzg@gnu.org>
 // SPDX-License-Identifier: MPL-2.0
 

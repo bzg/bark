@@ -14,7 +14,7 @@
 #   journalctl [--user] -u bark -f
 
 [Unit]
-Description=BARK — email-driven report tracker
+Description=BARK -- email-driven report tracker
 After=network-online.target
 Wants=network-online.target
 
@@ -34,7 +34,7 @@ RestartSec=30s
 StandardOutput=journal
 StandardError=journal
 
-# Sandboxing — safe baseline for a JVM service reading a Maildir and
+# Sandboxing -- safe baseline for a JVM service reading a Maildir and
 # writing a single LMDB directory.  Adjust ReadWritePaths= to match
 # your :db :path and any log/export directories.
 NoNewPrivileges=true

@@ -873,8 +873,10 @@ defaults are =:db {:path "data/bark-db"}=, stderr-only logging at
 
 BARK also reads Maildir folders.  Point =:path= at the parent
 directory that contains =cur/=, =new/= and =tmp/=, and use
-=:folder= to select the subfolder.  A Maildir source in watch mode
-uses filesystem events rather than polling.
+=:folder= to select the subfolder.  Set =:folder ""= if the Maildir
+at =:path= already holds =cur/=, =new/= and =tmp/= directly (no
+subfolder).  A Maildir source in watch mode uses filesystem events
+rather than polling.
 
 #+begin_src edn
 {:mailbox {:type   :maildir

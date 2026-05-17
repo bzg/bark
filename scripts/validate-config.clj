@@ -35,7 +35,9 @@
 (s/def :mailbox/user ::non-blank-string)
 (s/def :mailbox/password ::non-blank-string)
 (s/def :mailbox/oauth2-token ::non-blank-string)
-(s/def :mailbox/folder ::non-blank-string)
+;; Empty string is allowed and means "no subfolder, use :path directly"
+;; (typically a Maildir whose root holds cur/new/tmp).
+(s/def :mailbox/folder (s/or :empty #{""} :name ::non-blank-string))
 (s/def :mailbox/path ::non-blank-string)
 
 (s/def :bark/mailbox

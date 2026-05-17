@@ -96,10 +96,10 @@ bb clean                                  Remove all files in public/
 The =--theme= flag (or =:theme= in =config.edn=) controls the CSS
 theme for HTML exports.  The value is resolved in order:
 
-1. *https:// URL* — used as an external =<link>= stylesheet.
-2. *file:///path* — the local file is read and inlined in a =<style>= block.
-3. *Path ending in .css* — relative or absolute; inlined in =<style>=.
-4. *Bare name* (no spaces, no =.css= suffix) — treated as a [[https://github.com/bzg/pico-themes][pico-themes]] name; the base theme and bark overlay are loaded from jsDelivr.
+1. *https:// URL* -- used as an external =<link>= stylesheet.
+2. *file:///path* -- the local file is read and inlined in a =<style>= block.
+3. *Path ending in .css* -- relative or absolute; inlined in =<style>=.
+4. *Bare name* (no spaces, no =.css= suffix) -- treated as a [[https://github.com/bzg/pico-themes][pico-themes]] name; the base theme and bark overlay are loaded from jsDelivr.
 
 Set to ="none"= to disable theming entirely.
 
@@ -121,7 +121,7 @@ By default BARK reads =./config.edn= (from the current working
 directory).  To override:
 
 - Pass =-c <path>= to the JVM daemon: =clj -M:run -- -c /path/to/config.edn=
-- Or set the =BARK_CONFIG= env var — all =bb= scripts (=bb export=,
+- Or set the =BARK_CONFIG= env var -- all =bb= scripts (=bb export=,
   =bb notify=, =bb maintenance=, =bb test-config=, …) honor it.
 
 Precedence: CLI =-c= flag > =BARK_CONFIG= env var > =./config.edn=.
@@ -169,7 +169,7 @@ one of the three type keys:
 | =:list= / =:alias= / =:to=   | yes      | Exactly one (determines source type and header to match)             |
 | =:commands=              | no       | Command keyword overrides (per action)                               |
 | =:labels=                | no       | Report label overrides (per report type)                             |
-| =:maintainers=           | no       | Initial maintainers — first entry is the lead (see below)            |
+| =:maintainers=           | no       | Initial maintainers -- first entry is the lead (see below)            |
 | =:list-archive=          | no       | URL of the list archive (shown in HTML reports)                      |
 | =:archive-format-string= | no       | URL template for message-ids (=%s= is replaced)                        |
 | =:base-url=              | no       | Base URL where this source's public directory is served              |
@@ -181,7 +181,7 @@ one of the three type keys:
 | =:awaiting-delay=        | no       | Duration before "awaiting reply" flag, e.g. ="14d"= (default: 14 days) |
 
 All state-changing actions (commands, role controls) must be sent
-through the source's public channel to ensure reproducibility — anyone
+through the source's public channel to ensure reproducibility -- anyone
 running BARK on the same source sees the same state.
 
 *** Maintainers and the "lead"
@@ -194,12 +194,12 @@ running BARK on the same source sees the same state.
 - The lead cannot remove themselves. To change lead, edit =config.edn=
   and redeploy.
 
-Each =Add=/=Remove= opens or closes a *tenure* in the DB — a
-=[from, to)= interval recording when someone held maintainer status.
-The full tenure history (active and closed) is exported in
-=meta.json= and rendered in =docs.html=, so a new deployment can mirror
-command processing on archived emails even when maintainers have
-changed over time.
+Each =Add=/=Remove= opens or closes a *tenure* in the DB -- a =[from, to)=
+interval recording when someone held maintainer status. The full
+tenure history (active and closed) is exported in =meta.json= and
+rendered in =docs.html=, so a new deployment can mirror command
+processing on archived emails even when maintainers have changed over
+time.
 
 *** Canonical display names (=mailmap.edn=)
 

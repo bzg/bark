@@ -1,4 +1,4 @@
-;; BARK config — reference template.
+;; BARK config -- reference template.
 ;;
 ;; By default BARK reads ./config.edn.  Override via:
 ;;   - CLI:  clj -M:run -- -c /path/to/config.edn
@@ -7,7 +7,8 @@
 
 { ;; ---- Connection --------------------------------------------------------
 
- ;; Mail source — IMAP or Maildir. :folder defaults to "INBOX".
+ ;; Mail source -- IMAP or Maildir.  :folder defaults to "INBOX";
+ ;; set :folder "" if a Maildir's :path already holds cur/new/tmp.
  :mailbox {:type     :imap
            :host     "imap.example.com"
            :port     993
@@ -24,7 +25,7 @@
 
  ;; ---- Who monitors what --------------------------------------------------
 
- :sources [;; Mailing list — :list matches the List-Id identifier
+ :sources [;; Mailing list -- :list matches the List-Id identifier
            ;; (bare, no angle brackets).
            {:name                  "public-list"
             :list                  "bugs.example.org"
@@ -58,12 +59,12 @@
             ;; :notifications {:enabled false}  ;; silence this source
             }
 
-           ;; Alias — matches X-Original-To / Envelope-To / X-Envelope-To
+           ;; Alias -- matches X-Original-To / Envelope-To / X-Envelope-To
            ;; / Delivered-To.
            {:name  "team-alias"
             :alias "security@example.com"}
 
-           ;; Dedicated mailbox — matches Delivered-To.
+           ;; Dedicated mailbox -- matches Delivered-To.
            {:name "direct-inbox"
             :to   "inbox@example.com"}]
 
@@ -71,7 +72,7 @@
 
  ;; :ingest is optional.  Omitted → {:fetch {:limit 50}}.
  ;;
- ;; :fetch — first-run fetch window.  Exactly one of three map shapes
+ ;; :fetch -- first-run fetch window.  Exactly one of three map shapes
  ;; (strict: no key mixing, empty map rejected):
  ;;
  ;;   {:limit N}                        latest N messages (pos-int)
@@ -83,7 +84,7 @@
  ;;
  ;; CLI: --fetch 50 | --fetch 30d | --fetch 2020-01-01 (the scalar form
  ;; is lifted to {:limit …}, {:since …}, or {:start …} respectively).
- ;; :max-size / :max-attachment-size — byte limits (optional).
+ ;; :max-size / :max-attachment-size -- byte limits (optional).
  ;;
  ;; :ingest {:fetch {:limit 50}
  ;;          :max-size 1048576
@@ -91,7 +92,7 @@
 
  ;; ---- Customization -------------------------------------------------------
 
- ;; Global labels (optional) — subject tag overrides per report type.
+ ;; Global labels (optional) -- subject tag overrides per report type.
  ;; Per-source overrides global. An override replaces the default list
  ;; for that type entirely (not merged); start from the defaults below.
  ;;
@@ -102,7 +103,7 @@
  ;;          :release      ["REL" "RELEASE"]
  ;;          :change       ["CHG" "CHANGE"]}
 
- ;; Global commands (optional) — per-command overrides. Per-source
+ ;; Global commands (optional) -- per-command overrides. Per-source
  ;; overrides global. Each entry is a map with any of :words, :scope,
  ;; :report-types. A :words override REPLACES the default list for
  ;; that command (not merged word-by-word); start from the defaults
@@ -117,9 +118,9 @@
  ;;
  ;; To replay an archive under a different vocabulary (e.g. accept "Done"
  ;; for 2020 → today), declare multiple :periods entries on the source
- ;; (see below) — each period carries its own :commands override.
+ ;; (see below) -- each period carries its own :commands override.
 
- ;; :scope — :user, :maintainer, or :setter-or-maintainer.
+ ;; :scope -- :user, :maintainer, or :setter-or-maintainer.
  ;; Last is only valid on :un* directives whose attr is ref-tracked
  ;; (see the manual for the full list of command IDs and defaults).
 
@@ -129,11 +130,11 @@
 
  ;; ---- Lifecycle -----------------------------------------------------------
 
- ;; Expiry rules (optional) — auto-close open reports per report type.
+ ;; Expiry rules (optional) -- auto-close open reports per report type.
  ;; Per-source overrides global. Each rule:
- ;;   :inactive-after — duration, ISO date, or :deadline  [required]
- ;;   :max-status     — 0=none, 1=acked, 2=owned, 3=acked+owned [optional]
- ;;   :max-priority   — 0..3 (urgent+important)           [optional]
+ ;;   :inactive-after -- duration, ISO date, or :deadline  [required]
+ ;;   :max-status     -- 0=none, 1=acked, 2=owned, 3=acked+owned [optional]
+ ;;   :max-priority   -- 0..3 (urgent+important)           [optional]
  ;; Conjunctive. The "Expiry: <date-or-duration>" directive overrides
  ;; these rules per report.
  ;;
@@ -143,16 +144,16 @@
  ;;          :bug          {:inactive-after "1000d" :max-status 0 :max-priority 0}
  ;;          :request      {:inactive-after "1000d" :max-status 0}}
 
- ;; Awaiting-reply delay (optional) — ⌚ flag when last email is from a
+ ;; Awaiting-reply delay (optional) -- ⌚ flag when last email is from a
  ;; maintainer and no reply within this duration. Default: "14d".
  ;; Global or per-source (per-source wins).
  ;; :awaiting-delay "14d"
 
- ;; Command syntax mode — :loose (default) or :strict.
- ;;   :loose — every Bark instruction can be written with or without
+ ;; Command syntax mode -- :loose (default) or :strict.
+ ;;   :loose -- every Bark instruction can be written with or without
  ;;            a "!" prefix. Useful on mailing lists where Bark
  ;;            directives mingle with prose.
- ;;   :strict — every Bark instruction MUST start with "!".
+ ;;   :strict -- every Bark instruction MUST start with "!".
  ;;            Eliminates false positives on common English words.
  ;;            Applies uniformly to triggers (!Closed., !Urgent.),
  ;;            negatives (!Not acked), -by directives (!Acked-by:
@@ -166,7 +167,7 @@
  ;;
  ;; To replay an archive where the convention changed over time (e.g.
  ;; a list that tightened from :loose to :strict), declare :periods on
- ;; the source — each period can override :command-syntax.
+ ;; the source -- each period can override :command-syntax.
 
  ;; ---- Patches as triggers (per-source, default true) ---------------------
  ;;
@@ -177,7 +178,7 @@
 
  ;; ---- Exports -------------------------------------------------------------
 
- ;; Export formats (optional) — per-type feed files generated.
+ ;; Export formats (optional) -- per-type feed files generated.
  ;; Default: ["json" "org" "rss"]. Per-source overrides global.
  ;; :export-formats ["json" "rss"]
 
@@ -200,7 +201,7 @@
 
  ;; ---- Notifications -------------------------------------------------------
 
- ;; Optional — notifications disabled if absent.
+ ;; Optional -- notifications disabled if absent.
  ;; :notifications {:enabled false
  ;;                 :smtp {:host     "smtp.example.com"
  ;;                        :port     587
