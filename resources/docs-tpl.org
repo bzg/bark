@@ -1,19 +1,19 @@
 * BARK! Another Report Keeper
 
-BARK monitors a mailbox and converts incoming emails into reports.
-Subsequent emails in the same thread can update the status of that
-report using predefined commands. Maintainers can update reports by
-writing directly to the monitored inbox, manage roles, and receive
-periodic digest emails.
+BARK monitors a mailbox and turns incoming emails into reports.
+Replies in the same thread update each report through a small
+fixed vocabulary of commands.  Maintainers can also write to the
+inbox directly to manage roles and receive periodic digests.
 
-To explore BARK reports from your terminal, use [[https://codeberg.org/bzg/bone][bone]]. You can also
-highlight BARK with [[codeberg.org/bzg/gnus-bone][gnus-bone.el]] and [[https://codeberg.org/bzg/notmuch-bone][notmuch-bone.el]].
+To browse BARK reports from the terminal, use [[https://codeberg.org/bzg/bone][bone]].  Companion
+modes for Emacs: [[codeberg.org/bzg/gnus-bone][gnus-bone.el]] and [[https://codeberg.org/bzg/notmuch-bone][notmuch-bone.el]].
 
 For maintainers, see the full [[https://codeberg.org/bzg/bark/src/branch/main/docs/bark-manual.org][BARK manual]].
 
 ** Subject labels
 
-Subject labels create reports, optionally with a topic/version:
+A subject label creates a report, optionally carrying a topic
+and/or version:
 
 | Type         | Subject label                    |
 |--------------+----------------------------------|
@@ -27,27 +27,25 @@ Subject labels create reports, optionally with a topic/version:
 
 All =<…>= parts are optional and positional.
 
-/Also accepted/: =[ANNOUNCEMENT]=, =[RELEASE]=, =[CHANGE]= (long forms,
-equivalent to their 3-letter counterparts).
+/Also accepted/: =[ANNOUNCEMENT]=, =[RELEASE]=, =[CHANGE]= (long
+forms, equivalent to their 3-letter counterparts).
 
-For release and change, a single value is interpreted as =<version>=:
-=[REL 2.0]= sets version to "2.0". Use both for topic and version: =[REL
-parser 2.0]=.
+For release and change, a single value is read as =<version>=:
+=[REL 2.0]= sets version to "2.0".  Use both for topic and version:
+=[REL parser 2.0]=.
 
-Topics can also be set using a colon-delimited prefix in the subject
-after the label: =[BUG] parser: crash on empty input= sets the topic to
-"parser".
+The topic can also be set with a colon prefix after the label:
+=[BUG] parser: crash on empty input= sets the topic to "parser".
 
 ** Status & priority commands
 
-Replies to reports can update them by using command keywords such as
+Replies to a report update it with command keywords such as
 =Fixed.= or =Applied.=.
 
-Command keywords should be placed at the beginning of the line and
-followed by a space or a punctuation mark (=.= =,= =;= =:= =?= =!=).
+A command keyword goes at the beginning of a line, followed by
+punctuation (=.= =,= =;= =:= =?= =!=), whitespace, or end of line.
 
-Recommended keyword per action, with the form to retract your own
-action on the same line:
+Recommended keyword per action, with the matching retract form:
 
 | Effect on report  | Keyword (recommended)                                 | To retract     |
 |-------------------+-------------------------------------------------------+----------------|
@@ -59,19 +57,21 @@ action on the same line:
 | Mark as urgent    | =Urgent.=                                               | =Not urgent.=    |
 | Mark as important | =Important.=                                            | =Not important.= |
 
-Announcements, releases, and changes cannot be acked or owned, but
-they can be marked closed, urgent, or important.
+Announcements, releases and changes cannot be acked or owned but
+can still be marked closed, urgent or important.
 
-/Also accepted for ack, any type/: =Acked=, =Confirmed=, =Approved=.
+/Also accepted for ack/: =Acked=, =Confirmed=, =Approved=.
+/Also accepted for close/: =Resolved=, =Closed=, =Applied=, =Fixed=,
+=Completed=.
 
-/Also accepted for close, any type/: =Resolved=, =Closed=.
+Priority is not set directly: it is the sum of important (+1) and
+urgent (+2).
 
-Users don't set the priority directly: it is computed as the sum of
-important (+1) and urgent (+2).
+=Urgent.= and =Important.= require a punctuation mark or end of
+line -- a bare space is rejected (these words appear too often in
+ordinary prose).
 
-Note that =Urgent.= and =Important.= both require a full stop at the end.
-
-You can combine several status/priority commands in a single email:
+You can combine several commands in one email:
 
 #+begin_example
 Confirmed.
@@ -94,21 +94,21 @@ Important.
 | subject:match                   | =s:=        | Reports matching subject                               |
 | topic:match                     | =t:=        | Reports matching topic                                 |
 | priority:[0-4]                  | =p:=        | Reports matching priority level 0 to 4                 |
-| mid:<...>                       | =m:=        | Report open with message-id <...>                      |
-| date:3d..                       | =d:=        | Reports from 3 days ago                                |
-| date:2023-01-01..2023-12-31     | =d:=        | Reports from 2023-01-01 to 2023-12-31                  |
-| deadline:2026-09-01             | =D:=        | Reports with due date 2026-09-01                       |
-| deadline:2026-01-01..2026-06-30 | =D:=        | Reports with due date in that range                    |
+| mid:<...>                       | =m:=        | Report with message-id <...>                           |
+| date:3d..                       | =d:=        | Reports from the last 3 days                           |
+| date:2023-01-01..2023-12-31     | =d:=        | Reports between 2023-01-01 and 2023-12-31              |
+| deadline:2026-09-01             | =D:=        | Reports due on 2026-09-01                              |
+| deadline:2026-01-01..2026-06-30 | =D:=        | Reports due in that range                              |
 | deadline:2m                     | =D:=        | Reports due between now and 2 months from now          |
-| expired:10d                     | =e:=        | Reports expired between now and 10 days from now       |
-| expired:2026-01-01..2026-03-31  | =e:=        | Reports expired in that date range                     |
+| expired:10d                     | =e:=        | Reports expiring within 10 days                        |
+| expired:2026-01-01..2026-03-31  | =e:=        | Reports expiring in that range                         |
 | match1 \vert match2                 |           | Reports matching "match1" or "match2"                  |
 | from:* acked:* …                | =f:*= =a:*= … | Wildcard for from/acked/owned/closed/urgent/important  |
 
-Durations: =Nd= (days), =Nw= (weeks), =Nm= (months).  
+Durations: =Nd= (days), =Nw= (weeks), =Nm= (months).
 
-For =date:= they look backward from today; for =deadline:= and =expired:=
-they look forward.
+=date:= looks backward from today; =deadline:= and =expired:= look
+forward.
 
-Combine filters freely: =D:2m o:user@email.com= finds reports due within
-2 months owned by user@email.com.
+Combine filters freely: =D:2m o:user@email.com= finds reports due
+within 2 months and owned by user@email.com.

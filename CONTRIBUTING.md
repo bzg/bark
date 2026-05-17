@@ -44,7 +44,7 @@ scripts in `scripts/` are read-only.
 | `bark.ingest`   | Datalevin connection, email parsing and storage    |
 | `bark.digest`   | Single-email processing (classify, detect, thread) |
 | `bark.detect`   | Report type detection from subject + attachments   |
-| `bark.commands` | Triggers, directives, votes                        |
+| `bark.commands` | Commands (triggers, annotations) and votes         |
 | `bark.roles`    | Permission checks and role management              |
 | `bark.relations`| Qualified relations between reports                |
 | `bark.series`   | Patch series tracking                              |

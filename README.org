@@ -3,11 +3,12 @@
 [[https://www.repostatus.org/#active][https://img.shields.io/badge/status-active-brightgreen.svg?style=for-the-badge]]
 [[https://intver.org/][https://img.shields.io/badge/versioning-intver.org-blue.svg?style=for-the-badge]]
 
-BARK is an email-driven report tracker - see the [[docs/bark-manual.org#principles][principles]].
+BARK is an email-driven report tracker -- see the [[docs/bark-manual.org#principles][principles]].
 
-BARK monitors a single IMAP mailbox, classifies incoming emails into
-sources by header matching, detects report types from subject tags,
-applies commands from email body, and manages roles per source.
+BARK monitors a single IMAP mailbox or Maildir, classifies incoming
+emails into sources by header matching, detects report types from
+subject tags, applies commands from email bodies, and manages roles
+per source.
 
 BARK reports can be read with other tools:
 
@@ -17,9 +18,10 @@ BARK reports can be read with other tools:
 
 * BARK manual
 
-For a more extensive documentation, please read the [[docs/bark-manual.org][BARK manual]].
+For more extensive documentation, read the [[docs/bark-manual.org][BARK manual]].
 
-For the codebase, architecture and development setup, see [[CONTRIBUTING.md][CONTRIBUTING.md]].
+For the codebase, architecture and development setup, see
+[[CONTRIBUTING.md][CONTRIBUTING.md]].
 
 [[bark-capture.jpg]]
 
@@ -32,7 +34,7 @@ cp config.edn.minimal config.edn
 # 2a. Run once (fetch new emails, expire, exit)
 clj -M:run
 
-# 2b. Run in watch mode (IMAP IDLE, stays running)
+# 2b. Run in watch mode (IMAP IDLE or Maildir, stays running)
 clj -M:run -- --watch
 
 # 2c. Or build an uberjar and run it (production)
@@ -44,12 +46,11 @@ bin/bark --watch
 # 3. Export reports
 bb export                   # incremental (skips if nothing changed)
 bb export --force           # full rebuild, ignore timestamps
-bb export --index-only      # regenerate top-level public/index.html only
+bb export root              # regenerate top-level public/index.html only
 bb export --topics-filter "event"  # only reports with topic "event"
 #
-# Individual formats (json|rss|org|html|stats|patches|text|events) remain
-# available as positional args for power users:
-#   bb export json, bb export rss, bb export stats, …
+# Individual formats remain available as positional args:
+#   bb export json | rss | org | html | stats | patches | text | events
 
 # 4. Send notification emails
 bb notify              # send notifications
@@ -59,9 +60,10 @@ bb notify --debug      # verbose filtering diagnostics
 # 5. Test SMTP configuration (dry-run by default; --send to actually send)
 bb test-smtp
 
-# 6. Maintenance (purge orphan emails)
-bb maintenance --verbose  # show orphans
-bb maintenance --delete   # actually purge
+# 6. Maintenance
+bb maintenance --verbose   # show orphan emails
+bb maintenance --delete    # actually purge
+bb maintenance --failures  # list recent command failures
 
 # 7. Run tests
 clj -M:test
@@ -70,68 +72,68 @@ clj -M:test
 * bb tasks
 
 #+begin_example
-bb export [--force] [--index-only]        Incremental export of all formats
-                                          (individual formats still accept
-                                           a positional arg for power users:
-                                           json|rss|org|html|stats|patches|
-                                           text|events)
+bb export [--force]                       Incremental export of all formats
        [-n source] [-p 1|2|3] [-s 1-7]    Filter by source, priority, status
        [--only-open]                      Also export -open files
        [--theme THEME]                    Override CSS theme (see below)
        [--topics-filter TOPICS]           Only export matching topics (csv)
        [--page-size N]                    Paginate HTML table (N rows/page)
        [--closed-retention DUR]           Drop reports closed before cutoff
+bb export <format>                        Single format: json|rss|org|html|
+                                          stats|patches|text|events|root|all
 bb notify [--dry-run] [--debug]           Send notification emails
 bb maintenance [--delete] [--verbose] [-n source]  Purge orphan emails
        [--retention DUR]                  Orphan retention (default 90d)
        [--failures]                       List recent command failures
 bb test-config [path]                     Validate config.edn
-clj -M:run -- --fresh                     Wipe DB + full replay (interactive)
 bb test-smtp [--to addr] [--send]         Test SMTP config (default = dry-run)
+bb build-jar                              Build target/bark.jar + bin/bark wrapper
 bb clean                                  Remove all files in public/
+clj -M:run -- --fresh                     Wipe DB + full replay (interactive)
 #+end_example
 
 ** Theme (=--theme= / =:theme=)
 
 The =--theme= flag (or =:theme= in =config.edn=) controls the CSS
-theme for HTML exports.  The value is resolved in order:
+theme for HTML exports.  Values are resolved in order:
 
 1. *https:// URL* -- used as an external =<link>= stylesheet.
-2. *file:///path* -- the local file is read and inlined in a =<style>= block.
-3. *Path ending in .css* -- relative or absolute; inlined in =<style>=.
-4. *Bare name* (no spaces, no =.css= suffix) -- treated as a [[https://github.com/bzg/pico-themes][pico-themes]] name; the base theme and bark overlay are loaded from jsDelivr.
+2. *file:///path* -- local file, inlined in =<style>=.
+3. *Path ending in .css* -- relative or absolute path, inlined
+   in =<style>=.
+4. *Bare name* -- treated as a [[https://github.com/bzg/pico-themes][pico-themes]] name; base theme and bark
+   overlay are loaded from jsDelivr.
 
-Set to ="none"= to disable theming entirely.
+Set to ="none"= to disable theming.
 
 #+begin_example
 bb export html --theme org                                  # pico-themes name
 bb export html --theme https://example.com/custom.css       # external URL
-bb export html --theme file:///home/user/my-theme.css       # local file (inlined)
-bb export html --theme themes/custom.css                    # relative path (inlined)
+bb export html --theme file:///home/user/my-theme.css       # local file
+bb export html --theme themes/custom.css                    # relative path
 bb export html --theme none                                 # no theme
 #+end_example
 
 * Configuration
 
-See =config.edn.example=. The configuration has three main sections.
+See =config.edn.example=.  The configuration has three main sections.
 
 ** Config file location
 
-By default BARK reads =./config.edn= (from the current working
-directory).  To override:
+By default BARK reads =./config.edn=.  To override:
 
-- Pass =-c <path>= to the JVM daemon: =clj -M:run -- -c /path/to/config.edn=
-- Or set the =BARK_CONFIG= env var -- all =bb= scripts (=bb export=,
-  =bb notify=, =bb maintenance=, =bb test-config=, …) honor it.
+- Pass =-c <path>= to the daemon:
+  =clj -M:run -- -c /path/to/config.edn=
+- Or set =BARK_CONFIG=; all =bb= scripts honor it.
 
-Precedence: CLI =-c= flag > =BARK_CONFIG= env var > =./config.edn=.
+Precedence: =-c= > =BARK_CONFIG= > =./config.edn=.
 
-The script-level =BARK_DB= env var (legacy) still works as a fallback
-when the config has no =:db {:path …}= entry.
+The legacy =BARK_DB= env var still works as a fallback when no
+=:db {:path …}= entry is set.
 
 ** Mail source (=:mailbox=)
 
-Single mail source (IMAP or Maildir) shared by all sources.
+A single mail source (IMAP or Maildir) shared by all sources.
 
 | Field         | Required     | Description                        |
 |---------------+--------------+------------------------------------|
@@ -149,13 +151,13 @@ Single mail source (IMAP or Maildir) shared by all sources.
 |----------------------+-------------+------------------------------------------------------------------------|
 | =:fetch=               | ={:limit 50}= | First-run fetch: ={:limit N}= or ={:since "30d"}= or ={:start "…" :end "…"}= |
 | =:max-size=            | none        | Skip emails larger than N bytes (e.g. =1048576=)                         |
-| =:max-attachment-size= | =1048576=     | Max text data extracted from attachments (.patch, .ics, etc)           |
+| =:max-attachment-size= | =1048576=     | Max bytes extracted from attachments (.patch, .ics, etc.)              |
 
 ** Sources (=:sources=)
 
-Each source classifies incoming emails by delivery type.  Sources are
-checked in order; the first match wins.  Each source must have exactly
-one of the three type keys:
+Each source classifies incoming emails by delivery type.  Sources
+are checked in order; the first match wins.  Each source must have
+exactly one of the three type keys:
 
 | Key    | Source type  | Matches against                                            |
 |--------+--------------+------------------------------------------------------------|
@@ -166,10 +168,10 @@ one of the three type keys:
 | Field                  | Required | Description                                                          |
 |------------------------+----------+----------------------------------------------------------------------|
 | =:name=                  | yes      | Unique source identifier                                             |
-| =:list= / =:alias= / =:to=   | yes      | Exactly one (determines source type and header to match)             |
+| =:list= / =:alias= / =:to=   | yes      | Exactly one; determines source type and matched header               |
 | =:commands=              | no       | Command keyword overrides (per action)                               |
 | =:labels=                | no       | Report label overrides (per report type)                             |
-| =:maintainers=           | no       | Initial maintainers -- first entry is the lead (see below)            |
+| =:maintainers=           | no       | Initial maintainers; first entry is the lead (see below)             |
 | =:list-archive=          | no       | URL of the list archive (shown in HTML reports)                      |
 | =:archive-format-string= | no       | URL template for message-ids (=%s= is replaced)                        |
 | =:base-url=              | no       | Base URL where this source's public directory is served              |
@@ -181,37 +183,37 @@ one of the three type keys:
 | =:awaiting-delay=        | no       | Duration before "awaiting reply" flag, e.g. ="14d"= (default: 14 days) |
 
 All state-changing actions (commands, role controls) must be sent
-through the source's public channel to ensure reproducibility -- anyone
-running BARK on the same source sees the same state.
+through the source's public channel.  Anyone running BARK on the
+same source then sees the same state.
 
 *** Maintainers and the "lead"
 
-=Maintainers= are seeded from the per-source =:maintainers= vector; the
-*first entry* is the *lead maintainer*.
+Maintainers are seeded from the per-source =:maintainers= vector;
+the *first entry* is the *lead maintainer*.
 
-- Any active maintainer can run =Add maintainer:= directives.
-- Only the lead maintainer can run =Remove maintainer:= directives.
-- The lead cannot remove themselves. To change lead, edit =config.edn=
-  and redeploy.
+- Any active maintainer can run =Add maintainer:= commands.
+- Only the lead maintainer can run =Remove maintainer:= commands.
+- The lead cannot remove themselves.  To change the lead, edit
+  =config.edn= and redeploy.
 
-Each =Add=/=Remove= opens or closes a *tenure* in the DB -- a =[from, to)=
-interval recording when someone held maintainer status. The full
-tenure history (active and closed) is exported in =meta.json= and
-rendered in =docs.html=, so a new deployment can mirror command
-processing on archived emails even when maintainers have changed over
-time.
+Each =Add= / =Remove= opens or closes a *tenure* in the DB -- a
+=[from, to)= interval recording when someone held maintainer
+status.  The full history (active and closed) is exported in
+=meta.json= and rendered in =docs.html=, so a fresh deployment
+replays commands consistently even when maintainers have changed.
 
 *** Canonical display names (=mailmap.edn=)
 
-To unify display names across addresses belonging to the same person,
-create =mailmap.edn= at the repo root:
+To unify display names across addresses belonging to the same
+person, create =mailmap.edn= at the repo root:
 
 #+begin_src clojure
 {"Bastien Guerry" ["bzg@gnu.org" "bzg@bzg.fr"]}
 #+end_src
 
-Applied at export time only (DB untouched) to maintainers, authors,
-and owners.  Unlisted emails keep their last observed =From:= name.
+Applied at export time only (the DB is untouched) to maintainers,
+authors, and owners.  Unlisted emails keep their last observed
+=From:= name.
 
 For sources whose maintainer list or vocabulary evolved over time,
 declare the history inline via =:periods= on the source (see
@@ -243,11 +245,9 @@ declare the history inline via =:periods= on the source (see
 
 ** Report labels (=:labels=)
 
-Controls which subject labels are recognised per report type.
-
-Can be set globally at the top level or per source (per-source takes
-precedence). Only the types you specify are overridden; others keep
-their defaults. Here are the default labels:
+Subject labels recognised per report type.  Set globally at the
+top level or per source (per-source wins).  Only the types you
+specify are overridden; others keep their defaults:
 
 | Type          | Default labels   |
 |---------------+------------------|
@@ -258,14 +258,14 @@ their defaults. Here are the default labels:
 | =:release=      | =REL= =RELEASE=      |
 | =:change=       | =CHG= =CHANGE=       |
 
-Example (global, in =config.edn=):
+Global override:
 
 #+begin_src clojure
 :labels {:bug     ["BUG" "DEFECT"]
-                   :request ["POLL" "FR" "TODO" "RFE"]}
+         :request ["POLL" "FR" "TODO" "RFE"]}
 #+end_src
 
-Per-source (inside a source map):
+Per-source override (inside a source map):
 
 #+begin_src clojure
 {:name "my-list"
@@ -274,13 +274,15 @@ Per-source (inside a source map):
 
 ** Notifications (=:notifications=)
 
-Optional. When absent or ={:enabled false}=, =bb notify= exits
+Optional.  When absent or ={:enabled false}=, =bb notify= exits
 immediately.
 
-| Field    | Required | Description                          |
-|----------+----------+--------------------------------------|
-| =:enabled= | yes      | Global kill switch (=true=/=false=)    |
-| =:smtp=    | yes      | SMTP connection settings (see below) |
+| Field        | Required | Description                                            |
+|--------------+----------+--------------------------------------------------------|
+| =:enabled=     | yes      | Global kill switch (=true= / =false=)                      |
+| =:smtp=        | yes      | SMTP connection settings (see below)                   |
+| =:admin-bcc=   | no       | Hidden Bcc on every digest (string or vector of email) |
+| =:subscribers= | no       | Recipient list with per-source filters                 |
 
 SMTP fields:
 
@@ -292,21 +294,22 @@ SMTP fields:
 | =:user=     | yes      | SMTP login username       |
 | =:password= | yes      | SMTP password             |
 | =:from=     | yes      | Sender address for emails |
+| =:reply-to= | no       | Reply-To header           |
 
 Use =bb test-smtp= to validate the configuration (no email sent by
-default), or =bb test-smtp --send= to actually send a test email to
-the lead maintainer.
+default), or =bb test-smtp --send= to send a test email to the
+lead maintainer.
 
 * Contributing
 
-See [[CONTRIBUTING.md][CONTRIBUTING.md]] for reporting bugs, sending patches, and working on
-the codebase.
+See [[CONTRIBUTING.md][CONTRIBUTING.md]] for reporting bugs, sending patches, and working
+on the codebase.
 
 You can also [[mailto:bzg@bzg.fr][send me an email]] and support my work on [[https://liberapay.com/bzg/][liberapay]].
 
 * Intentional Versioning
 
-This project uses [[https://intver.org][Intentional Versioning]], here are the three audiences:
+This project uses [[https://intver.org][Intentional Versioning]].  The three audiences:
 
 - =Users= : end-users and sysadmins who operate BARK instances
 - =Integrators= : consumers of the exported JSON/RSS/Org formats
@@ -314,13 +317,12 @@ This project uses [[https://intver.org][Intentional Versioning]], here are the t
 
 * Support the Clojure(script) ecosystem
 
-If you like Clojure(script), please consider supporting maintainers by
+If you like Clojure(script), consider supporting maintainers by
 donating to [[https://clojuriststogether.org][clojuriststogether.org]].
 
 * License
 
 Copyright © 2026 Bastien Guerry
 
-The Clojure code is distributed under the Eclipse Public License 2.0
-and the Javascript code is distributed under the Mozilla Public
-License 2.0.
+The Clojure code is distributed under the Eclipse Public License
+2.0 and the JavaScript code under the Mozilla Public License 2.0.
