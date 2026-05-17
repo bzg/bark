@@ -657,12 +657,24 @@
                                         source-type target-type))}))
 
 (defn- record-target-failures!
-  [failure-ctx syntax target-mid target-eid valid?]
+  "Record a failure when a relation command's target lookup or
+  validation didn't pan out.  Distinguishes three modes:
+  - :unknown-target -- mid was given but no report matches.
+  - :self-loop      -- target resolves to the current report itself
+                        (a no-op self-reference, common when a new
+                        bug filed as a reply names its own thread root).
+  - :type-mismatch  -- target exists but the type constraint fails."
+  [failure-ctx syntax target-mid target-eid valid? report-eid]
   (when failure-ctx
     (cond
       (and target-mid (nil? target-eid))
       (record-failure! (assoc failure-ctx
                               :reason :unknown-target
+                              :audience :author
+                              :command (str syntax ": " target-mid)))
+      (and target-eid (= target-eid report-eid))
+      (record-failure! (assoc failure-ctx
+                              :reason :self-loop
                               :audience :author
                               :command (str syntax ": " target-mid)))
       (and target-eid (not valid?))
@@ -674,8 +686,8 @@
 (defn- apply-related-to!
   "Pose / retract :related-to relations from a resolved commands map.
   Independent of report closure state; called from both `apply-lines!`
-  (open path) and `try-unclosed!` (closed path).  Emits failures for
-  unknown targets, ignores self-loops silently.
+  (open path) and `try-unclosed!` (closed path).  Records failures
+  for unknown targets and self-loops.
 
   Target mids resolve via `report-eid-by-mid` -- root or descendant --
   so a mid pointing at any email in a report's thread reaches that
@@ -700,7 +712,13 @@
                                     :audience :author
                                     :command  (str "Related-to: " mid))))
           (= report-eid target-eid)
-          (log/warn "Related-to: self-loop ignored" mid)
+          (do (log/warn (str "Related-to: " mid
+                             " -- targets the same report (self-loop) -- ignored"))
+              (when failure-ctx
+                (record-failure! (assoc failure-ctx
+                                        :reason   :self-loop
+                                        :audience :author
+                                        :command  (str "Related-to: " mid)))))
           :else
           (do (rel/pose-if-absent! conn {:from-eid  report-eid
                                          :to-eid    target-eid
@@ -985,10 +1003,13 @@
         (doseq [{:keys [resolved syntax target-mid]} rows
                 :let [tgt-eid (:target-eid resolved)
                       valid?  (:valid? resolved)]]
-          (record-target-failures! failure-ctx syntax target-mid tgt-eid valid?)
+          (record-target-failures! failure-ctx syntax target-mid tgt-eid valid? report-eid)
           (when (and tgt-eid (not valid?))
-            (log/warn (str syntax ": type mismatch -- source")
-                      source-type "vs target" (:target-type resolved))))
+            (if (= tgt-eid report-eid)
+              (log/warn (str syntax ": " target-mid
+                             " -- targets the same report (self-loop) -- ignored"))
+              (log/warn (str syntax ": type mismatch -- source")
+                        source-type "vs target" (:target-type resolved)))))
         (apply-related-to! conn report-eid resolved email-eid from-addr failure-ctx)))))
 
 (def ^:private unclose-relation-rows

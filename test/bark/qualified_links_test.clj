@@ -293,6 +293,39 @@
                 ":supersedes relation still active (not retracted)")))
         (finally (close-and-cleanup! setup))))))
 
+(deftest superseded-by-self-loop-is-recorded
+  (testing "Superseded-by: <own-mid> records a :self-loop failure and
+            leaves the report open.  This catches the common pitfall
+            where a new [BUG] reply names its own thread root as the
+            superseder, which would otherwise no-op silently."
+    (let [{:keys [conn] :as setup} (fresh-conn)]
+      (try
+        (let [bug-mid     "<bug-self@x>"
+              bug-email   (mk-email! conn bug-mid "alice@x" #inst "2026-04-01")
+              bug-eid     (mk-report! conn bug-mid bug-email :bug)
+              cmd-eid     (mk-email! conn "<cmd-self@x>" "alice@x" #inst "2026-04-02")
+              cmd-email   {:db/id cmd-eid
+                           :email/author-address "alice@x"
+                           :email/date-sent #inst "2026-04-02"
+                           :email/body-text (str "Superseded-by: " bug-mid "\n")}
+              recorded    (atom [])]
+          (with-redefs [commands/record-failure! (fn [entry] (swap! recorded conj entry))]
+            (commands/apply-commands! conn bug-eid :bug cmd-email
+                                      {} {} :direct))
+          (let [after (d/pull (d/db conn)
+                              [:report/closed :report/close-reason] bug-eid)]
+            (is (nil? (:report/closed after))
+                "report stays open -- self-loop is rejected")
+            (is (nil? (:report/close-reason after))
+                "no close-reason")
+            (is (some #(= :self-loop (:reason %)) @recorded)
+                "a :self-loop failure was recorded")
+            (let [entry (some #(when (= :self-loop (:reason %)) %) @recorded)]
+              (is (= :author (:audience entry))
+                  "self-loop is routed to the author (the typo culprit)")
+              (is (= (str "Superseded-by: " bug-mid) (:command entry))))))
+        (finally (close-and-cleanup! setup))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Phase 4 (partial): Duplicate-of directive
 ;; ---------------------------------------------------------------------------

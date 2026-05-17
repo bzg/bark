@@ -52,6 +52,8 @@
 (def reason-labels
   "Human-readable labels for command-failure :reason keys."
   {:unknown-target     "unknown target"
+   :type-mismatch      "type mismatch between source and target"
+   :self-loop          "target is the same report as the source"
    :insufficient-scope "insufficient permissions"})
 
 ;; ---------------------------------------------------------------------------
