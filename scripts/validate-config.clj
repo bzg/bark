@@ -155,6 +155,14 @@
                            :opt-un [:smtp/tls :smtp/reply-to]))
 (s/def :notif/enabled boolean?)
 
+;; Admin Bcc: single email or non-empty vector of emails, copied on
+;; every outgoing subscriber digest.  Lets the operator audit
+;; deliverability without subscribing each admin on each source
+;; individually.
+(s/def :notif/admin-bcc
+  (s/or :one  ::email
+        :many (s/coll-of ::email :kind vector? :min-count 1)))
+
 ;; Subscriber filters (all optional except :source)
 (s/def :sub/source ::non-blank-string)
 (s/def :sub/min-priority (s/and int? #(<= 0 % 3)))
@@ -169,7 +177,7 @@
             (s/coll-of :notif/subscription :kind vector? :min-count 1)))
 
 (s/def :bark/notifications (s/keys :req-un [:notif/enabled]
-                                   :opt-un [:notif/smtp :notif/subscribers]))
+                                   :opt-un [:notif/smtp :notif/subscribers :notif/admin-bcc]))
 
 ;; Valid report type keywords -- derived from common/report-type-spec.
 (def valid-report-types common/report-type-keywords)

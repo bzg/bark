@@ -260,27 +260,23 @@
               :unset-expiry   (-> acc (dissoc :expiry) (assoc :unexpiry? true))
               :set-topic      (assoc acc :topic topic)
               :unset-topic    (-> acc (dissoc :topic) (assoc :untopic? true))
-              :set-superseded   (cond-> acc
-                                  :always           (assoc :superseded-by target-message-id)
-                                  :always           (dissoc :unsuperseded-by? :unsuperseded-by-mid))
-              :unset-superseded (cond-> acc
-                                  :always           (dissoc :superseded-by)
-                                  :always           (assoc :unsuperseded-by? true)
-                                  target-message-id (assoc :unsuperseded-by-mid target-message-id))
-              :set-supersedes   (cond-> acc
-                                  :always           (assoc :supersedes target-message-id)
-                                  :always           (dissoc :unsupersedes? :unsupersedes-mid))
-              :unset-supersedes (cond-> acc
-                                  :always           (dissoc :supersedes)
-                                  :always           (assoc :unsupersedes? true)
-                                  target-message-id (assoc :unsupersedes-mid target-message-id))
-              :set-duplicate    (cond-> acc
-                                  :always           (assoc :duplicate-of target-message-id)
-                                  :always           (dissoc :unduplicate-of? :unduplicate-of-mid))
-              :unset-duplicate  (cond-> acc
-                                  :always           (dissoc :duplicate-of)
-                                  :always           (assoc :unduplicate-of? true)
-                                  target-message-id (assoc :unduplicate-of-mid target-message-id))
+              ;; All relation actions carry a mid (the `:param :message-id`
+              ;; in the registry guarantees the parser captured one).
+              :set-superseded   (-> acc (assoc  :superseded-by target-message-id)
+                                       (dissoc :unsuperseded-by? :unsuperseded-by-mid))
+              :unset-superseded (-> acc (dissoc :superseded-by)
+                                       (assoc  :unsuperseded-by? true
+                                               :unsuperseded-by-mid target-message-id))
+              :set-supersedes   (-> acc (assoc  :supersedes target-message-id)
+                                       (dissoc :unsupersedes? :unsupersedes-mid))
+              :unset-supersedes (-> acc (dissoc :supersedes)
+                                       (assoc  :unsupersedes? true
+                                               :unsupersedes-mid target-message-id))
+              :set-duplicate    (-> acc (assoc  :duplicate-of target-message-id)
+                                       (dissoc :unduplicate-of? :unduplicate-of-mid))
+              :unset-duplicate  (-> acc (dissoc :duplicate-of)
+                                       (assoc  :unduplicate-of? true
+                                               :unduplicate-of-mid target-message-id))
               :set-related      (-> acc
                                     (update :related-to-set   (fnil conj #{}) target-message-id)
                                     (update :related-to-unset (fnil disj #{}) target-message-id))
@@ -524,22 +520,25 @@
                 supersedes    unsupersedes?    unsupersedes-mid
                 duplicate-of  unduplicate-of?  unduplicate-of-mid
                 related-to-set related-to-unset]} resolved]
-    (str/join ", " (concat (map (fn [[attr addr]] (str (name attr) " -> " addr)) set)
-                           (map #(str "un-" (name %)) unset)
-                           (when deadline [(str "deadline " deadline)])
-                           (when undeadline? ["no deadline"])
-                           (when expiry [(str "expiry " expiry)])
-                           (when unexpiry? ["no expiry"])
-                           (when topic [(str "topic:" topic)])
-                           (when untopic? ["no topic"])
-                           (when superseded-by [(str "superseded-by:" superseded-by)])
-                           (when unsuperseded-by? [(str "not superseded-by:" unsuperseded-by-mid)])
-                           (when supersedes [(str "supersedes:" supersedes)])
-                           (when unsupersedes? [(str "not supersedes:" unsupersedes-mid)])
-                           (when duplicate-of [(str "duplicate-of:" duplicate-of)])
-                           (when unduplicate-of? [(str "not duplicate-of:" unduplicate-of-mid)])
-                           (map #(str "related-to:" %) related-to-set)
-                           (map #(str "not-related-to:" %) related-to-unset)))))
+    (str/join
+     ", "
+     (concat (map (fn [[attr addr]] (str (name attr) " -> " addr)) set)
+             (map #(str "un-" (name %)) unset)
+             (keep identity
+                   [(when deadline         (str "deadline " deadline))
+                    (when undeadline?      "no deadline")
+                    (when expiry           (str "expiry " expiry))
+                    (when unexpiry?        "no expiry")
+                    (when topic            (str "topic:" topic))
+                    (when untopic?         "no topic")
+                    (when superseded-by    (str "superseded-by:" superseded-by))
+                    (when unsuperseded-by? (str "not superseded-by:" unsuperseded-by-mid))
+                    (when supersedes       (str "supersedes:" supersedes))
+                    (when unsupersedes?    (str "not supersedes:" unsupersedes-mid))
+                    (when duplicate-of     (str "duplicate-of:" duplicate-of))
+                    (when unduplicate-of?  (str "not duplicate-of:" unduplicate-of-mid))])
+             (map #(str "related-to:" %) related-to-set)
+             (map #(str "not-related-to:" %) related-to-unset)))))
 
 (defn- setter-address
   "Return the address credited as the setter of `attr` on `current`.
@@ -847,24 +846,29 @@
                       surfaced in the pull map so `scope-permits?` can
                       resolve :setter-or-maintainer on the unset
                       command in the open-report path."
+  ;; :setter-attr must be UNIQUE per row.  Both :supersedes rows share
+  ;; the `:rel/supersedes` schema kind; if we reused `:rel/supersedes`
+  ;; as the pull-map key, `relation-setters-as-pull` would overwrite
+  ;; the from-setter with the to-setter on a chained report (one that
+  ;; supersedes X AND is superseded by Y), so the scope check on the
+  ;; `Not superseded-by:` unset would see the wrong setter.  The
+  ;; suffix `-from` / `-to` records the row's role.  These keys are
+  ;; internal to the pull map; nothing else reads them as schema attrs.
   [{:id :superseded-by :kind :supersedes :role :current-as-from
     :propagate :superseded :propagate-tgt true
     :syntax "Superseded-by"
     :mid-key :superseded-by :unset-key :unsuperseded-by? :unset-mid-key :unsuperseded-by-mid
-    :unset-syntax "Not superseded-by"
-    :setter-attr :rel/supersedes}
+    :setter-attr :rel/supersedes-from}
    {:id :supersedes :kind :supersedes :role :current-as-to
     :propagate :superseded :propagate-tgt true
     :syntax "Supersedes"
     :mid-key :supersedes :unset-key :unsupersedes? :unset-mid-key :unsupersedes-mid
-    :unset-syntax "Not supersedes"
-    :setter-attr :rel/supersedes}
+    :setter-attr :rel/supersedes-to}
    {:id :duplicate-of :kind :duplicates :role :current-as-from
     :propagate :canceled :propagate-tgt false
     :syntax "Duplicate-of"
     :mid-key :duplicate-of :unset-key :unduplicate-of? :unset-mid-key :unduplicate-of-mid
-    :unset-syntax "Not duplicate-of"
-    :setter-attr :rel/duplicates}])
+    :setter-attr :rel/duplicates-from}])
 
 (defn- compute-closure-rows
   "Enrich `closure-relation-rows` with per-row decisions derived from
@@ -1020,7 +1024,7 @@
   (into []
         (comp (filter #(= :current-as-from (:role %)))
               (map #(select-keys % [:id :kind :role :unset-key :unset-mid-key
-                                    :unset-syntax :setter-attr])))
+                                    :setter-attr])))
         closure-relation-rows))
 
 (defn- try-unclosed!
@@ -1231,15 +1235,15 @@
         word-result   (cond-> (merge implicit body-words)
                         self-ack? (dissoc :report/acked)
                         :always   (filter-words-by-scope overrides is-maint? fail-ctx))
-        line-id-ok?   (cond
-                        carrier-only? carrier-eligible-ids
-                        no-carrier?   (complement carrier-eligible-ids)
-                        :else         (constantly true))
+        keep-line?    (case line-filter
+                        :carrier-only #(contains? carrier-eligible-ids (:id %))
+                        :no-carrier   #(not (contains? carrier-eligible-ids (:id %)))
+                        (constantly true))
         lines         (when body-text
                         (->> (detect-lines report-type body-text overrides
                                            (:email/date-sent email)
                                            (:line-patterns src-cmds))
-                             (filter #(line-id-ok? (:id %)))
+                             (filter keep-line?)
                              (remove (fn [d]
                                        (and (= :set (:action d))
                                             (= :report/acked (:attr d))

@@ -57,13 +57,18 @@
     :syntax "Not closed"}
    ;; Closure relations -- backed by :rel/supersedes / :rel/duplicates;
    ;; :attr kept for registry shape.
-   {:id :superseded-by    :kind :trigger :action :set-superseded   :attr :rel/supersedes :scope :user
+   ;; The relation unsets use a direction-suffixed :attr so that
+   ;; `scope-permits?` finds the right setter in the pull map built
+   ;; by `relation-setters-as-pull` -- a chained report shares the
+   ;; `:rel/supersedes` schema kind across both directions, so the
+   ;; pull-map key must distinguish them.
+   {:id :superseded-by    :kind :trigger :action :set-superseded   :attr :rel/supersedes      :scope :user
     :syntax "Superseded-by"     :param :message-id :report-types #{:bug :patch :request}}
-   {:id :unsuperseded-by  :kind :trigger :action :unset-superseded :attr :rel/supersedes :scope :setter-or-maintainer
+   {:id :unsuperseded-by  :kind :trigger :action :unset-superseded :attr :rel/supersedes-from :scope :setter-or-maintainer
     :syntax "Not superseded-by" :param :message-id :report-types #{:bug :patch :request}}
-   {:id :duplicate-of    :kind :trigger :action :set-duplicate   :attr :rel/duplicates :scope :user
+   {:id :duplicate-of    :kind :trigger :action :set-duplicate   :attr :rel/duplicates      :scope :user
     :syntax "Duplicate-of"     :param :message-id :report-types #{:bug :patch :request}}
-   {:id :unduplicate-of  :kind :trigger :action :unset-duplicate :attr :rel/duplicates :scope :setter-or-maintainer
+   {:id :unduplicate-of  :kind :trigger :action :unset-duplicate :attr :rel/duplicates-from :scope :setter-or-maintainer
     :syntax "Not duplicate-of" :param :message-id :report-types #{:bug :patch :request}}
 
    ;; --- Annotations: property-set -------------------------------------------
@@ -90,9 +95,9 @@
     :syntax "No topic"}
    ;; Supersedes -- inverse role of Superseded-by (posed on the replacement;
    ;; current = :rel/to, target = :rel/from = the closed report).
-   {:id :supersedes   :kind :annotation :action :set-supersedes   :attr :rel/supersedes :scope :user
+   {:id :supersedes   :kind :annotation :action :set-supersedes   :attr :rel/supersedes    :scope :user
     :syntax "Supersedes"     :param :message-id :report-types #{:bug :patch :request}}
-   {:id :unsupersedes :kind :annotation :action :unset-supersedes :attr :rel/supersedes :scope :setter-or-maintainer
+   {:id :unsupersedes :kind :annotation :action :unset-supersedes :attr :rel/supersedes-to :scope :setter-or-maintainer
     :syntax "Not supersedes" :param :message-id :report-types #{:bug :patch :request}}
    ;; Related-to -- neutral cross-reference (no closure, multi-target,
    ;; symmetric canonicalised by :rel/id).  Multi-target makes a clean
@@ -106,11 +111,11 @@
 ;; Derived indexes
 ;; ---------------------------------------------------------------------------
 
-;; Semantic groupings
-(def trigger-commands    (filterv #(= :trigger    (:kind %)) commands))
-(def annotation-commands (filterv #(= :annotation (:kind %)) commands))
-
-;; Syntactic groupings (derived from :words vs :syntax presence)
+;; Syntactic groupings (derived from :words vs :syntax presence).
+;; The semantic axis (`:kind :trigger` / `:annotation`) is metadata
+;; on each entry, not surfaced as a derived index -- nothing consumes
+;; the full lists today; if you need them, write the `filterv` at
+;; the call site.
 (def word-commands (filterv :words  commands))
 (def line-commands (filterv :syntax commands))
 

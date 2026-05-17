@@ -873,7 +873,7 @@
           (is (= [] (commands/detect-lines :bug "Superseded-by: https://example.com/foo@bar/baz.html\n"))))
 
         (testing "detect-lines: Not superseded-by"
-          (is (= [{:action :unset-superseded :attr :rel/supersedes :scope :setter-or-maintainer :id :unsuperseded-by :target-message-id "<msg@example.com>"}]
+          (is (= [{:action :unset-superseded :attr :rel/supersedes-from :scope :setter-or-maintainer :id :unsuperseded-by :target-message-id "<msg@example.com>"}]
                  (commands/detect-lines :bug "Not superseded-by: <msg@example.com>\n"))))
 
         (testing "detect-lines: Supersedes (symmetric of Superseded-by)"
@@ -881,7 +881,7 @@
                  (commands/detect-lines :bug "Supersedes: <msg@example.com>\n"))))
 
         (testing "detect-lines: Not supersedes"
-          (is (= [{:action :unset-supersedes :attr :rel/supersedes :scope :setter-or-maintainer :id :unsupersedes :target-message-id "<msg@example.com>"}]
+          (is (= [{:action :unset-supersedes :attr :rel/supersedes-to :scope :setter-or-maintainer :id :unsupersedes :target-message-id "<msg@example.com>"}]
                  (commands/detect-lines :bug "Not supersedes: <msg@example.com>\n"))))
 
         (testing "resolve-commands: superseded-by"
@@ -890,14 +890,15 @@
                   [{:action :set-superseded :target-message-id "<mid@host>"}]))))
 
         (testing "resolve-commands: unsuperseded"
-          (is (= {:set {} :unset #{} :unsuperseded-by? true}
-                 (commands/resolve-commands [{:action :unset-superseded}]))))
+          (is (= {:set {} :unset #{} :unsuperseded-by? true :unsuperseded-by-mid "<mid@host>"}
+                 (commands/resolve-commands
+                  [{:action :unset-superseded :target-message-id "<mid@host>"}]))))
 
         (testing "resolve-commands: supersede then unsupersede"
-          (is (= {:set {} :unset #{} :unsuperseded-by? true}
+          (is (= {:set {} :unset #{} :unsuperseded-by? true :unsuperseded-by-mid "<mid@host>"}
                  (commands/resolve-commands
                   [{:action :set-superseded :target-message-id "<mid@host>"}
-                   {:action :unset-superseded}]))))
+                   {:action :unset-superseded :target-message-id "<mid@host>"}]))))
 
         (testing "resolve-commands: supersedes"
           (is (= {:set {} :unset #{} :supersedes "<mid@host>"}
@@ -905,10 +906,10 @@
                   [{:action :set-supersedes :target-message-id "<mid@host>"}]))))
 
         (testing "resolve-commands: supersedes then not superseding"
-          (is (= {:set {} :unset #{} :unsupersedes? true}
+          (is (= {:set {} :unset #{} :unsupersedes? true :unsupersedes-mid "<mid@host>"}
                  (commands/resolve-commands
                   [{:action :set-supersedes :target-message-id "<mid@host>"}
-                   {:action :unset-supersedes}]))))
+                   {:action :unset-supersedes :target-message-id "<mid@host>"}]))))
 
         ;; --- Emails 130-131 Supersedes (close target) ---
         (testing "Bug 130 closed by 131 via Supersedes:"

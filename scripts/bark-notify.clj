@@ -43,8 +43,8 @@
 ;;
 ;; We persist the timestamp of the last successful notification per
 ;; (subscriber, source) pair to avoid re-sending the same failure on
-;; every run.  This is operational state, not configuration -- subscriber
-;; identity and filters live in config.edn.
+;; every run.  This is operational state, not configuration --
+;; subscribers and filters live in config.edn.
 
 (def ^:private last-failures-file "public/.last-notify-failures.edn")
 
@@ -238,8 +238,8 @@
            "\n"))))
 
 (defn- join-sections
-  "Concatenate the non-nil sections with blank-line separators and append
-  a short footer.  Returns nil when every section is nil."
+  "Concatenate the non-nil sections with blank-line separators and
+  append a short footer.  Returns nil when every section is nil."
   [sections]
   (let [present (filter some? sections)]
     (when (seq present)
@@ -278,10 +278,24 @@
 ;; SMTP
 ;; ---------------------------------------------------------------------------
 
+(defn- bcc-list
+  "Normalize `:admin-bcc` to a vector of addresses (or nil when absent).
+  Accepts a single string or a vector of strings."
+  [admin-bcc]
+  (cond
+    (nil? admin-bcc)         nil
+    (string? admin-bcc)      [admin-bcc]
+    (sequential? admin-bcc)  (vec admin-bcc)
+    :else                    (do (log/warn "Ignoring invalid :admin-bcc"
+                                           (pr-str admin-bcc))
+                                 nil)))
+
 (defn send-notification!
-  "Send a plain-text notification email via SMTP."
-  [smtp-config to-addr source body]
-  (let [{:keys [host port tls user password from reply-to]} smtp-config]
+  "Send a plain-text notification email via SMTP.
+  `admin-bcc` is forwarded as :bcc on every send when non-nil."
+  [smtp-config to-addr source body admin-bcc]
+  (let [{:keys [host port tls user password from reply-to]} smtp-config
+        bccs (bcc-list admin-bcc)]
     (mail/send-mail
      (cond-> {:host     host
               :port     port
@@ -292,7 +306,8 @@
               :to       [to-addr]
               :subject  (str "[BARK " source "] Open reports")
               :text     body}
-       reply-to (assoc :reply-to reply-to)))))
+       reply-to    (assoc :reply-to reply-to)
+       (seq bccs)  (assoc :bcc bccs)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Main
@@ -318,6 +333,7 @@
         dbp         (db-path config)
         notif       (:notifications config)
         smtp        (:smtp notif)
+        admin-bcc   (:admin-bcc notif)
         subscribers (:subscribers notif)]
     (cond
       (not (and notif (:enabled notif)))
@@ -365,7 +381,7 @@
                                   "Notifying" email (str "(source: " source ")"))
                         (when-not dry-run?
                           (try
-                            (send-notification! smtp email source body)
+                            (send-notification! smtp email source body admin-bcc)
                             (swap! updated-shown assoc k (.getTime (java.util.Date.)))
                             (swap! sent inc)
                             (catch Exception e

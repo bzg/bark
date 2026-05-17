@@ -584,7 +584,7 @@ urgent or important, and can still be closed.
 =Urgent= and =Important= require punctuation (=.= =,= =;= =:= =?=
 =!=) or end of line.  A bare space is rejected, since words like
 "Important" appear too frequently in ordinary prose to be safe
-triggers.
+bareword annotations.
 
 These two values combine into the numeric priority:
 
@@ -1099,6 +1099,7 @@ limit with =:max-attachment-size= in the =:ingest= config section.
         :password "secret"
         :from     "bark@example.com"
         :reply-to "lead@example.com"}   ;; optional
+ :admin-bcc "ops@example.com"           ;; optional; string or vector
  :subscribers
  {"a@example.org"
   [{:source "my-list"}]
@@ -1111,6 +1112,11 @@ Each key under =:subscribers= is a recipient's address.  The
 associated vector lists their subscriptions, one per source --
 a recipient on three sources receives three separate emails per
 =bb notify= run.
+
+=:admin-bcc= adds a hidden carbon-copy on every subscriber digest.
+A single address as a string, or a vector of addresses.  Useful to
+audit deliverability and to catch bounces.  The BCC field is not
+visible to the other recipients (standard SMTP semantics).
 
 Optional per-subscription filters:
 
@@ -1135,6 +1141,13 @@ A small operational state file, =public/.last-notify-failures.edn=,
 records the last successful send per (subscriber, source) so the
 same failed-command entries are not re-mailed at every run.  Delete
 the file to replay all current failures on the next invocation.
+
+Command failures are kept on file for the subscriber digest and for
+manual inspection via =bb maintenance --failures=.  BARK does *not*
+mail the author of a failing command directly: an unsubscribed user
+who typed =Superseded-by:= with a typo learns of the failure only
+if they are themselves on the subscriber list.  Maintainers see all
+failures with =:audience :maintainers= in their digest.
 
 ** Logging
 

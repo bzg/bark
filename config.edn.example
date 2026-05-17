@@ -208,7 +208,11 @@
  ;;                        :tls      true
  ;;                        :user     "notify@example.com"
  ;;                        :password "secret"
- ;;                        :from     "bark@example.com"}}
+ ;;                        :from     "bark@example.com"}
+ ;;                 ;; Optional -- copy this address (or vector of
+ ;;                 ;; addresses) on every notification (subscriber
+ ;;                 ;; digest and direct-to-author failure mail).
+ ;;                 :admin-bcc "ops@example.com"}
 
  ;; ---- Logging -------------------------------------------------------------
 
