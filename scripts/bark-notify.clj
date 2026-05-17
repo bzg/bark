@@ -292,7 +292,11 @@
 
 (defn send-notification!
   "Send a plain-text notification email via SMTP.
-  `admin-bcc` is forwarded as :bcc on every send when non-nil."
+  `admin-bcc` is forwarded as :bcc on every send when non-nil.
+
+  Note: the tzzh/mail pod expects the unhyphenated key
+  `:replyto` (and as a vector of strings); `:reply-to` would be
+  silently dropped."
   [smtp-config to-addr source body admin-bcc]
   (let [{:keys [host port tls user password from reply-to]} smtp-config
         bccs (bcc-list admin-bcc)]
@@ -306,7 +310,7 @@
               :to       [to-addr]
               :subject  (str "[BARK " source "] Open reports")
               :text     body}
-       reply-to    (assoc :reply-to reply-to)
+       reply-to    (assoc :replyto [reply-to])
        (seq bccs)  (assoc :bcc bccs)))))
 
 ;; ---------------------------------------------------------------------------
