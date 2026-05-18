@@ -4,17 +4,15 @@
 
 * EmBARK
 
-_BARK_ is an email-driven report tracker.  A _report_ is an email
-that BARK has classified from its subject label -- a bug, a patch,
-a feature request, an announcement.  Subsequent emails in the same
-thread update the report's state through a small fixed vocabulary
-of commands.
+/BARK/ is an email-driven report tracker. A /report/ is an email that BARK
+has classified from its subject label -- a bug, a patch, a feature
+request, an announcement. Subsequent emails in the same thread update
+the report's state through a small fixed vocabulary of commands.
 
 Maintainers can write directly to the monitored inbox to update
 reports, manage roles and configure their digest emails.
 
-BARK exposes its data as an HTML site and as JSON, Org and RSS
-feeds.
+BARK exposes its data as an HTML site and as JSON, Org and RSS feeds.
 
 * Example
 
@@ -60,63 +58,93 @@ In this exchange:
 2. Bob confirmed it.
 3. Eve closed it.
 
-All three saw the same emails -- the mailing list is the
-conversation.  BARK indexes it so the same information becomes
-queryable as a database: reports, states, authors, threads.
+All three saw the same emails: the mailing list is the conversation.
+BARK indexes it so the same information becomes queryable as a
+database: reports, states, authors, threads.
 
 * Principles
 
-Four design choices:
+- *Single source* :: Reports and discussions live in one place, the
+  mailing list.
 
-- *Single source* :: Reports and discussions live in one place,
-  the mailing list.  BARK indexes that archive; it hosts no
-  parallel conversation.
+- *Email-native* :: Every state change is encoded in an email. Users
+  update the tracker without leaving their mail client.
 
-- *Email-native* :: Every state change is encoded in an email.  A
-  contributor replying to a thread updates the tracker without
-  leaving their mail client.
+- *Reproducible state* :: The mailbox is the source of truth. The
+  tracker database can be rebuilt from the archive at any time.
 
-- *Reproducible state* :: The mailbox is the source of truth.
-  The tracker database can be rebuilt from the archive at any
-  time.
-
-- *Fixed vocabulary* :: The set of states is closed: =acked=,
-  =owned= and =closed= for status; =urgent= and =important= for
-  priority.  Companion tools (=bone= TUI, =gnus-bone.el=,
-  =notmuch-bone.el=) read the same data without a new interface.
+- *Fixed vocabulary* :: The set of states is closed: =acked=, =owned=
+  and =closed= for status; =urgent= and =important= for priority.
 
 * As a user
 ** Bug, Patch, Request
 
-The subject label determines a report's type.  The three main
-labels are =[BUG]=, =[PATCH]= and =[POLL]= or =[TODO]= for requests;
-see [[#report-types][report types]] for the full list.
+The subject label determines a report's type. The three main labels
+are =[BUG]=, =[PATCH]= and =[FR/TODO/POLL]= for feature requests; see [[#report-types][report
+types]] for the full list.
 
-A _patch report_ is created in two cases:
+A /patch report/ is created in two cases:
 
-1. The subject starts with =[PATCH]=, either directly or as
-   =Re: [PATCH] ...= when the reply carries a =.patch= or =.diff=
-   attachment (the v2/v3 reply workflow).
-2. The email attaches a =git format-patch= file whose inner
-   =Subject:= header starts with =[PATCH]=.
+1. The subject starts with =[PATCH]=, either directly or as =Re: [PATCH]
+   ...= when the reply carries a =.patch= or =.diff= attachment (the v2/v3
+   reply workflow).
+2. The email attaches a =git format-patch= file whose inner =Subject:=
+   header starts with =[PATCH]=.
 
-A bare inline diff, a =git diff > x.patch= attached in a reply
-without re-labelling, or a quoted diff in a discussion stay
-regular replies.  To track such a fix as a patch, attach a real
-=git format-patch= file or relabel the subject with =[PATCH]=.
+A bare inline diff, a =git diff > x.patch= attached in a reply without
+re-labelling, or a quoted diff in a discussion stay regular replies.
+To track such a fix as a patch, attach a real =git format-patch= file or
+relabel the subject with =[PATCH]=.
 
-Attaching a patch to a =[BUG]= or =[FR]= email leaves the report's
-type unchanged; the patch is stored as metadata on the parent.
+Attaching a patch to a =[BUG]= or =[FR]= email leaves the report's type
+unchanged; the patch is stored as metadata on the parent.
+
+** Updating reports
+
+Updating reports is done via a BARK /command/, a case-sensitive keyword
+at the start of a line. For example, a reply to a bug starting with
+=Confirmed.= marks it /acked/; a reply to a patch starting with =Applied.=
+or =Fixed.= marks it /closed/; a reply to a request starting with =Canceled=
+marks it =canceled=.
+
+BARK commands are followed by punctuation (=.= =,= =;= =:= =?= =!=), whitespace,
+or end of line. As an exception, =Urgent= and =Important= are stricter: a
+whitespace is not enough, they require punctuation or end of line,
+because the same words appear too often in ordinary prose.
+
+There are two kinds of commands: /triggers/, which change the report
+state and /annotations/, which update their properties. Triggers never
+apply to the email that carries them, only to the closest parent
+report: for example, a =Acked= command in a new bug report does not
+confirm the bug. Annotations apply to the closest parent report too
+but can also apply to the report the email creates: for example,
+adding =Urgent.= in a new bug report increases its priority.
+
+See the [[#all-commands][complete list of commands]] for the full registry.
+
+** Retracting your own updates
+
+To retract a state you previously set with =Acked.=, =Owned.=, =Closed.=,
+=Urgent.= or =Important.=, reply with the matching "Not" command:
+
+: Not acked.
+: Not owned.
+: Not closed.
+: Not urgent.
+: Not important.
+
+Each retraction applies only to your own earlier action. Maintainers
+have broader retraction rights, described in [[#undoing-updates][Undoing updates]].
 
 ** Setting a topic
 
-A _topic_ is a short string attached to a report.  Set it from
-the subject in two ways:
+A /topic/ is a short string attached to a report. Set it from the
+subject in two ways:
 
 - Inside the label: =[BUG parser]= sets the topic to "parser".
-- As a colon prefix after the label: =[BUG] parser: crash on
-  empty input= also sets the topic to "parser" -- the segment
-  before the first colon after the closing bracket.
+- As a colon prefix after the label: =[BUG] parser: crash on empty
+  input= also sets the topic to "parser" -- the segment before the
+  first colon after the closing bracket.
 
 To change the topic on an existing report, reply with:
 
@@ -124,271 +152,66 @@ To change the topic on an existing report, reply with:
 
 To remove it, reply with =No topic.=.
 
-** Updating reports
-
-A _command_ is a case-sensitive keyword at the start of a line in
-a thread reply.  BARK accepts a command when the keyword is
-followed by punctuation (=.= =,= =;= =:= =?= =!=), whitespace, or
-end of line.
-
-A reply to a bug starting with =Confirmed.= marks it _acked_; a
-reply to a patch starting with =Applied.= or =Fixed.= marks it
-_closed_.
-
-=Urgent= and =Important= are stricter: they require punctuation or
-end of line, because the same words appear too often in ordinary
-prose ("Important note:", "Urgent matter").
-
-BARK strips email signatures (delimited by =-- = per RFC 3676)
-before scanning, so command-like words in signatures are ignored.
-
-A reporter cannot ack their own report; =Acked= requires a second
-party.  Ownership has no such restriction.
-
-A command targets the thread, never the mail that carries it --
-unless that mail opens its thread.  A root mail that introduces a
-report (e.g. =[BUG] foo=) annotates that report; any reply hands
-its commands to the nearest report in the thread, even when the
-reply itself creates a new report (e.g. a =Re: [PATCH]= v2).
-
-Two relation commands -- =Supersedes:= and =Related-to:= -- name an
-explicit external message-id, so their intent is unambiguous.
-When a reply *also* creates a new report (e.g. a fresh =[BUG]=
-filed as =Re:= of an existing discussion), these two commands
-apply to the *new* report rather than the thread parent.  Every
-other command in the same body still flows to the thread parent.
-
-See the [[#all-commands][complete list of commands]] for the full registry.
-
-** Retracting your own updates
-
-To retract a state you previously set with =Acked.=, =Owned.=,
-=Closed.=, =Urgent.= or =Important.=, reply with the matching "Not"
-command:
-
-: Not acked.
-: Not owned.
-: Not closed.
-: Not urgent.
-: Not important.
-
-Each retraction applies only to your own earlier action.
-Maintainers have broader retraction rights, described in [[#undoing-updates][Undoing
-updates]].
-
-** Superseding a report
-
-One report can replace another -- a newer patch version, or a
-fresh bug report that captures the real issue.  Two equivalent
-commands mark a supersession; which one you use depends on the
-thread you write from.
-
-From the old report's thread, write:
-
-: Superseded-by: <new-message-id@example.com>
-
-From the new report's thread, write (in a reply, or in the
-opening mail of a new bug, patch or request):
-
-: Supersedes: <old-message-id@example.com>
-
-A _message-id_ takes one of three forms: =<id@host>=, the bare
-=id@host=, or the last path segment of an archive URL such as
-=https://list.orgmode.org/orgmode/id@host/=.  Both reports must be
-of the same type: bug to bug, patch to patch, request to request.
-
-To undo, reply with =Not superseded-by: <new-message-id@example.com>=
-from the closed report's thread, or with =Not supersedes:
-<old-message-id@example.com>= from the replacement's thread.
-
-For the automatic actions BARK performs on supersession, see the
-[[#superseding-a-report-1][maintainer section]].
-
-** Marking a report as a duplicate
-
-Use =Duplicate-of:= when two reports describe the same issue, and
-=Superseded-by:= when a newer report replaces an older one.
-Typical duplicate: two bug reports filed independently.  Typical
-supersession: a patch v1 followed by a v2.
-
-To mark a report as a duplicate of another, reply with:
-
-: Duplicate-of: <target-message-id@example.com>
-
-Message-id forms and type constraints match =Superseded-by:= (see
-above).  The duplicate is closed with reason =:cancelled= and
-linked to the target.  To undo, reply with =Not duplicate-of:
-<target-message-id@example.com>=.
-
-** Cross-referencing reports
-
-To cross-reference another report, reply with:
-
-: Related-to: <other-message-id@example.com>
-
-This annotation accepts any pair of reports, including closed
-ones, and uses the same message-id forms as =Superseded-by:=.
-Several =Related-to:= lines in one email post several links.  To
-undo, reply with =Not related-to: <other-message-id@example.com>=.
-
-** Resolving a bug or request with a patch
-
-Replying to an open bug or request with a =.patch= or =.diff=
-attachment credits you as =Acked= and =Owned= on that parent.  This
-credit fires only when the nearest parent is a bug or a request.
-When you are the parent's own reporter, only =Owned= is credited.
-An existing explicit setter is preserved; opt out with =Not acked.=
-or =Not owned.=.
-
-When the same reply also produces a separate patch report
-(labelled =Re: [PATCH]=, or carrying a =git format-patch=
-attachment), the patch is linked to the parent through a
-=:resolves= relation.  Closing that patch with =Applied.= or =Fixed.=
-then propagates the closure to the parent, with reason
-=:resolved=.
-
-Cancelling the patch retracts the implicit credit.  Superseding
-it transfers =Owned= to the new author; =Acked= is historical and
-stays with whoever first confirmed the parent.
-
-The source-level =:patch-triggers? false= flag disables both the
-implicit credit and the closure propagation.
-
-** Voting on requests
-
-Requests (=[POLL]=, =[TODO]= and their aliases) accept votes.  Reply
-to the thread with one of:
-
-- =+1= or =1+= -- a positive vote.
-- =-1= or =1-= -- a negative vote.
-- =+0=, =0+=, =-0= or =0-= -- an abstention.
-
-Each voter is counted once per report; the first vote wins.
-
-* As a maintainer
-
-A maintainer acts on a source through the same email channel as
-a regular user, with broader permissions and a few additional
-report types.  The sections below describe what is specific to
-that role.
-
-** Announcements, releases, changes
-
-A maintainer can also post general announcements (=[ANN]=), share
-a release (=[REL]=), or announce an upcoming change (=[CHG]=) for a
-future release.
-
-** Events (ICS calendar support)
-
-An announcement can carry a calendar event.  When an =[ANN]=
-report contains an attached =.ics= file or inline =VCALENDAR=
-content, BARK stores the calendar data alongside the report.
-During export, such announcements feed dedicated event feeds:
-
-- Individual =.ics= files in =events/<mid-hash>/=.
-- Combined ICS calendars:
-  - =events/announcements.ics= -- all announcements with events.
-  - =events/announcements-open.ics= -- open only.
-  - =events/announcements-closed.ics= -- closed only.
-- =events.json=, =events.org=, =events.xml= -- open announcements
-  with ICS content; =events-closed.*= list closed ones.
-
-Use =[ANN event]= to set the topic to "event" for easier
-filtering, but any announcement with ICS content is included
-regardless of topic.
-
-** Undoing updates
-
-A maintainer can undo any update with the same "Not" or "No"
-commands available to regular users:
-
-: Not acked.
-: Not owned.
-: Not closed.
-: Not urgent.
-: Not important.
-: No deadline.
-: No expiry.
-: No topic.
-: Not superseded-by: <new-message-id@example.com>
-: Not supersedes: <old-message-id@example.com>
-: Not duplicate-of: <target-message-id@example.com>
-: Not related-to: <other-message-id@example.com>
-
-A regular user can retract only their own actions (see [[#retracting-your-own-updates][Retracting
-your own updates]]); a maintainer applies the same commands
-without that restriction.
-
 ** Setting a deadline
 
-To set a _deadline_ on a report, reply with:
+To set a /deadline/ on a report, reply with:
 
 : Deadline: 2026-03-10.
 
-The value is an ISO date (=yyyy-MM-dd=) or a duration (=2d=, =3w=,
-=1m=, =1y=) resolved relative to today.  A trailing punctuation
-mark is optional.  Deadlines appear in JSON exports, in Org
-output as a =DEADLINE:= line, and in notification emails.
+The value is an ISO date (=yyyy-MM-dd=) or a duration (=2d=, =3w=, =1m=, =1y=)
+resolved relative to today. A trailing punctuation mark is optional.
+Deadlines appear in JSON exports, in Org output as a =DEADLINE:= line,
+and in notification emails.
 
 To remove a deadline, reply with =No deadline.=.
 
 ** Setting an expiry date
 
-A per-report _expiry date_ schedules the automatic closing of a
-report.  When the date is reached, BARK closes the report with
-reason "expired", overriding the source-level expiry rules.
+A per-report /expiry date/ schedules the automatic closing of a report.
 
 To set an expiry, reply with one of:
 
 : Expiry: 2026-06-15.
 : Expiry: 30d.
 
-Like =Deadline:=, the value is an ISO date or a duration.  The
-expiry appears in JSON exports under =:expiry=, in Org output as
-an =:EXPIRY:= property, and in the HTML index as a tooltip on the
-date column.
+Like =Deadline:=, the value is an ISO date or a duration. The expiry
+appears in JSON exports under =:expiry=, in Org output as an =:EXPIRY:=
+property, and in the HTML index as a tooltip on the date column.
 
-To expire reports at their deadline, use =:inactive-after
-:deadline= in the source-level expiry rules (see [[#report-expiry][report expiry]]).
+To expire reports at their deadline, use =:inactive-after :deadline= in
+the source-level expiry rules (see [[#report-expiry][report expiry]]).
 
 To remove a per-report expiry, reply with =No expiry.=.
 
 ** Superseding a report
 
-A =Supersedes:= or =Superseded-by:= command (see [[#superseding-a-report][the user section]]
-for syntax and message-id forms) triggers three automatic
-actions:
+One report can replace another: a newer patch version, or a fresh bug
+report that captures the real issue.
 
-1. BARK records a =:supersedes= qualified relation between the
-   two reports, with a symmetric =:related-to= audit link.
-2. The old report is closed with close-reason =:superseded=.
-3. The two reports are linked as related; the link survives an
-   undo.
+From the old report's thread, you can write:
 
-In the HTML index, a superseded report appears struck through,
-with an "S" status flag.  Its subject tooltip shows the
-replacement's title.
+: Superseded-by: <new-message-id@example.com>
 
-A later command may flip the direction.  When =Supersedes: <X>=
-is posed at t1 and =Superseded-by: <X>= at t2 on the same report,
-the second pose retracts the first, reopens the previously
-closed report, and applies the new direction.
+From the new report's thread, you can write (in a reply, or in the
+opening mail of a new bug, patch or request):
 
-To undo, the original setter or any maintainer can reply with
-=Not superseded-by: <new@x>= or =Not supersedes: <old@x>=.  The
-message-id must match the currently-active relation; a
-mismatched id is a no-op (so an unrelated supersede posed from
-elsewhere is not retracted by accident).  On a match, the
-relation is retracted, the closed report reopens, and the
-close-reason is cleared; the =:related-to= link is kept.
+: Supersedes: <old-message-id@example.com>
 
-*** Automatic supersession of patches
+A /message-id/ takes one of three forms: =<id@host>=, the bare =id@host=, or
+the last path segment of an archive URL such as
+=https://list.orgmode.org/orgmode/id@host/=. Both reports must be of the
+same type: bug to bug, patch to patch, request to request.
 
-When a new patch report appears in a thread whose earlier open
-patch report shares the same base subject (ignoring =Re:= or =Fwd:=
-prefixes and =[TAG]= brackets), the new report automatically
-supersedes the previous one.  This covers re-sent patches
-without explicit version numbers.
+To undo, reply with =Not superseded-by: <new-message-id@example.com>=
+from the closed report's thread, or with =Not supersedes:
+<old-message-id@example.com>= from the replacement's thread.
+
+** Supersession of patches
+
+When a new patch report appears in a thread whose earlier open patch
+report shares the same base subject (ignoring =Re:= or =Fwd:= prefixes and
+=[TAG]= brackets), the new report automatically supersedes the previous
+one. This covers re-sent patches without explicit version numbers.
 
 For example:
 
@@ -400,24 +223,98 @@ For example:
 
 Only the most recent patch (3) remains open.
 
-The reply must itself qualify as a patch report -- either a
-=Re: [PATCH]= subject with an attached patch, or a =git
-format-patch= attachment.  A plain =Re:= without a patch carries
-on as ordinary discussion.
+The reply must itself qualify as a patch report -- either a =Re:
+[PATCH]= subject with an attached patch, or a =git format-patch=
+attachment. A plain =Re:= without a patch carries on as ordinary
+discussion.
 
-Patches with an explicit version number (=[PATCH v2]=) follow a
-separate mechanism that matches on version and topic.
+Patches with an explicit version number (=[PATCH v2]=) follow a separate
+mechanism that matches on version and topic. See [[#patch-series][Patch series]].
+
+** Resolving a bug or request with a patch
+
+Replying to an open bug or request with a =.patch= or =.diff= attachment
+credits you as =Acked= and =Owned= on that parent, if the nearest parent
+is a bug or a request. (When you are the parent's own reporter, only
+=Owned= is credited, as you cannot =Ack= a report you sent.)
+
+Closing that patch with =Applied.= or =Fixed.= then propagates the closure
+to the parent, with reason =:resolved=. Cancelling the patch retracts
+the implicit credit. Superseding it transfers =Owned= to the new author;
+=Acked= is historical and stays with whoever first confirmed the parent.
+
+** Marking a report as a duplicate
+
+To mark a report as a duplicate of another, reply with:
+
+: Duplicate-of: <target-message-id@example.com>
+
+Message-id forms and type constraints match =Superseded-by:= (see
+above). The duplicate is closed with reason =:canceled= and linked to
+the target. To undo, reply with =Not duplicate-of:
+<target-message-id@example.com>=.
+
+** Cross-referencing reports
+
+To cross-reference another report, reply with:
+
+: Related-to: <other-message-id@example.com>
+
+This annotation accepts any pair of reports, including closed ones,
+and uses the same message-id forms as =Superseded-by:=. Several
+=Related-to:= lines in one email post several links. To undo, reply with
+=Not related-to: <other-message-id@example.com>=.
+
+** Voting on requests
+
+Requests (=[POLL]=, =[TODO]= and their aliases) accept votes. Reply to the
+thread with one of:
+
+- =+1= or =1+= -- a positive vote.
+- =-1= or =1-= -- a negative vote.
+- =+0=, =0+=, =-0= or =0-= -- an abstention.
+
+Each voter is counted once per report; the first vote wins.
+
+* As a maintainer
+
+A maintainer acts on a source through the same email channel as a
+regular user, but with broader permissions and a few additional report
+types. The sections below describe what is specific to that role.
+
+** Announcements, releases, changes
+
+A maintainer can post general announcements (=[ANN]=), share a release
+(=[REL]=), or announce an upcoming change (=[CHG]=) for a future release.
+
+** Events (ICS calendar support)
+
+An announcement can carry a calendar event. When an =[ANN]= report
+contains an attached =.ics= file or inline =VCALENDAR= content, BARK
+stores the calendar data alongside the report. During export, such
+announcements feed dedicated event feeds:
+
+- Individual =.ics= files in =events/<mid-hash>/=.
+- Combined ICS calendars:
+  - =events/announcements.ics= -- all announcements with events.
+  - =events/announcements-open.ics= -- open only.
+  - =events/announcements-closed.ics= -- closed only.
+- =events.json=, =events.org=, =events.xml= -- open announcements with ICS
+  content; =events-closed.*= list closed ones.
+
+Use =[ANN event]= to set the topic to "event" for easier filtering, but
+any announcement with ICS content is included regardless of topic.
 
 ** Acting as an update proxy
 
-A maintainer can update a report on behalf of another user by
-writing directly to the BARK inbox with a =-by= line:
+A maintainer can update a report on behalf of another user by writing
+directly to the BARK inbox with a =-by= line:
 
 : Acked-by: a-user@example.com
 : Owned-by: a-user@example.com
 : Closed-by: a-user@example.com
 
-The RFC 5322 =Display Name <addr>= form is also accepted:
+The =Name <addr>= form is also accepted:
 
 : Owned-by: A User <a-user@example.com>
 
@@ -443,12 +340,31 @@ Add maintainer: Dev User <dev@example.com>
 #+end_example
 
 State-changing actions (commands and role controls) must be sent
-through the source's public channel -- the mailing list or
-alias.  Every instance of BARK running on the same source then
-sees the same state.
+through the source's public channel -- the mailing list or alias.
+Every instance of BARK running on the same source then sees the same
+state.
 
-Notification preferences, by contrast, are personal and may be
-sent privately.
+** Undoing updates
+
+A maintainer can undo any update with the same "Not" or "No" commands
+available to regular users:
+
+: Not acked.
+: Not owned.
+: Not closed.
+: Not urgent.
+: Not important.
+: No deadline.
+: No expiry.
+: No topic.
+: Not superseded-by: <new-message-id@example.com>
+: Not supersedes: <old-message-id@example.com>
+: Not duplicate-of: <target-message-id@example.com>
+: Not related-to: <other-message-id@example.com>
+
+A regular user can retract only their own actions (see [[#retracting-your-own-updates][Retracting your
+own updates]]); a maintainer applies the same commands without that
+restriction.
 
 * Report types
 
@@ -463,35 +379,34 @@ BARK detects a report's type from its subject label:
 | =[REL <topic> <version>]=           | release      |
 | =[CHG <topic> <version>]=           | change       |
 
-The long-form aliases =[ANNOUNCEMENT]=, =[RELEASE]= and =[CHANGE]= are
-also accepted.  Labels are case-sensitive and require whitespace
-(or end of subject) after the closing =]=.  Malformed labels are
-ignored.  Posting an announcement, release or change requires
-maintainer permission.
+The long-form aliases =[ANNOUNCEMENT]=, =[RELEASE]= and =[CHANGE]= are also
+accepted. Labels are case-sensitive and require whitespace (or end of
+subject) after the closing =]=. Malformed labels are ignored. Posting an
+announcement, release or change requires maintainer permission.
 
-All =<…>= parts are optional and positional.  For =[REL]= and =[CHG]=,
-a single value is read as the =<version>=: =[REL 2.0]= sets the
-version to "2.0".  Pass both for topic and version: =[REL parser
-2.0]=.  For =[PATCH]=, =<version>= is a =v\d+= token (e.g. =v2=), and
-=<n/m>= is a sequence marker (e.g. =3/5=).
+All =<…>= parts are optional and positional. For =[REL]= and =[CHG]=, a
+single value is read as the =<version>=: =[REL 2.0]= sets the version to
+"2.0". Pass both for topic and version: =[REL parser 2.0]=. For =[PATCH]=,
+=<version>= is a =v\d+= token (e.g. =v2=), and =<n/m>= is a sequence marker
+(e.g. =3/5=).
 
 When a =[REL <version>]= report is posted, any open =[CHG <version>]=
-report with the same version is automatically closed, and the
-two reports are linked as related.
+report with the same version is automatically closed, and the two
+reports are linked as related.
 
 ** Patch series
 
-A _patch series_ groups patches sharing a sequence marker (=<n/m>=).
-A cover letter (=0/m=) or a fresh =1/m= patch from the same sender
-and topic automatically closes the previous series and starts a
-new one.  This is how a version bump supersedes the previous
-run: =[PATCH parser v2 0/3]= closes the earlier =v1= series.
+A /patch series/ groups patches sharing a sequence marker (=<n/m>=). A
+cover letter (=0/m=) or a fresh =1/m= patch from the same sender and topic
+automatically closes the previous series and starts a new one. This is
+how a version bump supersedes the previous run: =[PATCH parser v2 0/3]=
+closes the earlier =v1= series.
 
 ** Customising subject labels
 
-The labels above are the built-in defaults.  Override them
-globally or per source in =config.edn= through =:labels=.  Only the
-types you list are affected; the others keep their defaults.
+The labels above are the built-in defaults. Override them globally or
+per source in =config.edn= through =:labels=. Only the types you list are
+affected; the others keep their defaults.
 
 #+begin_src edn
 ;; Global override (applies to all sources)
@@ -505,36 +420,37 @@ types you list are affected; the others keep their defaults.
  :labels {:announcement ["ANN" "NEWS"]}}
 #+end_src
 
-A per-source setting wins over the global =:labels=, which in turn
-wins over the built-in defaults.
+A per-source setting wins over the global =:labels=, which in turn wins
+over the built-in defaults.
 
 * Commands
 
-A _command_ is a keyword at the start of a line in a thread
-reply.  BARK distinguishes two kinds:
+A /command/ is a keyword at the start of a line in a thread reply.
 
-- A *trigger* changes a report's state -- open/closed, acked,
-  owned, superseded, duplicate.  Triggers never apply to the
-  mail that carries them, even when that mail opens a new
-  thread.  Examples: =Closed.=, =Acked.=, =Owned-by:=,
-  =Superseded-by:=, =Duplicate-of:=.
+** Triggers and annotations
 
-- An *annotation* sets or unsets a property -- urgency,
-  importance, topic, deadline, expiry, or a non-closing
-  relation.  When the carrying mail itself becomes a new report,
-  the annotation applies to it; otherwise it targets the
-  nearest report in the thread.  Examples: =Urgent.=,
-  =Important.=, =Topic:=, =Deadline:=, =Supersedes:=, =Related-to:=.
+BARK distinguishes two kinds of commands:
 
-Two annotations are stricter on punctuation: =Urgent= and
-=Important= require punctuation or end of line, never whitespace
-(see [[#priority-commands][priority commands]]).
+- A *trigger* changes a report's state -- open/closed, acked, owned,
+  superseded, duplicate. Triggers never apply to the mail that carries
+  them, even when that mail opens a new thread. Examples: =Closed.=,
+  =Acked.=, =Owned-by:=, =Superseded-by:=, =Duplicate-of:=.
 
-Colon-prefixed commands -- =Topic:=, =Deadline:=, =Expiry:=,
-=Acked-by:=, =Owned-by:=, =Closed-by:=, =Superseded-by:=,
-=Supersedes:=, =Duplicate-of:=, =Related-to:= -- require at least
-one whitespace character between the colon and the value.
-=Topic: parser= is recognised; =Topic:parser= is silently ignored.
+- An *annotation* sets or unsets a property -- urgency, importance,
+  topic, deadline, expiry, or a non-closing relation. When the
+  carrying mail itself becomes a new report, the annotation applies to
+  it; otherwise it targets the nearest report in the thread. Examples:
+  =Urgent.=, =Important.=, =Topic:=, =Deadline:=, =Supersedes:=, =Related-to:=.
+
+Two annotations are stricter on punctuation: =Urgent= and =Important=
+require punctuation or end of line, never whitespace (see [[#priority-commands][priority
+commands]]).
+
+Colon-prefixed commands -- =Topic:=, =Deadline:=, =Expiry:=, =Acked-by:=,
+=Owned-by:=, =Closed-by:=, =Superseded-by:=, =Supersedes:=, =Duplicate-of:=,
+=Related-to:= -- require at least one whitespace character between the
+colon and the value. =Topic: parser= is recognised; =Topic:parser= is
+silently ignored.
 
 ** Status commands
 
@@ -548,8 +464,8 @@ one whitespace character between the colon and the value.
 
 A report carries a combination of three states:
 
-- =:acked= :: someone took the next sensible action -- confirmed
-  a bug, reviewed a patch, approved a request.
+- =:acked= :: someone took the next sensible action -- confirmed a bug,
+  reviewed a patch, approved a request.
 - =:owned= :: someone claimed ownership of the report.
 - =:closed= :: the report is resolved, canceled, or expired.
 
@@ -561,9 +477,9 @@ The numeric form combines these three bits:
 
 An acked, unowned and open report therefore has status =1+0+4 = 5=.
 
-Only bugs, patches and requests carry _acked_ or _owned_.
-Announcements, releases and changes can still be marked urgent
-or important, and can still be closed.
+Only bugs, patches and requests carry /acked/ or /owned/. Announcements,
+releases and changes can still be marked urgent or important, and can
+still be closed.
 
 ** Priority commands
 
@@ -572,10 +488,9 @@ or important, and can still be closed.
 | =Urgent.=         | Mark as urgent    |
 | =Important.=      | Mark as important |
 
-=Urgent= and =Important= require punctuation (=.= =,= =;= =:= =?= =!=)
-or end of line.  A bare space is rejected: words like "Important"
-appear too often in ordinary prose to be safe bareword
-annotations.
+=Urgent= and =Important= require punctuation (=.= =,= =;= =:= =?= =!=) or end of line.
+A bare space is rejected: words like "Important" appear too often in
+ordinary prose to be safe bareword annotations.
 
 These two values combine into the numeric priority:
 
@@ -591,102 +506,26 @@ You can use several keywords in the same email, one per line.
 : From: x@y.z
 : Date: Thu, 19 Mar 2026 16:45:00 +0100
 : Subject: Re: [BUG] Crash on startup
-:
+: 
 : > Crash on startup with the new build.
-:
+: 
 : Confirmed.
 : Urgent.
 : Important.
 
-** Customising commands
-
-Command keywords can be customised globally or per source.
-
-*** Overriding words, permissions, and report types
-
-Each entry is a map with any of =:words=, =:scope=, =:report-types=
-(at least one must be present):
-
-#+begin_src edn
-:commands {:closed   {:words ["Canceled" "Fixed" "Wontfix"]}
-           :acked    {:words ["Approved" "LGTM"]
-                      :scope :maintainer}               ;; Restrict to maintainers
-           :deadline {:report-types
-                      #{:bug :patch :request :change}}  ;; Widen to changes
-           :unclosed {:scope :setter-or-maintainer}}    ;; Override scope only
-#+end_src
-
-- =:scope= overrides the default permission for that command:
-  - =:user= -- anyone
-  - =:maintainer= -- maintainer only
-  - =:setter-or-maintainer= -- the address that previously set
-    the attribute, or any maintainer (maintainers keep their
-    administrative override).  Valid only on unset commands
-    whose target attribute is tracked by a ref to the
-    pose-email: =:unacked=, =:unowned=, =:unclosed=, =:unurgent=,
-    =:unimportant=, =:untopic=, =:undeadline=, =:unexpiry=,
-    =:unsuperseded-by=, =:unsupersedes=, =:unduplicate-of=.
-    =bb test-config= rejects this scope on any other command.
-- =:report-types= replaces the default set of report types the
-  command applies to.  Absent => registry default.
-- Any command ID from the table below can be overridden, both
-  triggers and annotations.
-- Role controls cannot be overridden.
-
-Per-source settings win over the global =:commands=, which in
-turn win over the built-in defaults.
-
-*** Syntax mode: =:loose= vs =:strict=
-
-The =:command-syntax= key controls whether BARK commands must be
-prefixed with =!=.  The default is =:loose=; =:strict= requires the
-prefix on every command, removing false positives on common
-English words ("Done.", "Closed.", "Applied.") that occur in
-ordinary prose.
-
-| Form             | Loose                  | Strict                 |
-|------------------+------------------------+------------------------|
-| Bareword         | =Closed.= / =!Closed.=     | =!Closed.=               |
-| Negative bareword| =Not acked= / =!Not acked= | =!Not acked=             |
-| =-by= line       | =Acked-by: a@b.c=        | =!Acked-by: a@b.c=       |
-| Date line        | =Deadline: 2026-06-01=   | =!Deadline: 2026-06-01=  |
-| Topic            | =Topic: event=           | =!Topic: event=          |
-| Supersede        | =Superseded-by: <mid>=   | =!Superseded-by: <mid>=  |
-| Supersede (sym.) | =Supersedes: <mid>=      | =!Supersedes: <mid>=     |
-| Role control     | =Add maintainer: a@b.c=  | =!Add maintainer: a@b.c= |
-
-Set globally or per source (per-source wins):
-
-#+begin_src edn
-:command-syntax :strict
-#+end_src
-
-**** Replaying archives under a different convention
-
-When a source's vocabulary or syntax mode has changed over time
-(a list that tightened from =:loose= to =:strict=, or accepted
-=Done.= only during a specific era), declare the history inline
-with =:periods= (see [[#source-periods][Source periods]]).  Each period carries its own
-overrides for =:commands=, =:command-syntax= and =:maintainers=; the
-core resolves the effective config at each email's date.
-
 ** All commands
 
-A _command_ is a keyword sent in a public reply, by a user or a
-maintainer.  In the "Permission" column, "setter or maintainer"
-denotes the user who previously set the attribute; a maintainer
-retains a full override in every case.
+A /command/ is a keyword sent in a public reply, by a user or a
+maintainer. In the "Permission" column, "setter or maintainer" denotes
+the user who previously set the attribute; a maintainer retains a full
+override in every case.
 
-Triggers act on existing reports only.  Annotations also apply
-to the carrying mail when that mail itself becomes a new report.
+Triggers act on existing reports only. Annotations also apply to the
+carrying mail when that mail itself becomes a new report.
 
-*** The six syntactic patterns
+*** The six patterns
 
-BARK's command grammar reduces to six shapes.  Knowing the
-shape lets you derive every command from a short list of
-keywords -- =acked=, =owned=, =closed=, =urgent=, =important=,
-=topic=, =deadline=, =expiry=, =supersedes=, =superseded-by=,
-=duplicate-of=, =related-to=.
+Here are the six possible command patterns:
 
 | Shape                   | Meaning                        | Example                                 |
 |-------------------------+--------------------------------+-----------------------------------------|
@@ -697,15 +536,14 @@ keywords -- =acked=, =owned=, =closed=, =urgent=, =important=,
 | =X-by: <addr>=            | maintainer acts on behalf of X | =Acked-by: a@x=, =Closed-by: a@x=           |
 | =X: <mid>= / =Not X: <mid>= | pose or retract a relation     | =Superseded-by: <m@x>=, =Related-to: <m@x>= |
 
-The "Not" form negates a binary state; the "No" form removes a
-property (deadline, expiry, topic).  A useful mnemonic: read
-"Not" as "no longer", "No" as "none".
+The "Not" form negates a state; the "No" form removes a property
+(deadline, expiry, topic).
 
 *** Triggers
 
 Listed in the order they typically appear in a report's life: a
-contributor acks it, then someone owns it, then it is closed.
-Vote and relation triggers come last.
+contributor acks it, then someone owns it, then it is closed. Vote and
+relation triggers come last.
 
 | ID                 | Syntax / Words                              | Permission           | Report types        |
 |--------------------+---------------------------------------------+----------------------+---------------------|
@@ -730,8 +568,8 @@ Vote and relation triggers come last.
 
 *** Annotations
 
-Grouped by what they describe: priority, classification,
-scheduling, and inter-report links.
+Grouped by what they describe: priority, classification, scheduling,
+and inter-report links.
 
 **** Priority
 
@@ -751,12 +589,12 @@ scheduling, and inter-report links.
 
 **** Scheduling
 
-| ID            | Syntax / Words                          | Permission           | Report types        |
-|---------------+-----------------------------------------+----------------------+---------------------|
-| =:deadline=     | =Deadline: 2025-03-19= or =Deadline: 30d=   | any user             | bug, patch, request |
-| =:undeadline=   | =No deadline=                             | setter or maintainer | bug, patch, request |
-| =:expiry=       | =Expiry: 2025-06-15= or =Expiry: 30d=       | any user             | bug, patch, request |
-| =:unexpiry=     | =No expiry=                               | setter or maintainer | bug, patch, request |
+| ID          | Syntax / Words                        | Permission           | Report types        |
+|-------------+---------------------------------------+----------------------+---------------------|
+| =:deadline=   | =Deadline: 2025-03-19= or =Deadline: 30d= | any user             | bug, patch, request |
+| =:undeadline= | =No deadline=                           | setter or maintainer | bug, patch, request |
+| =:expiry=     | =Expiry: 2025-06-15= or =Expiry: 30d=     | any user             | bug, patch, request |
+| =:unexpiry=   | =No expiry=                             | setter or maintainer | bug, patch, request |
 
 **** Relations
 
@@ -769,8 +607,8 @@ scheduling, and inter-report links.
 
 ** All controls
 
-A _control_ manages a role.  Role controls must be sent through
-the source's public channel.
+A /control/ manages a role. Role controls must be sent through the
+source's public channel.
 
 | ID   | Syntax / Words               | Permission      | Channel |
 |------+------------------------------+-----------------+---------|
@@ -779,9 +617,9 @@ the source's public channel.
 
 * Exploring reports
 
-BARK exports its data as HTML pages and as JSON, Org and RSS
-feeds.  This chapter describes the exported files and the
-companion tools that consume them.
+BARK exports its data as HTML pages and as JSON, Org and RSS feeds.
+This chapter describes the exported files and the companion tools that
+consume them.
 
 ** Exported pages and feeds
 
@@ -802,11 +640,10 @@ Running =bb export all= generates, for each source:
   open/closed announcements carrying =.ics= or inline VCALENDAR
   content.
 
-RSS feeds carry up to 50 items, most recent first.  Export is
+RSS feeds carry up to 50 items, most recent first. Export is
 incremental: only sources modified since the last export are
-regenerated.  Use =--force= to rebuild everything, or
-=bb export {json|rss|org|html|stats|text|events}= to rebuild a
-single format.
+regenerated. Use =--force= to rebuild everything, or =bb export
+{json|rss|org|html|stats|text|events}= to rebuild a single format.
 
 | Flag               | Purpose                                                  | Configurable |
 |--------------------+----------------------------------------------------------+--------------|
@@ -818,14 +655,14 @@ single format.
 | =--topics-filter=    | restrict to topics (comma-separated, case-insensitive)   | per source   |
 | =--force=            | force a full re-export                                   | CLI only     |
 
-Durations accept =Nd=, =Nw=, =Nm=, =Ny= (e.g. =--closed-retention 1y=
-keeps reports closed within the last 12 months).
+Durations accept =Nd=, =Nw=, =Nm=, =Ny= (e.g. =--closed-retention 1y= keeps
+reports closed within the last 12 months).
 
 ** Vote transparency
 
-Each vote on a request is stored as a separate entity recording
-its voter and its source email.  Export produces a =votes.json=
-file per source so anyone can audit the results:
+Each vote on a request is stored as a separate entity recording its
+voter and its source email. Export produces a =votes.json= file per
+source so anyone can audit the results:
 
 #+begin_src json
 {
@@ -837,15 +674,15 @@ file per source so anyone can audit the results:
 }
 #+end_src
 
-Each voter is counted once per report; the first vote wins.
-Summary counts (=votes=, =votes-up=, =votes-down=, =votes-null=) are
-still included in the per-report JSON for display, derived from
-these entities at export time.
+Each voter is counted once per report; the first vote wins. Summary
+counts (=votes=, =votes-up=, =votes-down=, =votes-null=) are still included in
+the per-report JSON for display, derived from these entities at export
+time.
 
 ** Browsing BARK reports online
 
-The exported HTML site lets you browse a source's reports and
-filter them through a minimal search syntax:
+The exported HTML site lets you browse a source's reports and filter
+them through a minimal search syntax:
 
 | Long form                       | Short     | Explanation                                           |
 |---------------------------------+-----------+-------------------------------------------------------|
@@ -869,48 +706,45 @@ filter them through a minimal search syntax:
 | match1 \vert match2                 |           | Reports matching "match1" or "match2"                 |
 | from:* acked:* …                | f:* a:* … | Wildcard for from/acked/owned/closed/urgent/important |
 
-Durations are =Nd= (days), =Nw= (weeks), =Nm= (months).  =date:= looks
-backward from today; =deadline:= and =expired:= look forward.
+Durations are =Nd= (days), =Nw= (weeks), =Nm= (months). =date:= looks backward
+from today; =deadline:= and =expired:= look forward.
 
 ** The =bone= CLI tool, =gnus-bone.el= and =notmuch-bone.el=
 
-- [[https://codeberg.org/bzg/bone][bone]] lets you browse and filter BARK reports from the
-  terminal.
+- [[https://codeberg.org/bzg/bone][bone]] lets you browse and filter BARK reports from the terminal.
 - [[https://codeberg.org/bzg/gnus-bone][gnus-bone.el]] integrates the same view in [[https://gnus.org/][Emacs Gnus]].
 - [[https://codeberg.org/bzg/notmuch-bone][notmuch-bone.el]] provides the same integration for [[https://notmuchmail.org/][notmuch]].
 
 * Notifications
 
-BARK can send email digests of open reports.  Subscribers and
-their filters are declared by the operator in =config.edn=, under
-=:notifications :subscribers= (see [[#notifications-smtp][Notifications (SMTP)]] under
-Deploying BARK for the full configuration).
+BARK can send email digests of open reports. Subscribers and their
+filters are declared by the operator in =config.edn=, under
+=:notifications :subscribers= (see [[#notifications-smtp][Notifications (SMTP)]] under Deploying
+BARK for the full configuration).
 
-Each digest contains the failed commands relevant to the
-recipient, the open bugs, patches and requests they own (upcoming
-deadlines first), and the open ones nobody has acknowledged or
-owned yet.
+Each digest contains the failed commands relevant to the recipient,
+the open bugs, patches and requests they own (upcoming deadlines
+first), and the open ones nobody has acknowledged or owned yet.
 
 ** Subscribing or changing preferences
 
-Subscriptions are not managed by email.  To subscribe,
-unsubscribe, or adjust filters (minimum priority, subject match,
-topic), ask the operator to edit =config.edn=.  This is a
-deliberate trade-off: notifications are configured the same way
-as SMTP and the maintainer list, so the operator owns the full
-declaration of who receives what.
+Subscriptions are not managed by email. To subscribe, unsubscribe, or
+adjust filters (minimum priority, subject match, topic), ask the
+operator to edit =config.edn=. This is a deliberate trade-off:
+notifications are configured the same way as SMTP and the maintainer
+list, so the operator owns the full declaration of who receives what.
 
-The =bb notify= task -- run by the operator from cron or a
-systemd timer -- builds and sends the digests; =bb notify
---dry-run= prints them without sending.  Cadence is the
-operator's choice; the task tracks no per-recipient interval.
+The =bb notify= task -- run by the operator from cron or a systemd timer
+-- builds and sends the digests; =bb notify --dry-run= prints them
+without sending. Cadence is the operator's choice; the task tracks no
+per-recipient interval.
 
 * Deploying BARK
 
-This section addresses anyone running a BARK instance --
-organisation, project, or personal mailbox on a single machine.
-BARK reads its configuration from a single =config.edn= file;
-validate it after editing with =bb test-config=.
+This section addresses anyone running a BARK instance -- organisation,
+project, or personal mailbox on a single machine. BARK reads its
+configuration from a single =config.edn= file; validate it after editing
+with =bb test-config=.
 
 ** Setting up an instance
 
@@ -931,16 +765,16 @@ one source:
             :maintainers ["lead@example.org"]}]}
 #+end_src
 
-The =:db=, =:logging= and =:ingest= sections are optional.  Defaults:
-=:db {:path "data/bark-db"}=, stderr-only logging at =:info=, and
-=:ingest {:fetch {:limit 50}}=.  See =config.edn.example= for the
-full annotated reference.
+The =:db=, =:logging= and =:ingest= sections are optional. Defaults: =:db
+{:path "data/bark-db"}=, stderr-only logging at =:info=, and =:ingest
+{:fetch {:limit 50}}=. See =config.edn.example= for the full annotated
+reference.
 
-BARK also reads Maildir folders.  Point =:path= at the parent
-directory containing =cur/=, =new/= and =tmp/=, and use =:folder= to
-select the subfolder.  Set =:folder ""= when the Maildir at =:path=
-already holds =cur/=, =new/= and =tmp/= directly.  A Maildir source
-in watch mode uses filesystem events rather than polling.
+BARK also reads Maildir folders. Point =:path= at the parent directory
+containing =cur/=, =new/= and =tmp/=, and use =:folder= to select the
+subfolder. Set =:folder ""= when the Maildir at =:path= already holds
+=cur/=, =new/= and =tmp/= directly. A Maildir source in watch mode uses
+filesystem events rather than polling.
 
 #+begin_src edn
 {:mailbox {:type   :maildir
@@ -951,36 +785,33 @@ in watch mode uses filesystem events rather than polling.
 
 ** Monitoring your local mail
 
-BARK can run on a single machine to watch your own mail.  In
-that mode:
+BARK can run on a single machine to watch your own mail. In that mode:
 
-- The mail source is a Maildir (see the example above).  Watch
-  mode reacts to filesystem events -- no polling, no IMAP
-  credentials.
-- SMTP notifications are usually unnecessary: you already read
-  the mailbox BARK watches.  Either omit =:notifications= or set
-  =:enabled false=.
-- One source is enough.  Match on =:to= or =:list= depending on
-  which header your local MDA stamps.
+- The mail source is a Maildir (see the example above). Watch mode
+  reacts to filesystem events -- no polling, no IMAP credentials.
+- SMTP notifications are usually unnecessary: you already read the
+  mailbox BARK watches. Either omit =:notifications= or set =:enabled
+  false=.
+- One source is enough. Match on =:to= or =:list= depending on which
+  header your local MDA stamps.
 
-To keep BARK in the background, install the user-level systemd
-unit from =docs/deploy/bark.service= (see [[#running-bark-in-production][Running BARK in
-production]]).
+To keep BARK in the background, install the user-level systemd unit
+from =docs/deploy/bark.service= (see [[#running-bark-in-production][Running BARK in production]]).
 
 ** Source types and matching
 
-A source has exactly one type key, which determines how BARK
-matches incoming emails:
+A source has exactly one type key, which determines how BARK matches
+incoming emails:
 
 - =:list= -- matches the =List-Id= header (bare identifier, e.g.
-  ="my-list.example.org"=).  Detected as list mail when =List-Id=
-  or =X-BeenThere= is present.
-- =:alias= -- matches =X-Original-To=, =Envelope-To=, =X-Envelope-To=,
-  or =Delivered-To=.  Detected as alias mail when the original
-  recipient differs from =To=/=Cc=, or when multiple distinct
-  =Delivered-To= values are present.
-- =:to= -- matches =Delivered-To=.  For a dedicated mailbox where
-  all emails are delivered directly.
+  ="my-list.example.org"=). Detected as list mail when =List-Id= or
+  =X-BeenThere= is present.
+- =:alias= -- matches =X-Original-To=, =Envelope-To=, =X-Envelope-To=, or
+  =Delivered-To=. Detected as alias mail when the original recipient
+  differs from =To=/=Cc=, or when multiple distinct =Delivered-To= values
+  are present.
+- =:to= -- matches =Delivered-To=. For a dedicated mailbox where all
+  emails are delivered directly.
 
 Emails that match no source are discarded at ingestion.
 
@@ -1007,12 +838,11 @@ Emails that match no source are discarded at ingestion.
 
 ** Source periods
 
-When a source's vocabulary or maintainer list has evolved over
-time, declare the history inline with =:periods= -- a vector of
-time-windowed overrides.  Each entry may declare =:start= / =:end=
-(ISO =yyyy-MM-dd=) plus any of =:maintainers=, =:commands=,
-=:command-syntax=, =:labels=.  Fields omitted in a period inherit
-from the source level (the current state).
+When a source's vocabulary or maintainer list has evolved over time,
+declare the history inline with =:periods= -- a vector of time-windowed
+overrides. Each entry may declare =:start= / =:end= (ISO =yyyy-MM-dd=) plus
+any of =:maintainers=, =:commands=, =:command-syntax=, =:labels=. Fields
+omitted in a period inherit from the source level (the current state).
 
 #+begin_src edn
 {:name "orgmode"
@@ -1030,31 +860,26 @@ from the source level (the current state).
 
 Rules:
 
-- Periods must be /contiguous/: =:end= of era /N/ equals =:start=
-  of era /N+1/.
+- Periods must be /contiguous/: =:end= of era /N/ equals =:start= of era /N+1/.
 - Only the /first/ period may omit =:start= (unbounded past).
 - Only the /last/ period may omit =:end= (still active).
-- =bb test-config= validates the periods and rejects gaps or
-  overlaps.
-- Maintainer tenure at each boundary is computed via /sync/:
-  declared maintainers missing at the boundary are added, and
-  previously-active maintainers absent from the declared list
-  are closed at the boundary's =:start=.
-- =Add/Remove maintainer:= controls in emails continue to mutate
-  tenures in real time /between/ boundaries.
-- Sync is /idempotent/: re-running on an existing DB never
-  duplicates tenures and does not reinstate maintainers closed
-  by a past mail control.  To replay from scratch, run
-  =clj -M:run -- --fresh=.
+- =bb test-config= validates the periods and rejects gaps or overlaps.
+- Maintainer tenure at each boundary is computed via /sync/: declared
+  maintainers missing at the boundary are added, and previously-active
+  maintainers absent from the declared list are closed at the
+  boundary's =:start=.
+- =Add/Remove maintainer:= controls in emails continue to mutate tenures
+  in real time /between/ boundaries.
+- Sync is /idempotent/: re-running on an existing DB never duplicates
+  tenures and does not reinstate maintainers closed by a past mail
+  control. To replay from scratch, run =clj -M:run -- --fresh=.
 
 ** Report expiry
 
-Any report type can be automatically closed when its age and
-state match configured rules.  The close reason is set to
-"expired".
+Any report type can be automatically closed when its age and state
+match configured rules. The close reason is set to "expired".
 
-Each entry under =:expiry= maps a report type keyword to a rule
-map:
+Each entry under =:expiry= maps a report type keyword to a rule map:
 
 | Rule key        | Type                      | Description                                             |
 |-----------------+---------------------------+---------------------------------------------------------|
@@ -1062,9 +887,9 @@ map:
 | =:max-status=     | integer                   | Don't expire if activity score > this value (0--3)      |
 | =:max-priority=   | integer                   | Don't expire if priority > this value (0--3)            |
 
-All rules are conjunctive: a report expires only when *all*
-conditions are met.  Only =:inactive-after= is required; the
-others are optional filters.
+All rules are conjunctive: a report expires only when *all* conditions
+are met. Only =:inactive-after= is required; the others are optional
+filters.
 
 | =:inactive-after= value | Trigger                                                                |
 |-----------------------+------------------------------------------------------------------------|
@@ -1095,11 +920,6 @@ and owned (since expiry candidates are always open reports):
 
 Can be set globally or per source (per-source wins).
 
-Maintainers can also set a per-report expiry date with the
-=Expiry:= annotation (see [[#report-expiry][report expiry]]).  An explicit per-report
-expiry overrides the source-level rules: only that date is then
-checked.
-
 ** Tuning ingestion
 
 #+begin_src edn
@@ -1107,9 +927,9 @@ checked.
          :max-size 1048576}       ;; skip emails > 1 MB (optional)
 #+end_src
 
-- =:fetch= -- first-run fetch window (no watermark yet).
-  Exactly one of three disjoint map shapes (no key mixing,
-  empty map rejected); default is ={:limit 50}=:
+- =:fetch= -- first-run fetch window (no watermark yet). Exactly one of
+  three disjoint map shapes (no key mixing, empty map rejected);
+  default is ={:limit 50}=:
 
   | Config form                      | CLI shortcut       | Meaning                                                                           |
   |----------------------------------+--------------------+-----------------------------------------------------------------------------------|
@@ -1117,15 +937,13 @@ checked.
   | ={:since "Nd"}=                    | =--fetch 30d=        | Relative duration from now (=Nd=, =Nw=, =Nm=, =Ny=)                                       |
   | ={:start "yyyy-MM-dd" :end "..."}= | =--fetch 2020-01-01= | Absolute half-open window =[start, end)=; both keys optional, at least one required |
 
-- =:max-size= -- skip emails larger than N bytes.  No limit by
-  default.
+- =:max-size= -- skip emails larger than N bytes. No limit by default.
 
-Text content of =.patch=, =.diff=, =.ics=, =text/plain= and
-=text/x-log= attachments is extracted and stored in the database.
-Attachments larger than 1 MB (1,048,576 characters) are skipped
-with a warning -- only metadata (filename, size, content-type)
-is kept.  Override the limit with =:max-attachment-size= in
-=:ingest=.
+Text content of =.patch=, =.diff=, =.ics=, =text/plain= and =text/x-log=
+attachments is extracted and stored in the database. Attachments
+larger than 1 MB (1,048,576 characters) are skipped with a warning --
+only metadata (filename, size, content-type) is kept. Override the
+limit with =:max-attachment-size= in =:ingest=.
 
 ** Notifications (SMTP)
 
@@ -1148,15 +966,14 @@ is kept.  Override the limit with =:max-attachment-size= in
    {:source "another-list" :topic "release"}]}}
 #+end_src
 
-Each key under =:subscribers= is a recipient's address.  The
-associated vector lists their subscriptions, one per source --
-a recipient on three sources receives three separate emails per
-=bb notify= run.
+Each key under =:subscribers= is a recipient's address. The associated
+vector lists their subscriptions, one per source -- a recipient on
+three sources receives three separate emails per =bb notify= run.
 
-=:admin-bcc= adds a hidden carbon-copy on every subscriber digest.
-A single address as a string, or a vector of addresses.  Useful to
-audit deliverability and to catch bounces.  The BCC field is not
-visible to the other recipients (standard SMTP semantics).
+=:admin-bcc= adds a hidden carbon-copy on every subscriber digest. A
+single address as a string, or a vector of addresses. Useful to audit
+deliverability and to catch bounces. The BCC field is not visible to
+the other recipients (standard SMTP semantics).
 
 Optional per-subscription filters:
 
@@ -1167,28 +984,26 @@ Optional per-subscription filters:
 | =:subject-match= | Substring match on the report subject (all sections)         |
 | =:topic=         | Substring match on the report topic (all sections)           |
 
-=:min-priority= and =:min-status= filter only the "unacked &
-unowned" section -- the highest-volume one.  Reports you own
-(with or without deadline) always appear regardless of priority
-or status.
+=:min-priority= and =:min-status= filter only the "unacked & unowned"
+section -- the highest-volume one. Reports you own (with or without
+deadline) always appear regardless of priority or status.
 
-=bb notify= tracks no per-recipient cadence: it sends every time
-it is invoked.  Schedule it from cron or a systemd timer.
-=bb test-config= verifies that every =:source= named under
-=:subscribers= matches an existing source =:name=.
+=bb notify= tracks no per-recipient cadence: it sends every time it is
+invoked. Schedule it from cron or a systemd timer. =bb test-config=
+verifies that every =:source= named under =:subscribers= matches an
+existing source =:name=.
 
-A small state file, =public/.last-notify-failures.edn=, records
-the last successful send per (subscriber, source) so the same
-failed-command entries are not re-mailed at every run.  Delete
-the file to replay all current failures on the next invocation.
+A small state file, =public/.last-notify-failures.edn=, records the last
+successful send per (subscriber, source) so the same failed-command
+entries are not re-mailed at every run. Delete the file to replay all
+current failures on the next invocation.
 
-Command failures are kept on file for the subscriber digest and
-for manual inspection via =bb maintenance --failures=.  BARK does
-*not* mail the author of a failing command directly: an
-unsubscribed user who typed =Superseded-by:= with a typo learns
-of the failure only if they are themselves on the subscriber
-list.  Maintainers see all failures with =:audience :maintainers=
-in their digest.
+Command failures are kept on file for the subscriber digest and for
+manual inspection via =bb maintenance --failures=. BARK does *not* mail
+the author of a failing command directly: an unsubscribed user who
+typed =Superseded-by:= with a typo learns of the failure only if they
+are themselves on the subscriber list. Maintainers see all failures
+with =:audience :maintainers= in their digest.
 
 ** Logging
 
@@ -1201,33 +1016,103 @@ in their digest.
                      :level :error}}
 #+end_src
 
-Log file rotation is automatic.  Email alerts require SMTP to
-be configured.
+Log file rotation is automatic. Email alerts require SMTP to be
+configured.
 
 ** Running BARK in production
 
 BARK can be deployed in two modes.
 
-- *Watch mode under systemd* :: The daemon stays up, reacts to
-  IMAP IDLE or Maildir filesystem events, and reconnects on
-  failure.  A ready-to-edit unit file lives in
-  =docs/deploy/bark.service=.  Install it to
-  =/etc/systemd/system/bark.service= (root) or
+- *Watch mode under systemd* :: The daemon stays up, reacts to IMAP IDLE
+  or Maildir filesystem events, and reconnects on failure. A
+  ready-to-edit unit file lives in =docs/deploy/bark.service=. Install
+  it to =/etc/systemd/system/bark.service= (root) or
   =~/.config/systemd/user/= (user), then run =systemctl [--user]
   daemon-reload && systemctl [--user] enable --now bark=.
 
-- *Batch mode under cron* :: =clj -M:run= is a one-shot: it
-  connects, fetches new mail since the watermark, digests,
-  expires, and exits.  Chain =bb export= and =bb notify= after it.
-  An example crontab lives in =docs/deploy/crontab.example=.
+- *Batch mode under cron* :: =clj -M:run= is a one-shot: it connects,
+  fetches new mail since the watermark, digests, expires, and exits.
+  Chain =bb export= and =bb notify= after it. An example crontab lives in
+  =docs/deploy/crontab.example=.
 
-Either mode can be backed by an uberjar to avoid the Clojure
-startup cost; see Quick start in =README.org=.
+Either mode can be backed by an uberjar to avoid the Clojure startup
+cost; see Quick start in =README.org=.
+
+** Customising commands
+
+Command keywords can be customised globally or per source.
+
+*** Overriding words, permissions, and report types
+
+Each entry is a map with any of =:words=, =:scope=, =:report-types= (at
+least one must be present):
+
+#+begin_src edn
+:commands {:closed   {:words ["Canceled" "Fixed" "Wontfix"]}
+           :acked    {:words ["Approved" "LGTM"]
+                      :scope :maintainer}               ;; Restrict to maintainers
+           :deadline {:report-types
+                      #{:bug :patch :request :change}}  ;; Widen to changes
+           :unclosed {:scope :setter-or-maintainer}}    ;; Override scope only
+#+end_src
+
+- =:scope= overrides the default permission for that command:
+  - =:user= -- anyone
+  - =:maintainer= -- maintainer only
+  - =:setter-or-maintainer= -- the address that previously set the
+    attribute, or any maintainer (maintainers keep their
+    administrative override). Valid only on unset commands whose
+    target attribute is tracked by a ref to the pose-email: =:unacked=,
+    =:unowned=, =:unclosed=, =:unurgent=, =:unimportant=, =:untopic=,
+    =:undeadline=, =:unexpiry=, =:unsuperseded-by=, =:unsupersedes=,
+    =:unduplicate-of=. =bb test-config= rejects this scope on any other
+    command.
+- =:report-types= replaces the default set of report types the command
+  applies to. Absent => registry default.
+- Any command ID from the table below can be overridden, both triggers
+  and annotations.
+- Role controls cannot be overridden.
+
+Per-source settings win over the global =:commands=, which in turn win
+over the built-in defaults.
+
+*** Syntax mode: =:loose= vs =:strict=
+
+The =:command-syntax= key controls whether BARK commands must be
+prefixed with =!=. The default is =:loose=; =:strict= requires the prefix on
+every command, removing false positives on common English words
+("Done.", "Closed.", "Applied.") that occur in ordinary prose.
+
+| Form             | Loose                  | Strict                 |
+|------------------+------------------------+------------------------|
+| Bareword         | =Closed.= / =!Closed.=     | =!Closed.=               |
+| Negative bareword| =Not acked= / =!Not acked= | =!Not acked=             |
+| =-by= line       | =Acked-by: a@b.c=        | =!Acked-by: a@b.c=       |
+| Date line        | =Deadline: 2026-06-01=   | =!Deadline: 2026-06-01=  |
+| Topic            | =Topic: event=           | =!Topic: event=          |
+| Supersede        | =Superseded-by: <mid>=   | =!Superseded-by: <mid>=  |
+| Supersede (sym.) | =Supersedes: <mid>=      | =!Supersedes: <mid>=     |
+| Role control     | =Add maintainer: a@b.c=  | =!Add maintainer: a@b.c= |
+
+Set globally or per source (per-source wins):
+
+#+begin_src edn
+:command-syntax :strict
+#+end_src
+
+**** Replaying archives under a different convention
+
+When a source's vocabulary or syntax mode has changed over time (a
+list that tightened from =:loose= to =:strict=, or accepted =Done.= only
+during a specific era), declare the history inline with =:periods= (see
+[[#source-periods][Source periods]]). Each period carries its own overrides for =:commands=,
+=:command-syntax= and =:maintainers=; the core resolves the effective
+config at each email's date.
 
 ** Maintenance
 
-The =bb maintenance= task reports and prunes orphan emails.  Run
-it while the daemon is stopped.
+The =bb maintenance= task reports and prunes orphan emails. Run it while
+the daemon is stopped.
 
 #+begin_src shell
 bb maintenance                  # dry run, show orphan counts
@@ -1242,32 +1127,31 @@ bb maintenance --retention 6m   # override default orphan retention
 bb maintenance -n my-source     # scope to a single source
 #+end_src
 
-An _orphan email_ is one that no report references and that no
+An /orphan email/ is one that no report references and that no
 maintainer has sent.
 
 ** Rebuilding history
 
-A source's historical evolution -- vocabulary, syntax,
-maintainer list -- is declared inline through =:periods= entries.
-See [[#source-periods][Source periods]] for the full format and rules.  At startup,
-BARK materialises the tenure history by syncing at each period
-boundary, and resolves the effective config for every email
-from its date.
+A source's historical evolution -- vocabulary, syntax, maintainer list
+-- is declared inline through =:periods= entries. See [[#source-periods][Source periods]] for
+the full format and rules. At startup, BARK materialises the tenure
+history by syncing at each period boundary, and resolves the effective
+config for every email from its date.
 
-To replay from scratch after editing periods (or any config
-change you want reflected retroactively), wipe the DB:
+To replay from scratch after editing periods (or any config change you
+want reflected retroactively), wipe the DB:
 
 #+begin_src shell
 clj -M:run -- --fresh   # interactive confirm, then full replay
 #+end_src
 
-=bb test-config= validates =:periods= on each source: contiguity,
-ISO date format, =:start= strictly before =:end=.
+=bb test-config= validates =:periods= on each source: contiguity, ISO date
+format, =:start= strictly before =:end=.
 
 * CLI reference
 
 The export, notification and maintenance tasks are run through
-[[https://babashka.org/][Babashka]].  Each task and its main flags:
+[[https://babashka.org/][Babashka]]. Each task and its main flags:
 
 | Task                            | Description                                                    |
 |---------------------------------+----------------------------------------------------------------|
@@ -1291,8 +1175,8 @@ The export, notification and maintenance tasks are run through
 | =bb test-config=                  | Validate =config.edn=                                            |
 | =bb test-smtp=                    | Test SMTP config (=--to addr=, =--send=; default = dry-run)        |
 
-Export accepts =-n <source>= (restrict to one source), =-p <N>=
-(minimum priority), =-s <N>= (minimum status).
+Export accepts =-n <source>= (restrict to one source), =-p <N>= (minimum
+priority), =-s <N>= (minimum status).
 
 * Appendix 1: workflow examples
 
@@ -1315,7 +1199,7 @@ A contributor submits a patch series:
 : 
 : <inline patch>
 
-BARK creates a patch series (cover + 2 patches).  The maintainer
+BARK creates a patch series (cover + 2 patches). The maintainer
 reviews and asks for changes:
 
 : From: eve@project.org
@@ -1332,8 +1216,8 @@ Carol resubmits as v2:
 : 
 : v2: renamed foo to bar as requested.
 
-BARK automatically closes the v1 series and opens a v2 series.
-The maintainer applies:
+BARK automatically closes the v1 series and opens a v2 series. The
+maintainer applies:
 
 : From: eve@project.org
 : Subject: Re: [PATCH parser v2 0/2] Refactor tokenizer
@@ -1344,8 +1228,8 @@ The v2 series is now closed (resolved).
 
 ** Maintainer triage
 
-A bug comes in with no response for a while.  The maintainer
-triages by replying to the list:
+A bug comes in with no response for a while. The maintainer triages by
+replying to the list:
 
 : From: eve@project.org
 : To: bugs-list@project.org
@@ -1370,7 +1254,7 @@ Any maintainer adds a new maintainer (via the list):
 : From: eve@project.org
 : To: bugs-list@project.org
 : Subject: Role update
-:
+: 
 : Add maintainer: newdev@project.org
 
 Only the lead maintainer can =Remove maintainer:=.
@@ -1383,12 +1267,11 @@ With this config:
 :expiry {:bug {:inactive-after "90d" :max-status 0}}
 #+end_src
 
-A bug whose last email is 91 days old, still unacked and
-unowned, is automatically closed with reason "expired" on the
-next expiry run.
+A bug whose last email is 91 days old, still unacked and unowned, is
+automatically closed with reason "expired" on the next expiry run.
 
-To keep a legitimately old bug open, a maintainer marks it
-owned (which lifts it above =:max-status 0=):
+To keep a legitimately old bug open, a maintainer marks it owned
+(which lifts it above =:max-status 0=):
 
 : From: eve@project.org
 : To: bugs-list@project.org
@@ -1398,9 +1281,9 @@ owned (which lifts it above =:max-status 0=):
 : No expiry.
 : Owned.
 
-Marking the bug owned takes its status above =:max-status 0=, so
-the expiry rule no longer applies.  =No expiry.= clears any
-per-report expiry date previously set.
+Marking the bug owned takes its status above =:max-status 0=, so the
+expiry rule no longer applies. =No expiry.= clears any per-report expiry
+date previously set.
 
 * Appendix 2: credits
 
