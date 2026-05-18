@@ -75,6 +75,8 @@
   td:nth-child(5) { min-width: 740px; }
   td:nth-child(6) { max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #status { font-size: 0.8rem; margin-bottom: 0.5rem; }
+  .row-icon { font-size: 0.75rem; text-decoration: none; }
+  a.row-icon[data-action] { margin-right: 0.3em; }
   .vote-badge { display: inline-block; padding: 0.1rem 0.4rem; border-radius: 3px; font-size: 0.7rem;
                 font-weight: 600; margin-left: 0.4em; margin-right: 0.4em; vertical-align: middle; }
   .vote-pos { background: var(--bark-vote-pos-bg, #27ae6033); color: var(--bark-vote-pos, #27ae60); }
@@ -121,6 +123,7 @@
 
 (defn page-js [types-json total open-count closed-count source-type page-size reports-json]
   (wrap-js (str "var barkConfig = {types:" types-json
+                ",typeLabels:" (json/generate-string type-labels)
                 ",total:" total
                 ",openCount:" open-count
                 ",closedCount:" closed-count

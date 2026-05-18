@@ -3,7 +3,8 @@
 // SPDX-License-Identifier: MPL-2.0
 //
 // Expects global objects:
-//   barkConfig -- .types, .total, .openCount, .closedCount, .closedJsonUrl, .pageSize, .sourceType
+//   barkConfig -- .types, .typeLabels, .total, .openCount, .closedCount,
+//                 .closedJsonUrl, .pageSize, .sourceType
 //   barkData   -- array of report objects (open reports, embedded in page)
 
 var allTypes = barkConfig.types;
@@ -24,13 +25,22 @@ var currentPage = 1;
 var _today = new Date();
 _today.setHours(0,0,0,0);
 var _todayMs = _today.getTime();
+var MS_PER_DAY = 86400000;
+
+// Sort sentinels and rendering thresholds
+var NO_DUE_DATE_SORT_VALUE = 99999; // rows without a deadline sort to the end
+var SUBJECT_TRUNCATE_MIN_CHARS = 75; // below this length we never show the unfold toggle
 
 // ── Data model ──────────────────────────────────────────────
 // All data lives in JS arrays; DOM is only used for rendering the current page.
 var _allReports = [];       // prepared report objects
 var _filteredReports = [];  // filtered + sorted subset
-var _displayList = [];      // after series folding (what pagination sees)
-var _seriesFoldState = {};  // series-id → true (folded) | false (unfolded); null = auto
+var _displayList = [];      // after series and cluster folding (what pagination sees)
+var _seriesFoldState = {};  // series-id -> true (folded) | false (unfolded); null = auto
+var _clusterFoldState = {}; // cluster-id -> true (folded) | false (unfolded); null = auto
+var _clusters = {};         // cluster-id -> { cid, mids, members, types, rep }
+var _clusterOf = {};        // mid -> cluster-id
+var _byMid = {};            // mid -> prepared report
 
 function getSearchInput() { return document.getElementById('si'); }
 
@@ -65,31 +75,23 @@ function localDate(d) {
   return y + '-' + m + '-' + day;
 }
 
-function resolveDate(s) {
+function resolveRelativeDate(s, sign) {
   if (!s) return '';
-  var m;
-  m = s.match(/^(\d+)d$/);
-  if (m) { var d = new Date(); d.setDate(d.getDate() - parseInt(m[1])); return localDate(d); }
-  m = s.match(/^(\d+)w$/);
-  if (m) { var d = new Date(); d.setDate(d.getDate() - parseInt(m[1]) * 7); return localDate(d); }
-  m = s.match(/^(\d+)m$/);
-  if (m) { var d = new Date(); d.setMonth(d.getMonth() - parseInt(m[1])); return localDate(d); }
+  var m = s.match(/^(\d+)([dwm])$/);
+  if (m) {
+    var n = parseInt(m[1]) * sign;
+    var d = new Date();
+    if (m[2] === 'd') d.setDate(d.getDate() + n);
+    else if (m[2] === 'w') d.setDate(d.getDate() + n * 7);
+    else d.setMonth(d.getMonth() + n);
+    return localDate(d);
+  }
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
   return '';
 }
 
-function resolveFutureDate(s) {
-  if (!s) return '';
-  var m;
-  m = s.match(/^(\d+)d$/);
-  if (m) { var d = new Date(); d.setDate(d.getDate() + parseInt(m[1])); return localDate(d); }
-  m = s.match(/^(\d+)w$/);
-  if (m) { var d = new Date(); d.setDate(d.getDate() + parseInt(m[1]) * 7); return localDate(d); }
-  m = s.match(/^(\d+)m$/);
-  if (m) { var d = new Date(); d.setMonth(d.getMonth() + parseInt(m[1])); return localDate(d); }
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  return '';
-}
+function resolveDate(s)       { return resolveRelativeDate(s, -1); }
+function resolveFutureDate(s) { return resolveRelativeDate(s,  1); }
 
 function isDuration(s) { return /^\d+[dwm]$/.test(s); }
 
@@ -134,6 +136,30 @@ var fieldMap = [
   {prefixes: ['important:', 'i:'],          key: 'important', dataAttr: 'important'}
 ];
 
+// Prefix-table for range filters: maps the parsed prefix to the result-keys
+// to fill and the range parser to use. 'D:' is case-sensitive (the only
+// uppercase shortcut in the syntax) -- handled separately below.
+var rangeMap = [
+  {prefixes: ['deadline:'],         fromKey: 'deadlineFrom', toKey: 'deadlineTo', parse: parseFutureDateRange},
+  {prefixes: ['expired:', 'e:'],    fromKey: 'expiredFrom',  toKey: 'expiredTo',  parse: parseFutureDateRange},
+  {prefixes: ['date:', 'd:'],       fromKey: 'dateFrom',     toKey: 'dateTo',     parse: parseBackwardDateRange}
+];
+
+function parseBackwardDateRange(val) {
+  var range = val.split('..');
+  return {
+    from: resolveDate(range[0] || ''),
+    to:   resolveDate(range[1] || '') || localDate(new Date())
+  };
+}
+
+function matchingPrefix(lp, prefixes) {
+  for (var i = 0; i < prefixes.length; i++) {
+    if (lp.indexOf(prefixes[i]) === 0) return prefixes[i];
+  }
+  return null;
+}
+
 function parseClause(q) {
   var result = { text: '', mids: [], froms: [], subjects: [],
                  acked: [], owned: [], closed: [], topics: [],
@@ -145,7 +171,7 @@ function parseClause(q) {
                  includeClosed: false };
   var parts = q.trim().split(/\s+/).filter(Boolean);
   for (var i = 0; i < parts.length; i++) {
-    var p  = parts[i];
+    var p = parts[i];
     if (p.indexOf('D:') === 0) {
       var dr = parseFutureDateRange(p.substring(2));
       result.deadlineFrom = dr.from;
@@ -172,23 +198,21 @@ function parseClause(q) {
     if (lp.indexOf('priority:') === 0 || lp.indexOf('p:') === 0) {
       var n = parseInt(extractValue(p, lp), 10);
       if (!isNaN(n)) result.minPriority = n;
-    } else if (lp.indexOf('deadline:') === 0) {
-      var dr = parseFutureDateRange(p.substring(9));
-      result.deadlineFrom = dr.from;
-      result.deadlineTo   = dr.to;
-    } else if (lp.indexOf('expired:') === 0 || lp.indexOf('e:') === 0) {
-      var pfxLen = lp.indexOf('expired:') === 0 ? 8 : 2;
-      var er = parseFutureDateRange(p.substring(pfxLen));
-      result.expiredFrom = er.from;
-      result.expiredTo   = er.to;
-    } else if (lp.indexOf('date:') === 0 || lp.indexOf('d:') === 0) {
-      var pfxLen = lp.indexOf('date:') === 0 ? 5 : 2;
-      var range = p.substring(pfxLen).split('..');
-      result.dateFrom = resolveDate(range[0] || '');
-      result.dateTo   = resolveDate(range[1] || '') || localDate(new Date());
-    } else {
-      result.text += (result.text ? ' ' : '') + p;
+      continue;
     }
+    var rangeMatched = false;
+    for (var j = 0; j < rangeMap.length; j++) {
+      var pfx = matchingPrefix(lp, rangeMap[j].prefixes);
+      if (pfx) {
+        var r = rangeMap[j].parse(p.substring(pfx.length));
+        result[rangeMap[j].fromKey] = r.from;
+        result[rangeMap[j].toKey]   = r.to;
+        rangeMatched = true;
+        break;
+      }
+    }
+    if (rangeMatched) continue;
+    result.text += (result.text ? ' ' : '') + p;
   }
   // Pre-lowercase text for matching (avoids repeated toLowerCase in tight loop)
   if (result.text) result.text = result.text.toLowerCase();
@@ -225,7 +249,7 @@ function parseIsoDate(dateRaw) {
   return '';
 }
 
-var _typeLabels = {bug:'bug',announcement:'ann',request:'req',patch:'patch',release:'rel',change:'chg'};
+var _typeLabels = barkConfig.typeLabels || {};
 
 function prepareReport(r) {
   var type = r.type || '';
@@ -264,7 +288,7 @@ function prepareReport(r) {
     var parts = deadline.split('-');
     if (parts.length === 3) {
       var deadlineMs = new Date(+parts[0], +parts[1]-1, +parts[2]).getTime();
-      dueDays = Math.round((deadlineMs - _todayMs) / 86400000);
+      dueDays = Math.round((deadlineMs - _todayMs) / MS_PER_DAY);
     }
   }
 
@@ -377,7 +401,7 @@ function getSortValue(rpt, key) {
   switch(key) {
     case 'type':     return _typeLabels[rpt.type] || rpt.type;
     case 'priority': return rpt.priority;
-    case 'due':      return rpt.dueDays !== null ? rpt.dueDays : 99999;
+    case 'due':      return rpt.dueDays !== null ? rpt.dueDays : NO_DUE_DATE_SORT_VALUE;
     case 'flags':    return rpt.flagsScore;
     case 'subject':  return rpt.lastActivity || '';
     case 'from':     return rpt.from;
@@ -402,91 +426,292 @@ function sortReports(key, dir) {
   });
 }
 
-/* ── Series folding ─────────────────────────────────────────── */
+/* ── Series & cluster folding ───────────────────────────────── */
+
+function flagsCat(flags) {
+  var f = flags || '---';
+  if (f.length >= 3 && f[2] !== '-') return 'C';
+  if (f[0] !== '-') return 'A';
+  return 'O';
+}
 
 function isSeriesHomogeneous(members) {
   var refCat = null;
   for (var i = 0; i < members.length; i++) {
     var seq = members[i].raw['patch-seq'] || '';
     if (seq.indexOf('0/') === 0) continue; // skip cover letter
-    var f = members[i].raw.flags || '---';
-    var cat = f.length >= 3 && f[2] !== '-' ? 'C' : f[0] !== '-' ? 'A' : 'O';
+    var cat = flagsCat(members[i].raw.flags);
     if (refCat === null) { refCat = cat; continue; }
     if (cat !== refCat) return false;
   }
   return true;
 }
 
-function buildDisplayList() {
+// Build clusters of reports connected by :related-to relations.
+// Excludes series patches (they fold via the series mechanism).
+// Singleton groups are dropped. Representative = oldest by date.
+function computeClusters() {
+  // Snapshot the previous mid->cid mapping so we can carry user fold state
+  // across recomputes (e.g., after lazy-loading closed reports). The cid is
+  // mids[0] (sorted), so a new member with a smaller mid would shift the cid
+  // even though the cluster is "the same" from the user's perspective.
+  var oldMidsByCid = {};
+  for (var oldMid in _clusterOf) {
+    if (!Object.prototype.hasOwnProperty.call(_clusterOf, oldMid)) continue;
+    var oc = _clusterOf[oldMid];
+    (oldMidsByCid[oc] = oldMidsByCid[oc] || []).push(oldMid);
+  }
+
+  _clusters = {};
+  _clusterOf = {};
+  _byMid = {};
+
+  for (var i = 0; i < _allReports.length; i++) {
+    var rpt = _allReports[i];
+    if (rpt.mid) _byMid[rpt.mid] = rpt;
+  }
+
+  var parent = {};
+  function find(x) {
+    while (parent[x] !== x) {
+      parent[x] = parent[parent[x]]; // half-path compression
+      x = parent[x];
+    }
+    return x;
+  }
+  function union(a, b) {
+    var ra = find(a), rb = find(b);
+    if (ra !== rb) parent[ra] = rb;
+  }
+
+  for (var i = 0; i < _allReports.length; i++) {
+    var rpt = _allReports[i];
+    if (!rpt.mid || rpt.seriesId) continue;
+    parent[rpt.mid] = rpt.mid;
+  }
+
+  for (var i = 0; i < _allReports.length; i++) {
+    var rpt = _allReports[i];
+    if (!rpt.mid || rpt.seriesId) continue;
+    if (!(rpt.mid in parent)) continue;
+    var related = rpt.raw['related-to'];
+    if (!related) continue;
+    for (var k = 0; k < related.length; k++) {
+      var other = related[k];
+      var otherMid = other && other['message-id'];
+      if (!otherMid) continue;
+      otherMid = String(otherMid).toLowerCase();
+      if (otherMid in parent) union(rpt.mid, otherMid);
+    }
+  }
+
   var groups = {};
+  for (var mid in parent) {
+    if (!Object.prototype.hasOwnProperty.call(parent, mid)) continue;
+    var root = find(mid);
+    if (!groups[root]) groups[root] = [];
+    groups[root].push(mid);
+  }
+
+  for (var root in groups) {
+    if (!Object.prototype.hasOwnProperty.call(groups, root)) continue;
+    var mids = groups[root];
+    if (mids.length < 2) continue;
+    mids.sort();
+    var cid = mids[0];
+    var members = [];
+    var types = {};
+    for (var j = 0; j < mids.length; j++) {
+      var r = _byMid[mids[j]];
+      if (r) {
+        members.push(r);
+        types[r.type] = 1;
+        _clusterOf[mids[j]] = cid;
+      }
+    }
+    if (members.length < 2) continue;
+    members.sort(compareByDateThenMid);
+    _clusters[cid] = {
+      cid: cid,
+      mids: mids,
+      members: members,
+      types: types,
+      rep: members[0].mid
+    };
+  }
+
+  // Carry over user fold state: for each old cid with state, find any of its
+  // old members and look up its new cid. If the cluster split or merged, the
+  // state lands on whichever new cluster won that member -- still the user's
+  // last intent.
+  var oldState = _clusterFoldState;
+  _clusterFoldState = {};
+  for (var oldCid in oldState) {
+    if (!Object.prototype.hasOwnProperty.call(oldState, oldCid)) continue;
+    var oldMembers = oldMidsByCid[oldCid];
+    if (!oldMembers) continue;
+    for (var im = 0; im < oldMembers.length; im++) {
+      var newCid = _clusterOf[oldMembers[im]];
+      if (newCid) {
+        _clusterFoldState[newCid] = oldState[oldCid];
+        break;
+      }
+    }
+  }
+}
+
+function compareByDateThenMid(a, b) {
+  var da = a.date || '', db = b.date || '';
+  if (da < db) return -1;
+  if (da > db) return 1;
+  if (a.mid < b.mid) return -1;
+  if (a.mid > b.mid) return 1;
+  return 0;
+}
+
+function isAllTypesActive() {
+  for (var i = 0; i < allTypes.length; i++) {
+    if (!activeTypes[allTypes[i]]) return false;
+  }
+  return true;
+}
+
+function clusterFoldable(cluster) {
+  if (isAllTypesActive()) return true;
+  for (var t in cluster.types) {
+    if (!Object.prototype.hasOwnProperty.call(cluster.types, t)) continue;
+    if (!activeTypes[t]) return false;
+  }
+  return true;
+}
+
+function clusterStatusSummary(members) {
+  var counts = {A: 0, C: 0, O: 0};
+  for (var i = 0; i < members.length; i++) {
+    counts[flagsCat(members[i].raw.flags)]++;
+  }
+  var parts = [];
+  if (counts.A) parts.push(counts.A + ' acked');
+  if (counts.C) parts.push(counts.C + ' closed');
+  if (counts.O) parts.push(counts.O + ' open');
+  return parts.join(', ');
+}
+
+function buildDisplayList() {
+  var seriesGroups = {};
+  var clusterGroups = {};
   var order = [];
   var result = [];
 
   for (var i = 0; i < _filteredReports.length; i++) {
     var rpt = _filteredReports[i];
     var sid = rpt.seriesId;
-    if (!sid) {
-      result.push(rpt);
-    } else {
-      if (!groups[sid]) {
-        groups[sid] = [];
-        order.push({sid: sid, insertAt: result.length});
-        result.push(null); // placeholder
+    var cid = sid ? null : _clusterOf[rpt.mid];
+    var cluster = cid ? _clusters[cid] : null;
+    // A cluster only groups its members when foldable (no type filter active,
+    // or cluster types fit inside the filter). Otherwise members fall back
+    // to standalone rows -- this is how mixed clusters dissolve under a type
+    // filter, per the folding spec.
+    if (sid) {
+      if (!seriesGroups[sid]) {
+        seriesGroups[sid] = [];
+        order.push({kind: 'series', sid: sid, insertAt: result.length});
+        result.push(null);
       }
-      groups[sid].push(rpt);
+      seriesGroups[sid].push(rpt);
+    } else if (cluster && clusterFoldable(cluster)) {
+      if (!clusterGroups[cid]) {
+        clusterGroups[cid] = [];
+        order.push({kind: 'cluster', cid: cid, insertAt: result.length});
+        result.push(null);
+      }
+      clusterGroups[cid].push(rpt);
+    } else {
+      result.push(rpt);
     }
   }
 
-  // Process each series group
   for (var j = 0; j < order.length; j++) {
     var entry = order[j];
-    var sid = entry.sid;
-    var members = groups[sid];
-    // Sort by patch-seq within group (numeric, not lexicographic)
-    members.sort(function(a, b) {
-      var sa = a.raw['patch-seq'] || '0/0', sb = b.raw['patch-seq'] || '0/0';
-      var na = parseInt(sa, 10) || 0, nb = parseInt(sb, 10) || 0;
-      return na - nb;
-    });
-    // Determine fold state: manual override or auto (homogeneous = folded)
-    var manualState = _seriesFoldState[sid];
-    var folded;
-    if (manualState === true || manualState === false) {
-      folded = manualState;
-    } else {
-      folded = isSeriesHomogeneous(members);
-    }
-    // Pick representative: cover letter (0/n) or first patch
-    var rep = members[0];
-    for (var k = 0; k < members.length; k++) {
-      var seq = members[k].raw['patch-seq'] || '';
-      if (seq.indexOf('0/') === 0) { rep = members[k]; break; }
-    }
-    // Build representative entry
-    var repEntry = Object.create(rep);
-    repEntry._isSeries = true;
-    repEntry._seriesFolded = folded;
-    repEntry._seriesId = sid;
-    repEntry._seriesMembers = members;
+    var insert;
 
-    // Replace placeholder with representative + optionally expanded members
-    var insert = [repEntry];
-    if (!folded) {
+    if (entry.kind === 'series') {
+      var sid = entry.sid;
+      var members = seriesGroups[sid];
+      members.sort(function(a, b) {
+        var sa = a.raw['patch-seq'] || '0/0', sb = b.raw['patch-seq'] || '0/0';
+        var na = parseInt(sa, 10) || 0, nb = parseInt(sb, 10) || 0;
+        return na - nb;
+      });
+      var manualState = _seriesFoldState[sid];
+      var folded;
+      if (manualState === true || manualState === false) folded = manualState;
+      else folded = isSeriesHomogeneous(members);
+      var rep = members[0];
       for (var k = 0; k < members.length; k++) {
-        if (members[k] !== rep) {
-          var child = Object.create(members[k]);
-          child._isSeriesChild = true;
-          child._seriesId = sid;
-          insert.push(child);
+        var seq = members[k].raw['patch-seq'] || '';
+        if (seq.indexOf('0/') === 0) { rep = members[k]; break; }
+      }
+      var repEntry = Object.create(rep);
+      repEntry._isSeries = true;
+      repEntry._seriesFolded = folded;
+      repEntry._seriesId = sid;
+      repEntry._seriesMembers = members;
+      insert = [repEntry];
+      if (!folded) {
+        for (var k = 0; k < members.length; k++) {
+          if (members[k] !== rep) {
+            var child = Object.create(members[k]);
+            child._isSeriesChild = true;
+            child._seriesId = sid;
+            insert.push(child);
+          }
+        }
+      }
+    } else {
+      var cid = entry.cid;
+      var visible = clusterGroups[cid];
+      var cluster = _clusters[cid];
+      var repMid = cluster ? cluster.rep : null;
+      var rep = null;
+      for (var k = 0; k < visible.length; k++) {
+        if (visible[k].mid === repMid) { rep = visible[k]; break; }
+      }
+      // Cluster reached this branch only if it was foldable at grouping time.
+      // If the representative didn't survive the filter, hide the cluster.
+      if (!rep || !cluster) {
+        insert = [];
+      } else {
+        var manualState = _clusterFoldState[cid];
+        var folded = (manualState === true || manualState === false)
+          ? manualState
+          : true; // default folded
+        // Sort visible members oldest first (rep stays at index 0).
+        visible.sort(compareByDateThenMid);
+        var repEntry = Object.create(rep);
+        repEntry._isCluster = true;
+        repEntry._clusterFolded = folded;
+        repEntry._clusterId = cid;
+        repEntry._clusterMembers = visible;
+        repEntry._clusterSummary = clusterStatusSummary(cluster.members);
+        insert = [repEntry];
+        if (!folded) {
+          for (var k = 0; k < visible.length; k++) {
+            if (visible[k].mid !== rep.mid) {
+              var child = Object.create(visible[k]);
+              child._isClusterChild = true;
+              child._clusterId = cid;
+              insert.push(child);
+            }
+          }
         }
       }
     }
-    // Splice into result at the placeholder position
+
     result.splice(entry.insertAt, 1);
     for (var k = insert.length - 1; k >= 0; k--) {
       result.splice(entry.insertAt, 0, insert[k]);
     }
-    // Adjust subsequent placeholder positions
     var delta = insert.length - 1;
     for (var m = j + 1; m < order.length; m++) {
       if (order[m].insertAt > entry.insertAt) {
@@ -498,27 +723,52 @@ function buildDisplayList() {
   _displayList = result;
 }
 
-function toggleSeriesFold(sid) {
-  // Find current effective state (manual override or auto-computed)
-  var manual = _seriesFoldState[sid];
+// state    -- fold-state hash (_seriesFoldState or _clusterFoldState)
+// id       -- series-id or cluster-id
+// idKey    -- '_seriesId' or '_clusterId'
+// flagKey  -- '_isSeries' or '_isCluster'
+// foldKey  -- '_seriesFolded' or '_clusterFolded'
+function toggleFold(state, id, idKey, flagKey, foldKey) {
+  var manual = state[id];
   var effective;
   if (manual === true || manual === false) {
     effective = manual;
   } else {
-    // Compute auto state: find this series in _displayList
     for (var i = 0; i < _displayList.length; i++) {
-      if (_displayList[i]._seriesId === sid && _displayList[i]._isSeries) {
-        effective = _displayList[i]._seriesFolded;
+      if (_displayList[i][idKey] === id && _displayList[i][flagKey]) {
+        effective = _displayList[i][foldKey];
         break;
       }
     }
   }
-  _seriesFoldState[sid] = !effective;
+  state[id] = !effective;
   buildDisplayList();
   renderPage();
 }
 
+function toggleSeriesFold(sid) {
+  toggleFold(_seriesFoldState, sid, '_seriesId', '_isSeries', '_seriesFolded');
+}
+
+function toggleClusterFold(cid) {
+  toggleFold(_clusterFoldState, cid, '_clusterId', '_isCluster', '_clusterFolded');
+}
+
 /* ── Rendering (builds only the current page's DOM nodes) ────── */
+
+// Builds a single-file or directory link for a list of attachments
+// (patches, events, texts). Returns '' when the list is empty.
+function attachmentLink(list, dir, label, icon) {
+  if (!list || list.length === 0) return '';
+  var n = list.length;
+  var href = n === 1
+    ? dir + '/' + list[0].file
+    : dir + '/' + list[0].file.replace(/\/[^/]+$/, '/');
+  var text = n === 1 ? '1 ' + label : n + ' ' + label + 's';
+  return '<a class="row-icon" href="' + escAttr(href) +
+    '" title="' + escAttr(text) +
+    '" aria-label="' + escAttr(text) + '">' + icon + ' </a>';
+}
 
 function buildRowElement(rpt) {
   var r = rpt.raw;
@@ -538,17 +788,26 @@ function buildRowElement(rpt) {
   var author = rpt.author;
 
   var closedBool = rpt.closed;
-  var flagA = acked ? 'A' : '-', flagO = owned ? 'O' : '-';
-  var flagC = closeReason === 'canceled' ? 'C' : closeReason === 'expired' ? 'E' : closeReason === 'superseded' ? 'S' : closedBool ? 'R' : '-';
+  var closedMap = {canceled: 'C', expired: 'E', superseded: 'S'};
+  var closedTitle = {C: 'Canceled', E: 'Expired', S: 'Superseded', R: 'Resolved'};
+  var flagA = acked ? 'A' : '-';
+  var flagO = owned ? 'O' : '-';
+  var flagC = closedMap[closeReason] || (closedBool ? 'R' : '-');
   var flagsStr = flagA + flagO + flagC;
-  var flagsTitle = [flagA === 'A' ? 'Acked' : '', flagO === 'O' ? 'Owned' : '',
-                    flagC === 'C' ? 'Canceled' : flagC === 'E' ? 'Expired' : flagC === 'S' ? 'Superseded' : flagC === 'R' ? 'Resolved' : '']
-                   .filter(Boolean).join(', ');
+  var flagsTitle = [flagA === 'A' ? 'Acked' : '',
+                    flagO === 'O' ? 'Owned' : '',
+                    closedTitle[flagC] || ''].filter(Boolean).join(', ');
   var label = _typeLabels[type] || type;
 
-  var subjectHtml = (closeReason === 'canceled' || closeReason === 'superseded')
-                  ? '<em><s>' + escHtml(subject) + '</s></em>'
-                  : closedBool ? '<em>' + escHtml(subject) + '</em>' : escHtml(subject);
+  var subjectEsc = escHtml(subject);
+  var subjectHtml;
+  if (closeReason === 'canceled' || closeReason === 'superseded') {
+    subjectHtml = '<em><s>' + subjectEsc + '</s></em>';
+  } else if (closedBool) {
+    subjectHtml = '<em>' + subjectEsc + '</em>';
+  } else {
+    subjectHtml = subjectEsc;
+  }
   var _srcType = barkConfig.sourceType || '';
   if (archivedAt && _srcType !== 'alias' && _srcType !== 'mailbox') {
     var titleAttr = supersededBy ? ' title="Superseded by: ' + escAttr(supersededBy.subject || 'another report') + '"' : '';
@@ -559,23 +818,17 @@ function buildRowElement(rpt) {
   if (rpt._isSeries && rpt._seriesMembers && rpt._seriesMembers.length > 1) {
     var arrow = rpt._seriesFolded ? '\u25B6' : '\u25BC';
     var stitle = rpt._seriesFolded ? 'Unfold series' : 'Fold series';
-    var safeSid = rpt._seriesId.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-    seriesHtml = '<a href="javascript:void(0)" onclick="toggleSeriesFold(\'' +
-      escAttr(safeSid) + '\'); return false;" title="' + escAttr(stitle) +
-      '" style="font-size:0.75rem;margin-right:0.3em;text-decoration:none">' +
-      arrow + '</a>';
+    seriesHtml = '<a href="#" class="row-icon" data-action="series-fold" data-id="' +
+      escAttr(rpt._seriesId) + '" title="' + escAttr(stitle) + '">' + arrow + '</a>';
+  } else if (rpt._isCluster && rpt._clusterMembers && rpt._clusterMembers.length > 1) {
+    var carrow = rpt._clusterFolded ? '\u25B6' : '\u25BC';
+    var ctitle = (rpt._clusterFolded ? 'Unfold related cluster' : 'Fold related cluster') +
+                 (rpt._clusterSummary ? ' (' + rpt._clusterSummary + ')' : '');
+    seriesHtml = '<a href="#" class="row-icon" data-action="cluster-fold" data-id="' +
+      escAttr(rpt._clusterId) + '" title="' + escAttr(ctitle) + '">' + carrow + '</a>';
   }
 
-  var patchHtml = '';
-  if (r.patches && r.patches.length > 0) {
-    var n = r.patches.length;
-    var href = n === 1
-      ? 'patches/' + r.patches[0].file
-      : 'patches/' + r.patches[0].file.replace(/\/[^/]+$/, '/');
-    var plabel = n === 1 ? '1 patch file' : n + ' patch files';
-    patchHtml = '<a href="' + escAttr(href) + '" title="' + escAttr(plabel) +
-      '" aria-label="' + escAttr(plabel) + '" style="font-size:0.75rem">\uD83E\uDE79 </a>';
-  }
+  var patchHtml = attachmentLink(r.patches, 'patches', 'patch file', '\uD83E\uDE79');
 
   var relatedHtml = '';
   // Union of all qualified-relation kinds: a click on this link should
@@ -600,33 +853,13 @@ function buildRowElement(rpt) {
     }
   });
   if (allRelated.length > 1) {
-    relatedHtml = '<a class="secondary" href="#" onclick="showRelated(\'m:' +
+    relatedHtml = '<a class="secondary row-icon" href="#" data-action="related" data-mids="' +
       escAttr(allRelated.join(',')) +
-      '\'); return false;" title="Filter related reports" style="font-size:0.75rem">\u21B3' +
-      (allRelated.length - 1) + ' </a>';
+      '" title="Filter related reports">\u21B3' + (allRelated.length - 1) + ' </a>';
   }
 
-  var eventsHtml = '';
-  if (r.events && r.events.length > 0) {
-    var en = r.events.length;
-    var ehref = en === 1
-      ? 'events/' + r.events[0].file
-      : 'events/' + r.events[0].file.replace(/\/[^/]+$/, '/');
-    var elabel = en === 1 ? '1 event file' : en + ' event files';
-    eventsHtml = '<a href="' + escAttr(ehref) + '" title="' + escAttr(elabel) +
-      '" aria-label="' + escAttr(elabel) + '" style="font-size:0.75rem">\uD83D\uDCC5 </a>';
-  }
-
-  var textsHtml = '';
-  if (r.texts && r.texts.length > 0) {
-    var tn = r.texts.length;
-    var thref = tn === 1
-      ? 'text/' + r.texts[0].file
-      : 'text/' + r.texts[0].file.replace(/\/[^/]+$/, '/');
-    var tlabel = tn === 1 ? '1 text file' : tn + ' text files';
-    textsHtml = '<a href="' + escAttr(thref) + '" title="' + escAttr(tlabel) +
-      '" aria-label="' + escAttr(tlabel) + '" style="font-size:0.75rem">\uD83D\uDCC4 </a>';
-  }
+  var eventsHtml = attachmentLink(r.events, 'events', 'event file', '\uD83D\uDCC5');
+  var textsHtml  = attachmentLink(r.texts,  'text',   'text file',  '\uD83D\uDCC4');
 
   var votesHtml = '';
   if (r.votes) {
@@ -644,27 +877,28 @@ function buildRowElement(rpt) {
     var dueLabel = days < 0 ? Math.abs(days) + 'd. ago' : 'In ' + days + ' d.';
     if (days < 0) dueStyle = 'color:var(--pico-del-color, #c0392b);';
     else if (days <= 3) dueStyle = 'color:var(--pico-ins-color, #b8860b);';
-    dueHtml = '<a href="javascript:void(0)" onclick="setSearch(\'D:' + dl + '\')" title="' + dl + '">' + dueLabel + '</a>';
+    dueHtml = '<a href="#" data-action="search-deadline" data-val="' + escAttr(dl) + '" title="' + escAttr(dl) + '">' + escHtml(dueLabel) + '</a>';
   }
 
-  var priLabel = priority === 3 ? 'A' : priority === 2 ? 'B' : priority === 1 ? 'C' : ' ';
-  var priTitle = priority === 3 ? 'Priority A -- urgent and important'
-               : priority === 2 ? 'Priority B -- urgent'
-               : priority === 1 ? 'Priority C -- important'
-               : 'No priority';
+  var priLabels = {3: 'A', 2: 'B', 1: 'C'};
+  var priTitles = {3: 'Priority A -- urgent and important',
+                   2: 'Priority B -- urgent',
+                   1: 'Priority C -- important'};
+  var priLabel = priLabels[priority] || ' ';
+  var priTitle = priTitles[priority] || 'No priority';
   var isMaint = role === 'maintainer';
   var authorInner = isMaint ? '<strong>' + escHtml(author) + '</strong>' : escHtml(author);
-  var authorHtml = '<a href="javascript:void(0)" onclick="setSearch(\'f:' + escAttr(from) + '\')" title="' + escAttr(from) + '">' + authorInner + '</a>';
+  var authorHtml = '<a href="#" data-action="search-from" data-val="' + escAttr(from) + '" title="' + escAttr(from) + '">' + authorInner + '</a>';
 
   var ownerAddr = owned || '';
   var ownerHtml = ownerAddr
-    ? '<a href="javascript:void(0)" onclick="setSearch(\'o:' + escAttr(ownerAddr) + '\')" title="' + escAttr(ownerAddr) + '">' + escHtml(rpt.ownerDisplay) + '</a>'
+    ? '<a href="#" data-action="search-owner" data-val="' + escAttr(ownerAddr) + '" title="' + escAttr(ownerAddr) + '">' + escHtml(rpt.ownerDisplay) + '</a>'
     : '';
 
   // Date cell with expiry handling
   var dateHtml = '';
   if (isoDate) {
-    var dateLink = '<a href="javascript:void(0)" onclick="setSearch(\'d:' + escAttr(isoDate) + '..\')">' + escHtml(isoDate) + '</a>';
+    var dateLink = '<a href="#" data-action="search-date" data-val="' + escAttr(isoDate) + '">' + escHtml(isoDate) + '</a>';
     if (expiry) {
       dateHtml = '<small title="Expires on ' + escAttr(expiry) + '"><em>' + dateLink + '</em></small>';
     } else {
@@ -674,11 +908,11 @@ function buildRowElement(rpt) {
 
   var tr = document.createElement('tr');
   tr.innerHTML =
-    '<td title="Filter by type"><mark data-type="' + escAttr(type) + '" style="cursor:pointer" onclick="isolateType(\'' + escAttr(type) + '\')">' + escHtml(label) + '</mark></td>' +
+    '<td title="Filter by type"><mark data-action="isolate-type" data-type="' + escAttr(type) + '" style="cursor:pointer">' + escHtml(label) + '</mark></td>' +
     '<td title="' + priTitle + '" style="text-align:center">' + priLabel + '</td>' +
     '<td style="text-align:center;' + dueStyle + '">' + dueHtml + '</td>' +
     '<td title="' + escAttr(flagsTitle) + '" style="text-align:center;font-family:monospace;font-size:0.8rem;letter-spacing:0.1em">' + flagsStr + '</td>' +
-    '<td>' + seriesHtml + patchHtml + eventsHtml + textsHtml + relatedHtml + votesHtml + (awaitingFlag ? '<span title="Awaiting reply" style="font-size:0.75rem">\u231A </span>' : '') + subjectHtml + '</td>' +
+    '<td>' + seriesHtml + patchHtml + eventsHtml + textsHtml + relatedHtml + votesHtml + (awaitingFlag ? '<span class="row-icon" title="Awaiting reply">\u231A </span>' : '') + subjectHtml + '</td>' +
     '<td class="secondary">' + authorHtml + '</td>' +
     '<td class="secondary" title="' + escAttr(ownerAddr) + '">' + ownerHtml + '</td>' +
     '<td title="Filter">' + dateHtml + '</td>' +
@@ -709,7 +943,7 @@ function renderPage() {
   for (var i = start; i < end; i++) {
     var tr = buildRowElement(_displayList[i]);
     tr.classList.toggle('stripe', (i - start) % 2 === 1);
-    if (_displayList[i]._isSeriesChild) {
+    if (_displayList[i]._isSeriesChild || _displayList[i]._isClusterChild) {
       tr.style.backgroundColor = 'var(--pico-card-background-color, #f8f9fa)';
     }
     fragment.appendChild(tr);
@@ -812,6 +1046,7 @@ function loadClosedReports(callback) {
       }
       closedLoaded = true;
       closedLoading = false;
+      computeClusters();
       updateStatusButtons();
       if (callback) callback();
     })
@@ -917,6 +1152,27 @@ function onSearchInput() {
   clearTimeout(_filterTimer);
   currentPage = 1;
   _filterTimer = setTimeout(function() { filterReports(); replaceURL(); }, 120);
+}
+
+// Delegated click handler for tbody rows. Each interactive element carries
+// a [data-action] attribute; we dispatch on it instead of inlining onclick.
+// User-supplied values (mids, addresses, ids) live in data-* attributes,
+// which removes the need for JS-string escaping inside HTML attributes.
+function tbodyClick(e) {
+  var target = e.target.closest('[data-action]');
+  if (!target) return;
+  e.preventDefault();
+  var d = target.dataset;
+  switch (d.action) {
+    case 'series-fold':     toggleSeriesFold(d.id); break;
+    case 'cluster-fold':    toggleClusterFold(d.id); break;
+    case 'related':         showRelated('m:' + d.mids); break;
+    case 'isolate-type':    isolateType(d.type); break;
+    case 'search-from':     setSearch('f:' + d.val); break;
+    case 'search-owner':    setSearch('o:' + d.val); break;
+    case 'search-date':     setSearch('d:' + d.val + '..'); break;
+    case 'search-deadline': setSearch('D:' + d.val); break;
+  }
 }
 
 /* ── Sort ────────────────────────────────────────────────────── */
@@ -1052,7 +1308,7 @@ var _setupToggles, _showTogglesIfNeeded;
     for (var i = 0; i < toggles.length; i++) {
       var toggle = toggles[i];
       var td = toggle.parentElement;
-      if (td.textContent.length < 75) {
+      if (td.textContent.length < SUBJECT_TRUNCATE_MIN_CHARS) {
         toggle.style.display = 'none';
       } else {
         items.push({toggle: toggle, td: td});
@@ -1081,7 +1337,12 @@ console.time('bark:prepare');
 for (var _i = 0; _i < barkData.length; _i++) {
   _allReports.push(prepareReport(barkData[_i]));
 }
+computeClusters();
 console.timeEnd('bark:prepare');
+
+// Single delegated listener on tbody (the node persists across renders;
+// only its children are replaced).
+document.querySelector('tbody').addEventListener('click', tbodyClick);
 
 console.time('bark:initial-render');
 restoreFromURL();
