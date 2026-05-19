@@ -27,7 +27,10 @@
 ;; Email address (basic check: contains @)
 (s/def ::email (s/and ::non-blank-string #(str/includes? % "@")))
 
-;; Mailbox connection (IMAP or Maildir)
+;; Mailbox connection (IMAP or Maildir).  :name is required and
+;; unique across :mailboxes -- it keys the per-mailbox watermark and
+;; prefixes log lines.  Shared format with :source/name.
+(s/def :mailbox/name common/valid-config-name?)
 (s/def :mailbox/type #{:imap :maildir})
 (s/def :mailbox/host ::non-blank-string)
 (s/def :mailbox/port ::pos-int)
@@ -41,16 +44,21 @@
 (s/def :mailbox/path ::non-blank-string)
 
 (s/def :bark/mailbox
-  (s/and (s/keys :req-un [:mailbox/type]
+  (s/and (s/keys :req-un [:mailbox/name :mailbox/type]
                  :opt-un [:mailbox/host :mailbox/port :mailbox/ssl
                           :mailbox/user :mailbox/password :mailbox/oauth2-token
-                          :mailbox/folder :mailbox/path])
+                          :mailbox/folder :mailbox/path
+                          :bark/ingest])
          (fn [m]
            (case (:type m)
              :imap    (and (:host m) (:user m)
                            (or (:password m) (:oauth2-token m)))
              :maildir (:path m)
              false))))
+
+(s/def :bark/mailboxes
+  (s/and (s/coll-of :bark/mailbox :kind vector? :min-count 1)
+         (fn [mbs] (common/all-distinct? (map :name mbs)))))
 
 ;; Source match spec
 (s/def :match/list-id
@@ -65,9 +73,7 @@
   (= 1 (count (filter some? (map src [:list :alias :to])))))
 
 ;; Source
-(s/def :source/name
-  (s/and ::non-blank-string
-         #(re-matches #"[a-zA-Z0-9][a-zA-Z0-9 ._-]*" %)))
+(s/def :source/name common/valid-config-name?)
 (s/def :source/list :match/list-id)
 (s/def :source/alias :match/alias)
 (s/def :source/to :match/to)
@@ -109,7 +115,7 @@
 
 (s/def :bark/sources
   (s/and (s/coll-of ::source :kind vector? :min-count 1)
-         (fn [srcs] (= (count srcs) (count (distinct (map :name srcs)))))))
+         (fn [srcs] (common/all-distinct? (map :name srcs)))))
 
 ;; DB
 (s/def :db/path ::non-blank-string)
@@ -326,7 +332,7 @@
 
 ;; Top-level config
 (s/def ::config
-  (s/keys :req-un [:bark/mailbox :bark/sources]
+  (s/keys :req-un [:bark/mailboxes :bark/sources]
           :opt-un [:bark/db :bark/ingest :bark/notifications :bark/labels
                    :bark/commands
                    :bark/report-types :bark/awaiting-delay
@@ -416,8 +422,16 @@
                          " does not match any :sources :name"))]
         (seq errs)))))
 
+(defn- pre-check-mailbox-legacy
+  "BARK is in 0.y.z -- reject the legacy singleton :mailbox key
+  outright (no silent wrap to :mailboxes)."
+  [config]
+  (when (contains? config :mailbox)
+    [common/legacy-mailbox-error]))
+
 (defn validate-config [config]
-  (if-let [errs (or (pre-check-commands config)
+  (if-let [errs (or (pre-check-mailbox-legacy config)
+                    (pre-check-commands config)
                     (pre-check-periods config)
                     (pre-check-subscribers config))]
     {:valid? false
@@ -449,12 +463,15 @@
           result (validate-config config)]
       (if (:valid? result)
         (do (log/info "✓" path "is valid.")
-            (let [mb (:mailbox config)]
-              (log/info "  Mailbox:" (pr-str (:type mb))
+            (log/info "  Mailboxes:" (count (:mailboxes config)))
+            (doseq [mb (:mailboxes config)]
+              (log/info "    -" (:name mb) (pr-str (:type mb))
                         (case (:type mb)
                           :imap    (str (:user mb) "@" (:host mb) "/" (or (:folder mb) "INBOX"))
                           :maildir (str (str/replace (common/expand-home (:path mb)) #"/+$" "") "/" (or (:folder mb) "INBOX"))
-                          "")))
+                          ""))
+              (when-let [ing (:ingest mb)]
+                (log/info "        :ingest" (pr-str ing))))
             (log/info "  Sources:" (count (:sources config)))
             (doseq [src (:sources config)]
               (let [parts (cond-> []

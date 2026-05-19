@@ -231,3 +231,65 @@
           ;; error.
           (is (false? r)))
         (finally (cleanup! setup))))))
+
+;; ---------------------------------------------------------------------------
+;; Per-mailbox watermarks -- multi-mailbox isolation
+;; ---------------------------------------------------------------------------
+
+(deftest watermarks-are-scoped-per-mailbox
+  (testing "IMAP UID watermark is independent across mailboxes"
+    (let [{:keys [conn] :as setup} (fresh-conn)]
+      (try
+        (is (= 0 (ingest/max-imap-uid conn "alpha")))
+        (is (= 0 (ingest/max-imap-uid conn "beta")))
+        (ingest/save-imap-uid! conn "alpha" 42)
+        (ingest/save-imap-uid! conn "beta" 7)
+        (is (= 42 (ingest/max-imap-uid conn "alpha")))
+        (is (= 7  (ingest/max-imap-uid conn "beta")))
+        ;; Updating one doesn't disturb the other.
+        (ingest/save-imap-uid! conn "alpha" 100)
+        (is (= 100 (ingest/max-imap-uid conn "alpha")))
+        (is (= 7   (ingest/max-imap-uid conn "beta")))
+        (finally (cleanup! setup)))))
+
+  (testing "UIDVALIDITY is tracked per mailbox; reset clears only its own UID"
+    (let [{:keys [conn] :as setup} (fresh-conn)]
+      (try
+        (ingest/save-imap-uid! conn "alpha" 50)
+        (ingest/save-imap-uid! conn "beta" 80)
+        (is (= :stamped (ingest/sync-uid-validity! conn "alpha" 1000)))
+        (is (= :stamped (ingest/sync-uid-validity! conn "beta" 2000)))
+        (is (= :match   (ingest/sync-uid-validity! conn "alpha" 1000)))
+        ;; Bumping alpha's UIDVALIDITY resets alpha's UID, leaves beta alone.
+        (is (= :reset   (ingest/sync-uid-validity! conn "alpha" 1001)))
+        (is (= 0  (ingest/max-imap-uid conn "alpha")))
+        (is (= 80 (ingest/max-imap-uid conn "beta")))
+        (finally (cleanup! setup)))))
+
+  (testing "Maildir init flag and seen-ids baseline are scoped per mailbox"
+    (let [{:keys [conn] :as setup} (fresh-conn)]
+      (try
+        (is (false? (ingest/maildir-init-done? conn "alpha")))
+        (is (false? (ingest/maildir-init-done? conn "beta")))
+        (ingest/mark-ids-seen! conn "alpha" ["m1" "m2"])
+        (ingest/set-maildir-init-done! conn "alpha")
+        (is (= #{"m1" "m2"} (ingest/seen-maildir-ids conn "alpha")))
+        (is (= #{}          (ingest/seen-maildir-ids conn "beta")))
+        (is (true?  (ingest/maildir-init-done? conn "alpha")))
+        (is (false? (ingest/maildir-init-done? conn "beta")))
+        ;; Seeding beta separately leaves alpha's baseline intact.
+        (ingest/mark-ids-seen! conn "beta" ["x1"])
+        (is (= #{"m1" "m2"} (ingest/seen-maildir-ids conn "alpha")))
+        (is (= #{"x1"}      (ingest/seen-maildir-ids conn "beta")))
+        (finally (cleanup! setup)))))
+
+  (testing "mark-ids-seen! accumulates across successive calls (cardinality/many)"
+    (let [{:keys [conn] :as setup} (fresh-conn)]
+      (try
+        (ingest/mark-ids-seen! conn "alpha" ["m1" "m2"])
+        (ingest/mark-ids-seen! conn "alpha" ["m3"])
+        (is (= #{"m1" "m2" "m3"} (ingest/seen-maildir-ids conn "alpha")))
+        ;; Re-asserting an existing id is a no-op (still the same set).
+        (ingest/mark-ids-seen! conn "alpha" ["m2"])
+        (is (= #{"m1" "m2" "m3"} (ingest/seen-maildir-ids conn "alpha")))
+        (finally (cleanup! setup))))))

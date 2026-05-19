@@ -748,22 +748,29 @@ with =bb test-config=.
 
 ** Setting up an instance
 
-The shortest valid configuration declares an IMAP mailbox and
+The shortest valid configuration declares a single IMAP mailbox and
 one source:
 
 #+begin_src edn
-{:mailbox {:type     :imap
-           :host     "imap.example.com"
-           :port     993
-           :ssl      true
-           :user     "imap-login@example.com"
-           :password "secret"
-           :folder   "INBOX"}
+{:mailboxes [{:name     "primary"
+              :type     :imap
+              :host     "imap.example.com"
+              :port     993
+              :ssl      true
+              :user     "imap-login@example.com"
+              :password "secret"
+              :folder   "INBOX"}]
 
  :sources [{:name        "my-list"
             :list        "my-list.example.org"
             :maintainers ["lead@example.org"]}]}
 #+end_src
+
+=:mailboxes= is a /vector/: every mailbox is a map with a unique =:name=
+(used to key its watermark and prefix logs) and a =:type= of =:imap= or
+=:maildir=. The singleton =:mailbox= key from older releases is no
+longer accepted -- migrate to the vector form even if you only have
+one mailbox.
 
 The =:db=, =:logging= and =:ingest= sections are optional. Defaults: =:db
 {:path "data/bark-db"}=, stderr-only logging at =:info=, and =:ingest
@@ -777,10 +784,75 @@ subfolder. Set =:folder ""= when the Maildir at =:path= already holds
 filesystem events rather than polling.
 
 #+begin_src edn
-{:mailbox {:type   :maildir
-           :path   "/home/me/Mail"
-           :folder "INBOX"}
+{:mailboxes [{:name   "local"
+              :type   :maildir
+              :path   "/home/me/Mail"
+              :folder "INBOX"}]
  :sources [{:name "my-list" :list "my-list.example.org"}]}
+#+end_src
+
+*** Multiple mailboxes
+:PROPERTIES:
+:CUSTOM_ID: multiple-mailboxes
+:END:
+
+=:mailboxes= can declare any combination of IMAP and Maildir entries.
+A typical setup: one IMAP account for an upstream mailing list, and a
+local Maildir fed by a forge-to-mail bridge such as [[https://codeberg.org/bzg/forge2mail][forge2mail]].
+
+#+begin_src edn
+{:mailboxes [{:name     "upstream"
+              :type     :imap
+              :host     "imap.example.com" :port 993 :ssl true
+              :user     "me@example.com"   :password "secret"}
+             {:name     "forge"
+              :type     :maildir
+              :path     "/home/me/Mail/forge"
+              :folder   ""}]
+ :sources  [{:name "my-project" :list "my-project.example.org"}
+            {:name "issues"     :to   "issues@example.com"}]}
+#+end_src
+
+How the modes behave with several mailboxes:
+
+- /Batch/ (=clj -M:run=, the default) iterates over =:mailboxes= in
+  order. A mailbox that fails to open or fetch is logged and skipped;
+  the run continues with the next one. Expiry and stale-pending
+  flush run once at the end, and only if at least one mailbox
+  succeeded.
+- /Watch/ (=clj -M:run -- --watch=) spawns one thread per mailbox,
+  each with its own reconnect/backoff loop. The daily expire/flush is
+  gated by a shared atom so it runs exactly once per 24-hour window
+  no matter how many threads are active.
+
+Watermarks are scoped per mailbox: each entry's =:name= keys its own
+record in Datalevin, so IMAP UID state and Maildir baseline IDs never
+mix between mailboxes. Sources are global -- BARK still matches
+emails to sources by =List-Id= / =X-Original-To= / =Delivered-To=
+regardless of which mailbox delivered them.
+
+Renaming a mailbox is equivalent to declaring a new one: the old
+watermark is left orphaned in the DB, and the renamed entry restarts
+from its =:fetch= baseline. Wipe the DB with =clj -M:run -- --fresh=
+if you want to discard the orphan state.
+
+A mailbox can also carry its own =:ingest= map -- same shape as the
+top-level =:ingest= (=:fetch=, =:max-size=, =:max-attachment-size=).
+Declared keys win over the global ones (shallow merge); undeclared
+keys fall back to the global defaults.  A =--fetch= argument on the
+CLI still overrides every level.
+
+#+begin_src edn
+{:mailboxes [{:name "upstream" :type :imap :host "..." :user "..." :password "..."}
+             {:name "forge"
+              :type :maildir
+              :path "/home/me/Mail/forge"
+              :folder ""
+              ;; Only fetch the last 7 days from the forge bridge,
+              ;; while the upstream mailbox keeps the global default.
+              :ingest {:fetch {:since "7d"}}}]
+ :ingest    {:fetch {:limit 200}}
+ :sources   [{:name "..." :list "..."}]}
 #+end_src
 
 ** Monitoring your local mail

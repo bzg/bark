@@ -131,19 +131,26 @@ Precedence: =-c= > =BARK_CONFIG= > =./config.edn=.
 The legacy =BARK_DB= env var still works as a fallback when no
 =:db {:path …}= entry is set.
 
-** Mail source (=:mailbox=)
+** Mail sources (=:mailboxes=)
 
-A single mail source (IMAP or Maildir) shared by all sources.
+=:mailboxes= is a vector; each entry is one mail source (IMAP or
+Maildir) with a unique =:name=. Batch mode iterates over them
+sequentially; watch mode runs one thread per mailbox. Watermarks are
+keyed per =:name=, so IMAP UID state never mixes between mailboxes.
 
-| Field         | Required     | Description                        |
-|---------------+--------------+------------------------------------|
-| =:type=         | yes          | =:imap= or =:maildir=                  |
-| =:host=         | IMAP only    | IMAP server hostname               |
-| =:user=         | IMAP only    | IMAP login username                |
-| =:password=     | IMAP *       | IMAP password (* or =:oauth2-token=) |
-| =:oauth2-token= | IMAP *       | OAuth2 token (* or =:password=)      |
-| =:path=         | Maildir only | Root path of the Maildir           |
-| =:folder=       | no           | Folder name (default: ="INBOX"=)     |
+| Field         | Required     | Description                                  |
+|---------------+--------------+----------------------------------------------|
+| =:name=         | yes          | Unique identifier (keys the watermark, logs) |
+| =:type=         | yes          | =:imap= or =:maildir=                            |
+| =:host=         | IMAP only    | IMAP server hostname                         |
+| =:user=         | IMAP only    | IMAP login username                          |
+| =:password=     | IMAP *       | IMAP password (* or =:oauth2-token=)           |
+| =:oauth2-token= | IMAP *       | OAuth2 token (* or =:password=)                |
+| =:path=         | Maildir only | Root path of the Maildir                     |
+| =:folder=       | no           | Folder name (default: ="INBOX"=)               |
+
+See the manual ([[file:docs/bark-manual.org][docs/bark-manual.org]] § Multiple mailboxes) for the
+behaviour of batch and watch modes with several mailboxes.
 
 ** Ingest settings (=:ingest=)
 
@@ -222,9 +229,10 @@ declare the history inline via =:periods= on the source (see
 ** Example config
 
 #+begin_src clojure
-{:mailbox {:type :imap :host "imap.example.com" :port 993 :ssl true
-           :user "imap-login@example.com" :password "secret"
-           :folder "INBOX"}
+{:mailboxes [{:name "primary"
+              :type :imap :host "imap.example.com" :port 993 :ssl true
+              :user "imap-login@example.com" :password "secret"
+              :folder "INBOX"}]
  :sources [{:name "public-list"
             :list "bugs.example.org"
             ;; First entry = lead maintainer.

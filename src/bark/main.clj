@@ -67,6 +67,11 @@
 
 (defn shutting-down? [] @shutdown?)
 
+;; Futures spawned by `watch-all!`.  Stored here so the shutdown hook
+;; can wait for them to finish before closing the database.  Nil in
+;; batch mode.
+(def ^:private watch-futures (atom nil))
+
 ;; ---------------------------------------------------------------------------
 ;; Fetch parsing
 ;;
@@ -164,13 +169,13 @@
             (if (contains? safe-uids uid) uid (reduced acc)))
           nil all-uids))
 
-(defn- advance-watermark! [db-conn msgs safe-ids]
+(defn- advance-watermark! [db-conn mailbox-name msgs safe-ids]
   (let [all-uids (->> msgs (keep :uid) sort)]
     (if-let [new-wm (max-contiguous-safe-uid all-uids safe-ids)]
       (do (when (not= new-wm (some->> all-uids last))
             (log/warn "Watermark stopped at UID" new-wm
                       "(some messages failed -- will retry on next reconnect)"))
-          (ingest/save-imap-uid! db-conn new-wm))
+          (ingest/save-imap-uid! db-conn mailbox-name new-wm))
       ;; First UID in batch failed -- watermark cannot advance at all.
       (when (seq all-uids)
         (log/warn "Watermark not advanced: first UID" (first all-uids)
@@ -181,15 +186,48 @@
 ;; Atomic store+process
 ;; ---------------------------------------------------------------------------
 
+;; Message-ids whose digest is currently in flight on some thread.
+;; In multi-mailbox watch mode, two mailboxes that subscribe to the
+;; same list may both observe a new email and race to digest it
+;; before `:email/digested-at` lands.  `store-email!` already
+;; prevents duplicate DB entities, but a sibling thread that sees
+;; "stored but not digested" then re-enters `try-digest!` --
+;; legitimately, for crash recovery, but incorrectly here.  Mids in
+;; this set are claimed by another thread; concurrent callers skip.
+(def ^:private digesting-mids (atom #{}))
+
+(defn take-mid-ownership!
+  "Atomically register `mid` as digested-by-us.  Returns true if the
+  caller now owns the digest and must release via
+  `release-mid-ownership!`; false if another thread already owns it."
+  [mid]
+  (let [[old _] (swap-vals! digesting-mids conj mid)]
+    (not (contains? old mid))))
+
+(defn release-mid-ownership!
+  "Release the mid claimed by `take-mid-ownership!`."
+  [mid]
+  (swap! digesting-mids disj mid))
+
 (defn- try-digest!
-  "Run process-email!, returning :ok on success, :retry on exception."
+  "Run process-email!, returning :ok on success, :retry on exception.
+  Concurrent callers for the same mid return :ok without re-running
+  -- a sibling thread already owns it (see `digesting-mids`).  The
+  `:ok` here means \"do not retry / watermark may advance\", not
+  \"I digested\" : the sibling thread is responsible for posting
+  :email/digested-at."
   [db-conn source-map sources email mid]
-  (try
-    (digest/process-email! db-conn source-map sources email)
-    :ok
-    (catch Exception e
-      (log/error e "Failed to digest email" mid (blog/exception-msg e))
-      :retry)))
+  (if-not (take-mid-ownership! mid)
+    (do (log/debug "Digest already in flight for" mid "-- skipping")
+        :ok)
+    (try
+      (digest/process-email! db-conn source-map sources email)
+      :ok
+      (catch Exception e
+        (log/error e "Failed to digest email" mid (blog/exception-msg e))
+        :retry)
+      (finally
+        (release-mid-ownership! mid)))))
 
 (defn- store-and-process!
   "Classify, store, and digest an email.  Returns :ok (advance watermark),
@@ -304,13 +342,13 @@
 (defn- catch-up-imap!
   "IMAP incremental fetch via UID watermark; falls back to first-run
   on UIDVALIDITY change (stored watermark is cleared)."
-  [src db-conn folder fetch-opts source-map sources ingest-opts]
+  [src db-conn mailbox-name folder fetch-opts source-map sources ingest-opts]
   (let [live-uv   (try (mailseq/uid-validity src folder)
                        (catch Exception e
                          (log/debug "Could not read UIDVALIDITY:" (.getMessage e))
                          nil))
-        _         (ingest/sync-uid-validity! db-conn live-uv)
-        watermark (ingest/max-imap-uid db-conn)
+        _         (ingest/sync-uid-validity! db-conn mailbox-name live-uv)
+        watermark (ingest/max-imap-uid db-conn mailbox-name)
         msgs (sort-chronologically
               (if (zero? watermark)
                 (first-run-messages src folder fetch-opts)
@@ -320,19 +358,19 @@
     (log/info "Fetched" (count msgs) "messages")
     (when (and (seq msgs) (not (shutting-down?)))
       (let [safe-ids (collect-safe-uids db-conn source-map sources msgs ingest-opts)]
-        (advance-watermark! db-conn msgs safe-ids)))))
+        (advance-watermark! db-conn mailbox-name msgs safe-ids)))))
 
 (defn- catch-up-maildir!
   "Maildir incremental fetch: diff list-ids against known :email/id.
   First run honours fetch-opts then seals pre-existing ids as seen;
   the init flag is set last so a crash retries safely."
-  [src db-conn folder fetch-opts source-map sources ingest-opts]
-  (let [init-done? (ingest/maildir-init-done? db-conn)
+  [src db-conn mailbox-name folder fetch-opts source-map sources ingest-opts]
+  (let [init-done? (ingest/maildir-init-done? db-conn mailbox-name)
         all-ids    (mailseq/list-ids src folder)]
     (if init-done?
       ;; Incremental run: diff against stored emails + seen baseline
       (let [known   (into (ingest/known-email-ids db-conn)
-                          (ingest/seen-maildir-ids db-conn))
+                          (ingest/seen-maildir-ids db-conn mailbox-name))
             new-ids (remove known all-ids)]
         (if (empty? new-ids)
           (log/info "No new messages in Maildir")
@@ -357,17 +395,17 @@
               unseen (remove stored all-ids)]
           (when (seq unseen)
             (log/info "Marking" (count unseen) "pre-existing Maildir ids as seen")
-            (ingest/mark-ids-seen! db-conn unseen)))
-        (ingest/set-maildir-init-done! db-conn)))))
+            (ingest/mark-ids-seen! db-conn mailbox-name unseen)))
+        (ingest/set-maildir-init-done! db-conn mailbox-name)))))
 
 (defn catch-up-fetch!
   "Fetch messages missed while the process was down.
   Dispatches to IMAP (watermark) or Maildir (id diff) strategy."
-  [src db-conn folder fetch-opts source-map sources ingest-opts mailbox-type]
+  [src db-conn mailbox-name folder fetch-opts source-map sources ingest-opts mailbox-type]
   (when-not (shutting-down?)
     (case mailbox-type
-      :imap    (catch-up-imap! src db-conn folder fetch-opts source-map sources ingest-opts)
-      :maildir (catch-up-maildir! src db-conn folder fetch-opts source-map sources ingest-opts))))
+      :imap    (catch-up-imap! src db-conn mailbox-name folder fetch-opts source-map sources ingest-opts)
+      :maildir (catch-up-maildir! src db-conn mailbox-name folder fetch-opts source-map sources ingest-opts))))
 
 ;; ---------------------------------------------------------------------------
 ;; Mail source connection
@@ -409,21 +447,33 @@
 ;; orphans must eventually leave the queue).
 (def ^:private pending-flush-max-age-days 7)
 
+;; Last successful expire+flush timestamp.  Shared across all watch
+;; threads: a single CAS gates the daily run so N watch loops never
+;; duplicate work.
+(def ^:private last-expire-ms (atom 0))
+
 (defn- maybe-expire!
   "Run expire + flush-stale-pending if at least a day has elapsed
-  since `last-ms`.  Returns the new timestamp (or `last-ms` on failure)."
-  [db-conn source-map sources last-ms]
-  (let [now (System/currentTimeMillis)]
-    (if (> (- now last-ms) one-day-ms)
+  since the last successful run.  Thread-safe -- a single atomic CAS
+  picks which caller executes the work; concurrent callers return
+  without retrying.  On failure the timestamp is rolled back via CAS
+  so a sibling thread can retry at its next reconnect (rather than
+  waiting another 24 hours)."
+  [db-conn source-map sources]
+  (let [now  (System/currentTimeMillis)
+        prev @last-expire-ms]
+    (when (and (> (- now prev) one-day-ms)
+               (compare-and-set! last-expire-ms prev now))
       (try
         (expire/expire-reports! db-conn source-map)
         (digest/flush-stale-pending! db-conn source-map sources
                                      pending-flush-max-age-days)
-        now
         (catch Exception e
           (log/error e "Expire/flush failed:" (blog/exception-msg e))
-          last-ms))
-      last-ms)))
+          ;; Roll the watermark back.  If a sibling already moved it
+          ;; forward in the meantime (very unlikely given the 24h
+          ;; gate), the CAS is a no-op -- that sibling is in charge.
+          (compare-and-set! last-expire-ms now prev))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Watch mode with reconnection
@@ -433,25 +483,27 @@
 
 (defn start-watch!
   "Start watching for new messages, storing+processing each as it arrives."
-  [src db-conn folder source-map sources ingest-opts]
-  (log/info "Starting watch on" folder)
+  [src db-conn mailbox-name folder source-map sources ingest-opts]
+  (log/info "Mailbox" (pr-str mailbox-name) "-- starting watch on" folder)
   (mailseq/watch src folder
                  (fn [msg]
                    (when-not (shutting-down?)
                      (if (nil? msg)
-                       (log/warn "Watch delivered nil message, skipping")
+                       (log/warn "Mailbox" (pr-str mailbox-name)
+                                 "-- watch delivered nil message, skipping")
                        (do
-                         (log/info "New message via watch -- id:" (:id msg)
+                         (log/info "Mailbox" (pr-str mailbox-name)
+                                   "-- new message id:" (:id msg)
                                    "Subject:" (:subject msg))
                          (try
                            (let [result (store-and-process! db-conn source-map sources msg ingest-opts)]
                              ;; Advance IMAP watermark when applicable
                              (when (and (not= :retry result) (:uid msg))
-                               (ingest/save-imap-uid! db-conn (:uid msg))))
+                               (ingest/save-imap-uid! db-conn mailbox-name (:uid msg))))
                            (catch Exception e
-                             (log/error e "Error processing watch message id:" (:id msg)
-                                        (str "(" (.getName (class e)) ": "
-                                             (or (.getMessage e) "no message") ")"))))))))
+                             (log/error e "Mailbox" (pr-str mailbox-name)
+                                        "-- error processing message id:" (:id msg)
+                                        (blog/exception-msg e))))))))
                  {:parse-opts   {:attachments? true}
                   :heartbeat-ms (* 20 60 1000)}))
 
@@ -460,12 +512,18 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- run-opts
-  "Per-run options from mailbox+ingest config (shared by batch/watch)."
-  [mailbox-cfg ingest-cfg]
-  {:folder       (or (:folder mailbox-cfg) "INBOX")
-   :mailbox-type (:type mailbox-cfg)
-   :fetch-opts   (parse-fetch (or (:fetch ingest-cfg) {:limit 50}))
-   :ingest-opts  (select-keys ingest-cfg [:max-size :max-attachment-size])})
+  "Per-run options for one mailbox.  Effective ingest settings are
+  (merge global-ingest local-ingest), with a CLI --fetch override
+  winning over both.  Priority: CLI > mailbox :ingest > global
+  :ingest > defaults."
+  [mailbox-cfg ingest-cfg cli-fetch-map]
+  (let [effective (cond-> (merge ingest-cfg (:ingest mailbox-cfg))
+                    cli-fetch-map (assoc :fetch cli-fetch-map))]
+    {:mailbox-name (:name mailbox-cfg)
+     :folder       (or (:folder mailbox-cfg) "INBOX")
+     :mailbox-type (:type mailbox-cfg)
+     :fetch-opts   (parse-fetch (or (:fetch effective) {:limit 50}))
+     :ingest-opts  (select-keys effective [:max-size :max-attachment-size])}))
 
 (defn- load-context
   "Re-read config, seed maintainers into tenures, return source-map+sources.
@@ -483,58 +541,114 @@
          (log/debug "Mailbox close failed:" (.getMessage e)))))
 
 (defn watch-loop!
-  "Run watch with automatic reconnection and exponential backoff.
-  Reloads config.edn on each reconnect so changes take effect."
-  [mailbox-cfg db-conn ingest-cfg config-path]
-  (let [{:keys [folder mailbox-type fetch-opts ingest-opts]}
-        (run-opts mailbox-cfg ingest-cfg)]
-    (loop [backoff-ms 1000
-           last-expire-ms 0]
+  "Run watch on one mailbox with automatic reconnection and
+  exponential backoff.  Reloads config.edn on each reconnect so
+  changes take effect.  Designed to be run in its own future when
+  several mailboxes are configured."
+  [mailbox-cfg db-conn ingest-cfg cli-fetch-map config-path]
+  (let [{:keys [mailbox-name folder mailbox-type fetch-opts ingest-opts]}
+        (run-opts mailbox-cfg ingest-cfg cli-fetch-map)]
+    (loop [backoff-ms 1000]
       (when-not (shutting-down?)
         (let [{:keys [source-map sources]} (load-context db-conn config-path)
               src (open-mailbox mailbox-cfg)]
           (if-not src
-            (do (log/error "Mailbox connection failed, retrying in" (/ backoff-ms 1000) "s")
+            (do (log/error "Mailbox" (pr-str mailbox-name)
+                           "-- connection failed, retrying in" (/ backoff-ms 1000) "s")
                 (Thread/sleep backoff-ms)
-                (recur (min (* backoff-ms 2) max-backoff-ms) last-expire-ms))
-            (let [new-expire-ms
-                  (try
-                    (log/info "Mailbox connected, folder:" folder)
-                    (catch-up-fetch! src db-conn folder fetch-opts source-map sources ingest-opts mailbox-type)
-                    (let [ts (maybe-expire! db-conn source-map sources last-expire-ms)]
-                      (when-not (shutting-down?)
-                        (start-watch! src db-conn folder source-map sources ingest-opts))
-                      ts)
-                    (catch Exception e
-                      (log/error e "Watch interrupted:" (blog/exception-msg e))
-                      last-expire-ms))]
+                (recur (min (* backoff-ms 2) max-backoff-ms)))
+            (do
+              (try
+                (log/info "Mailbox" (pr-str mailbox-name) "-- connected, folder:" folder)
+                (catch-up-fetch! src db-conn mailbox-name folder fetch-opts
+                                 source-map sources ingest-opts mailbox-type)
+                (maybe-expire! db-conn source-map sources)
+                (when-not (shutting-down?)
+                  (start-watch! src db-conn mailbox-name folder source-map sources ingest-opts))
+                (catch Exception e
+                  (log/error e "Mailbox" (pr-str mailbox-name)
+                             "-- watch interrupted:" (blog/exception-msg e))))
               (close-mailbox! src)
               (when-not (shutting-down?)
-                (log/debug "Watch exited, reconnecting in 1s")
+                (log/debug "Mailbox" (pr-str mailbox-name) "-- watch exited, reconnecting in 1s")
                 (Thread/sleep 1000)
-                (recur 1000 new-expire-ms)))))))))
+                (recur 1000)))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Main
 ;; ---------------------------------------------------------------------------
 
+(defn- watch-all!
+  "Run watch on every configured mailbox in parallel: one future per
+  mailbox.  The futures are published into `watch-futures` so the
+  shutdown hook can wait for them before closing the DB.  The main
+  thread blocks on `run! deref` until every loop exits (typically
+  only on shutdown).  Uncaught throwables inside a future are logged
+  so a dead thread cannot silently disappear."
+  [mailboxes db-conn ingest-cfg cli-fetch-map config-path]
+  (let [futs (mapv (fn [mb]
+                     (future
+                       (try
+                         (watch-loop! mb db-conn ingest-cfg cli-fetch-map config-path)
+                         (catch Throwable t
+                           (log/error t "Mailbox" (pr-str (:name mb))
+                                      "-- watch loop terminated:"
+                                      (blog/exception-msg t))))))
+                   mailboxes)]
+    (reset! watch-futures futs)
+    (run! deref futs)
+    ;; Reached when every watch loop has exited.  Under normal
+    ;; operation that only happens during shutdown; otherwise every
+    ;; thread died and the daemon is doing nothing useful -- treat
+    ;; that as a fatal condition rather than silently returning.
+    (when-not (shutting-down?)
+      (log/error "All" (count mailboxes)
+                 "watch loop(s) exited without a shutdown signal -- aborting.")
+      (System/exit 1))))
+
+(defn- batch-fetch-one!
+  "Open, catch-up, and close a single mailbox in batch mode.  Returns
+  true on success, false on connection failure or fetch error (so
+  the caller can decide whether at least one mailbox advanced)."
+  [mailbox-cfg db-conn ingest-cfg cli-fetch-map source-map sources]
+  (let [{:keys [mailbox-name folder mailbox-type fetch-opts ingest-opts]}
+        (run-opts mailbox-cfg ingest-cfg cli-fetch-map)]
+    (log/info "Mailbox" (pr-str mailbox-name) "-- batch fetch starting")
+    (if-let [src (open-mailbox mailbox-cfg)]
+      (try
+        (catch-up-fetch! src db-conn mailbox-name folder fetch-opts
+                         source-map sources ingest-opts mailbox-type)
+        (log/info "Mailbox" (pr-str mailbox-name) "-- batch fetch done")
+        true
+        (catch Exception e
+          (log/error e "Mailbox" (pr-str mailbox-name)
+                     "-- batch fetch failed:" (blog/exception-msg e))
+          false)
+        (finally (close-mailbox! src)))
+      (do (log/error "Mailbox" (pr-str mailbox-name) "-- connection failed, skipping")
+          false))))
+
 (defn- batch-run!
-  "Single-pass mode (default): connect, fetch new messages, expire, exit."
-  [mailbox-cfg db-conn ingest-cfg config-path]
-  (let [{:keys [folder mailbox-type fetch-opts ingest-opts]}
-        (run-opts mailbox-cfg ingest-cfg)
-        {:keys [source-map sources]} (load-context db-conn config-path)
-        src (open-mailbox mailbox-cfg)]
-    (when-not src
-      (log/error "Mailbox connection failed.")
+  "Single-pass mode (default): for each configured mailbox, connect,
+  fetch new messages, then expire/flush once globally.  Continues
+  across mailbox failures; exits non-zero only if every mailbox
+  attempted actually failed.  A shutdown signalled mid-loop is
+  honoured silently (no spurious exit 1)."
+  [mailboxes db-conn ingest-cfg cli-fetch-map config-path]
+  (let [{:keys [source-map sources]} (load-context db-conn config-path)
+        results (doall
+                 (for [mb mailboxes
+                       :while (not (shutting-down?))]
+                   (batch-fetch-one! mb db-conn ingest-cfg cli-fetch-map source-map sources)))]
+    (when (and (not (shutting-down?))
+               (seq results)
+               (not-any? true? results))
+      (log/error (count results) "mailbox(es) failed -- aborting before expire/flush.")
       (System/exit 1))
-    (try
-      (catch-up-fetch! src db-conn folder fetch-opts source-map sources ingest-opts mailbox-type)
+    (when-not (shutting-down?)
       (expire/expire-reports! db-conn source-map)
       (digest/flush-stale-pending! db-conn source-map sources
-                                   pending-flush-max-age-days)
-      (finally
-        (close-mailbox! src)))))
+                                   pending-flush-max-age-days))))
 
 (defn- parse-main-args [args]
   (let [arg-set (set args)
@@ -571,14 +685,52 @@
         (configure-email-logging! smtp email-cfg)
         (log/warn "Logging :email configured but no :notifications :smtp found.")))))
 
-(defn- validate-mailbox-cfg! [mailbox-cfg]
-  (when-not mailbox-cfg
-    (log/error "No :mailbox key in config.edn.")
-    (System/exit 1))
-  (when-not (#{:imap :maildir} (:type mailbox-cfg))
-    (log/error "Invalid :type in :mailbox -- expected :imap or :maildir, got:"
-               (pr-str (:type mailbox-cfg)))
-    (System/exit 1)))
+(defn check-mailboxes
+  "Validate the :mailboxes vector.  Returns either {:ok mailboxes}
+  or {:error message}.  Rejects the legacy singleton :mailbox key
+  explicitly (BARK is in 0.y.z -- no rétrocompat).  Pure -- callers
+  decide whether to exit or surface the error.  Name format is
+  shared with :sources via `common/valid-config-name?`."
+  [config]
+  (let [mailboxes (:mailboxes config)]
+    (or (when (contains? config :mailbox)
+          {:error common/legacy-mailbox-error})
+        (when (or (not (vector? mailboxes)) (empty? mailboxes))
+          {:error ":mailboxes must be a non-empty vector of mailbox maps."})
+        (some (fn [[idx mb]]
+                (when-not (common/valid-config-name? (:name mb))
+                  {:error (str "Mailbox at index " idx
+                               " has invalid :name -- expected a non-blank string matching "
+                               (pr-str (str common/config-name-regex))
+                               ", got: " (pr-str (:name mb)))}))
+              (map-indexed vector mailboxes))
+        (some (fn [mb]
+                (when-not (#{:imap :maildir} (:type mb))
+                  {:error (str "Mailbox " (pr-str (:name mb))
+                               " has invalid :type -- expected :imap or :maildir, got: "
+                               (pr-str (:type mb)))}))
+              mailboxes)
+        (let [names (mapv :name mailboxes)]
+          (when-not (common/all-distinct? names)
+            {:error (str "Mailbox :name values must be unique, got: "
+                         (pr-str names))}))
+        {:ok mailboxes})))
+
+(defn- validate-mailboxes!
+  "Return the validated :mailboxes vector, or exit with a message."
+  [config]
+  (let [{:keys [ok error]} (check-mailboxes config)]
+    (when error
+      (log/error error)
+      (System/exit 1))
+    ok))
+
+;; Total grace period (across all watch threads) when waiting for
+;; futures to settle during shutdown.  Long enough to let an
+;; in-flight `d/transact!` complete; short enough that wedged
+;; `mailseq/watch` threads (which block on IMAP IDLE / NIO and
+;; don't poll `shutdown?`) don't keep the JVM around forever.
+(def ^:private shutdown-grace-ms 5000)
 
 (defn- install-shutdown-hook! [db-conn]
   (.addShutdownHook
@@ -587,10 +739,19 @@
     (fn []
       (log/info "Shutting down...")
       (reset! shutdown? true)
-      (Thread/sleep 1000)
+      ;; Let any active watch thread finish its current transact
+      ;; before we close the DB underneath it.  The grace period is
+      ;; shared across all futures (deadline-based) so a multi-
+      ;; mailbox shutdown doesn't compound to N x grace.
+      (when-let [futs @watch-futures]
+        (let [deadline (+ (System/currentTimeMillis) shutdown-grace-ms)]
+          (doseq [f futs]
+            (let [remaining (max 0 (- deadline (System/currentTimeMillis)))]
+              (deref f remaining :timeout)))))
       (try (ingest/close db-conn)
            (catch Exception e
              (log/debug "DB close failed:" (.getMessage e))))
+      (shutdown-agents)
       (log/info "Goodbye.")))))
 
 (defn -main [& args]
@@ -599,20 +760,19 @@
     (when (nil? config)
       (log/error "Config file not found:" config-path)
       (System/exit 1))
-    (let [mailbox-cfg (:mailbox config)
-          ingest-cfg  (cond-> (or (:ingest config) {})
-                        cli-fetch (assoc :fetch (cli-fetch->map cli-fetch)))
-          db-path     (common/expand-home
-                       (or (:path (:db config)) "data/bark-db"))]
-      (setup-logging! config)
-      (validate-mailbox-cfg! mailbox-cfg)
+    (setup-logging! config)
+    (let [mailboxes     (validate-mailboxes! config)
+          ingest-cfg    (or (:ingest config) {})
+          cli-fetch-map (some-> cli-fetch cli-fetch->map)
+          db-path       (common/expand-home
+                         (or (:path (:db config)) "data/bark-db"))]
       (when fresh? (maybe-wipe-db! db-path))
       (let [db-conn (ingest/connect db-path)]
         (log/info "Datalevin connected.")
         (install-shutdown-hook! db-conn)
         (if watch?
-          (watch-loop! mailbox-cfg db-conn ingest-cfg config-path)
-          (do (batch-run! mailbox-cfg db-conn ingest-cfg config-path)
+          (watch-all! mailboxes db-conn ingest-cfg cli-fetch-map config-path)
+          (do (batch-run! mailboxes db-conn ingest-cfg cli-fetch-map config-path)
               ;; Datalevin/LMDB keeps non-daemon threads alive; explicit
               ;; close + System/exit avoids a hung JVM after batch mode.
               (try (ingest/close db-conn)

@@ -34,41 +34,68 @@
                   :where [?e :email/source ?src] [?e :email/id ?id]]
                 (d/db conn) source-name id))))
 
-(defn max-imap-uid [conn]
-  (or (d/q '[:find ?uid . :where [?e :watermark/id "default"] [?e :watermark/imap-uid ?uid]]
-           (d/db conn))
+;; Watermarks are scoped per-mailbox: each `:mailboxes` entry's
+;; `:name` keys its own `:watermark/id` entity, so IMAP UID / Maildir
+;; baseline state never mix between mailboxes.
+
+(defn- wm-id
+  "Datalevin :watermark/id key for the given mailbox name.  Throws
+  on any name `common/valid-config-name?` would reject -- never let
+  two mailboxes collapse onto the same watermark id by accident, and
+  never let an exotic character (slash, colon, control char) sneak
+  into the entity id.  Uses an explicit `throw` rather than `:pre`
+  so the guard survives a `(set! *assert* false)`."
+  [mailbox-name]
+  (when-not (common/valid-config-name? mailbox-name)
+    (throw (ex-info "Invalid mailbox-name for watermark id"
+                    {:mailbox-name mailbox-name})))
+  (str "mailbox:" mailbox-name))
+
+(defn max-imap-uid [conn mailbox-name]
+  (or (d/q '[:find ?uid .
+             :in $ ?wm
+             :where [?e :watermark/id ?wm] [?e :watermark/imap-uid ?uid]]
+           (d/db conn) (wm-id mailbox-name))
       0))
 
-(defn save-imap-uid! [conn imap-uid]
-  (d/transact! conn [{:watermark/id "default" :watermark/imap-uid imap-uid}]))
+(defn save-imap-uid! [conn mailbox-name imap-uid]
+  (when-not (and (integer? imap-uid) (not (neg? imap-uid)))
+    (throw (ex-info "save-imap-uid! expects a non-negative integer UID"
+                    {:mailbox-name mailbox-name :imap-uid imap-uid})))
+  (d/transact! conn [{:watermark/id (wm-id mailbox-name)
+                      :watermark/imap-uid imap-uid}]))
 
 (defn stored-uid-validity
-  "Recorded UIDVALIDITY for the current UID watermark (nil if never set)."
-  [conn]
+  "Recorded UIDVALIDITY for this mailbox's UID watermark (nil if never set)."
+  [conn mailbox-name]
   (d/q '[:find ?uv .
-         :where [?e :watermark/id "default"] [?e :watermark/imap-uid-validity ?uv]]
-       (d/db conn)))
+         :in $ ?wm
+         :where [?e :watermark/id ?wm] [?e :watermark/imap-uid-validity ?uv]]
+       (d/db conn) (wm-id mailbox-name)))
 
 (defn sync-uid-validity!
   "Align the stored UIDVALIDITY with the mailbox's live value.
   Returns :match, :stamped (first time), :reset (changed -- watermark
   cleared, caller falls back to first-run fetch), or :unsupported
   (backend cannot report UIDVALIDITY, e.g. Maildir)."
-  [conn live-uv]
+  [conn mailbox-name live-uv]
   (if (nil? live-uv)
     :unsupported
-    (let [stored (stored-uid-validity conn)]
+    (let [stored (stored-uid-validity conn mailbox-name)
+          id     (wm-id mailbox-name)]
       (cond
         (nil? stored)
-        (do (log/info "Stamping initial UIDVALIDITY:" live-uv)
-            (d/transact! conn [{:watermark/id "default"
+        (do (log/info "Stamping initial UIDVALIDITY:" live-uv
+                      "for mailbox" (pr-str mailbox-name))
+            (d/transact! conn [{:watermark/id id
                                 :watermark/imap-uid-validity live-uv}])
             :stamped)
 
         (not= stored live-uv)
-        (do (log/warn "UIDVALIDITY changed" stored "→" live-uv
+        (do (log/warn "UIDVALIDITY changed" stored "=>" live-uv
+                      "for mailbox" (pr-str mailbox-name)
                       "-- clearing UID watermark, re-running initial fetch")
-            (d/transact! conn [{:watermark/id "default"
+            (d/transact! conn [{:watermark/id id
                                 :watermark/imap-uid-validity live-uv
                                 :watermark/imap-uid 0}])
             :reset)
@@ -83,28 +110,34 @@
              (d/db conn))))
 
 (defn seen-maildir-ids
-  "Return the set of Maildir ids recorded as seen (first-run baseline)."
-  [conn]
+  "Return the set of Maildir ids recorded as seen for this mailbox
+  (first-run baseline)."
+  [conn mailbox-name]
   (into #{}
         (d/q '[:find [?id ...]
-               :where [?e :watermark/id "default"]
+               :in $ ?wm
+               :where [?e :watermark/id ?wm]
                       [?e :watermark/seen-ids ?id]]
-             (d/db conn))))
+             (d/db conn) (wm-id mailbox-name))))
 
 (defn mark-ids-seen!
-  "Record Maildir ids as seen so future incremental diffs skip them."
-  [conn ids]
-  (d/transact! conn [{:watermark/id "default"
+  "Record Maildir ids as seen for this mailbox so future incremental
+  diffs skip them.  `:watermark/seen-ids` has cardinality/many --
+  successive calls accumulate, they do not replace the baseline."
+  [conn mailbox-name ids]
+  (d/transact! conn [{:watermark/id (wm-id mailbox-name)
                       :watermark/seen-ids (set ids)}]))
 
-(defn maildir-init-done? [conn]
+(defn maildir-init-done? [conn mailbox-name]
   (true? (d/q '[:find ?v .
-                :where [?e :watermark/id "default"]
+                :in $ ?wm
+                :where [?e :watermark/id ?wm]
                        [?e :watermark/maildir-init ?v]]
-              (d/db conn))))
+              (d/db conn) (wm-id mailbox-name))))
 
-(defn set-maildir-init-done! [conn]
-  (d/transact! conn [{:watermark/id "default" :watermark/maildir-init true}]))
+(defn set-maildir-init-done! [conn mailbox-name]
+  (d/transact! conn [{:watermark/id (wm-id mailbox-name)
+                      :watermark/maildir-init true}]))
 
 ;; ---------------------------------------------------------------------------
 ;; Constants

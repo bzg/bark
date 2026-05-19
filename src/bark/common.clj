@@ -67,6 +67,31 @@
     (str (System/getProperty "user.home") (subs p 1))
     p))
 
+;; Shared identifier rule for :sources [{:name ...}] and :mailboxes
+;; [{:name ...}].  Starts with alphanum; spaces allowed in the middle
+;; to keep current :source/name configs valid; no slash / colon /
+;; control chars (those would break paths or watermark ids).
+(def config-name-regex #"[a-zA-Z0-9][a-zA-Z0-9 ._-]*")
+
+(defn valid-config-name?
+  "True iff `s` is a non-blank string matching `config-name-regex`."
+  [s]
+  (and (string? s)
+       (not (str/blank? s))
+       (some? (re-matches config-name-regex s))))
+
+(def legacy-mailbox-error
+  "Single source of truth for the rejected-`:mailbox`-key message."
+  (str ":mailbox is no longer accepted (even when set to nil) "
+       "-- use :mailboxes [{...}] (vector of mailbox maps with a :name each)."))
+
+(defn all-distinct?
+  "True iff `coll` contains no duplicates (under `=`).  Prefer over
+  `(apply distinct? coll)` -- the latter throws on empty collections
+  and depends on splatting through `apply`."
+  [coll]
+  (= (count coll) (count (distinct coll))))
+
 (defn slugify
   "Normalize a source name for use as a directory name."
   [s]

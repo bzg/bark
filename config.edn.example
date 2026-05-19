@@ -7,17 +7,30 @@
 
 { ;; ---- Connection --------------------------------------------------------
 
- ;; Mail source -- IMAP or Maildir.  :folder defaults to "INBOX";
- ;; set :folder "" if a Maildir's :path already holds cur/new/tmp.
- :mailbox {:type     :imap
-           :host     "imap.example.com"
-           :port     993
-           :ssl      true
-           :user     "imap-login@example.com"
-           :password "secret"
-           :folder   "INBOX"}
- ;; Maildir alternative:
- ;; :mailbox {:type :maildir :path "/home/me/Mail" :folder "INBOX"}
+ ;; Mail sources -- vector of mailboxes.  Each entry needs a unique
+ ;; :name (used to key the per-mailbox watermark and prefix logs) and
+ ;; a :type of :imap or :maildir.  IMAP and Maildir entries may be
+ ;; mixed freely.  :folder defaults to "INBOX"; set :folder "" if a
+ ;; Maildir's :path already holds cur/new/tmp.
+ :mailboxes [{:name     "primary"
+              :type     :imap
+              :host     "imap.example.com"
+              :port     993
+              :ssl      true
+              :user     "imap-login@example.com"
+              :password "secret"
+              :folder   "INBOX"}
+             ;; Maildir example (e.g. fed by forge2mail) with a
+             ;; tighter per-mailbox :ingest window.  An :ingest map
+             ;; on a mailbox has the same shape as the top-level
+             ;; :ingest below; declared keys win over the global
+             ;; ones (shallow merge).  --fetch on the CLI still
+             ;; wins over both.
+             ;; {:name "forge" :type :maildir
+             ;;  :path "/home/me/Mail/forge" :folder ""
+             ;;  :ingest {:fetch {:since "7d"}
+             ;;           :max-size 524288}}
+             ]
 
  ;; :db is optional.  Omitted → {:path "data/bark-db"}.  Override to
  ;; place the Datalevin directory outside the source tree, e.g.:
