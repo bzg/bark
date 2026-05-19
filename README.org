@@ -182,9 +182,9 @@ exactly one of the three type keys:
 | =:notifications=         | no       | ={:enabled false}= silences notifications for this source              |
 | =:awaiting-delay=        | no       | Duration before "awaiting reply" flag, e.g. ="14d"= (default: 14 days) |
 
-All state-changing actions (commands, role controls) must be sent
-through the source's public channel.  Anyone running BARK on the
-same source then sees the same state.
+Send all state-changing actions (commands, role controls) through
+the source's public channel.  Anyone running BARK on the same source
+then sees the same state.
 
 *** Maintainers and the "lead"
 
@@ -198,8 +198,8 @@ the *first entry* is the *lead maintainer*.
 
 Each =Add= / =Remove= opens or closes a *tenure* in the DB -- a
 =[from, to)= interval recording when someone held maintainer
-status.  The full history (active and closed) is exported in
-=meta.json= and rendered in =docs.html=, so a fresh deployment
+status.  BARK exports the full history (active and closed) to
+=meta.json= and renders it in =docs.html=, so a fresh deployment
 replays commands consistently even when maintainers have changed.
 
 *** Canonical display names (=mailmap.edn=)
@@ -211,9 +211,9 @@ person, create =mailmap.edn= at the repo root:
 {"Bastien Guerry" ["bzg@gnu.org" "bzg@bzg.fr"]}
 #+end_src
 
-Applied at export time only (the DB is untouched) to maintainers,
-authors, and owners.  Unlisted emails keep their last observed
-=From:= name.
+BARK applies the mailmap at export time only (the DB is untouched)
+to maintainers, authors, and owners.  Unlisted emails keep their
+last observed =From:= name.
 
 For sources whose maintainer list or vocabulary evolved over time,
 declare the history inline via =:periods= on the source (see
@@ -246,8 +246,8 @@ declare the history inline via =:periods= on the source (see
 ** Report labels (=:labels=)
 
 Subject labels recognised per report type.  Set globally at the
-top level or per source (per-source wins).  Only the types you
-specify are overridden; others keep their defaults:
+top level or per source (per-source wins).  Overrides apply only
+to the types you specify; others keep their defaults:
 
 | Type          | Default labels   |
 |---------------+------------------|

@@ -83,7 +83,7 @@ The subject label determines a report's type. The three main labels
 are =[BUG]=, =[PATCH]= and =[FR/TODO/POLL]= for feature requests; see [[#report-types][report
 types]] for the full list.
 
-A /patch report/ is created in two cases:
+BARK creates a /patch report/ in two cases:
 
 1. The subject starts with =[PATCH]=, either directly or as =Re: [PATCH]
    ...= when the reply carries a =.patch= or =.diff= attachment (the v2/v3
@@ -250,8 +250,8 @@ To mark a report as a duplicate of another, reply with:
 : Duplicate-of: <target-message-id@example.com>
 
 Message-id forms and type constraints match =Superseded-by:= (see
-above). The duplicate is closed with reason =:canceled= and linked to
-the target. To undo, reply with =Not duplicate-of:
+above). BARK closes the duplicate with reason =:canceled= and links
+it to the target. To undo, reply with =Not duplicate-of:
 <target-message-id@example.com>=.
 
 ** Cross-referencing reports
@@ -333,7 +333,7 @@ Add maintainer: dev@example.com        (any maintainer)
 Remove maintainer: dev@example.com     (lead maintainer only)
 #+end_example
 
-The RFC 5322 =Display Name <addr>= form is also accepted:
+BARK also accepts the =Display Name <addr>= form:
 
 #+begin_example
 Add maintainer: Dev User <dev@example.com>
@@ -379,10 +379,10 @@ BARK detects a report's type from its subject label:
 | =[REL <topic> <version>]=           | release      |
 | =[CHG <topic> <version>]=           | change       |
 
-The long-form aliases =[ANNOUNCEMENT]=, =[RELEASE]= and =[CHANGE]= are also
-accepted. Labels are case-sensitive and require whitespace (or end of
-subject) after the closing =]=. Malformed labels are ignored. Posting an
-announcement, release or change requires maintainer permission.
+BARK also accepts the long-form aliases =[ANNOUNCEMENT]=, =[RELEASE]= and
+=[CHANGE]=. Labels are case-sensitive and require whitespace (or end of
+subject) after the closing =]=. BARK ignores malformed labels. Posting
+an announcement, release or change requires maintainer permission.
 
 All =<…>= parts are optional and positional. For =[REL]= and =[CHG]=, a
 single value is read as the =<version>=: =[REL 2.0]= sets the version to
@@ -390,9 +390,9 @@ single value is read as the =<version>=: =[REL 2.0]= sets the version to
 =<version>= is a =v\d+= token (e.g. =v2=), and =<n/m>= is a sequence marker
 (e.g. =3/5=).
 
-When a =[REL <version>]= report is posted, any open =[CHG <version>]=
-report with the same version is automatically closed, and the two
-reports are linked as related.
+When someone posts a =[REL <version>]= report, BARK automatically
+closes any open =[CHG <version>]= report with the same version and
+links the two as related.
 
 ** Patch series
 
@@ -660,7 +660,7 @@ reports closed within the last 12 months).
 
 ** Vote transparency
 
-Each vote on a request is stored as a separate entity recording its
+BARK stores each vote on a request as a separate entity recording its
 voter and its source email. Export produces a =votes.json= file per
 source so anyone can audit the results:
 
@@ -674,10 +674,10 @@ source so anyone can audit the results:
 }
 #+end_src
 
-Each voter is counted once per report; the first vote wins. Summary
-counts (=votes=, =votes-up=, =votes-down=, =votes-null=) are still included in
-the per-report JSON for display, derived from these entities at export
-time.
+BARK counts each voter once per report; the first vote wins. The
+per-report JSON still includes summary counts (=votes=, =votes-up=,
+=votes-down=, =votes-null=) for display, derived from these entities at
+export time.
 
 ** Browsing BARK reports online
 
@@ -717,8 +717,8 @@ from today; =deadline:= and =expired:= look forward.
 
 * Notifications
 
-BARK can send email digests of open reports. Subscribers and their
-filters are declared by the operator in =config.edn=, under
+BARK can send email digests of open reports. The operator declares
+subscribers and their filters in =config.edn=, under
 =:notifications :subscribers= (see [[#notifications-smtp][Notifications (SMTP)]] under Deploying
 BARK for the full configuration).
 
@@ -864,10 +864,10 @@ Rules:
 - Only the /first/ period may omit =:start= (unbounded past).
 - Only the /last/ period may omit =:end= (still active).
 - =bb test-config= validates the periods and rejects gaps or overlaps.
-- Maintainer tenure at each boundary is computed via /sync/: declared
-  maintainers missing at the boundary are added, and previously-active
-  maintainers absent from the declared list are closed at the
-  boundary's =:start=.
+- At each boundary, /sync/ recomputes maintainer tenure: it adds
+  declared maintainers missing at the boundary, and closes previously-
+  active maintainers absent from the declared list at the boundary's
+  =:start=.
 - =Add/Remove maintainer:= controls in emails continue to mutate tenures
   in real time /between/ boundaries.
 - Sync is /idempotent/: re-running on an existing DB never duplicates
@@ -876,8 +876,8 @@ Rules:
 
 ** Report expiry
 
-Any report type can be automatically closed when its age and state
-match configured rules. The close reason is set to "expired".
+BARK can automatically close any report type when its age and state
+match configured rules. It sets the close reason to "expired".
 
 Each entry under =:expiry= maps a report type keyword to a rule map:
 
@@ -939,10 +939,10 @@ Can be set globally or per source (per-source wins).
 
 - =:max-size= -- skip emails larger than N bytes. No limit by default.
 
-Text content of =.patch=, =.diff=, =.ics=, =text/plain= and =text/x-log=
-attachments is extracted and stored in the database. Attachments
-larger than 1 MB (1,048,576 characters) are skipped with a warning --
-only metadata (filename, size, content-type) is kept. Override the
+BARK extracts the text content of =.patch=, =.diff=, =.ics=, =text/plain=
+and =text/x-log= attachments and stores it in the database. It skips
+attachments larger than 1 MB (1,048,576 characters) with a warning,
+keeping only metadata (filename, size, content-type). Override the
 limit with =:max-attachment-size= in =:ingest=.
 
 ** Notifications (SMTP)
@@ -998,7 +998,7 @@ successful send per (subscriber, source) so the same failed-command
 entries are not re-mailed at every run. Delete the file to replay all
 current failures on the next invocation.
 
-Command failures are kept on file for the subscriber digest and for
+BARK keeps command failures on file for the subscriber digest and for
 manual inspection via =bb maintenance --failures=. BARK does *not* mail
 the author of a failing command directly: an unsubscribed user who
 typed =Superseded-by:= with a typo learns of the failure only if they

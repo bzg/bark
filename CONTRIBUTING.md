@@ -54,8 +54,8 @@ scripts in `scripts/` are read-only.
 | `bark.common`   | Shared utilities (JVM + Babashka)                  |
 | `bark.logging`  | File and email log appenders                       |
 
-`bark.common` carries no Datalevin dependency, so it is loaded by both
-the JVM and Babashka scripts. All other namespaces under `src/bark/`
+`bark.common` carries no Datalevin dependency, so both the JVM and
+Babashka scripts load it. All other namespaces under `src/bark/`
 are JVM-only.
 
 ### Babashka scripts (`scripts/`)
@@ -83,8 +83,8 @@ Dependencies:
   needs `--add-opens` flags that are wired into `deps.edn`).
 - [Babashka](https://babashka.org/) for the export, notify and
   maintenance scripts.
-- [Datalevin](https://github.com/datalevin/datalevin) is pulled in as
-  a library by `deps.edn` and as a pod by the bb scripts.
+- [Datalevin](https://github.com/datalevin/datalevin): `deps.edn`
+  pulls it in as a library; the bb scripts use it as a pod.
 
 Clone the repository:
 
@@ -122,7 +122,7 @@ then reference it by message-id in the new assertion block.
 
 ## Debugging an ingest
 
-When an email is not digested as expected:
+When BARK does not digest an email as expected:
 
 - Run `bb maintenance --failures` to list recent command-parsing
   errors and other ingest-time warnings recorded by the daemon.
