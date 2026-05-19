@@ -205,7 +205,8 @@
                          [:ul {:style "margin:0"}
                           [:li [:a {:href "?types=bug&acked=1&sort=date&dir=asc"} "Fix confirmed bugs"]]
                           [:li [:a {:href "?types=patch&sort=date&dir=asc"} "Review old patches"]]
-                          [:li [:a {:href "?types=request&sort=replies&dir=desc"} "Answer active requests"]]]]
+                          [:li [:a {:href "?types=request&sort=replies&dir=desc"} "Answer active requests"]]
+                          [:li [:a {:href "?acked=1&awaiting=1&sort=date&dir=asc"} "Revive reports awaiting reporter input"]]]]
                         [:div#pagination]])
                       (h/html (bark-footer {:ical has-ical?})))]
     (str
