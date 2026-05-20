@@ -714,6 +714,7 @@ from today; =deadline:= and =expired:= look forward.
 - [[https://codeberg.org/bzg/bone][bone]] lets you browse and filter BARK reports from the terminal.
 - [[https://codeberg.org/bzg/gnus-bone][gnus-bone.el]] integrates the same view in [[https://gnus.org/][Emacs Gnus]].
 - [[https://codeberg.org/bzg/notmuch-bone][notmuch-bone.el]] provides the same integration for [[https://notmuchmail.org/][notmuch]].
+- [[https://codeberg.org/bzg/mu4e-bone][mu4e-bone.el]] provides the same integration for [[https://djcbsoftware.nl/code/mu/mu4e.html][mu4e]].
 
 * Notifications
 
@@ -792,9 +793,6 @@ filesystem events rather than polling.
 #+end_src
 
 *** Multiple mailboxes
-:PROPERTIES:
-:CUSTOM_ID: multiple-mailboxes
-:END:
 
 =:mailboxes= can declare any combination of IMAP and Maildir entries.
 A typical setup: one IMAP account for an upstream mailing list, and a

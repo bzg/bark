@@ -6,7 +6,7 @@ fixed vocabulary of commands.  Maintainers can also write to the
 inbox directly to manage roles and receive periodic digests.
 
 To browse BARK reports from the terminal, use [[https://codeberg.org/bzg/bone][bone]].  Companion
-modes for Emacs: [[codeberg.org/bzg/gnus-bone][gnus-bone.el]] and [[https://codeberg.org/bzg/notmuch-bone][notmuch-bone.el]].
+modes for Emacs: [[codeberg.org/bzg/gnus-bone][gnus-bone]], [[https://codeberg.org/bzg/notmuch-bone][notmuch-bone]] and [[https://codeberg.org/bzg/mu4e-bone][mu4e-bone]].
 
 For maintainers, see the full [[https://codeberg.org/bzg/bark/src/branch/main/docs/bark-manual.org][BARK manual]].
 

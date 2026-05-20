@@ -15,6 +15,7 @@ BARK reports can be read with other tools:
 - As a CLI based on [[https://junegunn.github.io/fzf/][fzf]]: [[https://codeberg.org/bzg/bone][bone]]
 - Via GNU Emacs [[https://gnus.org][Gnus]]: [[https://codeberg.org/bzg/gnus-bone][gnus-bone]]
 - Via GNU Emacs [[https://notmuchmail.org/notmuch-emacs/][notmuch]]: [[https://codeberg.org/bzg/notmuch-bone][notmuch-bone]]
+- Via GNU Emacs [[https://djcbsoftware.nl/code/mu/mu4e.html][mu4e]]: [[https://codeberg.org/bzg/mu4e-bone][mu4e-bone]]
 
 * BARK manual
 

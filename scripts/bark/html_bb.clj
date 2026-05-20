@@ -206,8 +206,9 @@
     [:li [:a {:href "docs.html"} "Documentation"]]
     [:li [:a {:href "reports/all.xml"} "Subscribe via RSS"]]
     [:li [:a {:href "https://codeberg.org/bzg/bone"} "bone"] " -- CLI based on fzf"]
-    [:li [:a {:href "https://codeberg.org/bzg/gnus-bone"} "gnus-bone"] " -- GNU Emacs Gnus interface"]
-    [:li [:a {:href "https://codeberg.org/bzg/notmuch-bone"} "notmuch-bone"] " -- GNU Emacs notmuch interface"]
+    [:li [:a {:href "https://codeberg.org/bzg/gnus-bone"} "gnus-bone"] " -- Gnus"]
+    [:li [:a {:href "https://codeberg.org/bzg/notmuch-bone"} "notmuch-bone"] " -- GNU Emacs notmuch"]
+    [:li [:a {:href "https://codeberg.org/bzg/mu4e-bone"} "mu4e-bone"] " -- mu4e"]
     [:li [:a {:href bark-repo-url} "BARK source repository"]]]])
 
 (defn wrap-template
