@@ -129,7 +129,7 @@ By default BARK reads =./config.edn=.  To override:
 
 Precedence: =-c= > =BARK_CONFIG= > =./config.edn=.
 
-The legacy =BARK_DB= env var still works as a fallback when no
+The =BARK_DB= env var is honored as a fallback when no
 =:db {:path …}= entry is set.
 
 ** Mail sources (=:mailboxes=)

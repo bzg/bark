@@ -106,7 +106,7 @@
     (let [r (main/check-mailboxes {:mailboxes [imap-mb maildir-mb]})]
       (is (= [imap-mb maildir-mb] (:ok r))))))
 
-(deftest check-mailboxes-rejects-legacy-singleton
+(deftest check-mailboxes-rejects-singleton
   (testing ":mailbox singleton is no longer accepted"
     (let [r (main/check-mailboxes {:mailbox imap-mb})]
       (is (nil? (:ok r)))

@@ -735,14 +735,14 @@
 
 (defn check-mailboxes
   "Validate the :mailboxes vector.  Returns either {:ok mailboxes}
-  or {:error message}.  Rejects the legacy singleton :mailbox key
-  explicitly (BARK is in 0.y.z -- no rétrocompat).  Pure -- callers
-  decide whether to exit or surface the error.  Name format is
-  shared with :sources via `common/valid-config-name?`."
+  or {:error message}.  Rejects the singleton :mailbox key explicitly
+  (BARK is in 0.y.z -- no rétrocompat).  Pure -- callers decide
+  whether to exit or surface the error.  Name format is shared with
+  :sources via `common/valid-config-name?`."
   [config]
   (let [mailboxes (:mailboxes config)]
     (or (when (contains? config :mailbox)
-          {:error common/legacy-mailbox-error})
+          {:error common/singleton-mailbox-error})
         (when (or (not (vector? mailboxes)) (empty? mailboxes))
           {:error ":mailboxes must be a non-empty vector of mailbox maps."})
         (some (fn [[idx mb]]

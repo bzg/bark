@@ -422,15 +422,15 @@
                          " does not match any :sources :name"))]
         (seq errs)))))
 
-(defn- pre-check-mailbox-legacy
-  "BARK is in 0.y.z -- reject the legacy singleton :mailbox key
-  outright (no silent wrap to :mailboxes)."
+(defn- pre-check-singleton-mailbox
+  "BARK is in 0.y.z -- reject the singleton :mailbox key outright
+  (no silent wrap to :mailboxes)."
   [config]
   (when (contains? config :mailbox)
-    [common/legacy-mailbox-error]))
+    [common/singleton-mailbox-error]))
 
 (defn validate-config [config]
-  (if-let [errs (or (pre-check-mailbox-legacy config)
+  (if-let [errs (or (pre-check-singleton-mailbox config)
                     (pre-check-commands config)
                     (pre-check-periods config)
                     (pre-check-subscribers config))]
@@ -460,7 +460,12 @@
                    (catch Exception e
                      (log/error "Invalid EDN:" (.getMessage e))
                      (System/exit 1)))
-          result (validate-config config)]
+          result (validate-config config)
+          inline-pwds (common/inline-password-locations path)]
+      (doseq [loc inline-pwds]
+        (log/warn "Inline :password in" loc
+                  "-- consider :password-file or #bark/env to keep"
+                  "credentials out of config.edn (see manual)."))
       (if (:valid? result)
         (do (log/info "✓" path "is valid.")
             (log/info "  Mailboxes:" (count (:mailboxes config)))

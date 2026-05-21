@@ -1406,7 +1406,7 @@ To keep a legitimately old bug open, a maintainer marks it owned
 
 : From: eve@project.org
 : To: bugs-list@project.org
-: Subject: Re: [BUG] Legacy encoding issue
+: Subject: Re: [BUG] Old encoding issue
 : 
 : This is still relevant, keeping it open.
 : No expiry.

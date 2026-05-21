@@ -93,7 +93,7 @@
   Routing is driven by the `:audience` field on each failure entry:
   - `:author`      -- shown only to the address that triggered the
                      failure (someone seeing their own typo); default
-                     for legacy entries that predate the field.
+                     when the field is absent.
   - `:maintainers` -- shown to every subscriber on the source."
   [all-failures {:keys [email source since]}]
   (let [addr (str/lower-case email)]

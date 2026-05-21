@@ -59,7 +59,7 @@
                             :email/headers-edn]}]
           [:report/message-id message-id]))
 
-;; --- Helpers to bridge legacy assertions to the new :rel/* model ---
+;; --- Test helpers to aggregate :rel/* facts for assertion convenience ---
 
 (defn- active-out-rels
   "All active outgoing relations of `kind` from `report-pull`."
@@ -69,10 +69,10 @@
        (filter #(= kind (:rel/kind %)))))
 
 (defn- all-related
-  "Legacy :report/related accessor: collects every report linked via
+  "Aggregate-related accessor: collects every report linked via
   :related-to (canonical may live on either side), :resolves/:resolved-by,
-  or :supersedes/:superseded-by -- i.e. anything that used to populate
-  the bidirectional :report/related ref."
+  or :supersedes/:superseded-by -- mirrors what a bidirectional
+  :report/related ref would surface."
   [report-pull]
   (let [outs (->> (:rel/_from report-pull)
                   (filter :rel/active?)

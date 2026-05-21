@@ -83,7 +83,7 @@
        (not (str/blank? s))
        (some? (re-matches config-name-regex s))))
 
-(def legacy-mailbox-error
+(def singleton-mailbox-error
   "Single source of truth for the rejected-`:mailbox`-key message."
   (str ":mailbox is no longer accepted (even when set to nil) "
        "-- use :mailboxes [{...}] (vector of mailbox maps with a :name each)."))
@@ -721,6 +721,28 @@
      (when (.exists f)
        (-> (edn/read-string {:readers config-edn-readers} (slurp f))
            resolve-password-files)))))
+
+(defn inline-password-locations
+  "Read config.edn as it was written -- without resolving #bark/env or
+   :password-file -- and return a vector of human-readable location
+   labels where :password is a plain inline string.  Used by
+   `bb test-config` to remind operators that credentials can live in
+   a sidecar file or environment variable instead."
+  [path]
+  (let [f (io/file path)]
+    (when (.exists f)
+      (let [env-marker ::env
+            raw        (edn/read-string
+                        {:readers {'bark/env (constantly env-marker)}}
+                        (slurp f))
+            inline?    #(and (map? %)
+                             (string? (:password %))
+                             (not (:password-file %)))
+            mailboxes  (for [mb (:mailboxes raw) :when (inline? mb)]
+                         (str "mailbox " (pr-str (:name mb))))
+            smtp       (when (inline? (get-in raw [:notifications :smtp]))
+                         "notifications :smtp")]
+        (vec (cond-> (vec mailboxes) smtp (conj smtp)))))))
 
 (defn load-mailmap
   "Load ./mailmap.edn (shape `{\"Canonical Name\" [emails…]}`) and return
