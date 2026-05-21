@@ -12,6 +12,15 @@
  ;; a :type of :imap or :maildir.  IMAP and Maildir entries may be
  ;; mixed freely.  :folder defaults to "INBOX"; set :folder "" if a
  ;; Maildir's :path already holds cur/new/tmp.
+ ;; The :password value above is shown inline for clarity, but you can
+ ;; keep credentials out of config.edn (which is often world-readable
+ ;; or backed up unencrypted) by using either:
+ ;;
+ ;;   :password-file "/etc/bark/imap.pwd"   ; trimmed contents at startup
+ ;;   :password #bark/env "BARK_IMAP_PWD"   ; resolved from the env at startup
+ ;;
+ ;; Both raise a clear error at startup if the file/var is missing,
+ ;; rather than silently using nil.  Mutually exclusive with :password.
  :mailboxes [{:name     "primary"
               :type     :imap
               :host     "imap.example.com"
@@ -215,6 +224,8 @@
  ;; ---- Notifications -------------------------------------------------------
 
  ;; Optional -- notifications disabled if absent.
+ ;; The :smtp map accepts :password-file or #bark/env exactly like the
+ ;; mailbox section above.
  ;; :notifications {:enabled false
  ;;                 :smtp {:host     "smtp.example.com"
  ;;                        :port     587

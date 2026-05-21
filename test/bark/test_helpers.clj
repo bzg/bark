@@ -17,7 +17,7 @@
   "A `clojure.test` fixture (`:once` or `:each`) that rebinds
   `bark.commands/*failures-file*` to a temp path for the duration of
   the test run, so denied commands don't pollute the real
-  `public/.failures.edn`.  The file is marked `deleteOnExit` and also
+  `data/.failures.edn`.  The file is marked `deleteOnExit` and also
   removed eagerly after the fixture body."
   [f]
   (let [tmp (doto (java.io.File/createTempFile "bark-failures" ".edn")

@@ -9,7 +9,7 @@
 ;; and sends emails via SMTP.  The cadence is the operator's
 ;; responsibility: schedule bb notify from cron or a systemd timer.
 ;;
-;; Operational state lives in public/.last-notify-failures.edn -- a
+;; Operational state lives in data/.last-notify-failures.edn -- a
 ;; per-(subscriber, source) timestamp of the last successful send,
 ;; used to avoid re-mailing the same failures.  Delete the file to
 ;; replay all failures on the next run.
@@ -46,7 +46,7 @@
 ;; every run.  This is operational state, not configuration --
 ;; subscribers and filters live in config.edn.
 
-(def ^:private last-failures-file "public/.last-notify-failures.edn")
+(def ^:private last-failures-file "data/.last-notify-failures.edn")
 
 (defn- load-last-failures-shown
   "Read {key -> epoch-millis} from the state file, or {}.  A corrupt

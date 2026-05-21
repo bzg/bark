@@ -12,13 +12,21 @@
   notify     {:doc  "Send notification emails: bb notify [--dry-run] [--debug]"
               :task (apply shell "bb scripts/bark-notify.clj" *command-line-args*)}
 
-  clean      {:doc  "Remove all files in public/"
-              :task (let [dir (clojure.java.io/file "public")]
-                     (when (.exists dir)
-                      (doseq [f (reverse (file-seq dir))]
-                       (when-not (= f dir)
-                        (.delete f)
-                        (println "Deleted" (.getPath f))))))}
+  clean      {:doc  "Remove all files in public/ and reset the incremental-export watermark"
+              :task (do (let [dir (clojure.java.io/file "public")]
+                         (when (.exists dir)
+                          (doseq [f (reverse (file-seq dir))]
+                           (when-not (= f dir)
+                            (.delete f)
+                            (println "Deleted" (.getPath f))))))
+                        ;; Drop the incremental watermark so the next
+                        ;; export rebuilds everything.  .failures.edn
+                        ;; and .last-notify-failures.edn are owned by
+                        ;; the daemon / notifier and survive.
+                        (let [f (clojure.java.io/file "data/.last-export")]
+                         (when (.exists f)
+                          (.delete f)
+                          (println "Deleted" (.getPath f)))))}
 
   test-config {:doc  "Validate config.edn (pass path as arg, default: ./config.edn)"
                :task (apply shell "bb scripts/validate-config.clj" *command-line-args*)}

@@ -8,6 +8,7 @@
   (:require [clojure.string :as str]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clojure.walk :as walk]
             [taoensso.timbre :as log])
   (:import [java.text Normalizer Normalizer$Form]
            [java.security MessageDigest]
@@ -27,8 +28,10 @@
   (edn/read-string (slurp (io/resource "bark-schema.edn"))))
 
 (def failures-file-path
-  "Shared command-failures EDN file: JVM writes, bb scripts read."
-  "public/.failures.edn")
+  "Shared command-failures EDN file: JVM writes, bb scripts read.
+   Kept under data/ so the public/ directory only holds files that
+   are safe to serve."
+  "data/.failures.edn")
 
 (defn read-failures-file
   "Read the failures EDN file at `path`, returning a vector ([] if
@@ -671,15 +674,53 @@
 ;; Config and source-map
 ;; ---------------------------------------------------------------------------
 
+(def config-edn-readers
+  "EDN reader tags accepted in `config.edn`.
+
+   `#bark/env \"VAR\"` resolves to the named environment variable.
+   Raises if the variable is unset -- prefer a clear startup failure
+   over silently using a nil password."
+  {'bark/env (fn [var-name]
+               (let [k (str var-name)]
+                 (or (System/getenv k)
+                     (throw (ex-info (str "Environment variable not set: " k)
+                                     {:var k})))))})
+
+(defn- resolve-password-files
+  "Replace every `{:password-file path}` in the config with the trimmed
+   contents of the file.  Applied across :mailboxes and :notifications
+   :smtp.  Raises if both `:password` and `:password-file` are set, or
+   if the referenced file is missing."
+  [config]
+  (walk/postwalk
+   (fn [x]
+     (if-let [pf (and (map? x) (:password-file x))]
+       (do
+         (when (:password x)
+           (throw (ex-info ":password and :password-file are mutually exclusive"
+                           {:offending x})))
+         (let [f (io/file (expand-home pf))]
+           (when-not (.exists f)
+             (throw (ex-info (str ":password-file not found: " pf)
+                             {:path pf})))
+           (-> x (dissoc :password-file)
+               (assoc :password (str/trim (slurp f))))))
+       x))
+   config))
+
 (defn load-config
   "Load config.edn if it exists, or nil.  With no args, consults the
   BARK_CONFIG env var, falling back to ./config.edn -- so all bb
-  scripts honor a single override point without per-script flags."
+  scripts honor a single override point without per-script flags.
+
+  Resolves `#bark/env \"VAR\"` reader tags and `:password-file` entries
+  before returning, so callers see a fully-materialised config."
   ([] (load-config (or (System/getenv "BARK_CONFIG") "config.edn")))
   ([path]
    (let [f (io/file path)]
      (when (.exists f)
-       (edn/read-string (slurp f))))))
+       (-> (edn/read-string {:readers config-edn-readers} (slurp f))
+           resolve-password-files)))))
 
 (defn load-mailmap
   "Load ./mailmap.edn (shape `{\"Canonical Name\" [emails…]}`) and return

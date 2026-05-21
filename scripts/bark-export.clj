@@ -72,10 +72,10 @@
 ;; The export is fully read-only w.r.t. the database.
 ;; ---------------------------------------------------------------------------
 
-(def ^:private last-export-file "public/.last-export")
+(def ^:private last-export-file "data/.last-export")
 
 (defn- get-last-export
-  "Read the last export timestamp from public/.last-export, or nil.
+  "Read the last export timestamp from data/.last-export, or nil.
   A corrupt file forces a full export on the next run -- log so the
   operator knows why."
   []
@@ -88,7 +88,7 @@
              nil)))))
 
 (defn- save-last-export!
-  "Write the export timestamp to public/.last-export."
+  "Write the export timestamp to data/.last-export."
   [^java.util.Date ts]
   (io/make-parents last-export-file)
   (spit last-export-file (str (.getTime ts))))

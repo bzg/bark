@@ -456,7 +456,7 @@
     (do (log/error "Config file not found:" path)
         (System/exit 1))
     (let [config (try
-                   (edn/read-string (slurp file))
+                   (common/load-config path)
                    (catch Exception e
                      (log/error "Invalid EDN:" (.getMessage e))
                      (System/exit 1)))

@@ -778,6 +778,20 @@ The =:db=, =:logging= and =:ingest= sections are optional. Defaults: =:db
 {:fetch {:limit 50}}=. See =config.edn.example= for the full annotated
 reference.
 
+To keep IMAP/SMTP credentials out of =config.edn= itself, either:
+
+#+begin_src edn
+:password-file "/etc/bark/imap.pwd"   ; trimmed contents read at startup
+:password      #bark/env "BARK_IMAP_PWD"  ; resolved from the environment
+#+end_src
+
+Both forms fail loudly at startup if the file or env var is missing,
+rather than silently using a nil password. The file form pairs well
+with systemd's =LoadCredential=imap-pwd:/etc/bark/imap.pwd= (the secret
+is mounted under =$CREDENTIALS_DIRECTORY=) and with Docker secrets
+(=/run/secrets/imap-pwd=). =:password= and =:password-file= are mutually
+exclusive in the same map.
+
 BARK also reads Maildir folders. Point =:path= at the parent directory
 containing =cur/=, =new/= and =tmp/=, and use =:folder= to select the
 subfolder. Set =:folder ""= when the Maildir at =:path= already holds
@@ -852,6 +866,53 @@ CLI still overrides every level.
  :ingest    {:fetch {:limit 200}}
  :sources   [{:name "..." :list "..."}]}
 #+end_src
+
+** Trust model and MTA requirements
+
+BARK identifies every actor -- author, maintainer, voter, command issuer
+-- by the =From:= header of incoming mail. BARK does /not/ verify DKIM,
+SPF or DMARC itself. It relies on the upstream MTA to filter forged
+mail before it reaches the Maildir or IMAP folder BARK watches.
+
+This has practical consequences:
+
+- Trivial actions (creating a report, =Acked.=, =Owned.=, votes, closing
+  a thread) treat the =From:= address as authoritative. An attacker who
+  successfully delivers a mail with a forged =From:= can vandalise a
+  report. Damage is bounded: a maintainer can always retract by
+  command, and the audit trail keeps the offending message-id.
+- Sensitive actions are stronger by design: =Add maintainer= /
+  =Remove maintainer= / =Set lead= require the issuer to already be a
+  maintainer (or the lead); the lead maintainer cannot be removed.
+  Announcements and releases require maintainer status. /But/ those
+  checks still rely on =From:=, so they are only as strong as the
+  upstream filtering.
+
+Recommended deployment posture:
+
+- Run BARK behind an MTA that injects =Authentication-Results= for
+  every delivered mail (Postfix + OpenDKIM/OpenDMARC, or any mail
+  provider that supplies them).
+- Configure the MTA to /reject/ -- not just tag -- messages that fail
+  DMARC for domains with =p=reject= or =p=quarantine= policies. The
+  default behaviour of most MTAs is to honour the sender's policy,
+  which means domains publishing =p=none= will still let spoofs
+  through.
+- If your sources are public mailing lists (Mailman, sourcehut, etc.),
+  be aware that list mail typically arrives with =dmarc=fail= even
+  when legitimate, because the list rewrites headers. Bark cannot
+  distinguish a legitimate Gmail-via-list mail from a spoofed one
+  without reading =Authentication-Results= itself -- which it does
+  not, for now.
+- For a personal Maildir watched by a single user, this whole section
+  is mostly informative: you are the only writer with practical
+  delivery, and the attack surface reduces to whatever can reach your
+  inbox -- which is already your spam problem.
+
+If your deployment exposes BARK to a public list where you cannot
+trust the upstream filtering, treat maintainer changes and
+announcements as advisory and audit the source =Message-Id= before
+acting on them.
 
 ** Monitoring your local mail
 
@@ -1063,7 +1124,7 @@ invoked. Schedule it from cron or a systemd timer. =bb test-config=
 verifies that every =:source= named under =:subscribers= matches an
 existing source =:name=.
 
-A small state file, =public/.last-notify-failures.edn=, records the last
+A small state file, =data/.last-notify-failures.edn=, records the last
 successful send per (subscriber, source) so the same failed-command
 entries are not re-mailed at every run. Delete the file to replay all
 current failures on the next invocation.
