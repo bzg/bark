@@ -310,15 +310,16 @@
 
 (defn- safe-store-and-process!
   "Run store-and-process! on `msg`, logging and swallowing exceptions.
-  Returns the result keyword (:ok/:skip/:retry) or nil on exception.
-  Honours `shutting-down?` -- callers that iterate should also check it
-  via a :while clause to stop cleanly."
+  Returns the result keyword (:ok/:skip/:retry); :retry on exception so
+  the IMAP watermark stays put and the message gets a fresh attempt on
+  the next catch-up.  Honours `shutting-down?` -- callers that iterate
+  should also check it via a :while clause to stop cleanly."
   [db-conn source-map sources msg ingest-opts]
   (try
     (store-and-process! db-conn source-map sources msg ingest-opts)
     (catch Exception e
       (log/error e "Failed to process id:" (:id msg) (blog/exception-msg e))
-      nil)))
+      :retry)))
 
 (defn- collect-safe-uids
   "Set of UIDs from `msgs` that didn't need retry.  Caps the IMAP
@@ -452,6 +453,13 @@
 ;; duplicate work.
 (def ^:private last-expire-ms (atom 0))
 
+;; How often the dedicated scheduler thread wakes to attempt
+;; maybe-expire!.  The real frequency-of-execution is once per day
+;; (gated by the CAS inside maybe-expire!); this interval just sets
+;; how quickly we react when the 24-hour window opens and how long
+;; the scheduler thread takes to notice a shutdown.
+(def ^:private expire-tick-ms (* 60 60 1000))
+
 (defn- maybe-expire!
   "Run expire + flush-stale-pending if at least a day has elapsed
   since the last successful run.  Thread-safe -- a single atomic CAS
@@ -540,63 +548,103 @@
        (catch Exception e
          (log/debug "Mailbox close failed:" (.getMessage e)))))
 
+(defn- live-run-opts
+  "Recompute run-opts from the latest config.edn so edits to this
+  mailbox's own :ingest, :folder, host/credentials etc. take effect on
+  reconnect.  Falls back to the original mailbox-cfg / ingest-cfg when
+  the entry has been removed from the config between reconnects --
+  silently dropping a live mailbox would be more confusing than
+  carrying on with the last known state."
+  [mailbox-cfg ingest-cfg cli-fetch-map config-path]
+  (let [config      (common/load-config config-path)
+        live-mb     (or (some #(when (= (:name %) (:name mailbox-cfg)) %)
+                              (:mailboxes config))
+                        mailbox-cfg)
+        live-ingest (or (:ingest config) ingest-cfg)]
+    (assoc (run-opts live-mb live-ingest cli-fetch-map)
+           :mailbox-cfg live-mb)))
+
 (defn watch-loop!
   "Run watch on one mailbox with automatic reconnection and
   exponential backoff.  Reloads config.edn on each reconnect so
   changes take effect.  Designed to be run in its own future when
   several mailboxes are configured."
   [mailbox-cfg db-conn ingest-cfg cli-fetch-map config-path]
-  (let [{:keys [mailbox-name folder mailbox-type fetch-opts ingest-opts]}
-        (run-opts mailbox-cfg ingest-cfg cli-fetch-map)]
-    (loop [backoff-ms 1000]
-      (when-not (shutting-down?)
-        (let [{:keys [source-map sources]} (load-context db-conn config-path)
-              src (open-mailbox mailbox-cfg)]
-          (if-not src
-            (do (log/error "Mailbox" (pr-str mailbox-name)
-                           "-- connection failed, retrying in" (/ backoff-ms 1000) "s")
-                (Thread/sleep backoff-ms)
-                (recur (min (* backoff-ms 2) max-backoff-ms)))
-            (do
-              (try
-                (log/info "Mailbox" (pr-str mailbox-name) "-- connected, folder:" folder)
-                (catch-up-fetch! src db-conn mailbox-name folder fetch-opts
-                                 source-map sources ingest-opts mailbox-type)
-                (maybe-expire! db-conn source-map sources)
-                (when-not (shutting-down?)
-                  (start-watch! src db-conn mailbox-name folder source-map sources ingest-opts))
-                (catch Exception e
-                  (log/error e "Mailbox" (pr-str mailbox-name)
-                             "-- watch interrupted:" (blog/exception-msg e))))
-              (close-mailbox! src)
+  (loop [backoff-ms 1000]
+    (when-not (shutting-down?)
+      (let [{:keys [source-map sources]} (load-context db-conn config-path)
+            {:keys [mailbox-cfg mailbox-name folder mailbox-type fetch-opts ingest-opts]}
+            (live-run-opts mailbox-cfg ingest-cfg cli-fetch-map config-path)
+            src (open-mailbox mailbox-cfg)]
+        (if-not src
+          (do (log/error "Mailbox" (pr-str mailbox-name)
+                         "-- connection failed, retrying in" (/ backoff-ms 1000) "s")
+              (Thread/sleep backoff-ms)
+              (recur (min (* backoff-ms 2) max-backoff-ms)))
+          (do
+            (try
+              (log/info "Mailbox" (pr-str mailbox-name) "-- connected, folder:" folder)
+              (catch-up-fetch! src db-conn mailbox-name folder fetch-opts
+                               source-map sources ingest-opts mailbox-type)
+              (maybe-expire! db-conn source-map sources)
               (when-not (shutting-down?)
-                (log/debug "Mailbox" (pr-str mailbox-name) "-- watch exited, reconnecting in 1s")
-                (Thread/sleep 1000)
-                (recur 1000)))))))))
+                (start-watch! src db-conn mailbox-name folder source-map sources ingest-opts))
+              (catch Exception e
+                (log/error e "Mailbox" (pr-str mailbox-name)
+                           "-- watch interrupted:" (blog/exception-msg e))))
+            (close-mailbox! src)
+            (when-not (shutting-down?)
+              (log/debug "Mailbox" (pr-str mailbox-name) "-- watch exited, reconnecting in 1s")
+              (Thread/sleep 1000)
+              (recur 1000))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Main
 ;; ---------------------------------------------------------------------------
 
+(defn- expire-scheduler!
+  "Periodically wake to give maybe-expire! a chance to run.  Necessary
+  because start-watch! blocks on IMAP IDLE / inotify -- without this
+  thread, expire and flush-stale-pending would only run when a watch
+  loop reconnects.  The actual work is rate-limited to once per day
+  by the CAS inside maybe-expire!.  Exits cleanly on shutdown."
+  [db-conn config-path]
+  (while (not (shutting-down?))
+    (Thread/sleep ^long expire-tick-ms)
+    (when-not (shutting-down?)
+      (try
+        (let [{:keys [source-map sources]} (load-context db-conn config-path)]
+          (maybe-expire! db-conn source-map sources))
+        (catch Exception e
+          (log/error e "Scheduled expire failed:" (blog/exception-msg e)))))))
+
 (defn- watch-all!
   "Run watch on every configured mailbox in parallel: one future per
-  mailbox.  The futures are published into `watch-futures` so the
-  shutdown hook can wait for them before closing the DB.  The main
-  thread blocks on `run! deref` until every loop exits (typically
-  only on shutdown).  Uncaught throwables inside a future are logged
-  so a dead thread cannot silently disappear."
+  mailbox, plus a dedicated future for the daily expire scheduler.
+  The futures are published into `watch-futures` so the shutdown hook
+  can wait for them before closing the DB.  The main thread blocks on
+  `run! deref` over the watch loops until every one exits (typically
+  only on shutdown); the scheduler exits via the shared shutdown flag.
+  Uncaught throwables inside a future are logged so a dead thread
+  cannot silently disappear."
   [mailboxes db-conn ingest-cfg cli-fetch-map config-path]
-  (let [futs (mapv (fn [mb]
-                     (future
-                       (try
-                         (watch-loop! mb db-conn ingest-cfg cli-fetch-map config-path)
-                         (catch Throwable t
-                           (log/error t "Mailbox" (pr-str (:name mb))
-                                      "-- watch loop terminated:"
-                                      (blog/exception-msg t))))))
-                   mailboxes)]
-    (reset! watch-futures futs)
-    (run! deref futs)
+  (let [watch-futs (mapv (fn [mb]
+                           (future
+                             (try
+                               (watch-loop! mb db-conn ingest-cfg cli-fetch-map config-path)
+                               (catch Throwable t
+                                 (log/error t "Mailbox" (pr-str (:name mb))
+                                            "-- watch loop terminated:"
+                                            (blog/exception-msg t))))))
+                         mailboxes)
+        sched-fut  (future
+                     (try
+                       (expire-scheduler! db-conn config-path)
+                       (catch Throwable t
+                         (log/error t "Expire scheduler terminated:"
+                                    (blog/exception-msg t)))))]
+    (reset! watch-futures (conj watch-futs sched-fut))
+    (run! deref watch-futs)
     ;; Reached when every watch loop has exited.  Under normal
     ;; operation that only happens during shutdown; otherwise every
     ;; thread died and the daemon is doing nothing useful -- treat
