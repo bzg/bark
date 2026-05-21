@@ -113,6 +113,17 @@
   [message-id]
   (sha256 (str "bark:" message-id)))
 
+(defn escape-script-payload
+  "Neutralize HTML-script-closing and comment sequences in a JSON payload that
+   will be inlined inside an HTML <script> tag.  Email-controlled fields
+   (subject, from-name, …) reach this path verbatim, so a `</script>` in any
+   string would otherwise break out of the script element."
+  ^String [^String s]
+  (-> s
+      (str/replace "</" "<\\/")
+      (str/replace "<!--" "<\\!--")
+      (str/replace "-->" "--\\>")))
+
 (def patch-filename-re #"(?i)\.(patch|diff)$")
 
 (defn patch-file?

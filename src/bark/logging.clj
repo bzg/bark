@@ -52,6 +52,14 @@
 
 (def ^:private file-log-lock (Object.))
 
+(defn- escape-log-line
+  "Neutralize CR/LF in a single log message so email-controlled fields
+   (subject, From, …) cannot inject forged log lines."
+  ^String [^String s]
+  (-> s
+      (str/replace "\r" "\\r")
+      (str/replace "\n" "\\n")))
+
 (defn configure-file-logging!
   "Attach a Timbre file appender when `:file` is set."
   [{:keys [file level max-size backlog]
@@ -76,6 +84,6 @@
                                  (str (force (:timestamp_ data)) " "
                                       (str/upper-case (name (:level data))) " "
                                       (:?ns-str data) " - "
-                                      (force (:msg_ data)) "\n"
+                                      (escape-log-line (force (:msg_ data))) "\n"
                                       trace)
                                  :append true))))}}}))))

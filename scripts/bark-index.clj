@@ -17,7 +17,7 @@
          '[clojure.string :as str]
          '[hiccup2.core :as h]
          '[taoensso.timbre :as log]
-         '[bark.common :refer [parse-cli-args load-config]]
+         '[bark.common :refer [parse-cli-args load-config escape-script-payload]]
          '[bark.html-bb :refer [pico-cdn resolved-theme set-theme!
                                 bark-description page-title
                                 footer-css bark-footer wrap-js spit-html
@@ -123,7 +123,7 @@
 
 (defn page-js [types-json total open-count closed-count source-type page-size reports-json]
   (wrap-js (str "var barkConfig = {types:" types-json
-                ",typeLabels:" (json/generate-string type-labels)
+                ",typeLabels:" (escape-script-payload (json/generate-string type-labels))
                 ",total:" total
                 ",openCount:" open-count
                 ",closedCount:" closed-count
@@ -146,7 +146,7 @@
         source-name  (get envelope "source")
         title        (page-title "Reports" source-name)
         types        (vec (distinct (map #(get % "type") reports)))
-        types-json   (json/generate-string types)
+        types-json   (escape-script-payload (json/generate-string types))
         total        (get envelope "total" (count reports))
         open-count   (get envelope "open-count" (count reports))
         closed-count (get envelope "closed-count" 0)
@@ -235,7 +235,7 @@
         (noscript-banner title)
         (h/raw (wrap-template "js-tpl" tpl-body))
         [:script (h/raw (page-js types-json total open-count closed-count source-type page-size
-                                 (json/generate-string reports)))]]]))))
+                                 (escape-script-payload (json/generate-string reports))))]]]))))
 
 ;; ---------------------------------------------------------------------------
 ;; Main

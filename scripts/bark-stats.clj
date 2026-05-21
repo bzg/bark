@@ -19,7 +19,7 @@
          '[bark.common :refer [report-priority report-status
                                report-descendant-count format-date format-date-iso
                                parse-cli-args load-config db-path bark-schema
-                               votes-by-report vote-counts]]
+                               votes-by-report vote-counts escape-script-payload]]
          '[bark.common-bb :refer [load-datalevin-pod! all-reports dq]]
          '[bark.html-bb :refer [pico-cdn resolved-theme set-theme!
                                 bark-description footer-css page-title
@@ -383,7 +383,9 @@
 
 (defn chart-div [id spec]
   (str "<div class=\"chart\" id=\"" id "\"></div>"
-       "<script>" (wrap-js (str "barkSpecs['" id "']=" (json/generate-string spec) ";")) "</script>"))
+       "<script>" (wrap-js (str "barkSpecs['" id "']="
+                                (escape-script-payload (json/generate-string spec))
+                                ";")) "</script>"))
 
 ;; Individual chart specs
 
