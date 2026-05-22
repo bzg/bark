@@ -43,6 +43,15 @@ function barkRenderAll() {
   });
 }
 
+// Vega's default tooltip handler is mouse-driven; on touch devices a tap
+// triggers mouseover but no mouseout, so the tooltip sticks (and worse,
+// stays on top while the user scrolls). Force-hide it on scroll or on any
+// tap outside a chart.
+function barkHideTooltip() {
+  var el = document.getElementById('vg-tooltip-element');
+  if (el) el.classList.remove('visible');
+}
+
 // Wait for DOMContentLoaded so bark-theme.js has defined toggleTheme.
 // Then wrap it to also re-render charts on theme change.
 document.addEventListener('DOMContentLoaded', function() {
@@ -51,4 +60,8 @@ document.addEventListener('DOMContentLoaded', function() {
     var origToggle = toggleTheme;
     toggleTheme = function() { origToggle(); barkRenderAll(); };
   }
+  window.addEventListener('scroll', barkHideTooltip, {passive: true});
+  document.addEventListener('touchstart', function(e) {
+    if (!e.target.closest || !e.target.closest('.chart')) barkHideTooltip();
+  }, {passive: true});
 });

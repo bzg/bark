@@ -18,7 +18,7 @@
          '[taoensso.timbre :as log]
          '[bark.common :refer [report-priority report-status
                                report-descendant-count format-date format-date-iso
-                               parse-cli-args load-config db-path bark-schema
+                               parse-cli-args load-config load-mailmap db-path bark-schema
                                votes-by-report vote-counts escape-script-payload]]
          '[bark.common-bb :refer [load-datalevin-pod! all-reports dq]]
          '[bark.html-bb :refer [pico-cdn resolved-theme set-theme!
@@ -277,15 +277,30 @@
                         :within-quarter (count (filter #(and (>= % 30) (<= % 90)) durations))
                         :longer         (count (filter #(>  % 90)    durations))}})))
 
-(defn top-openers [reports n]
-  (->> reports
-       (filter #(within-last-year? (report-date %)))
-       (group-by report-author)
-       (map (fn [[addr rs]]
-              {:address addr
-               :name    (get-in (first rs) [:report/email :email/author-name])
-               :count   (count rs)}))
-       (sort-by :count >) (take n)))
+(defn top-openers
+  "Top N openers in the last 12 months.
+  Addresses are normalized to lower-case to collapse case-only variants
+  (e.g. `Morgan.J.Smith@...` vs `morgan.j.smith@...`).  When `mailmap`
+  (`{email-lc -> canonical-name}`) maps the address, the canonical name
+  is used both as the group key and as the displayed `:name`, so a
+  single contributor posting from multiple addresses appears once."
+  ([reports n] (top-openers reports n {}))
+  ([reports n mailmap]
+   (->> reports
+        (filter #(within-last-year? (report-date %)))
+        (map (fn [r]
+               (let [addr-lc (some-> (report-author r) str/lower-case)
+                     canon   (get mailmap addr-lc)]
+                 {:lc-addr addr-lc
+                  :canon   canon
+                  :name    (get-in r [:report/email :email/author-name])})))
+        (group-by (fn [{:keys [canon lc-addr]}] (or canon lc-addr)))
+        (map (fn [[_ rs]]
+               {:address (:lc-addr (first rs))
+                :name    (or (:canon (first rs))
+                             (some #(when (seq (:name %)) (:name %)) rs))
+                :count   (count rs)}))
+        (sort-by :count >) (take n))))
 
 (defn open-closed-ratio [reports]
   (let [open     (count (remove :report/closed reports))
@@ -325,7 +340,8 @@
   ([reports] (compute-stats reports nil nil))
   ([reports db] (compute-stats reports db nil))
   ([reports db source-name]
-   (let [last-year     (filter #(within-last-year? (report-date %)) reports)
+   (let [mailmap       (load-mailmap)
+         last-year     (filter #(within-last-year? (report-date %)) reports)
          open-yr       (remove :report/closed last-year)
          emails-yr     (when db (emails-last-year db))
          contributors  (when db (cond->> (all-contributors db)
@@ -354,7 +370,7 @@
         :open-closed-ratio (open-closed-ratio reports)
         :open-last-year    (count open-yr)
         :total-last-year   (count last-year)
-        :top-openers       (top-openers reports 10)
+        :top-openers       (top-openers reports 10 mailmap)
         :vote-leaders      (vote-leaders reports all-votes 10)
         :closed-cancel     (closed-cancel-breakdown reports)}
        emails-yr     (assoc :email-ratio (email-vs-reports-ratio reports emails-yr))
@@ -415,9 +431,15 @@
          :y {:field "n" :type "quantitative" :title "Reports"}})))
 
 (defn chart-openers [openers]
+  ;; Defense in depth: if upstream produced two rows with the same display label
+  ;; (e.g. a missing mailmap entry collides two addresses), sum their counts here
+  ;; so Vega-Lite never stacks them into one bar with two contradictory tooltips.
   (let [data (->> openers
                   (map (fn [{:keys [address name count]}]
-                         {"user" (or (when (seq name) name) address) "count" count})))]
+                         {"user" (or (when (seq name) name) address) "count" count}))
+                  (group-by #(get % "user"))
+                  (map (fn [[u rs]] {"user" u "count" (reduce + (map #(get % "count") rs))}))
+                  (sort-by #(get % "count") >))]
     (vl "Top 10 openers (last 12 months)" "bar" data
         {:y {:field "user"  :type "ordinal" :title nil
              :sort {:field "count" :order "descending"}
