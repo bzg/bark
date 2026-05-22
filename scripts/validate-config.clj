@@ -8,13 +8,14 @@
 ;;
 ;; Defaults to ./config.edn if no path given.
 
-(require '[clojure.spec.alpha :as s]
-         '[clojure.edn :as edn]
-         '[clojure.string :as str]
-         '[taoensso.timbre :as log]
-         '[bark.common :as common]
-         '[bark.commands.registry :as reg]
-         '[bark.periods :as periods])
+(ns validate-config
+  (:require [clojure.spec.alpha :as s]
+            [clojure.string :as str]
+            [clojure.java.io :as io]
+            [taoensso.timbre :as log]
+            [bark.common :as common]
+            [bark.commands.registry :as reg]
+            [bark.periods :as periods]))
 
 ;; ---------------------------------------------------------------------------
 ;; Specs
@@ -451,7 +452,7 @@
 (let [path (or (first *command-line-args*)
                (System/getenv "BARK_CONFIG")
                "config.edn")
-      file (clojure.java.io/file path)]
+      file (io/file path)]
   (if-not (.exists file)
     (do (log/error "Config file not found:" path)
         (System/exit 1))

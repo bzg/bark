@@ -12,8 +12,7 @@
 ;;   bb scripts/bark-index.clj                   -> writes public/index.html
 ;;   bb scripts/bark-index.clj -o reports.html   -> writes reports.html
 
-(require '[babashka.process :as process]
-         '[cheshire.core :as json]
+(require '[cheshire.core :as json]
          '[clojure.string :as str]
          '[hiccup2.core :as h]
          '[taoensso.timbre :as log]

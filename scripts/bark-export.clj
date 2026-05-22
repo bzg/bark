@@ -43,27 +43,27 @@
 ;; Environment / defaults:
 ;;   BARK_DB -- path to db (default: ./data/bark-db)
 
-(require '[babashka.process :as process]
-         '[cheshire.core :as json]
-         '[clojure.string :as str]
-         '[clojure.edn :as edn]
-         '[clojure.java.io :as io]
-         '[taoensso.timbre :as log]
-         '[bark.common :refer [get-header slugify mid-hash
-                               format-date format-date-iso
-                               report-priority report-status report-descendant-count
-                               parse-cli-args parse-delay parse-cutoff-date
-                               load-config load-mailmap db-path build-source-map
-                               bark-schema bark-format
-                               report-type-spec type->plural
-                               votes-by-report vote-counts
-                               ics-file? text-attachment?]]
-         '[bark.common-bb :refer [load-datalevin-pod! all-reports dq
-                                  fetch-attachment-data get-tenures tenures-snapshot
-                                  get-last-modified changed-source-types-since]]
-         '[bark.html-bb :refer [set-theme! html-head footer-css bark-footer
-                                wrap-js spit-html theme-toggle-js nav-bar]]
-         '[hiccup2.core :as h])
+(ns bark-export
+  (:require [babashka.process :as process]
+            [cheshire.core :as json]
+            [clojure.string :as str]
+            [clojure.java.io :as io]
+            [taoensso.timbre :as log]
+            [bark.common :refer [get-header slugify mid-hash
+                                 format-date format-date-iso
+                                 report-priority report-status report-descendant-count
+                                 parse-cli-args parse-delay parse-cutoff-date
+                                 load-config load-mailmap db-path build-source-map
+                                 bark-schema bark-format
+                                 report-type-spec type->plural
+                                 votes-by-report vote-counts
+                                 ics-file? text-attachment?]]
+            [bark.common-bb :refer [load-datalevin-pod! all-reports dq
+                                    fetch-attachment-data get-tenures tenures-snapshot
+                                    get-last-modified changed-source-types-since]]
+            [bark.html-bb :refer [set-theme! html-head footer-css bark-footer
+                                  wrap-js spit-html theme-toggle-js nav-bar]]
+            [hiccup2.core :as h]))
 
 (load-datalevin-pod!)
 
