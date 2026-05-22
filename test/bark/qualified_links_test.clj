@@ -13,8 +13,7 @@
             [datalevin.core :as d]
             [bark.commands :as commands]
             [bark.common :as common]
-            [bark.digest :as digest]
-            [bark.relations :as rel])
+            [bark.digest :as digest])
   (:import [java.util Date]))
 
 (defn- fresh-conn []

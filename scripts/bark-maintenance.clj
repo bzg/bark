@@ -22,7 +22,7 @@
 
 (require '[clojure.string :as str]
          '[taoensso.timbre :as log]
-         '[bark.common :refer [parse-delay parse-cutoff-date
+         '[bark.common :refer [parse-cutoff-date
                                load-config db-path build-source-map
                                bark-schema format-date
                                failures-file-path read-failures-file

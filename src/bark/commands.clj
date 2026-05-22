@@ -767,26 +767,6 @@
     :current-as-from (relation-target-eid db report-eid kind)
     :current-as-to   (relation-source-eid db report-eid kind)))
 
-(defn- relation-setter
-  ":rel/setter address of the active `kind` relation involving
-  `report-eid`, or nil.  `role` controls which side `report-eid` is on."
-  [db report-eid kind role]
-  (case role
-    :current-as-from (d/q '[:find ?setter . :in $ ?from ?kind
-                            :where
-                            [?e :rel/from ?from]
-                            [?e :rel/kind ?kind]
-                            [?e :rel/active? true]
-                            [?e :rel/setter ?setter]]
-                          db report-eid kind)
-    :current-as-to   (d/q '[:find ?setter . :in $ ?to ?kind
-                            :where
-                            [?e :rel/to ?to]
-                            [?e :rel/kind ?kind]
-                            [?e :rel/active? true]
-                            [?e :rel/setter ?setter]]
-                          db report-eid kind)))
-
 (defn- relation-setters-as-pull
   "Build a partial pull map exposing relation setters under :setter-attr
   so `scope-permits?` can resolve :setter-or-maintainer on relation
@@ -924,7 +904,7 @@
   2. Close pose-from with the row's propagate close-reason.
   3. Pose the new closure relation + :related-to companion.
   4. Propagate the patch closure when pose-from is a patch."
-  [conn {:keys [kind resolved target-mid pose-from pose-to
+  [conn {:keys [kind target-mid pose-from pose-to
                 propagate propagate-tgt]}
    email-eid from-addr posed-at source-type]
   (when (rel/active-inverse-relation (d/db conn) pose-from pose-to kind)
@@ -1199,7 +1179,6 @@
                      double-applied."
   [conn report-eid report-type email source-map roles delivery line-filter]
   (let [carrier-only? (= :carrier-only line-filter)
-        no-carrier?   (= :no-carrier   line-filter)
         body-text     (common/email-body-text email)
         db            (d/db conn)
         from-addr     (:email/author-address email)
