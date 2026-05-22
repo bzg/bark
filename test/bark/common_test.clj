@@ -40,6 +40,27 @@
                           (common/parse-duration-str "2x 1d")))))
 
 ;; ---------------------------------------------------------------------------
+;; strip-signature
+;; ---------------------------------------------------------------------------
+
+(deftest strip-signature-test
+  (testing "strips LF signature"
+    (is (= "Hello world" (common/strip-signature "Hello world\n-- \nSignature content\nMore sig"))))
+
+  (testing "strips CRLF signature"
+    (is (= "Hello world" (common/strip-signature "Hello world\r\n-- \r\nSignature content\r\nMore sig"))))
+
+  (testing "strips signature at the end of text without trailing newline"
+    (is (= "Hello world" (common/strip-signature "Hello world\n-- "))))
+
+  (testing "does not strip if no signature marker"
+    (is (= "Hello world" (common/strip-signature "Hello world")))
+    (is (= "Hello -- world" (common/strip-signature "Hello -- world"))))
+
+  (testing "handles nil input gracefully"
+    (is (nil? (common/strip-signature nil)))))
+
+;; ---------------------------------------------------------------------------
 ;; parse-delay
 ;; ---------------------------------------------------------------------------
 

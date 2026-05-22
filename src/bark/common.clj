@@ -168,8 +168,8 @@
   "Remove the RFC 3676 email signature (everything after a line
   containing exactly \"-- \") from plain-text body."
   [text]
-  (if-let [idx (str/index-of text "\n-- \n")]
-    (subs text 0 idx)
+  (if text
+    (first (str/split text #"\r?\n-- \s*(?:\r?\n|$)" 2))
     text))
 
 (defn email-body-text
