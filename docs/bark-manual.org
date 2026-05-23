@@ -207,6 +207,9 @@ from the closed report's thread, or with =Not supersedes:
 <old-message-id@example.com>= from the replacement's thread.
 
 ** Supersession of patches
+:PROPERTIES:
+:CUSTOM_ID: supersession-of-patches
+:END:
 
 When a new patch report appears in a thread whose earlier open patch
 report shares the same base subject (ignoring =Re:= or =Fwd:= prefixes and
@@ -232,6 +235,9 @@ Patches with an explicit version number (=[PATCH v2]=) follow a separate
 mechanism that matches on version and topic. See [[#patch-series][Patch series]].
 
 ** Resolving a bug or request with a patch
+:PROPERTIES:
+:CUSTOM_ID: resolving-a-bug-or-request-with-a-patch
+:END:
 
 Replying to an open bug or request with a =.patch= or =.diff= attachment
 credits you as =Acked= and =Owned= on that parent, if the nearest parent
@@ -283,9 +289,16 @@ regular user, but with broader permissions and a few additional report
 types. The sections below describe what is specific to that role.
 
 ** Announcements, releases, changes
+:PROPERTIES:
+:CUSTOM_ID: announcements-releases-changes
+:END:
 
 A maintainer can post general announcements (=[ANN]=), share a release
 (=[REL]=), or announce an upcoming change (=[CHG]=) for a future release.
+
+When a =[REL]= report carries a version in its subject tag
+(=[REL v2.0]=), it closes every open =[CHG v2.0]= report with reason
+=:resolved= and cross-links them to the release.
 
 ** Events (ICS calendar support)
 
@@ -390,17 +403,29 @@ single value is read as the =<version>=: =[REL 2.0]= sets the version to
 =<version>= is a =v\d+= token (e.g. =v2=), and =<n/m>= is a sequence marker
 (e.g. =3/5=).
 
-When someone posts a =[REL <version>]= report, BARK automatically
-closes any open =[CHG <version>]= report with the same version and
-links the two as related.
-
 ** Patch series
+:PROPERTIES:
+:CUSTOM_ID: patch-series
+:END:
 
 A /patch series/ groups patches sharing a sequence marker (=<n/m>=). A
 cover letter (=0/m=) or a fresh =1/m= patch from the same sender and topic
 automatically closes the previous series and starts a new one. This is
 how a version bump supersedes the previous run: =[PATCH parser v2 0/3]=
 closes the earlier =v1= series.
+
+*** Commands on a cover letter
+:PROPERTIES:
+:CUSTOM_ID: cover-letter-commands
+:END:
+
+When someone replies to the cover letter =[PATCH 0/m]= of a patch
+series, BARK applies the command to every patch in the series, not
+just to the cover. So =Closed.= closes the whole series and
+=Deadline: 30d= sets the deadline on every patch.
+
+The exceptions are =Supersedes:= and =Related-to:= (with their =Not=
+variants), which name a specific target and stay on the cover only.
 
 ** Customising subject labels
 
@@ -506,12 +531,33 @@ You can use several keywords in the same email, one per line.
 : From: x@y.z
 : Date: Thu, 19 Mar 2026 16:45:00 +0100
 : Subject: Re: [BUG] Crash on startup
-: 
+:
 : > Crash on startup with the new build.
-: 
+:
 : Confirmed.
 : Urgent.
 : Important.
+
+** Propagation
+:PROPERTIES:
+:CUSTOM_ID: propagation
+:END:
+
+Some updates ripple beyond the report they were sent to. BARK
+propagates them through the threading and series graphs:
+
+- Closing a patch with =Applied.= or =Fixed.= also closes its parent
+  bug or request, with reason =:resolved=. See [[#resolving-a-bug-or-request-with-a-patch][Resolving a bug or
+  request with a patch]].
+- Commands sent to the cover letter =[PATCH 0/m]= of a series apply
+  to every patch in the series (except cross-references). See
+  [[#cover-letter-commands][Commands on a cover letter]].
+- A reply that itself carries a new patch supersedes the previous
+  patch report in the same thread. See [[#supersession-of-patches][Supersession of patches]].
+- A new patch-series version (matching topic) closes the previous
+  series with reason =:superseded=. See [[#patch-series][Patch series]].
+- A =[REL v2.0]= release closes every open =[CHG v2.0]= report. See
+  [[#announcements-releases-changes][Announcements, releases, changes]].
 
 ** All commands
 
@@ -604,6 +650,10 @@ and inter-report links.
 | =:unsupersedes= | =Not supersedes: <msg-id>= | setter or maintainer | all          |
 | =:related-to=   | =Related-to: <msg-id>=     | any user             | all          |
 | =:unrelated-to= | =Not related-to: <msg-id>= | any user             | all          |
+
+=:supersedes= and =:related-to= are the only relations that stay on
+the cover when sent through a patch-series cover letter -- see
+[[#cover-letter-commands][Commands on a cover letter]].
 
 ** All controls
 

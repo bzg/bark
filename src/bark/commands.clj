@@ -11,7 +11,8 @@
             [bark.common :as common]
             [bark.commands.registry :refer [commands-by-id line-commands
                                             attr->word-cmd proxy-state-attrs
-                                            address-attrs setter-ref-attrs]]
+                                            address-attrs setter-ref-attrs
+                                            cross-ref-line-ids]]
             [bark.detect :as detect]
             [bark.periods :as periods]
             [bark.relations :as rel]
@@ -1176,7 +1177,14 @@
     :no-carrier   -- process everything EXCEPT carrier-eligible
                      lines.  Used for the thread-parent call in the
                      same scenario, so carrier lines are not
-                     double-applied."
+                     double-applied.
+    :no-cross-refs -- process everything EXCEPT neutral cross-
+                     reference annotations (Supersedes:, Related-to:
+                     and their unsets, i.e. `cross-ref-line-ids`).
+                     Triggers -- including the closure relations
+                     Superseded-by: and Duplicate-of: -- still go
+                     through.  Used to broadcast cover-letter
+                     commands to the rest of a patch series."
   [conn report-eid report-type email source-map roles delivery line-filter]
   (let [carrier-only? (= :carrier-only line-filter)
         body-text     (common/email-body-text email)
@@ -1217,6 +1225,7 @@
         keep-line?    (case line-filter
                         :carrier-only #(contains? carrier-eligible-ids (:id %))
                         :no-carrier   #(not (contains? carrier-eligible-ids (:id %)))
+                        :no-cross-refs #(not (contains? cross-ref-line-ids (:id %)))
                         (constantly true))
         lines         (when body-text
                         (->> (detect-lines report-type body-text overrides

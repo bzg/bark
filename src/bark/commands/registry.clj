@@ -127,6 +127,25 @@
 (def attr->word-cmd
   (into {} (map (juxt :attr identity)) word-commands))
 
+;; Cross-reference annotations -- commands that pose a neutral link
+;; between reports without changing the report's state (Supersedes:,
+;; Related-to: and their unsets).  Identified by `:kind :annotation`
+;; combined with a `:rel/`-namespaced `:attr`.  Closure relations
+;; (Superseded-by:, Duplicate-of:) are excluded because they're
+;; triggers -- they DO change state and propagate through a series
+;; like any other trigger.
+;;
+;; Used by `apply-commands!` to skip these four when broadcasting
+;; cover-letter commands to the rest of a patch series: broadcasting
+;; a neutral cross-reference would pose N redundant edges to the
+;; same target.
+(def cross-ref-line-ids
+  (into #{}
+        (comp (filter #(and (= :annotation (:kind %))
+                            (some-> % :attr namespace (= "rel"))))
+              (map :id))
+        commands))
+
 ;; State attrs that support the `-by` proxy form (e.g. Acked-by:
 ;; bob@x credits Bob instead of the sender).  The credited address
 ;; lives in `address-attrs`.

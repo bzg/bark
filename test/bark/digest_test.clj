@@ -1462,3 +1462,190 @@
               "Command applied to the available ancestor report after TTL flush"))
         (finally
           (teardown! ctx))))))
+
+;; ---------------------------------------------------------------------------
+;; Patch-series cover-letter broadcast
+;; ---------------------------------------------------------------------------
+
+(deftest cover-letter-broadcast
+  (testing "Commands sent in reply to a patch-series cover letter
+            propagate to every patch of the series, EXCEPT relation
+            commands which stay on the cover only."
+    (let [{:keys [conn] :as ctx} (setup-db!)]
+      (try
+        ;; A standalone bug to be used as the Related-to target.
+        (store-and-process! conn
+                            (mk-email {:mid "<other-bug@test.org>"
+                                       :subject "[BUG] unrelated thing"
+                                       :from "third@test.org"
+                                       :date #inst "2026-06-01T08:00:00"
+                                       :body "another report\n"})
+                            "direct")
+        ;; Cover letter (0/3) + 3 patches.
+        (store-and-process! conn
+                            (mk-email {:mid "<cov@test.org>"
+                                       :subject "[PATCH cl 0/3] Refactor X"
+                                       :from "user@test.org"
+                                       :date #inst "2026-06-01T10:00:00"
+                                       :body "Series intro.\n"})
+                            "direct")
+        (doseq [i [1 2 3]]
+          (store-and-process! conn
+                              (mk-email {:mid (str "<p" i "@test.org>")
+                                         :subject (str "[PATCH cl " i "/3] step " i)
+                                         :from "user@test.org"
+                                         :date #inst "2026-06-01T10:01:00"
+                                         :in-reply-to "<cov@test.org>"
+                                         :body (str "step " i "\n\n"
+                                                    "diff --git a/x.clj b/x.clj\n"
+                                                    "--- a/x.clj\n+++ b/x.clj\n"
+                                                    "@@ -1,1 +1,1 @@\n-a\n+b\n")})
+                              "direct"))
+        ;; Reply to the cover with a mix of broadcastable commands
+        ;; and one relation command.
+        (store-and-process! conn
+                            (mk-email {:mid "<rev@test.org>"
+                                       :subject "Re: [PATCH cl 0/3] Refactor X"
+                                       :from "admin@test.org"
+                                       :date #inst "2026-06-02T09:00:00"
+                                       :in-reply-to "<cov@test.org>"
+                                       :body (str "Acked.\n"
+                                                  "Deadline: 30d\n"
+                                                  "Related-to: <other-bug@test.org>\n")})
+                            "direct")
+
+        (let [db    (d/db conn)
+              cover (get-report db "<cov@test.org>")
+              p1    (get-report db "<p1@test.org>")
+              p2    (get-report db "<p2@test.org>")
+              p3    (get-report db "<p3@test.org>")
+              related-to-other? (fn [r]
+                                  (some #(= "<other-bug@test.org>"
+                                            (:report/message-id %))
+                                        (all-related r)))]
+          (testing "Acked. propagates to cover and every patch"
+            (is (some? (:report/acked cover)) "cover acked")
+            (is (some? (:report/acked p1))    "patch 1/3 acked")
+            (is (some? (:report/acked p2))    "patch 2/3 acked")
+            (is (some? (:report/acked p3))    "patch 3/3 acked"))
+          (testing "Deadline: propagates to cover and every patch"
+            (is (some? (:report/deadline-value cover)) "cover has deadline")
+            (is (some? (:report/deadline-value p1))    "patch 1/3 has deadline")
+            (is (some? (:report/deadline-value p2))    "patch 2/3 has deadline")
+            (is (some? (:report/deadline-value p3))    "patch 3/3 has deadline"))
+          (testing "Related-to stays on the cover only"
+            (is (related-to-other? cover)
+                "cover is related-to the target bug")
+            (is (not (related-to-other? p1))
+                "patch 1/3 has no relation to the target")
+            (is (not (related-to-other? p2))
+                "patch 2/3 has no relation to the target")
+            (is (not (related-to-other? p3))
+                "patch 3/3 has no relation to the target")))
+        (finally
+          (teardown! ctx))))))
+
+(deftest cover-letter-broadcast-closure
+  (testing "Closed. on a cover letter closes every patch of the series."
+    (let [{:keys [conn] :as ctx} (setup-db!)]
+      (try
+        (store-and-process! conn
+                            (mk-email {:mid "<cov2@test.org>"
+                                       :subject "[PATCH topic 0/2] series"
+                                       :from "user@test.org"
+                                       :date #inst "2026-06-03T10:00:00"
+                                       :body "Series\n"})
+                            "direct")
+        (doseq [i [1 2]]
+          (store-and-process! conn
+                              (mk-email {:mid (str "<q" i "@test.org>")
+                                         :subject (str "[PATCH topic " i "/2] step " i)
+                                         :from "user@test.org"
+                                         :date #inst "2026-06-03T10:01:00"
+                                         :in-reply-to "<cov2@test.org>"
+                                         :body (str "step " i "\n\n"
+                                                    "diff --git a/y.clj b/y.clj\n"
+                                                    "--- a/y.clj\n+++ b/y.clj\n"
+                                                    "@@ -1,1 +1,1 @@\n-a\n+b\n")})
+                              "direct"))
+        (store-and-process! conn
+                            (mk-email {:mid "<close-rev@test.org>"
+                                       :subject "Re: [PATCH topic 0/2] series"
+                                       :from "admin@test.org"
+                                       :date #inst "2026-06-04T09:00:00"
+                                       :in-reply-to "<cov2@test.org>"
+                                       :body "Closed.\n"})
+                            "direct")
+        (let [db (d/db conn)
+              cover (get-report db "<cov2@test.org>")
+              q1    (get-report db "<q1@test.org>")
+              q2    (get-report db "<q2@test.org>")]
+          (is (some? (:report/closed cover)) "cover closed")
+          (is (some? (:report/closed q1))    "patch 1/2 closed")
+          (is (some? (:report/closed q2))    "patch 2/2 closed")
+          (is (= :resolved (:report/close-reason cover)))
+          (is (= :resolved (:report/close-reason q1)))
+          (is (= :resolved (:report/close-reason q2))))
+        (finally
+          (teardown! ctx))))))
+
+(deftest cover-letter-broadcast-supersede
+  (testing "Superseded-by: on a cover letter supersedes every patch:
+            each report closes with reason :superseded and points to
+            the same target via :rel/supersedes."
+    (let [{:keys [conn] :as ctx} (setup-db!)]
+      (try
+        ;; The Superseded-by: target must be a :patch (cross-type
+        ;; supersede is rejected by the same-type check).
+        (store-and-process! conn
+                            (mk-email {:mid "<target-bug@test.org>"
+                                       :subject "[PATCH replacement 1/1] the fix"
+                                       :from "third@test.org"
+                                       :date #inst "2026-06-05T08:00:00"
+                                       :body (str "the fix\n\n"
+                                                  "diff --git a/y.clj b/y.clj\n"
+                                                  "--- a/y.clj\n+++ b/y.clj\n"
+                                                  "@@ -1,1 +1,1 @@\n-a\n+b\n")})
+                            "direct")
+        (store-and-process! conn
+                            (mk-email {:mid "<cov3@test.org>"
+                                       :subject "[PATCH t3 0/2] old series"
+                                       :from "user@test.org"
+                                       :date #inst "2026-06-05T10:00:00"
+                                       :body "Series\n"})
+                            "direct")
+        (doseq [i [1 2]]
+          (store-and-process! conn
+                              (mk-email {:mid (str "<r" i "@test.org>")
+                                         :subject (str "[PATCH t3 " i "/2] step " i)
+                                         :from "user@test.org"
+                                         :date #inst "2026-06-05T10:01:00"
+                                         :in-reply-to "<cov3@test.org>"
+                                         :body (str "step " i "\n\n"
+                                                    "diff --git a/z.clj b/z.clj\n"
+                                                    "--- a/z.clj\n+++ b/z.clj\n"
+                                                    "@@ -1,1 +1,1 @@\n-a\n+b\n")})
+                              "direct"))
+        (store-and-process! conn
+                            (mk-email {:mid "<sup-rev@test.org>"
+                                       :subject "Re: [PATCH t3 0/2] old series"
+                                       :from "admin@test.org"
+                                       :date #inst "2026-06-06T09:00:00"
+                                       :in-reply-to "<cov3@test.org>"
+                                       :body "Superseded-by: <target-bug@test.org>\n"})
+                            "direct")
+        (let [db    (d/db conn)
+              cover (get-report db "<cov3@test.org>")
+              r1    (get-report db "<r1@test.org>")
+              r2    (get-report db "<r2@test.org>")
+              target-mid (fn [r]
+                           (some-> (superseded-by-target r) :report/message-id))]
+          (doseq [[label r] [["cover" cover] ["patch 1/2" r1] ["patch 2/2" r2]]]
+            (is (some? (:report/closed r))
+                (str label " is closed"))
+            (is (= :superseded (:report/close-reason r))
+                (str label " has :superseded reason"))
+            (is (= "<target-bug@test.org>" (target-mid r))
+                (str label " is :rel/supersedes -> target-bug"))))
+        (finally
+          (teardown! ctx))))))

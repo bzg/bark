@@ -509,33 +509,86 @@
     (add-descendant! conn rid eid (:email/date-sent email) from-addr))
   (tracking/bump-report-updated! conn parent-eids))
 
+(defn- rids->type+source
+  "Pull `[report-type source-name]` for each report eid.  Returns a
+  map {rid [type src]}; rids with no report-type are absent."
+  [db rids]
+  (reduce (fn [m [r t s]] (assoc m r [t s]))
+          {}
+          (d/q '[:find ?r ?t ?src
+                 :in $ [?r ...]
+                 :where
+                 [?r :report/type ?t]
+                 [?r :report/email ?e]
+                 [?e :email/source ?src]]
+               db rids)))
+
+(defn- cover-letter-patches
+  "If `rid` is the cover-letter report of a series, return the other
+  patch report eids of that series (the cover excluded).  Returns
+  nil otherwise.  A report is a cover iff its email is the series'
+  `:series/cover-letter`."
+  [db rid]
+  (seq (d/q '[:find [?r ...]
+              :in $ ?rid
+              :where
+              [?rid :report/series ?s]
+              [?rid :report/email ?cover-email]
+              [?s :series/cover-letter ?cover-email]
+              [?s :series/patches ?r]
+              [(not= ?r ?rid)]]
+            db rid)))
+
+(defn- broadcast-cover-commands!
+  "When `rid` is a series cover letter, apply trigger and non-cross-
+  reference annotation commands to every patch of the series.  Pure
+  cross-reference annotations (Supersedes:, Related-to: and unsets)
+  are skipped via the `:no-cross-refs` filter -- broadcasting them
+  would pose N redundant edges to the same target.  Triggers like
+  Closed., Superseded-by: and Duplicate-of: propagate normally so
+  the whole series shares the cover's resulting state."
+  [conn email source-map rroles delivery rid]
+  (when-let [patches (cover-letter-patches (d/db conn) rid)]
+    (let [db         (d/db conn)
+          info       (rids->type+source db patches)
+          src->roles (into {}
+                           (map (fn [s] [s (roles/get-tenures db s)]))
+                           (into #{} (keep (fn [[_ [_t s]]] s)) info))]
+      (doseq [patch-rid patches
+              :let [[ptype psrc] (get info patch-rid)]
+              :when ptype]
+        (let [proles (or (get src->roles psrc) rroles)]
+          (commands/apply-commands! conn patch-rid ptype email source-map
+                                    proles delivery :no-cross-refs))))))
+
 (defn- apply-commands-on-nearest!
   "Apply commands to the nearest reports of a reply, refreshing roles
   per source when reports come from different sources.  Ensures the
   author is recorded as a participant if any command matched.
 
+  Also broadcasts cover-letter commands to the rest of the series
+  for any cover in `nearest-eids` (see `broadcast-cover-commands!`).
+
   `line-filter` is forwarded to `apply-commands!`; see its docstring."
   [conn email from-addr source-name rroles source-map delivery nearest-eids line-filter]
-  (let [rid-info (reduce (fn [m [r t s]] (assoc m r [t s]))
-                         {}
-                         (d/q '[:find ?r ?t ?src
-                                :in $ [?r ...]
-                                :where
-                                [?r :report/type ?t]
-                                [?r :report/email ?e]
-                                [?e :email/source ?src]]
-                              (d/db conn) nearest-eids))
+  (let [db       (d/db conn)
+        info     (rids->type+source db nearest-eids)
+        src->roles (into {}
+                         (map (fn [s] [s (roles/get-tenures db s)]))
+                         (into #{} (keep (fn [[_ [_t s]]] s)) info))
         any-cmd? (reduce (fn [acc rid]
-                           (if-let [[rtype rsrc] (get rid-info rid)]
-                             (let [rroles (if rsrc (roles/get-tenures (d/db conn) rsrc) rroles)]
+                           (if-let [[rtype rsrc] (get info rid)]
+                             (let [r (or (get src->roles rsrc) rroles)]
                                (if (commands/apply-commands! conn rid rtype email source-map
-                                                             rroles delivery line-filter)
+                                                             r delivery line-filter)
                                  true acc))
                              acc))
                          false nearest-eids)]
     (when any-cmd?
       (ensure-participant! conn source-name from-addr
-                           (:email/author-name email) (:email/date-sent email)))))
+                           (:email/author-name email) (:email/date-sent email)))
+    (doseq [rid nearest-eids]
+      (broadcast-cover-commands! conn email source-map rroles delivery rid))))
 
 (defn- run-post-creation-hooks!
   "Execute post-creation side effects driven by the plan."
