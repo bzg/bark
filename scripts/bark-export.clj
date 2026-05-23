@@ -1385,12 +1385,21 @@
     (let [db              (d/db conn)
           last-modified   (get-last-modified db)
           last-export     (get-last-export)
+          config-path     (or (System/getenv "BARK_CONFIG") "config.edn")
+          config-mtime    (let [f (io/file config-path)]
+                            (when (.exists f) (.lastModified f)))
+          config-changed? (and last-export config-mtime
+                               (> ^long config-mtime
+                                  (.getTime ^java.util.Date last-export)))
           incremental?    (and (not force-all?)
+                               (not config-changed?)
                                (= format "all")
                                last-export last-modified)
           skip?           (and incremental?
                                (<= (.getTime ^java.util.Date last-modified)
                                    (.getTime ^java.util.Date last-export)))]
+      (when config-changed?
+        (log/info "Config changed since last export, forcing full re-export."))
       (if skip?
         (log/info "Nothing changed since last export, skipping.")
         ;; Resolve source list *before* the expensive DB pull
