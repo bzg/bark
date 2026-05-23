@@ -405,7 +405,7 @@ automatically closes the previous series and starts a new one. This is
 how a version bump supersedes the previous run: =[PATCH parser v2 0/3]=
 closes the earlier =v1= series.
 
-*** Commands on a cover letter
+*** Cover letter commands
 
 When someone replies to the cover letter =[PATCH 0/m]= of a patch
 series, BARK applies the command to every patch in the series, not
@@ -519,9 +519,9 @@ You can use several keywords in the same email, one per line.
 : From: x@y.z
 : Date: Thu, 19 Mar 2026 16:45:00 +0100
 : Subject: Re: [BUG] Crash on startup
-:
+: 
 : > Crash on startup with the new build.
-:
+: 
 : Confirmed.
 : Urgent.
 : Important.
@@ -536,7 +536,7 @@ propagates them through the threading and series graphs:
   request with a patch]].
 - Commands sent to the cover letter =[PATCH 0/m]= of a series apply
   to every patch in the series (except cross-references). See
-  [[#cover-letter-commands][Commands on a cover letter]].
+  [[#cover-letter-commands][Cover letter commands]].
 - A reply that itself carries a new patch supersedes the previous
   patch report in the same thread. See [[#supersession-of-patches][Supersession of patches]].
 - A new patch-series version (matching topic) closes the previous
@@ -638,7 +638,7 @@ and inter-report links.
 
 =:supersedes= and =:related-to= are the only relations that stay on
 the cover when sent through a patch-series cover letter -- see
-[[#cover-letter-commands][Commands on a cover letter]].
+[[#cover-letter-commands][Cover letter commands]].
 
 ** All controls
 
