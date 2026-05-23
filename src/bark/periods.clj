@@ -5,12 +5,13 @@
 (ns bark.periods
   "Per-source time-windowed overrides.  A source's :periods vector
   declares how :maintainers / :commands / :command-syntax / :labels
-  change over time.  Periods are contiguous half-open [from, to)
-  windows; unspecified fields inherit source-level defaults.  Pure."
+  / :restricted-types change over time.  Periods are contiguous
+  half-open [from, to) windows; unspecified fields inherit source-
+  level defaults.  Pure."
   (:require [bark.common :as common]))
 
 (def ^:private overridable-keys
-  #{:maintainers :commands :command-syntax :labels})
+  #{:maintainers :commands :command-syntax :labels :restricted-types})
 
 (defn- iso-date? [s]
   (boolean (and (string? s) (re-matches #"\d{4}-\d{2}-\d{2}" s))))

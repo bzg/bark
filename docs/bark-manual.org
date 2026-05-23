@@ -207,9 +207,6 @@ from the closed report's thread, or with =Not supersedes:
 <old-message-id@example.com>= from the replacement's thread.
 
 ** Supersession of patches
-:PROPERTIES:
-:CUSTOM_ID: supersession-of-patches
-:END:
 
 When a new patch report appears in a thread whose earlier open patch
 report shares the same base subject (ignoring =Re:= or =Fwd:= prefixes and
@@ -235,9 +232,6 @@ Patches with an explicit version number (=[PATCH v2]=) follow a separate
 mechanism that matches on version and topic. See [[#patch-series][Patch series]].
 
 ** Resolving a bug or request with a patch
-:PROPERTIES:
-:CUSTOM_ID: resolving-a-bug-or-request-with-a-patch
-:END:
 
 Replying to an open bug or request with a =.patch= or =.diff= attachment
 credits you as =Acked= and =Owned= on that parent, if the nearest parent
@@ -289,9 +283,6 @@ regular user, but with broader permissions and a few additional report
 types. The sections below describe what is specific to that role.
 
 ** Announcements, releases, changes
-:PROPERTIES:
-:CUSTOM_ID: announcements-releases-changes
-:END:
 
 A maintainer can post general announcements (=[ANN]=), share a release
 (=[REL]=), or announce an upcoming change (=[CHG]=) for a future release.
@@ -394,8 +385,11 @@ BARK detects a report's type from its subject label:
 
 BARK also accepts the long-form aliases =[ANNOUNCEMENT]=, =[RELEASE]= and
 =[CHANGE]=. Labels are case-sensitive and require whitespace (or end of
-subject) after the closing =]=. BARK ignores malformed labels. Posting
-an announcement, release or change requires maintainer permission.
+subject) after the closing =]=. BARK ignores malformed labels.
+
+By default, posting an announcement, release or change requires
+maintainer permission. The set of restricted types is configurable
+per source through =:restricted-types= (see [[#source-options][Source options]]).
 
 All =<…>= parts are optional and positional. For =[REL]= and =[CHG]=, a
 single value is read as the =<version>=: =[REL 2.0]= sets the version to
@@ -404,9 +398,6 @@ single value is read as the =<version>=: =[REL 2.0]= sets the version to
 (e.g. =3/5=).
 
 ** Patch series
-:PROPERTIES:
-:CUSTOM_ID: patch-series
-:END:
 
 A /patch series/ groups patches sharing a sequence marker (=<n/m>=). A
 cover letter (=0/m=) or a fresh =1/m= patch from the same sender and topic
@@ -415,9 +406,6 @@ how a version bump supersedes the previous run: =[PATCH parser v2 0/3]=
 closes the earlier =v1= series.
 
 *** Commands on a cover letter
-:PROPERTIES:
-:CUSTOM_ID: cover-letter-commands
-:END:
 
 When someone replies to the cover letter =[PATCH 0/m]= of a patch
 series, BARK applies the command to every patch in the series, not
@@ -539,9 +527,6 @@ You can use several keywords in the same email, one per line.
 : Important.
 
 ** Propagation
-:PROPERTIES:
-:CUSTOM_ID: propagation
-:END:
 
 Some updates ripple beyond the report they were sent to. BARK
 propagates them through the threading and series graphs:
@@ -998,32 +983,34 @@ Emails that match no source are discarded at ingestion.
 
 ** Source options
 
-| Key                    | Description                                                                  |
-|------------------------+------------------------------------------------------------------------------|
-| =:name=                  | Source identifier (required)                                                 |
-| =:list= / =:alias= / =:to=   | Exactly one (determines source type and header to match)                     |
-| =:maintainers=           | Initial maintainers as a vector of email strings, e.g. =["dev@example.org"]=   |
-|                        | The first entry is the lead maintainer (see [[#managing-roles-and-permissions][Managing roles and permissions]])  |
-| =:list-archive=          | URL of the list archive (shown in HTML reports)                              |
-| =:archive-format-string= | URL template for message-ids (=%s= is replaced), used when the                 |
-|                        | =Archived-At= header is absent                                                 |
-| =:base-url=              | Base URL where this source's public directory is served                      |
-| =:labels=                | Per-source label overrides (see [[#customising-subject-labels][customising subject labels]])                  |
-| =:commands=              | Per-source command overrides (see [[#customising-commands][customising commands]])                      |
-| =:report-types=          | Restrict detected and exported types, e.g. =#{:bug :patch}=                    |
-| =:export-formats=        | Output formats, e.g. =["json" "rss"]=  (default: =["json" "org" "rss"]=)         |
-| =:expiry=                | Auto-close rules per report type (see below)                                 |
-| =:notifications=         | ={:enabled false}= to silence notifications for this source (default: enabled) |
-| =:awaiting-delay=        | Duration before flagging "awaiting reply", e.g. ="14d"= (default: 14 days)     |
-| =:periods=               | Time-windowed overrides for maintainers/commands (see [[#source-periods][Source periods]])        |
+| Key                    | Description                                                                                 |
+|------------------------+---------------------------------------------------------------------------------------------|
+| =:name=                  | Source identifier (required)                                                                |
+| =:list= / =:alias= / =:to=   | Exactly one (determines source type and header to match)                                    |
+| =:maintainers=           | Initial maintainers as a vector of email strings, e.g. =["dev@example.org"]=                  |
+|                        | The first entry is the lead maintainer (see [[#managing-roles-and-permissions][Managing roles and permissions]])                 |
+| =:list-archive=          | URL of the list archive (shown in HTML reports)                                             |
+| =:archive-format-string= | URL template for message-ids (=%s= is replaced), used when the                                |
+|                        | =Archived-At= header is absent                                                                |
+| =:base-url=              | Base URL where this source's public directory is served                                     |
+| =:labels=                | Per-source label overrides (see [[#customising-subject-labels][customising subject labels]])                                 |
+| =:commands=              | Per-source command overrides (see [[#customising-commands][customising commands]])                                     |
+| =:report-types=          | Restrict detected and exported types, e.g. =#{:bug :patch}=                                   |
+| =:restricted-types=      | Types that require maintainer status to create (default: =#{:announcement :release :change}=) |
+| =:export-formats=        | Output formats, e.g. =["json" "rss"]=  (default: =["json" "org" "rss"]=)                        |
+| =:expiry=                | Auto-close rules per report type (see below)                                                |
+| =:notifications=         | ={:enabled false}= to silence notifications for this source (default: enabled)                |
+| =:awaiting-delay=        | Duration before flagging "awaiting reply", e.g. ="14d"= (default: 14 days)                    |
+| =:periods=               | Time-windowed overrides for maintainers/commands (see [[#source-periods][Source periods]])                       |
 
 ** Source periods
 
 When a source's vocabulary or maintainer list has evolved over time,
 declare the history inline with =:periods= -- a vector of time-windowed
 overrides. Each entry may declare =:start= / =:end= (ISO =yyyy-MM-dd=) plus
-any of =:maintainers=, =:commands=, =:command-syntax=, =:labels=. Fields
-omitted in a period inherit from the source level (the current state).
+any of =:maintainers=, =:commands=, =:command-syntax=, =:labels=,
+=:restricted-types=. Fields omitted in a period inherit from the source
+level (the current state).
 
 #+begin_src edn
 {:name "orgmode"

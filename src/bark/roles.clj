@@ -248,13 +248,17 @@
 ;; Permission check for report creation (pure)
 ;; ---------------------------------------------------------------------------
 
-(def announcement-types #{:announcement :release :change})
+(def ^:private default-restricted-types #{:announcement :release :change})
 
 (defn can-create-report?
-  "True iff `from-addr` may create this report type.  Announcements/
-  releases/changes require maintainer status; other types pass (the
-  source-match gate already filtered)."
-  [roles from-addr report-info email _source-cfg]
-  (if (announcement-types (:type report-info))
-    (common/maintainer? roles from-addr (:email/date-sent email))
-    true))
+  "True iff `from-addr` may create this report type.  Report types in
+  the source's `:restricted-types` set require maintainer status;
+  other types pass (the source-match gate already filtered).
+
+  Default restricted set: #{:announcement :release :change}.  An
+  explicit empty set opens every type to any sender."
+  [roles from-addr report-info email source-cfg]
+  (let [restricted (get source-cfg :restricted-types default-restricted-types)]
+    (if (contains? restricted (:type report-info))
+      (common/maintainer? roles from-addr (:email/date-sent email))
+      true)))

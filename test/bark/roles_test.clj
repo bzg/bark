@@ -193,3 +193,51 @@
            :periods [{:start "2020-01-01" :maintainers ["lead@x.org"]}]})
     (is (not (contains? (active conn "s") "bob@x.org"))
         "bob is closed at the first period's :start")))
+
+;; ---------------------------------------------------------------------------
+;; can-create-report? -- :restricted-types
+;; ---------------------------------------------------------------------------
+
+(def ^:private an-email {:email/date-sent t1})
+
+(defn- can-create?
+  "Helper: ask if `from-addr` (alone, no tenures) can create a report
+   of `rtype` against `source-cfg`."
+  [source-cfg from-addr rtype]
+  (roles/can-create-report? [] from-addr {:type rtype} an-email source-cfg))
+
+(deftest can-create-report-defaults
+  (testing "Default restricted set covers announcement/release/change"
+    (is (false? (can-create? {} "user@x.org" :announcement)))
+    (is (false? (can-create? {} "user@x.org" :release)))
+    (is (false? (can-create? {} "user@x.org" :change))))
+  (testing "Other types pass by default"
+    (is (true? (can-create? {} "user@x.org" :bug)))
+    (is (true? (can-create? {} "user@x.org" :patch)))
+    (is (true? (can-create? {} "user@x.org" :request)))))
+
+(deftest can-create-report-empty-set-opens-everything
+  (testing ":restricted-types #{} lets any sender create any type"
+    (let [cfg {:restricted-types #{}}]
+      (doseq [rtype [:bug :patch :request :announcement :release :change]]
+        (is (true? (can-create? cfg "user@x.org" rtype))
+            (str rtype " is open with empty :restricted-types"))))))
+
+(deftest can-create-report-custom-set
+  (testing "Custom restricted set restricts and opens types as declared"
+    (let [cfg {:restricted-types #{:bug}}]
+      ;; :bug now requires maintainer status -- non-maintainer denied.
+      (is (false? (can-create? cfg "user@x.org" :bug))
+          ":bug is now restricted")
+      ;; :announcement is no longer in the set -- anyone can create it.
+      (is (true? (can-create? cfg "user@x.org" :announcement))
+          ":announcement is now open"))))
+
+(deftest can-create-report-maintainer-always-passes
+  (testing "An active maintainer can create any restricted type"
+    (let [tenures [{:email "lead@x.org" :from nil :to nil}]]
+      (is (true? (roles/can-create-report?
+                  tenures "lead@x.org" {:type :announcement} an-email {})))
+      (is (true? (roles/can-create-report?
+                  tenures "lead@x.org" {:type :bug}
+                  an-email {:restricted-types #{:bug}}))))))

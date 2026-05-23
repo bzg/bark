@@ -106,7 +106,7 @@
                           :source/list-archive :source/base-url
                           :source/archive-format-string
                           :source/commands :source/labels
-                          :source/report-types
+                          :source/report-types :source/restricted-types
                           :source/maintainers :source/notifications
                           :source/expiry :source/awaiting-delay
                           :source/export-formats :source/topics-filter
@@ -258,6 +258,14 @@
 (s/def :source/report-types ::report-types)
 (s/def :bark/report-types ::report-types)
 
+;; Restricted types: which report types require maintainer status to
+;; create. Default: #{:announcement :release :change}. The empty set
+;; opens every type to any sender. Per-source overrides global.
+(s/def ::restricted-types
+  (s/coll-of valid-report-types :kind set?))
+(s/def :source/restricted-types ::restricted-types)
+(s/def :bark/restricted-types ::restricted-types)
+
 ;; Expiry rules (optional)
 ;; Each report type maps to a rule map with :inactive-after and optional conditions.
 (s/def :expiry/inactive-after (s/or :deadline #{:deadline}
@@ -324,11 +332,12 @@
 (s/def :period/commands ::commands-map)
 (s/def :period/command-syntax :bark/command-syntax)
 (s/def :period/labels ::labels)
+(s/def :period/restricted-types ::restricted-types)
 (s/def ::period-entry
   (s/keys :opt-un [:period/start :period/end
                    :period/maintainers :period/commands
                    :period/command-syntax :period/patch-triggers?
-                   :period/labels]))
+                   :period/labels :period/restricted-types]))
 (s/def :source/periods (s/coll-of ::period-entry :kind vector? :min-count 1))
 
 ;; Top-level config
@@ -336,7 +345,8 @@
   (s/keys :req-un [:bark/mailboxes :bark/sources]
           :opt-un [:bark/db :bark/ingest :bark/notifications :bark/labels
                    :bark/commands
-                   :bark/report-types :bark/awaiting-delay
+                   :bark/report-types :bark/restricted-types
+                   :bark/awaiting-delay
                    :bark/expiry :bark/logging
                    :bark/command-syntax :bark/theme
                    :bark/export-formats]))

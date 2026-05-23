@@ -150,6 +150,11 @@
  ;; Default: all types. Per-source overrides global.
  ;; :report-types #{:bug :patch :request :announcement :release :change}
 
+ ;; Restrict which report types require maintainer status to create.
+ ;; Default: #{:announcement :release :change}. Per-source overrides
+ ;; global. The empty set #{} opens every type to any sender.
+ ;; :restricted-types #{:announcement :release :change}
+
  ;; ---- Lifecycle -----------------------------------------------------------
 
  ;; Expiry rules (optional) -- auto-close open reports per report type.
