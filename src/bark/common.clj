@@ -344,6 +344,16 @@
         (some-> (first (re-seq mid-token-re s))
                 normalize-mid)))))
 
+(defn extract-bracketed-id-raw
+  "Like extract-bracketed-id but preserves the original case of the
+  id-right.  Used at export time for archive URLs (e.g. public-inbox)
+  that compare message-ids case-sensitively."
+  [v]
+  (when v
+    (let [s (if (vector? v) (first v) (str v))]
+      (when-not (str/blank? s)
+        (first (re-seq mid-token-re s))))))
+
 (defn extract-in-reply-to
   "Extract In-Reply-To message-id from a headers map (raw or parsed).
   Handles both string and vector values."
@@ -842,10 +852,10 @@
     :report/last-activity :report/last-activity-address :report/descendants :report/digested-at :report/updated-at
     {:rel/_from [:rel/kind :rel/active? :rel/setter :rel/posed-at :rel/value
                  {:rel/to [:db/id :report/type :report/message-id
-                           {:report/email [:email/subject]}]}]}
+                           {:report/email [:email/subject :email/headers-edn]}]}]}
     {:rel/_to [:rel/kind :rel/active? :rel/setter :rel/posed-at :rel/value
                {:rel/from [:db/id :report/type :report/message-id
-                           {:report/email [:email/subject]}]}]}
+                           {:report/email [:email/subject :email/headers-edn]}]}]}
     {:report/series [:series/id :series/expected :series/closed
                      {:series/patches [:db/id]}
                      {:series/cover-letter [:email/message-id]}]}

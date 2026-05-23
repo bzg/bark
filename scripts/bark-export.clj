@@ -51,6 +51,7 @@
             [taoensso.timbre :as log]
             [bark.common :refer [get-header slugify mid-hash
                                  format-date format-date-iso
+                                 extract-bracketed-id-raw
                                  report-priority report-status report-descendant-count
                                  parse-cli-args parse-delay parse-cutoff-date
                                  load-config load-mailmap db-path build-source-map
@@ -294,6 +295,16 @@
 (defn- archived-at [email]
   (get-header (:email/headers-edn email) "Archived-At"))
 
+(defn- raw-message-id
+  "Original-case Message-Id pulled from the email's stored headers.  The
+  DB key (:email/message-id) is normalized (RFC 5322 §3.6.4 lowercases
+  the id-right) but public-inbox compares mids case-sensitively, so
+  exports use this for URLs and the displayed :message-id field.
+  Returns nil when headers-edn is missing (synthetic emails)."
+  [email]
+  (extract-bracketed-id-raw
+   (get-header (:email/headers-edn email) "Message-Id")))
+
 (defn- sender-role
   "Determine role of sender for a given source context."
   [from source-name _source-map maintainers-map]
@@ -357,7 +368,8 @@
         src-type    (get-in source-map [source-name :source-type])]
     (when-not (#{:alias :mailbox} src-type)
       (let [raw  (archived-at email)
-            mid  (some-> (:report/message-id report) (str/replace #"^<|>$" ""))
+            mid  (some-> (or (raw-message-id email) (:report/message-id report))
+                         (str/replace #"^<|>$" ""))
             fmt  (get-in source-map [source-name :archive-format-string])]
         (if (and fmt mid) (str/replace fmt "%s" mid) raw)))))
 
@@ -476,8 +488,10 @@
         format-rel (fn [from-side? rel]
                      (let [other (if from-side? (:rel/to rel) (:rel/from rel))
                            a     (archive other)
-                           subj  (get-in other [:report/email :email/subject])]
-                       (cond-> {:message-id (:report/message-id other)}
+                           subj  (get-in other [:report/email :email/subject])
+                           mid   (or (raw-message-id (:report/email other))
+                                     (:report/message-id other))]
+                       (cond-> {:message-id mid}
                          (:report/type other) (assoc :type (name (:report/type other)))
                          subj                 (assoc :subject subj)
                          a                    (assoc :archived-at a)
@@ -531,7 +545,8 @@
         (cond->
          from-name                       (assoc :from-name from-name)
           role                            (assoc :role role)
-          (:report/message-id report)     (assoc :message-id (:report/message-id report))
+          (:report/message-id report)     (assoc :message-id (or (raw-message-id email)
+                                                                  (:report/message-id report)))
           (:report/version report)        (assoc :version (:report/version report))
           (:report/topic-value report)    (assoc :topic (:report/topic-value report))
           (:report/patch-seq report)      (assoc :patch-seq (:report/patch-seq report))
@@ -898,7 +913,8 @@
   (let [av       (ctx-votes)
         entries  (reduce
                   (fn [acc report]
-                    (let [mid   (:report/message-id report)
+                    (let [mid   (or (raw-message-id (:report/email report))
+                                    (:report/message-id report))
                           votes (get av (:db/id report))]
                       (if (seq votes)
                         (let [grouped (group-by :value votes)
