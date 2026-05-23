@@ -1295,6 +1295,32 @@
         (finally
           (teardown! ctx))))))
 
+(deftest new-report-reply-without-anchorable-parent-applies-commands
+  (testing "An email that creates a new report AND replies to a
+            non-indexable In-Reply-To (so thread-anchorable? passes but
+            nearest-eids is empty) still receives its body commands."
+    (let [{:keys [conn] :as ctx} (setup-db!)
+          ;; IRT longer than max-indexable-mid-length (200) -- thread-
+          ;; anchorable? returns true via the non-indexable branch, but
+          ;; ancestor-mids-from filters it out so nearest-eids is empty.
+          long-irt (str "<" (apply str (repeat 220 "a")) "@x>")]
+      (try
+        (store-and-process! conn
+                            (mk-email {:mid "<orphan-bug@test.org>"
+                                       :subject "[BUG] orphan reply"
+                                       :from "alice@test.org"
+                                       :date #inst "2026-05-01T10:00:00"
+                                       :in-reply-to long-irt
+                                       :body "Important.\n"})
+                            "direct")
+        (let [r (get-report (d/db conn) "<orphan-bug@test.org>")]
+          (is (some? r) "new report was created")
+          (is (= :bug (:report/type r)))
+          (is (some? (:report/important r))
+              "Important. trigger applied to the new report"))
+        (finally
+          (teardown! ctx))))))
+
 (deftest pending-thread-references-anchor
   (testing "Reply with missing IRT but a known References ancestor is threaded immediately."
     (let [{:keys [conn] :as ctx} (setup-db!)]

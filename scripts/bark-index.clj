@@ -9,8 +9,11 @@
 ;;
 ;; Usage:
 ;;   bb export html                              -> via bb task (preferred)
-;;   bb scripts/bark-index.clj                   -> writes public/index.html
-;;   bb scripts/bark-index.clj -o reports.html   -> writes reports.html
+;;   bb scripts/bark-index.clj -o <out.html> --json <reports.json>
+;;
+;; --json and -o are required (the public/<source>/... layout means
+;; there is no single sensible default).  --dir defaults to the
+;; directory of --json.
 
 (require '[cheshire.core :as json]
          '[clojure.string :as str]
@@ -26,9 +29,6 @@
 ;; ---------------------------------------------------------------------------
 ;; Config
 ;; ---------------------------------------------------------------------------
-
-(def default-json "public/reports/all-open.json")
-(def default-output "public/web/index.html")
 
 (def type-labels {"bug" "bug" "announcement" "ann" "request" "req"
                   "patch" "patch" "release" "rel" "change" "chg"})
@@ -242,16 +242,16 @@
 
 (let [{:keys [out-file json-file out-dir theme page-size]}
       (parse-cli-args *command-line-args*)
-      _           (when theme (set-theme! theme))
-      json-file   (or json-file default-json)
-      out-file    (or out-file default-output)
-      reports-dir (or out-dir
-                      (.getParent (clojure.java.io/file json-file))
-                      "public/reports")]
-  (.mkdirs (clojure.java.io/file (.getParent (clojure.java.io/file out-file))))
-  (let [envelope (json/parse-string (slurp json-file))
-        reports  (get envelope "reports" envelope)
-        html     (index-page reports reports-dir envelope page-size)]
-    (spit-html out-file html)
+      _           (when theme (set-theme! theme))]
+  (when (or (str/blank? json-file) (str/blank? out-file))
     (binding [*out* *err*]
-      (log/info "Wrote" (count reports) "reports to" out-file))))
+      (log/error "bark-index.clj requires --json <file> and -o <file>"))
+    (System/exit 2))
+  (let [reports-dir (or out-dir (.getParent (clojure.java.io/file json-file)))]
+    (.mkdirs (clojure.java.io/file (.getParent (clojure.java.io/file out-file))))
+    (let [envelope (json/parse-string (slurp json-file))
+          reports  (get envelope "reports" envelope)
+          html     (index-page reports reports-dir envelope page-size)]
+      (spit-html out-file html)
+      (binding [*out* *err*]
+        (log/info "Wrote" (count reports) "reports to" out-file)))))

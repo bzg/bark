@@ -227,6 +227,22 @@
     (is (nil? (common/extract-bracketed-id "")))
     (is (nil? (common/extract-bracketed-id "   ")))))
 
+(deftest extract-bracketed-id-raw-test
+  (testing "preserves original case of the id-right"
+    (is (= "<abc@Example.COM>" (common/extract-bracketed-id-raw "<abc@Example.COM>")))
+    (is (= "<Local-Part@EXAMPLE.com>"
+           (common/extract-bracketed-id-raw "<Local-Part@EXAMPLE.com>"))))
+  (testing "first bracketed token wins, padding trimmed, vector accepted"
+    (is (= "<abc@X>" (common/extract-bracketed-id-raw "<abc@X> (c) <other@Y>")))
+    (is (= "<abc@X>" (common/extract-bracketed-id-raw "   <abc@X>   ")))
+    (is (= "<abc@X>" (common/extract-bracketed-id-raw ["<abc@X>" "<other@Y>"]))))
+  (testing "rejects malformed input identically to extract-bracketed-id"
+    (is (nil? (common/extract-bracketed-id-raw "no brackets")))
+    (is (nil? (common/extract-bracketed-id-raw "<foo bar@X>")))
+    (is (nil? (common/extract-bracketed-id-raw nil)))
+    (is (nil? (common/extract-bracketed-id-raw "")))
+    (is (nil? (common/extract-bracketed-id-raw "   ")))))
+
 (deftest normalize-mid-test
   (testing "lowercases the domain only, preserves local-part case"
     (is (= "<Abc@example.com>" (common/normalize-mid "<Abc@EXAMPLE.com>"))))

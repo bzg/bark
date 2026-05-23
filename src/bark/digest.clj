@@ -170,7 +170,7 @@
                         (common/has-inline-ics? body-text))
         has-text    (boolean (some common/text-attachment? attachments))]
     (into {:report/type (:type report-info) :report/email email-eid
-           :report/message-id message-id :report/digested-at now
+           :report/message-id message-id
            :report/last-activity (or email-date now)}
           (remove (comp nil? val))
           {:report/last-activity-address (:email/author-address email)
@@ -637,6 +637,44 @@
 
 (declare retry-pending-in-shared-thread!)
 
+(defn- dispatch-commands!
+  "Route commands carried by `email` between the new report and the
+  nearest thread parents.
+  - Root mail (no parent): every command applies to the new report.
+  - Pure reply: every command applies to the nearest report.
+  - Reply opening a new report (e.g. fresh `[BUG] ...` as `Re:` of a
+    discussion): carrier-eligible relation lines (Supersedes:,
+    Related-to:) land on the *new* report; everything else still flows
+    to the thread parent."
+  [conn email report-eid report-type nearest-eids from-addr
+   source-name source-map rroles delivery]
+  (let [creates-report? (some? report-eid)
+        has-parents?    (seq nearest-eids)]
+    (cond
+      (and creates-report? has-parents?)
+      (do (commands/apply-commands! conn report-eid report-type
+                                    email source-map rroles delivery
+                                    :carrier-only)
+          (apply-commands-on-nearest! conn email from-addr source-name rroles
+                                      source-map delivery nearest-eids
+                                      :no-carrier))
+
+      creates-report?
+      (commands/apply-commands! conn report-eid report-type
+                                email source-map rroles delivery nil)
+
+      has-parents?
+      (apply-commands-on-nearest! conn email from-addr source-name rroles
+                                  source-map delivery nearest-eids nil))))
+
+(defn- mark-digested-and-rescue!
+  "Stamp :email/digested-at then rescue pending siblings in the same
+  thread.  The rescue runs AFTER the write so the recursive call sees
+  a consistent state."
+  [conn eid email source-map sources]
+  (d/transact! conn [{:db/id eid :email/digested-at (Date.)}])
+  (retry-pending-in-shared-thread! conn email source-map sources))
+
 (defn process-email!
   "Process a stored email: classify source, detect report, thread,
   apply commands, manage series.
@@ -690,41 +728,11 @@
                 ;; threading and command dispatch -- private replies
                 ;; cannot annotate a public thread.
                 (when via-channel?
-                  ;; Threading: attach as descendant of every parent.
                   (when (seq parent-eids)
                     (attach-as-descendant! conn eid email from-addr parent-eids))
-
-                  ;; Command dispatch:
-                  ;; - Root mail opening a report (no In-Reply-To):
-                  ;;   carry every command onto that report.
-                  ;; - Reply with no new report:
-                  ;;   hand every command to the nearest thread report.
-                  ;; - Reply that itself creates a new report (e.g. a
-                  ;;   fresh `[BUG] ...` filed as `Re:` of a discussion):
-                  ;;   split the body in two -- the carrier-eligible
-                  ;;   relation lines (Supersedes:, Related-to:) name
-                  ;;   external mids and unambiguously apply to the
-                  ;;   *new* report; everything else (triggers, other
-                  ;;   annotations, words, votes, implicit ack/own)
-                  ;;   still flows to the thread parent.
-                  (let [is-reply?       (some? (:email/in-reply-to email))
-                        creates-report? (some? report-eid)]
-                    (cond
-                      (and creates-report? (not is-reply?))
-                      (commands/apply-commands! conn report-eid (:type report-info)
-                                                email source-map rroles delivery nil)
-
-                      (and creates-report? is-reply? (seq nearest-eids))
-                      (do (commands/apply-commands! conn report-eid (:type report-info)
-                                                    email source-map rroles delivery
-                                                    :carrier-only)
-                          (apply-commands-on-nearest! conn email from-addr source-name rroles
-                                                      source-map delivery nearest-eids
-                                                      :no-carrier))
-
-                      (seq nearest-eids)
-                      (apply-commands-on-nearest! conn email from-addr source-name rroles
-                                                  source-map delivery nearest-eids nil))))
+                  (dispatch-commands! conn email report-eid (:type report-info)
+                                      nearest-eids from-addr source-name source-map
+                                      rroles delivery))
 
                 ;; Phase 4: post-creation hooks (plan is pure, execution is effectful)
                 (when report-eid
@@ -733,13 +741,7 @@
                     (run-post-creation-hooks! conn report-eid eid email from-addr report-info
                                               parent-eids nearest-eids patches plan)))
 
-                ;; Mark email as fully digested so future re-fetches can skip it.
-                (d/transact! conn [{:db/id eid :email/digested-at (Date.)}])
-
-                ;; Out-of-order rescue: this email may have unblocked pending
-                ;; siblings/descendants.  Run AFTER the digested-at write so
-                ;; the recursive call sees a consistent state.
-                (retry-pending-in-shared-thread! conn email source-map sources)))
+                (mark-digested-and-rescue! conn eid email source-map sources)))
 
             ;; --- Pending path: defer threading and commands ---
             (do (d/transact! conn [{:db/id eid

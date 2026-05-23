@@ -124,7 +124,6 @@
  :report/last-activity-address {:db/valueType :db.type/string}
  :report/has-ics               {:db/valueType :db.type/boolean}
  :report/has-text-attachments  {:db/valueType :db.type/boolean}
- :report/digested-at           {:db/valueType :db.type/instant}
  :report/updated-at            {:db/valueType :db.type/instant}
 
  ;; --- Global metadata (export change tracking) ---

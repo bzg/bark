@@ -806,35 +806,33 @@
                     [setter-attr {:email/author-address s}])))
           rows)))
 
+;; closure-relation-rows: row schema consumed by `apply-lines!`.
+;;   :id            unique row id (matches the registry command :id)
+;;   :kind          relation kind to pose
+;;   :role          :current-as-from when the current report is the
+;;                  one being closed (Superseded-by:, Duplicate-of:);
+;;                  :current-as-to when the current report is the
+;;                  replacement and the target is closed (Supersedes:).
+;;                  :rel/from is always the report being closed.
+;;   :propagate     close-reason passed to propagate-patch-closure!
+;;   :propagate-tgt true => pass the replacement eid as `successor-eid`
+;;   :syntax        human-readable command name (failure logs)
+;;   :mid-key       key in `resolved` holding the target message-id
+;;   :unset-key     key in `resolved` holding the unset flag
+;;   :setter-attr   pull-map key under which the relation's :rel/setter
+;;                  is surfaced for `scope-permits?` on the open-report
+;;                  unset path.  MUST be unique per row: both :supersedes
+;;                  rows share `:rel/supersedes` as schema kind, but a
+;;                  chained report (supersedes X AND superseded by Y)
+;;                  would have its from-setter overwritten by the
+;;                  to-setter if we reused the same pull key.  The
+;;                  `-from`/`-to` suffix records the row's role and is
+;;                  internal to the pull map; nothing else reads these
+;;                  as schema attrs.
+
 (def ^:private closure-relation-rows
   "Specs for command-driven closure relations (Superseded-by /
-  Supersedes / Duplicate-of).  Each row drives an iteration in
-  `apply-lines!`:
-    :id            -- unique row id (matches the registry command :id)
-    :kind          -- relation kind to pose
-    :role          -- :current-as-from when the current report is the
-                      one being closed (Superseded-by:, Duplicate-of:);
-                      :current-as-to when the current report is the
-                      replacement and the target is the one being closed
-                      (Supersedes:).  The :rel/from of the posed
-                      relation is always the report being closed.
-    :propagate     -- close-reason passed to propagate-patch-closure!
-    :propagate-tgt -- when true, pass the replacement eid as `successor-eid`
-    :syntax        -- human-readable command name (for failure logs)
-    :mid-key       -- key in resolved holding the target message-id
-    :unset-key     -- key in resolved holding the unset flag
-    :setter-attr   -- key under which the relation's :rel/setter is
-                      surfaced in the pull map so `scope-permits?` can
-                      resolve :setter-or-maintainer on the unset
-                      command in the open-report path."
-  ;; :setter-attr must be UNIQUE per row.  Both :supersedes rows share
-  ;; the `:rel/supersedes` schema kind; if we reused `:rel/supersedes`
-  ;; as the pull-map key, `relation-setters-as-pull` would overwrite
-  ;; the from-setter with the to-setter on a chained report (one that
-  ;; supersedes X AND is superseded by Y), so the scope check on the
-  ;; `Not superseded-by:` unset would see the wrong setter.  The
-  ;; suffix `-from` / `-to` records the row's role.  These keys are
-  ;; internal to the pull map; nothing else reads them as schema attrs.
+  Supersedes / Duplicate-of)."
   [{:id :superseded-by :kind :supersedes :role :current-as-from
     :propagate :superseded :propagate-tgt true
     :syntax "Superseded-by"
@@ -1139,24 +1137,18 @@
           (:report/close-reason word-result) (assoc :report/close-reason
                                                     (:report/close-reason word-result)))))))
 
+;; Carrier-eligible commands: when a mail simultaneously creates a new
+;; report AND carries one of these annotations, the annotation applies
+;; to the new report rather than the thread parent.  The set is
+;; restricted to relation annotations naming an explicit external mid
+;; (Supersedes:, Related-to:): on a brand-new report there is nothing
+;; to undo (no :unsupersedes), no one opens a fresh report to declare
+;; it superseded (:superseded-by) or a duplicate (:duplicate-of), and
+;; non-relation annotations (urgent/important/topic/...) almost always
+;; target the thread, not the new report.
+
 (def carrier-eligible-ids
-  "Command ids whose intent is unambiguously cross-report: when carried
-  by a mail that also creates a new report, they apply to that new
-  report rather than the thread parent.  Restricted to two relation
-  annotations with explicit external mids:
-  - :supersedes  -- 'this new report supersedes <old>'
-  - :related-to  -- 'this new report is related to <other>'
-
-  Excluded by design:
-  - :superseded-by / :duplicate-of (no one opens a new report just to
-    declare it's superseded or a duplicate);
-  - state-change triggers (close/ack/own) -- ambiguous on a brand-new
-    report;
-  - non-relation annotations (urgent/important/topic/deadline/expiry)
-    -- the intent is usually 'this thread', not the new report.
-
-  Unsets (:unsupersedes, :unrelated-to) are intentionally NOT in the
-  carrier set: there is nothing to undo on a freshly-created report."
+  "Command ids that carry to a new report instead of the thread parent."
   #{:supersedes :related-to})
 
 (defn apply-commands!
@@ -1219,6 +1211,11 @@
                                       report-eid)
                               :report/email :email/author-address str/lower-case)
         self-ack?     (and from-addr reporter (= (str/lower-case from-addr) reporter))
+        self-ack-line? (fn [d]
+                         (and (= :set (:action d))
+                              (= :report/acked (:attr d))
+                              reporter
+                              (= (some-> (:email-address d) str/lower-case) reporter)))
         word-result   (cond-> (merge implicit body-words)
                         self-ack? (dissoc :report/acked)
                         :always   (filter-words-by-scope overrides is-maint? fail-ctx))
@@ -1232,12 +1229,7 @@
                                            (:email/date-sent email)
                                            (:line-patterns src-cmds))
                              (filter keep-line?)
-                             (remove (fn [d]
-                                       (and (= :set (:action d))
-                                            (= :report/acked (:attr d))
-                                            reporter
-                                            (= (some-> (:email-address d) str/lower-case)
-                                               reporter))))
+                             (remove self-ack-line?)
                              vec))
         closed?       (some? (:report/closed (d/pull db [:report/closed] report-eid)))]
     (if closed?

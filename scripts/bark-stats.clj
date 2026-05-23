@@ -467,7 +467,7 @@
                            contributors-by-month)
         maint-data   (mapv (fn [[m c]] {"month" m "count" c "role" "Maintainers"})
                            maintainers-by-month)
-        data         (into (into partic-data contrib-data) maint-data)]
+        data         (into [] cat [partic-data contrib-data maint-data])]
     {:$schema  "https://vega.github.io/schema/vega-lite/v5.json"
      :title    "Participants, contributors & maintainers (last 12 months)"
      :width    "container"

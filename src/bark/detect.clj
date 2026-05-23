@@ -122,14 +122,6 @@
 (defn has-patch-attachment? [attachments]
   (some (fn [att] (common/patch-file? (:attachment/filename att))) attachments))
 
-;; ICS / calendar detection -- delegates to common for JVM+bb consistency.
-
-(defn has-ics?
-  "True if an email has ICS content (attached or inline)."
-  [email]
-  (or (common/has-ics-attachment? (:email/attachments email))
-      (common/has-inline-ics? (common/email-body-text email))))
-
 (defn has-patch-content?
   "True if an email has a .patch/.diff attachment.  Inline diffs in
   the body are intentionally not a signal: only the explicit gesture

@@ -5,7 +5,8 @@
 (ns bark.expire
   "Close open reports when their age and state match the configured
   :expiry rules. Runs inside the daemon."
-  (:require [datalevin.core :as d]
+  (:require [clojure.string :as str]
+            [datalevin.core :as d]
             [taoensso.timbre :as log]
             [bark.common :as common]
             [bark.tracking :as tracking])
@@ -75,7 +76,8 @@
   fresh (d/db conn) -- not a snapshot -- so re-runs within the same
   reduce see earlier inserts."
   [conn src report-mid now]
-  (let [synth-mid (str "<bark-expired-" report-mid ">")]
+  (let [stripped  (str/replace (or report-mid "") #"^<|>$" "")
+        synth-mid (str "<bark-expired-" stripped ">")]
     (or (d/entid (d/db conn) [:email/message-id synth-mid])
         (let [tempid -1
               ;; Stamp "bark-system" on both :from-address and

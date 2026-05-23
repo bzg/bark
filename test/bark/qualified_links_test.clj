@@ -13,8 +13,7 @@
             [datalevin.core :as d]
             [bark.commands :as commands]
             [bark.common :as common]
-            [bark.digest :as digest])
-  (:import [java.util Date]))
+            [bark.digest :as digest]))
 
 (defn- fresh-conn []
   (let [path (str "/tmp/bark-rel-test-" (System/currentTimeMillis) "-" (rand-int 1e6))
@@ -46,8 +45,7 @@
   [conn mid email-eid type]
   (d/transact! conn [{:report/message-id mid
                       :report/type       type
-                      :report/email      email-eid
-                      :report/digested-at (Date.)}])
+                      :report/email      email-eid}])
   (d/entid (d/db conn) [:report/message-id mid]))
 
 (defn- get-relations

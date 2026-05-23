@@ -131,7 +131,7 @@
           opts     (into-array java.nio.file.CopyOption
                                [java.nio.file.StandardCopyOption/REPLACE_EXISTING])]
       (doseq [^java.io.File f (file-seq src)
-              :let [target (.resolve dst-path (.relativize src-path (.toPath f)))]]
+              :let            [target (.resolve dst-path (.relativize src-path (.toPath f)))]]
         (if (.isDirectory f)
           (.mkdirs (.toFile target))
           (java.nio.file.Files/copy (.toPath f) target opts))))))
@@ -144,7 +144,7 @@
         prefix (str (.getName target) ".old-")]
     (when (.isDirectory parent)
       (doseq [^java.io.File f (.listFiles parent)
-              :when (and (.isDirectory f)
+              :when           (and (.isDirectory f)
                          (str/starts-with? (.getName f) prefix))]
         (delete-dir! f)))))
 
@@ -249,7 +249,7 @@
   [votes]
   (when (seq votes)
     (let [{:keys [up down null]} (vote-counts votes)
-          total (+ up down null)]
+          total                  (+ up down null)]
       (when (pos? total)
         (str (- up down) "/" total)))))
 
@@ -296,14 +296,17 @@
   (get-header (:email/headers-edn email) "Archived-At"))
 
 (defn- raw-message-id
-  "Original-case Message-Id pulled from the email's stored headers.  The
-  DB key (:email/message-id) is normalized (RFC 5322 §3.6.4 lowercases
-  the id-right) but public-inbox compares mids case-sensitively, so
-  exports use this for URLs and the displayed :message-id field.
-  Returns nil when headers-edn is missing (synthetic emails)."
+  "Original-case Message-Id from stored headers; nil for synthetic emails.
+  Exports use this because public-inbox compares mids case-sensitively."
   [email]
   (extract-bracketed-id-raw
    (get-header (:email/headers-edn email) "Message-Id")))
+
+(defn- export-mid
+  "Message-Id to expose in exports: original case when available, else
+  the normalized DB key."
+  [report email]
+  (or (raw-message-id email) (:report/message-id report)))
 
 (defn- sender-role
   "Determine role of sender for a given source context."
@@ -367,10 +370,9 @@
   (let [source-name (:email/source email)
         src-type    (get-in source-map [source-name :source-type])]
     (when-not (#{:alias :mailbox} src-type)
-      (let [raw  (archived-at email)
-            mid  (some-> (or (raw-message-id email) (:report/message-id report))
-                         (str/replace #"^<|>$" ""))
-            fmt  (get-in source-map [source-name :archive-format-string])]
+      (let [raw (archived-at email)
+            mid (some-> (export-mid report email) (str/replace #"^<|>$" ""))
+            fmt (get-in source-map [source-name :archive-format-string])]
         (if (and fmt mid) (str/replace fmt "%s" mid) raw)))))
 
 (defn- report-vote-fields
@@ -380,7 +382,7 @@
     (let [votes  (votes-str report-votes)
           counts (vote-counts report-votes)]
       (cond-> {}
-        votes                    (assoc :votes votes)
+        votes                   (assoc :votes votes)
         (pos? (:up counts 0))   (assoc :votes-up (:up counts))
         (pos? (:down counts 0)) (assoc :votes-down (:down counts))
         (pos? (:null counts 0)) (assoc :votes-null (:null counts))))))
@@ -423,28 +425,27 @@
                            (:email/attachments @att-email)))))))
 
 ;; ---------------------------------------------------------------------------
-;; Export context -- bound once per export run via with-export-context.
+;; Export context -- bound for the duration of one export run.
 ;; Used by map-reports, dump-events!, dump-text!, and collect-vevents
 ;; to access the DB and votes without threading parameters through
 ;; every dump-* function.
 ;; ---------------------------------------------------------------------------
 
-(def ^:private export-ctx
+(def ^:dynamic ^:private *export-ctx*
   "Export context: {:db <datalevin-db> :votes {eid -> [vote-maps]}
   :config <config> :author-names {lc-addr -> display-name}}"
-  (atom {:db nil :votes {} :config nil :author-names {}}))
+  {:db nil :votes {} :config nil :author-names {}})
 
-(defn- set-export-context! [db votes config]
-  (reset! export-ctx {:db           db
-                      :votes        votes
-                      :config       config
-                      :author-names (merge (build-author-names db)
-                                           (load-mailmap))}))
+(defn- build-export-ctx [db votes config]
+  {:db           db
+   :votes        votes
+   :config       config
+   :author-names (merge (build-author-names db) (load-mailmap))})
 
-(defn- ctx-db [] (:db @export-ctx))
-(defn- ctx-votes [] (:votes @export-ctx))
-(defn- ctx-config [] (:config @export-ctx))
-(defn- ctx-author-names [] (:author-names @export-ctx))
+(defn- ctx-db [] (:db *export-ctx*))
+(defn- ctx-votes [] (:votes *export-ctx*))
+(defn- ctx-config [] (:config *export-ctx*))
+(defn- ctx-author-names [] (:author-names *export-ctx*))
 
 (def ^:private default-awaiting-delay-days 14)
 
@@ -465,14 +466,14 @@
           op-role   (when op-addr
                       (sender-role op-addr source-name source-map maintainers-map))]
       (when (and last-role (not op-role))
-        (let [config     (ctx-config)
-              src-cfg    (get source-map source-name)
-              delay-str  (or (:awaiting-delay src-cfg)
+        (let [config                   (ctx-config)
+              src-cfg                  (get source-map source-name)
+              delay-str                (or (:awaiting-delay src-cfg)
                              (:awaiting-delay config))
-              delay-days (if delay-str (parse-delay delay-str) default-awaiting-delay-days)
+              delay-days               (if delay-str (parse-delay delay-str) default-awaiting-delay-days)
               ^java.util.Date last-act (:report/last-activity report)
-              elapsed-ms  (- (System/currentTimeMillis) (.getTime last-act))
-              elapsed-days (/ elapsed-ms (* 24 60 60 1000))]
+              elapsed-ms               (- (System/currentTimeMillis) (.getTime last-act))
+              elapsed-days             (/ elapsed-ms (* 24 60 60 1000))]
           (>= elapsed-days delay-days))))))
 
 (defn- group-relations
@@ -481,16 +482,15 @@
   (:rel/_to) is added because the symmetric kind canonicalises to the
   smaller-eid side, so the other report only sees it via incoming."
   [report src-type]
-  (let [self-eid   (:db/id report)
-        archive    (fn [other-r]
+  (let [self-eid        (:db/id report)
+        archive         (fn [other-r]
                      (when-not (#{:alias :mailbox} src-type)
                        (archived-at (:report/email other-r))))
-        format-rel (fn [from-side? rel]
-                     (let [other (if from-side? (:rel/to rel) (:rel/from rel))
-                           a     (archive other)
-                           subj  (get-in other [:report/email :email/subject])
-                           mid   (or (raw-message-id (:report/email other))
-                                     (:report/message-id other))]
+        format-rel      (fn [from-side? rel]
+                          (let [other (if from-side? (:rel/to rel) (:rel/from rel))
+                                a     (archive other)
+                                subj  (get-in other [:report/email :email/subject])
+                                mid   (export-mid other (:report/email other))]
                        (cond-> {:message-id mid}
                          (:report/type other) (assoc :type (name (:report/type other)))
                          subj                 (assoc :subject subj)
@@ -501,10 +501,10 @@
         active-not-self (fn [other-key]
                           (filter #(and (:rel/active? %)
                                         (not= self-eid (:db/id (other-key %))))))
-        out        (sequence (comp (active-not-self :rel/to)
+        out             (sequence (comp (active-not-self :rel/to)
                                    (map (juxt :rel/kind #(format-rel true %))))
                              (:rel/_from report))
-        in-related (sequence (comp (active-not-self :rel/from)
+        in-related      (sequence (comp (active-not-self :rel/from)
                                    (filter #(= :related-to (:rel/kind %)))
                                    (map (juxt :rel/kind #(format-rel false %))))
                              (:rel/_to report))]
@@ -517,7 +517,7 @@
   (let [email       (:report/email report)
         source-name (:email/source email)
         att-data    (delay (when db
-                     (fetch-attachment-data db (:report/message-id report))))
+                             (fetch-attachment-data db (:report/message-id report))))
         att-email   (delay (:report/email @att-data))
         from        (or (:email/author-address email) "")
         from-name   (or (get (ctx-author-names) (str/lower-case from))
@@ -543,38 +543,37 @@
         (assoc-from-addresses report)
         (assoc-owned-name (ctx-author-names))
         (cond->
-         from-name                       (assoc :from-name from-name)
-          role                            (assoc :role role)
-          (:report/message-id report)     (assoc :message-id (or (raw-message-id email)
-                                                                  (:report/message-id report)))
-          (:report/version report)        (assoc :version (:report/version report))
-          (:report/topic-value report)    (assoc :topic (:report/topic-value report))
-          (:report/patch-seq report)      (assoc :patch-seq (:report/patch-seq report))
-          (:report/patch-source report)   (assoc :patch-source (mapv name (sort (:report/patch-source report))))
-          arch                            (assoc :archived-at arch)
-          (:report/deadline-value report) (assoc :deadline (format-date-iso (:report/deadline-value report)))
-          (:report/last-activity report)  (assoc :last-activity (format-date-iso (:report/last-activity report)))
-          awaiting?                      (assoc :awaiting true)
-          (:report/expiry-value report)   (assoc :expiry (format-date-iso (:report/expiry-value report)))
-          (:report/close-reason report)   (assoc :close-reason (name (:report/close-reason report)))
-          ;; Singular :superseded-by convenience field -- first outgoing
-          ;; :supersedes if any.  Subject is also exposed under
-          ;; :rel/to.{:report/email :email/subject}.
-          first-sup
-          (assoc :superseded-by
-                 (cond-> {:message-id (:message-id first-sup)}
-                   (get-in first-sup [:subject])
-                   (assoc :subject (:subject first-sup))))
-          (and (= :expired (:report/close-reason report))
-               (:email/date-sent (:report/closed report)))
-          (assoc :expired-date (format-date-iso (:email/date-sent (:report/closed report)))))
+            from-name                       (assoc :from-name from-name)
+            role                            (assoc :role role)
+            (:report/message-id report)     (assoc :message-id (export-mid report email))
+            (:report/version report)        (assoc :version (:report/version report))
+            (:report/topic-value report)    (assoc :topic (:report/topic-value report))
+            (:report/patch-seq report)      (assoc :patch-seq (:report/patch-seq report))
+            (:report/patch-source report)   (assoc :patch-source (mapv name (sort (:report/patch-source report))))
+            arch                            (assoc :archived-at arch)
+            (:report/deadline-value report) (assoc :deadline (format-date-iso (:report/deadline-value report)))
+            (:report/last-activity report)  (assoc :last-activity (format-date-iso (:report/last-activity report)))
+            awaiting?                       (assoc :awaiting true)
+            (:report/expiry-value report)   (assoc :expiry (format-date-iso (:report/expiry-value report)))
+            (:report/close-reason report)   (assoc :close-reason (name (:report/close-reason report)))
+            ;; Singular :superseded-by convenience field -- first outgoing
+            ;; :supersedes if any.  Subject is also exposed under
+            ;; :rel/to.{:report/email :email/subject}.
+            first-sup
+            (assoc :superseded-by
+                   (cond-> {:message-id (:message-id first-sup)}
+                     (get-in first-sup [:subject])
+                     (assoc :subject (:subject first-sup))))
+            (and (= :expired (:report/close-reason report))
+                 (:email/date-sent (:report/closed report)))
+            (assoc :expired-date (format-date-iso (:email/date-sent (:report/closed report)))))
         (merge (report-vote-fields report-votes))
         (cond->
-          (:report/series report) (assoc :series (report-series-fields (:report/series report))))
+            (:report/series report) (assoc :series (report-series-fields (:report/series report))))
         ;; Qualified relations exported as one field per kind.
         (merge relations)
         (cond->
-          (seq (:report/patches report)) (assoc :patches (report-patch-fields report)))
+            (seq (:report/patches report)) (assoc :patches (report-patch-fields report)))
         (merge (report-attachment-files report att-email))
         ;; Ensure closed is truthy when close-reason is set (auto-superseded
         ;; reports may lack :report/closed-address, leaving :closed unset).
@@ -599,11 +598,11 @@
   [source-name source-map]
   (let [cfg (get source-map source-name)]
     (cond-> {:source-type (or (:source-type cfg) :mailbox)}
-      (:list cfg)          (assoc :list          (:list cfg))
-      (:alias cfg)         (assoc :alias         (:alias cfg))
-      (:to cfg)            (assoc :to            (:to cfg))
-      (:list-archive cfg)  (assoc :list-archive  (:list-archive cfg))
-      (:base-url cfg)      (assoc :base-url      (:base-url cfg)))))
+      (:list cfg)         (assoc :list          (:list cfg))
+      (:alias cfg)        (assoc :alias         (:alias cfg))
+      (:to cfg)           (assoc :to            (:to cfg))
+      (:list-archive cfg) (assoc :list-archive  (:list-archive cfg))
+      (:base-url cfg)     (assoc :base-url      (:base-url cfg)))))
 
 ;; ---------------------------------------------------------------------------
 ;; XML helpers
@@ -733,17 +732,17 @@
   Excludes cover letters (patch-seq starting with \"0/\") from the tally."
   [members]
   (let [patches (remove #(str/starts-with? (or (:patch-seq %) "") "0/") members)
-        counts (reduce (fn [acc m]
-                         (let [flags (or (:flags m) "---")]
+        counts  (reduce (fn [acc m]
+                          (let [flags (or (:flags m) "---")]
                            (cond
                              (not= \- (nth flags 2 \-)) (update acc :closed (fnil inc 0))
                              (not= \- (nth flags 0 \-)) (update acc :acked (fnil inc 0))
-                             :else                       (update acc :open (fnil inc 0)))))
-                       {} patches)
-        parts (cond-> []
-                (:acked counts) (conj (str (:acked counts) " acked"))
-                (:closed counts) (conj (str (:closed counts) " closed"))
-                (:open counts) (conj (str (:open counts) " open")))]
+                             :else                      (update acc :open (fnil inc 0)))))
+                        {} patches)
+        parts   (cond-> []
+                  (:acked counts)  (conj (str (:acked counts) " acked"))
+                  (:closed counts) (conj (str (:closed counts) " closed"))
+                  (:open counts)   (conj (str (:open counts) " open")))]
     (str/join ", " parts)))
 
 (defn- fold-series
@@ -760,7 +759,7 @@
                   (conj acc m)
                   (if (contains? @seen sid)
                     acc ;; already emitted representative
-                    (let [_ (vswap! seen conj sid)
+                    (let [_       (vswap! seen conj sid)
                           members (get groups sid)
                           sorted  (sort-by #(parse-long (re-find #"^\d+" (or (:patch-seq %) "0"))) members)
                           cover   (first (filter #(str/starts-with? (or (:patch-seq %) "") "0/") sorted))
@@ -899,7 +898,7 @@
    (let [data     (map-reports reports source-map maintainers-map)
          filename (str out-dir "/" basename)]
      (when (seq data)
-       (let [entries  (str/join "\n" (map report->org-entry data))]
+       (let [entries (str/join "\n" (map report->org-entry data))]
          (spit filename
                (str "#+TITLE: BARK " source-name " " title-label "\n"
                     "#+DATE: " (java.time.LocalDate/now) "\n\n"
@@ -910,21 +909,21 @@
   "Export votes.json for a single source.
   Format: {\"<mid>\": {\"+1\": [{voter, message-id}], \"-1\": [...], \"0\": [...]}}"
   [reports out-dir]
-  (let [av       (ctx-votes)
-        entries  (reduce
+  (let [av      (ctx-votes)
+        entries (reduce
                   (fn [acc report]
-                    (let [mid   (or (raw-message-id (:report/email report))
-                                    (:report/message-id report))
+                    (let [mid   (export-mid report (:report/email report))
                           votes (get av (:db/id report))]
                       (if (seq votes)
                         (let [grouped (group-by :value votes)
                               fmt     (fn [vs]
-                                        (mapv (fn [{:keys [voter email-mid]}]
-                                                {:voter voter :message-id email-mid})
+                                        (mapv (fn [{:keys [voter email-mid-raw email-mid]}]
+                                                {:voter voter
+                                                 :message-id (or email-mid-raw email-mid)})
                                               vs))]
                           (assoc acc mid {"+1" (fmt (:up grouped))
-                                         "-1" (fmt (:down grouped))
-                                         "0"  (fmt (:null grouped))}))
+                                          "-1" (fmt (:down grouped))
+                                          "0"  (fmt (:null grouped))}))
                         acc)))
                   {}
                   reports)]
@@ -973,10 +972,10 @@
   [reports text-dir]
   (let [txt-reports (filter :report/has-text-attachments reports)
         att-cache   (batch-fetch-attachments txt-reports)
-        total (reduce (fn [n report]
-                        (let [txt-atts (filter #(and (text-attachment? %)
-                                                     (:attachment/data %))
-                                               (:email/attachments (get att-cache (:report/message-id report))))]
+        total       (reduce (fn [n report]
+                              (let [txt-atts (filter #(and (text-attachment? %)
+                                                           (:attachment/data %))
+                                                     (:email/attachments (get att-cache (:report/message-id report))))]
                           (if (seq txt-atts)
                             (let [h   (mid-hash (:report/message-id report))
                                   dir (io/file text-dir h)]
@@ -1015,11 +1014,11 @@
                                   (has-ics-content? %))
                             reports)
         att-cache   (batch-fetch-attachments ics-reports)
-        total (reduce (fn [n report]
-                        (let [atts  (:email/attachments (get att-cache (:report/message-id report)))
-                              ics-atts (filter #(and (ics-file? (:attachment/filename %))
-                                                     (:attachment/data %))
-                                               atts)]
+        total       (reduce (fn [n report]
+                              (let [atts     (:email/attachments (get att-cache (:report/message-id report)))
+                                    ics-atts (filter #(and (ics-file? (:attachment/filename %))
+                                                           (:attachment/data %))
+                                                     atts)]
                           (if (seq ics-atts)
                             (let [h   (mid-hash (:report/message-id report))
                                   dir (io/file events-dir h)]
@@ -1038,10 +1037,10 @@
   "Export events.json/org (open) and events-closed.json/org (closed)
   for announcements that have ICS content."
   [reports reports-dir source-name source-map maintainers-map fmts]
-  (let [events      (filter #(and (= :announcement (:report/type %))
+  (let [events        (filter #(and (= :announcement (:report/type %))
                                   (has-ics-content? %))
                             reports)
-        open-events  (vec (open-reports events))
+        open-events   (vec (open-reports events))
         closed-events (vec (filter :report/closed events))]
     (when (seq open-events)
       (when (fmts "json")
@@ -1069,9 +1068,9 @@
   [reports]
   (let [att-cache (batch-fetch-attachments reports)]
     (mapcat (fn [report]
-              (let [email (:report/email (get att-cache (:report/message-id report)))
-                    atts  (:email/attachments email)
-                    att-vevents (->> atts
+              (let [email        (:report/email (get att-cache (:report/message-id report)))
+                    atts         (:email/attachments email)
+                    att-vevents  (->> atts
                                      (filter #(and (ics-file? (:attachment/filename %))
                                                    (:attachment/data %)))
                                      (mapcat #(extract-vevents (:attachment/data %))))
@@ -1138,7 +1137,7 @@
                                 "-o" (str base-dir "/docs.html")
                                 "--dir" base-dir]
                          source-name (into ["-n" source-name])
-                         true (into cli-args))))
+                         true        (into cli-args))))
 
 ;; ---------------------------------------------------------------------------
 ;; Per-type export
@@ -1160,12 +1159,23 @@
   (or cli-topics-filter
       (resolve-topics-filter (get-in source-map [source-name :topics-filter]))))
 
+;; Export scope: the 5-tuple {:reports :reports-dir :source-name
+;; :source-map :maintainers-map} that every dump-* orchestrator
+;; consumes.  Built once in `export-source!` and propagated as a map
+;; to avoid positional-argument errors.
+
+(defn- with-reports
+  "Return scope with :reports swapped (other keys preserved)."
+  [scope reports]
+  (assoc scope :reports reports))
+
 (defn- dump-typed-formats!
-  "Write `reports` to disk in every format enabled by `fmts`: JSON (if
-  `fmts \"json\"` or `:json-always?`), RSS (if `fmts \"rss\"`), Org (if
-  `fmts \"org\"`).  `basename` is the file stem (no extension); `label`
-  is the human title used in RSS/Org headers."
-  [reports reports-dir source-name source-map maintainers-map fmts basename label
+  "Write scope's reports in every format enabled by `fmts`: JSON
+  (when `fmts \"json\"` or `:json-always?`), RSS (when `fmts \"rss\"`),
+  Org (when `fmts \"org\"`).  `basename` is the file stem (no
+  extension); `label` is the human title used in RSS/Org headers."
+  [{:keys [reports reports-dir source-name source-map maintainers-map]}
+   fmts basename label
    & {:keys [json-always? counts]}]
   (when (or json-always? (fmts "json"))
     (dump-json! reports reports-dir source-name source-map maintainers-map
@@ -1178,17 +1188,16 @@
                (str basename ".org") label)))
 
 (defn- dump-per-type!
-  "Export per-type JSON, Org, and RSS files for all report types present.
-  When `changed-types` is non-nil, only re-export files for those types."
-  [reports reports-dir source-name source-map maintainers-map fmts
-   & {:keys [changed-types]}]
+  "Export per-type JSON, Org, and RSS files for all report types
+  present.  When `changed-types` is non-nil, only re-export files for
+  those types."
+  [{:keys [reports] :as scope} fmts & {:keys [changed-types]}]
   (doseq [rtype report-types
-          :let [typed (filter-reports reports {:type rtype})
-                plural (type->plural rtype)]
+          :let  [typed  (filter-reports reports {:type rtype})
+                 plural (type->plural rtype)]
           :when (and (seq typed)
                      (or (nil? changed-types) (changed-types rtype)))]
-    (dump-typed-formats! typed reports-dir source-name source-map maintainers-map
-                         fmts plural plural)))
+    (dump-typed-formats! (with-reports scope typed) fmts plural plural)))
 
 (defn- dump-open-closed!
   "Export open/closed split files and meta.json with summary counts.
@@ -1196,52 +1205,49 @@
   all-closed.json is lazy-loaded when user deactivates the Open filter.
   meta.json contains summary counts per type, used by data.html for KPIs.
   Produces per-type -open and -closed files in all enabled formats.
-  When `changed-types` is non-nil, only re-export per-type files for those types
-  (the aggregate all-open/all-closed and meta.json are always regenerated)."
-  [reports reports-dir source-name source-map maintainers-map fmts
-   & {:keys [changed-types]}]
-  (let [open       (vec (open-reports reports))
-        closed     (vec (filter :report/closed reports))
-        counts     {:total        (count reports)
-                    :open-count   (count open)
-                    :closed-count (count closed)}
-        ;; Per-type breakdown for meta.json
-        by-type    (group-by :report/type reports)
+  When `changed-types` is non-nil, only re-export per-type files for
+  those types (aggregate all-open/all-closed and meta.json are always
+  regenerated)."
+  [{:keys [reports reports-dir source-name source-map] :as scope}
+   fmts & {:keys [changed-types]}]
+  (let [open        (vec (open-reports reports))
+        closed      (vec (filter :report/closed reports))
+        counts      {:total        (count reports)
+                     :open-count   (count open)
+                     :closed-count (count closed)}
+        by-type     (group-by :report/type reports)
         type-counts (into {}
                           (map (fn [[t rs]]
                                  [(name t) {:total  (count rs)
                                             :open   (count (remove :report/closed rs))
                                             :closed (count (filter :report/closed rs))}]))
                           by-type)
-        tenures    (when-let [db (ctx-db)] (get-tenures db source-name))
-        meta-data  (merge counts
-                          {:bark-format bark-format
-                           :source      source-name
-                           :generated   (str (java.util.Date.))
-                           :by-type     type-counts
-                           :maintainers (tenures-snapshot (or tenures []))}
+        tenures     (when-let [db (ctx-db)] (get-tenures db source-name))
+        meta-data   (merge counts
+                           {:bark-format bark-format
+                            :source      source-name
+                            :generated   (str (java.util.Date.))
+                            :by-type     type-counts
+                            :maintainers (tenures-snapshot (or tenures []))}
                           (source-metadata source-name source-map))]
-    ;; meta.json
     (spit (str reports-dir "/meta.json")
           (json/generate-string meta-data {:pretty true}))
     (log/info "Wrote meta.json")
-    (dump-typed-formats! open reports-dir source-name source-map maintainers-map
-                         fmts "all-open" "open reports"
+    (dump-typed-formats! (with-reports scope open) fmts "all-open" "open reports"
                          :json-always? true :counts counts)
-    (dump-typed-formats! closed reports-dir source-name source-map maintainers-map
-                         fmts "all-closed" "closed reports"
+    (dump-typed-formats! (with-reports scope closed) fmts "all-closed" "closed reports"
                          :json-always? true :counts counts)
     (doseq [rtype report-types
             :when (or (nil? changed-types) (changed-types rtype))
-            :let [plural (type->plural rtype)
-                  t-open   (filter-reports open {:type rtype})
-                  t-closed (filter-reports closed {:type rtype})]]
+            :let  [plural   (type->plural rtype)
+                   t-open   (filter-reports open {:type rtype})
+                   t-closed (filter-reports closed {:type rtype})]]
       (when (seq t-open)
-        (dump-typed-formats! t-open reports-dir source-name source-map maintainers-map
-                             fmts (str plural "-open") (str plural " (open)")))
+        (dump-typed-formats! (with-reports scope t-open) fmts
+                             (str plural "-open") (str plural " (open)")))
       (when (seq t-closed)
-        (dump-typed-formats! t-closed reports-dir source-name source-map maintainers-map
-                             fmts (str plural "-closed") (str plural " (closed)"))))))
+        (dump-typed-formats! (with-reports scope t-closed) fmts
+                             (str plural "-closed") (str plural " (closed)"))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Root index -- public/index.html listing all sources
@@ -1260,10 +1266,10 @@
   Reads each source's reports/meta.json for summary counts."
   [source-names _source-map]
   (let [rows (for [src-name source-names
-                   :let [slug     (slugify src-name)
+                   :let     [slug     (slugify src-name)
                          base-dir (str "public/" slug)
                          meta     (load-source-meta base-dir)]
-                   :when meta]
+                   :when    meta]
                {:name         src-name
                 :slug         slug
                 :total        (or (:total meta) 0)
@@ -1290,7 +1296,7 @@
         (str
          "<!DOCTYPE html>\n<html lang=\"en\">\n"
          (html-head {:title "BARK -- Sources"
-                     :css (str "table{margin-top:1.5rem}"
+                     :css   (str "table{margin-top:1.5rem}"
                                "td.num,th.num{text-align:right}"
                                "a.archive{font-size:0.82rem;margin-left:0.4rem;opacity:0.7}"
                                ".feeds{font-size:0.82rem;white-space:nowrap}"
@@ -1329,18 +1335,23 @@
         _           (doseq [d [reports-dir patches-dir events-dir text-dir]]
                       (.mkdirs (io/file d)))
         ef          (resolve-export-formats source-name source-map)
+        scope       {:reports         reports
+                     :reports-dir     reports-dir
+                     :source-name     source-name
+                     :source-map      source-map
+                     :maintainers-map maintainers-map}
         do-format
         (fn [fmt]
           (case fmt
             "json"    (do (dump-json! reports reports-dir source-name source-map maintainers-map)
                           (dump-votes! reports reports-dir)
-                          (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"json"})
-                          (dump-open-closed! reports reports-dir source-name source-map maintainers-map #{"json"}))
+                          (dump-per-type! scope #{"json"})
+                          (dump-open-closed! scope #{"json"}))
             "rss"     (do (dump-rss!  reports reports-dir source-name source-map maintainers-map)
-                          (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"rss"}))
+                          (dump-per-type! scope #{"rss"}))
             "org"     (do (dump-org!  reports reports-dir source-name source-map maintainers-map)
-                          (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"org"})
-                          (dump-open-closed! reports reports-dir source-name source-map maintainers-map #{"org"}))
+                          (dump-per-type! scope #{"org"})
+                          (dump-open-closed! scope #{"org"}))
             "patches" (dump-patches! reports patches-dir)
             "text"    (dump-text! reports text-dir)
             "events"  (do (dump-events! reports events-dir)
@@ -1348,8 +1359,8 @@
                           (dump-events-ics! reports events-dir source-name))
             "html"    (do (dump-json! reports reports-dir source-name source-map maintainers-map)
                           (dump-votes! reports reports-dir)
-                          (dump-per-type! reports reports-dir source-name source-map maintainers-map #{"json"})
-                          (dump-open-closed! reports reports-dir source-name source-map maintainers-map #{"json"})
+                          (dump-per-type! scope #{"json"})
+                          (dump-open-closed! scope #{"json"})
                           (dump-docs! base-dir source-name cli-extra)
                           (dump-html! base-dir reports-dir cli-extra))
             "stats"   (dump-stats! base-dir reports-dir source-name "json" cli-extra)))]
@@ -1359,10 +1370,8 @@
           (when (or (ef "json") (ef "html")) (dump-votes! reports reports-dir))
           (when (ef "rss")  (dump-rss!  reports reports-dir source-name source-map maintainers-map))
           (when (ef "org")  (dump-org!  reports reports-dir source-name source-map maintainers-map))
-          (dump-per-type! reports reports-dir source-name source-map maintainers-map ef
-                          :changed-types changed-types)
-          (dump-open-closed! reports reports-dir source-name source-map maintainers-map ef
-                             :changed-types changed-types)
+          (dump-per-type! scope ef :changed-types changed-types)
+          (dump-open-closed! scope ef :changed-types changed-types)
           (dump-patches! reports patches-dir)
           (dump-text! reports text-dir)
           (dump-events! reports events-dir)
@@ -1382,11 +1391,11 @@
 
 (let [{:keys [format source-name min-priority min-status force-all? theme page-size closed-retention
               topics-filter]
-       :or {format "all"}}
+       :or   {format "all"}}
       (parse-cli-args *command-line-args*)
-      config  (load-config)
-      dbp     (db-path config)
-      conn    (d/get-conn dbp bark-schema {:wal? false})]
+      config (load-config)
+      dbp    (db-path config)
+      conn   (d/get-conn dbp bark-schema {:wal? false})]
   (try
     (when-not (formats format)
       (log/error "Unknown format:" format)
@@ -1454,14 +1463,15 @@
                   (let [maintainers-map (if config (build-maintainers db source-map) {})
                         all-reps        (all-reports-by-date db)
                         votes           (votes-by-report
-                                          (d/q '[:find ?r ?val ?voter ?emid
-                                                 :where
-                                                 [?v :vote/report ?r]
-                                                 [?v :vote/value  ?val]
-                                                 [?v :vote/voter  ?voter]
-                                                 [?v :vote/email  ?e]
-                                                 [?e :email/message-id ?emid]]
-                                               db))
+                                         (d/q '[:find ?r ?val ?voter ?emid ?hdrs
+                                                :where
+                                                [?v :vote/report ?r]
+                                                [?v :vote/value  ?val]
+                                                [?v :vote/voter  ?voter]
+                                                [?v :vote/email  ?e]
+                                                [?e :email/message-id ?emid]
+                                                [(get-else $ ?e :email/headers-edn "") ?hdrs]]
+                                              db))
                         effective-ps    page-size
                         cli-tf          (resolve-topics-filter topics-filter)
                         drop-cutoff     (parse-cutoff-date closed-retention)
@@ -1469,55 +1479,56 @@
                                           (log/info "CLI topics filter:" (str/join ", " cli-tf)))
                         _               (when drop-cutoff
                                           (log/info "Dropping reports closed before" drop-cutoff))
-                        cli-extra       (let [drop (disj (hash-set format "-n" source-name
-                                                                   "--force" "--theme" theme
-                                                                   "--page-size" (some-> page-size str)
-                                                                   "--closed-retention" closed-retention
-                                                                   "--topics-filter" topics-filter) nil)]
+                        cli-extra       (let [drop (into #{} (remove nil?)
+                                                              [format "-n" source-name "--force"
+                                                               "--theme" theme
+                                                               "--page-size" (some-> page-size str)
+                                                               "--closed-retention" closed-retention
+                                                               "--topics-filter" topics-filter])]
                                           (cond-> (vec (remove drop (rest *command-line-args*)))
                                             effective-theme (into ["--theme" effective-theme])
                                             effective-ps    (into ["--page-size" (str effective-ps)])))]
-                    (set-export-context! db votes config)
-                    (reduce (fn [exported? src-name]
-                              (let [reports  (filter-reports all-reps {:source       src-name
-                                                                       :min-priority min-priority
-                                                                       :min-status   min-status})
-                                    rt       (get-in source-map [src-name :report-types])
-                                    reports  (if rt (filter #(contains? rt (:report/type %)) reports) reports)
-                                    reports  (if drop-cutoff (drop-old-closed reports drop-cutoff) reports)
-                                    src-tf   (resolve-source-topics-filter src-name source-map cli-tf)
-                                    _        (when src-tf
-                                               (log/info (str "[" src-name "]") "topics filter:" (str/join ", " src-tf)))
-                                    reports  (filter-by-topics reports src-tf)
-                                    slug     (slugify src-name)
-                                    staging  (str "public/.staging-" slug)
-                                    final-dir (str "public/" slug)
-                                    src-changed (when (seq changed-st) (get changed-st src-name))]
-                                (if (empty? reports)
-                                  (do (log/info "No reports for source" (str "'" src-name "'") ", skipping.")
-                                      exported?)
-                                  (do (log/info (str "[" src-name "] " (count reports) " report(s)"
-                                                     " (" (count (open-reports reports)) " open)"
-                                                     (if incremental? " (incremental)" "")))
-                                      (try
-                                        (delete-dir! (io/file staging))
-                                        ;; Incremental writes only changed types
-                                        ;; into staging; seed it with the previous
-                                        ;; target so unchanged files survive the
-                                        ;; atomic swap.
-                                        (when src-changed
-                                          (copy-dir! (io/file final-dir)
-                                                     (io/file staging)))
-                                        (export-source! format reports staging src-name
-                                                        source-map maintainers-map cli-extra
-                                                        :changed-types src-changed)
-                                        (atomic-swap-dir! staging final-dir)
-                                        (catch Exception e
-                                          (log/error e "Export failed for" src-name "-- cleaning up staging dir")
+                    (binding [*export-ctx* (build-export-ctx db votes config)]
+                      (reduce (fn [exported? src-name]
+                                (let [reports     (filter-reports all-reps {:source       src-name
+                                                                            :min-priority min-priority
+                                                                            :min-status   min-status})
+                                      rt          (get-in source-map [src-name :report-types])
+                                      reports     (if rt (filter #(contains? rt (:report/type %)) reports) reports)
+                                      reports     (if drop-cutoff (drop-old-closed reports drop-cutoff) reports)
+                                      src-tf      (resolve-source-topics-filter src-name source-map cli-tf)
+                                      _           (when src-tf
+                                                 (log/info (str "[" src-name "]") "topics filter:" (str/join ", " src-tf)))
+                                      reports     (filter-by-topics reports src-tf)
+                                      slug        (slugify src-name)
+                                      staging     (str "public/.staging-" slug)
+                                      final-dir   (str "public/" slug)
+                                      src-changed (when (seq changed-st) (get changed-st src-name))]
+                                  (if (empty? reports)
+                                    (do (log/info "No reports for source" (str "'" src-name "'") ", skipping.")
+                                        exported?)
+                                    (do (log/info (str "[" src-name "] " (count reports) " report(s)"
+                                                       " (" (count (open-reports reports)) " open)"
+                                                       (if incremental? " (incremental)" "")))
+                                        (try
                                           (delete-dir! (io/file staging))
-                                          (throw e)))
-                                      true))))
-                            false export-names))
+                                          ;; Incremental writes only changed types
+                                          ;; into staging; seed it with the previous
+                                          ;; target so unchanged files survive the
+                                          ;; atomic swap.
+                                          (when src-changed
+                                            (copy-dir! (io/file final-dir)
+                                                       (io/file staging)))
+                                          (export-source! format reports staging src-name
+                                                          source-map maintainers-map cli-extra
+                                                          :changed-types src-changed)
+                                          (atomic-swap-dir! staging final-dir)
+                                          (catch Exception e
+                                            (log/error e "Export failed for" src-name "-- cleaning up staging dir")
+                                            (delete-dir! (io/file staging))
+                                            (throw e)))
+                                        true))))
+                              false export-names)))
                   false)]
             ;; Only regenerate root index when at least one source was exported,
             ;; or when explicitly requested via "bb export root".

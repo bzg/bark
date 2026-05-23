@@ -81,15 +81,17 @@
        (into #{})))
 
 (defn- all-emails
-  "All email entities as [eid source author-address date-sent message-id]."
+  "All email entities as {:eid :source :from :date :mid}."
   [db]
-  (dq '[:find ?e ?src ?from ?date ?mid
-         :where
-         [?e :email/source ?src]
-         [?e :email/author-address ?from]
-         [?e :email/date-sent ?date]
-         [?e :email/message-id ?mid]]
-       db))
+  (->> (dq '[:find ?e ?src ?from ?date ?mid
+             :where
+             [?e :email/source ?src]
+             [?e :email/author-address ?from]
+             [?e :email/date-sent ?date]
+             [?e :email/message-id ?mid]]
+           db)
+       (mapv (fn [[eid src from date mid]]
+               {:eid eid :source src :from from :date date :mid mid}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Orphan detection
@@ -114,15 +116,12 @@
     (log/info "Maintainer addresses:" (count maintainers))
     (log/info "Orphan retention cutoff:" cutoff-date)
     (->> emails
-         (remove (fn [[eid _ _ _ _]] (contains? protected eid)))
-         (remove (fn [[_ _ from _ _]]
-                   (contains? maintainers (str/lower-case (or from "")))))
-         (filter (fn [[_ src _ _ _]]
-                   (if source-name (= src source-name) true)))
-         (filter (fn [[_ _ _ date _]]
-                   (and date (.before ^java.util.Date date cutoff-date))))
-         (mapv (fn [[eid src from date mid]]
-                 {:eid eid :source src :from from :date date :mid mid})))))
+         (remove #(contains? protected (:eid %)))
+         (remove #(contains? maintainers (str/lower-case (or (:from %) ""))))
+         (filter #(if source-name (= (:source %) source-name) true))
+         (filter #(when-let [^java.util.Date d (:date %)]
+                    (.before d cutoff-date)))
+         vec)))
 
 ;; ---------------------------------------------------------------------------
 ;; Command failures

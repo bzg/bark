@@ -185,13 +185,16 @@
 ;; ---------------------------------------------------------------------------
 
 (defn email->txdata
-  "Mailseq message → Datalevin tx-data.  Source is NOT stamped here
-  (resolved at digest time from headers).  `opts :max-attachment-size`
-  overrides the default 1 MB cap."
+  "Mailseq message => Datalevin tx-data.  Source is NOT stamped here
+  (resolved at digest time from headers).  Opts:
+    :max-attachment-size -- override 1 MB cap
+    :message-id          -- pre-normalized mid; recomputed if absent."
   ([msg] (email->txdata msg {}))
   ([msg opts]
   (let [max-att-size (or (:max-attachment-size opts)
                          default-max-attachment-size)
+        message-id   (or (:message-id opts)
+                         (common/extract-bracketed-id (:message-id msg)))
         id          (:id msg)
         body        (:body msg)
         text        (:text body)
@@ -238,7 +241,7 @@
                                                                     (when data (count data)))}
                                 text-data (assoc :attachment/data text-data))))
                           (remove nil? (:attachments body)))]
-    (cond-> {:email/message-id   (common/extract-bracketed-id (:message-id msg))
+    (cond-> {:email/message-id   message-id
              :email/subject      (let [s (or (:subject msg) "")]
                                     (if (str/blank? s)
                                       "(no subject)"
@@ -286,7 +289,8 @@
   for live ingestion), :max-attachment-size (override 1 MB default)."
   ([conn msg] (store-email! conn msg {}))
   ([conn msg opts]
-  (let [message-id (common/extract-bracketed-id (:message-id msg))
+  (let [message-id (or (:message-id opts)
+                       (common/extract-bracketed-id (:message-id msg)))
         id         (:id msg)
         src-name   (:source opts)]
     (cond
@@ -306,7 +310,7 @@
           false)
 
       :else
-      (let [txdata (cond-> (email->txdata msg opts)
+      (let [txdata (cond-> (email->txdata msg (assoc opts :message-id message-id))
                      src-name (assoc :email/source src-name))]
         (try
           (d/transact! conn [txdata])

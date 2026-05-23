@@ -47,24 +47,6 @@
     (is (not (common/has-inline-ics? "Hello world")))))
 
 ;; ---------------------------------------------------------------------------
-;; Combined has-ics? check (bark.detect)
-;; ---------------------------------------------------------------------------
-
-(deftest has-ics-test
-  (testing "true with ICS attachment"
-    (is (detect/has-ics?
-         {:email/attachments [{:attachment/filename "event.ics"}]})))
-
-  (testing "true with inline ICS"
-    (is (detect/has-ics?
-         {:email/body-text "BEGIN:VCALENDAR\nBEGIN:VEVENT\nEND:VEVENT\nEND:VCALENDAR"})))
-
-  (testing "false without ICS"
-    (is (not (detect/has-ics?
-              {:email/body-text "Hello"
-               :email/attachments [{:attachment/filename "doc.pdf"}]})))))
-
-;; ---------------------------------------------------------------------------
 ;; Strict label regex: case-sensitive tag, mandatory `\s` or EOL after `]`
 ;; ---------------------------------------------------------------------------
 

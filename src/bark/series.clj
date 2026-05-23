@@ -22,13 +22,19 @@
   (str (or topic "") "|" sender "|" total))
 
 (defn- next-series-id [db topic sender total]
-  (let [base (series-id topic sender total)
+  (let [base     (series-id topic sender total)
         existing (d/q '[:find [?sid ...]
                         :in $ ?prefix
                         :where [?s :series/id ?sid]
                         [(clojure.string/starts-with? ?sid ?prefix)]]
-                      db base)]
-    (if (empty? existing) base (str base "#" (inc (count existing))))))
+                      db base)
+        ;; "base" itself counts as suffix 1; "base#N" yields N.
+        suffix-n (fn [sid]
+                   (if (= sid base)
+                     1
+                     (some-> (re-find #"#(\d+)$" sid) second parse-long)))
+        max-n    (reduce max 0 (keep suffix-n existing))]
+    (if (zero? max-n) base (str base "#" (inc max-n)))))
 
 (defn find-open-series [db topic sender total]
   (d/q '[:find ?s .

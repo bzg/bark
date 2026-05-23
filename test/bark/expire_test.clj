@@ -52,7 +52,6 @@
     (d/transact! conn [(cond-> {:report/type          type
                                 :report/email         email-eid
                                 :report/message-id    mid
-                                :report/digested-at   (Date.)
                                 :report/last-activity activity}
                          from (assoc :report/last-activity-address from))])
     (d/q '[:find ?r . :in $ ?mid :where [?r :report/message-id ?mid]]

@@ -259,7 +259,7 @@
       :else
       (if-let [src-name (digest/pre-classify-source (d/db db-conn) sources msg)]
         (let [lookup     [:email/message-id mid]
-              store-opts (cond-> {:source src-name}
+              store-opts (cond-> {:source src-name :message-id mid}
                            max-attachment-size (assoc :max-attachment-size
                                                       max-attachment-size))]
           (if (ingest/store-email! db-conn msg store-opts)

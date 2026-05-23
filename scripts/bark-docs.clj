@@ -7,9 +7,10 @@
 ;; (defaults -> global -> per-source).
 ;;
 ;; Usage:
-;;   bb scripts/bark-docs.clj -n my-source              -> public/my-source/docs.html
 ;;   bb scripts/bark-docs.clj -n my-source -o out.html  -> writes out.html
-;;   bb scripts/bark-docs.clj                           -> public/docs.html (defaults)
+;;
+;; -o is required (the public/<source>/... layout means there is no
+;; single sensible default).  --dir defaults to the directory of -o.
 
 (require '[clojure.java.io :as io]
          '[clojure.string :as str]
@@ -448,13 +449,11 @@
       labels      (if source-cfg (resolve-labels-map source-cfg) default-labels)
       cmds        (if source-cfg (resolve-commands-map source-cfg) default-commands)
       prefix      (if (= :strict (resolve-command-syntax source-cfg)) "!" "")
-      out-file    (or out-file
-                      (if source-name
-                        (str "public/" source-name "/web/docs.html")
-                        "public/web/docs.html"))
-      ;; Infer out-dir from out-file when not given explicitly
-      effective-dir (or out-dir
-                        (.getParent (io/file out-file)))
+      _           (when (str/blank? out-file)
+                    (binding [*out* *err*]
+                      (log/error "bark-docs.clj requires -o <file>"))
+                    (System/exit 2))
+      effective-dir (or out-dir (.getParent (io/file out-file)))
       ;; Load DB for maintainer names
       dbp         (db-path config)
       _           (load-datalevin-pod!)

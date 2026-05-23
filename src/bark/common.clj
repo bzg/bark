@@ -22,7 +22,7 @@
 
 (def bark-format
   "BARK export format version. Bump when the JSON/Org export shape changes."
-  "0.9.1")
+  "0.9.2")
 
 (def bark-schema
   (edn/read-string (slurp (io/resource "bark-schema.edn"))))
@@ -159,10 +159,9 @@
 (defn has-inline-ics?
   "True if body text contains inline ICS/VCALENDAR content."
   [body-text]
-  (boolean
-   (when body-text
-     (and (str/includes? body-text "BEGIN:VCALENDAR")
-          (str/includes? body-text "BEGIN:VEVENT")))))
+  (and (some? body-text)
+       (str/includes? body-text "BEGIN:VCALENDAR")
+       (str/includes? body-text "BEGIN:VEVENT")))
 
 (defn strip-signature
   "Remove the RFC 3676 email signature (everything after a line
@@ -180,15 +179,6 @@
   [email]
   (some-> (or (:email/body-text email) (:email/body-text-from-html email))
           strip-signature))
-
-(defn ensure-set
-  "Coerce a Datalevin cardinality/many value to a set.
-  A single string is wrapped in a set (not split into characters)."
-  [v]
-  (cond (nil? v)    #{}
-        (string? v) #{v}
-        (coll? v)   (set v)
-        :else       #{v}))
 
 ;; ---------------------------------------------------------------------------
 ;; Date formatting
@@ -332,27 +322,26 @@
         (str (subs mid 0 (inc at)) (str/lower-case (subs mid (inc at))))
         mid))))
 
-(defn extract-bracketed-id
-  "Extract the first <addr@domain> token from a header value, domain
-  lowercased (RFC 5322 §3.6.4).  Returns nil for nil/blank input or
-  when no well-formed bracketed token is found (rejects mids with
-  whitespace inside)."
+(defn- bracketed-token
+  "First <addr@domain> token in v (string or vector); nil otherwise."
   [v]
   (when v
     (let [s (if (vector? v) (first v) (str v))]
       (when-not (str/blank? s)
-        (some-> (first (re-seq mid-token-re s))
-                normalize-mid)))))
+        (first (re-seq mid-token-re s))))))
+
+(defn extract-bracketed-id
+  "Extract the first <addr@domain> token from a header value, domain
+  lowercased (RFC 5322 §3.6.4)."
+  [v]
+  (some-> (bracketed-token v) normalize-mid))
 
 (defn extract-bracketed-id-raw
   "Like extract-bracketed-id but preserves the original case of the
   id-right.  Used at export time for archive URLs (e.g. public-inbox)
   that compare message-ids case-sensitively."
   [v]
-  (when v
-    (let [s (if (vector? v) (first v) (str v))]
-      (when-not (str/blank? s)
-        (first (re-seq mid-token-re s))))))
+  (bracketed-token v))
 
 (defn extract-in-reply-to
   "Extract In-Reply-To message-id from a headers map (raw or parsed).
@@ -849,7 +838,7 @@
     {:report/expiry [:email/author-address :email/date-sent]}
     :report/expiry-value
     :report/has-ics :report/has-text-attachments
-    :report/last-activity :report/last-activity-address :report/descendants :report/digested-at :report/updated-at
+    :report/last-activity :report/last-activity-address :report/descendants :report/updated-at
     {:rel/_from [:rel/kind :rel/active? :rel/setter :rel/posed-at :rel/value
                  {:rel/to [:db/id :report/type :report/message-id
                            {:report/email [:email/subject :email/headers-edn]}]}]}
@@ -893,11 +882,19 @@
 ;; ---------------------------------------------------------------------------
 
 (defn votes-by-report
-  "Group raw vote tuples into {report-eid [{:value :up :voter \"a@b\" :email-mid \"<…>\"} …]}.
-  Expects tuples of [report-eid value voter email-mid], e.g. from a Datalog query."
+  "Group raw vote tuples into {report-eid [{:value :up :voter \"a@b\"
+  :email-mid \"<…>\" :email-mid-raw \"<…>\"} …]}.
+  :email-mid-raw preserves the original case (defaults to :email-mid
+  when headers-edn is absent).  Expects tuples of [report-eid value
+  voter email-mid headers-edn?] (headers-edn optional)."
   [vote-tuples]
-  (reduce (fn [acc [r val voter emid]]
-            (update acc r (fnil conj []) {:value val :voter voter :email-mid emid}))
+  (reduce (fn [acc tuple]
+            (let [[r val voter emid hdrs] tuple
+                  raw (when hdrs (extract-bracketed-id-raw
+                                  (get-header hdrs "Message-Id")))]
+              (update acc r (fnil conj [])
+                      {:value val :voter voter
+                       :email-mid emid :email-mid-raw (or raw emid)})))
           {}
           vote-tuples))
 
