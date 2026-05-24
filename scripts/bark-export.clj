@@ -120,10 +120,10 @@
 
 (defn- copy-dir!
   "Recursively copy `src` into `dst`, creating `dst` if needed.
-  Used to seed the staging directory with the previous target so an
-  incremental export does not lose files for unchanged report types.
-  Relies on `file-seq`'s pre-order traversal so each directory is
-  created before its children are copied."
+  Used to seed the staging `reports/` with the previous export so an
+  incremental run does not lose the per-type files it skips (see the
+  call site).  Relies on `file-seq`'s pre-order traversal so each
+  directory is created before its children are copied."
   [^java.io.File src ^java.io.File dst]
   (when (.exists src)
     (let [src-path (.toPath src)
@@ -1512,13 +1512,17 @@
                                                        (if incremental? " (incremental)" "")))
                                         (try
                                           (delete-dir! (io/file staging))
-                                          ;; Incremental writes only changed types
-                                          ;; into staging; seed it with the previous
-                                          ;; target so unchanged files survive the
-                                          ;; atomic swap.
+                                          ;; Seed only reports/: incremental export
+                                          ;; skips per-type files for unchanged types
+                                          ;; (dump-per-type!/dump-open-closed! honor
+                                          ;; :changed-types), so they must survive the
+                                          ;; atomic swap.  patches/, text/ and events/
+                                          ;; are regenerated in full every run, so
+                                          ;; copying them would only waste I/O and
+                                          ;; risk carrying over orphaned files.
                                           (when src-changed
-                                            (copy-dir! (io/file final-dir)
-                                                       (io/file staging)))
+                                            (copy-dir! (io/file final-dir "reports")
+                                                       (io/file staging "reports")))
                                           (export-source! format reports staging src-name
                                                           source-map maintainers-map cli-extra
                                                           :changed-types src-changed)
