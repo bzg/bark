@@ -848,7 +848,10 @@
     {:report/series [:series/id :series/expected :series/closed
                      {:series/patches [:db/id]}
                      {:series/cover-letter [:email/message-id]}]}
-    {:report/patches [:patch/filename :patch/source :patch/text
+    ;; :patch/text is deliberately excluded -- patch diffs are the
+    ;; bulkiest text in the DB.  dump-patches! pulls it on demand, only
+    ;; for the reports it actually writes.
+    {:report/patches [:patch/filename :patch/source
                       :patch/author :patch/subject :patch/date]}
     {:report/email [:email/subject :email/author-address :email/author-name
                     :email/from-address :email/from-name

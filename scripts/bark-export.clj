@@ -59,7 +59,7 @@
                                  report-type-spec type->plural
                                  votes-by-report vote-counts
                                  ics-file? text-attachment?]]
-            [bark.common-bb :refer [load-datalevin-pod! all-reports dq
+            [bark.common-bb :refer [load-datalevin-pod! all-reports dq dpull
                                     fetch-attachment-data get-tenures tenures-snapshot
                                     get-last-modified changed-source-types-since]]
             [bark.html-bb :refer [set-theme! html-head footer-css bark-footer
@@ -120,9 +120,9 @@
 
 (defn- copy-dir!
   "Recursively copy `src` into `dst`, creating `dst` if needed.
-  Used to seed the staging `reports/` with the previous export so an
-  incremental run does not lose the per-type files it skips (see the
-  call site).  Relies on `file-seq`'s pre-order traversal so each
+  Used to seed staging subdirectories with the previous export so an
+  incremental run does not lose files it chooses not to rewrite (see
+  the call site).  Relies on `file-seq`'s pre-order traversal so each
   directory is created before its children are copied."
   [^java.io.File src ^java.io.File dst]
   (when (.exists src)
@@ -635,6 +635,17 @@
   [reports]
   (remove :report/closed reports))
 
+(defn- updated-since?
+  "True when a report changed after `since`, so its per-mid files
+  (patches/, text/, events/) must be (re)written.  A nil `since` means
+  no incremental cutoff (write everything).  A report without
+  :report/updated-at is treated as changed -- we never skip a write we
+  are unsure about."
+  [report ^java.util.Date since]
+  (if-let [^java.util.Date updated (:report/updated-at report)]
+    (or (nil? since) (.after updated since))
+    true))
+
 ;; ---------------------------------------------------------------------------
 ;; Per-type helpers
 ;; ---------------------------------------------------------------------------
@@ -938,17 +949,27 @@
   (.getName (io/file (:patch/filename p))))
 
 (defn dump-patches!
-  "Export patch files for a single source."
-  [reports patches-dir]
-  (let [total (reduce (fn [n report]
-                        (let [h   (mid-hash (:report/message-id report))
-                              dir (io/file patches-dir h)]
+  "Export patch files for a single source.
+  Patch text is not in the default pull pattern, so it is fetched on
+  demand here -- only for the reports actually written.  With `:since`,
+  only reports updated after it are (re)written; the rest survive in
+  staging via the seeded patches/ directory."
+  [reports patches-dir & {:keys [since]}]
+  (let [db    (ctx-db)
+        reps  (cond->> (filter #(seq (:report/patches %)) reports)
+                since (filter #(updated-since? % since)))
+        total (reduce (fn [n report]
+                        (let [h       (mid-hash (:report/message-id report))
+                              dir     (io/file patches-dir h)
+                              patches (:report/patches
+                                       (dpull db '[{:report/patches [:patch/filename :patch/text]}]
+                                              (:db/id report)))]
                           (.mkdirs dir)
-                          (doseq [p (:report/patches report)]
+                          (doseq [p patches]
                             (spit (io/file dir (patch-basename p)) (:patch/text p)))
-                          (+ n (count (:report/patches report)))))
+                          (+ n (count patches))))
                       0
-                      (filter #(seq (:report/patches %)) reports))]
+                      reps)]
     (when (pos? total)
       (log/info "Wrote" total "patch file(s)"))))
 
@@ -968,9 +989,12 @@
           reports)))
 
 (defn dump-text!
-  "Export text attachments (text/plain, text/x-log) to text/<mid-hash>/."
-  [reports text-dir]
-  (let [txt-reports (filter :report/has-text-attachments reports)
+  "Export text attachments (text/plain, text/x-log) to text/<mid-hash>/.
+  With `:since`, only reports updated after it are (re)written; the
+  rest survive in staging via the seeded text/ directory."
+  [reports text-dir & {:keys [since]}]
+  (let [txt-reports (cond->> (filter :report/has-text-attachments reports)
+                      since (filter #(updated-since? % since)))
         att-cache   (batch-fetch-attachments txt-reports)
         total       (reduce (fn [n report]
                               (let [txt-atts (filter #(and (text-attachment? %)
@@ -1008,11 +1032,14 @@
     (re-seq #"(?s)BEGIN:VEVENT(?:(?!BEGIN:VEVENT).)*?END:VEVENT\r?\n?" text)))
 
 (defn dump-events!
-  "Export individual .ics files to events/<mid-hash>/ for announcements with ICS."
-  [reports events-dir]
-  (let [ics-reports (filter #(and (= :announcement (:report/type %))
-                                  (has-ics-content? %))
-                            reports)
+  "Export individual .ics files to events/<mid-hash>/ for announcements with ICS.
+  With `:since`, only reports updated after it are (re)written; the
+  rest survive in staging via the seeded events/ directory."
+  [reports events-dir & {:keys [since]}]
+  (let [ics-reports (cond->> (filter #(and (= :announcement (:report/type %))
+                                           (has-ics-content? %))
+                                     reports)
+                      since (filter #(updated-since? % since)))
         att-cache   (batch-fetch-attachments ics-reports)
         total       (reduce (fn [n report]
                               (let [atts     (:email/attachments (get att-cache (:report/message-id report)))
@@ -1327,7 +1354,7 @@
   `changed-types` (optional set of keywords) limits per-type file regeneration
   to those types during incremental export; aggregate files are always rebuilt."
   [format reports base-dir source-name source-map maintainers-map cli-extra
-   & {:keys [changed-types]}]
+   & {:keys [changed-types since]}]
   (let [reports-dir (str base-dir "/reports")
         patches-dir (str base-dir "/patches")
         events-dir  (str base-dir "/events")
@@ -1352,9 +1379,9 @@
             "org"     (do (dump-org!  reports reports-dir source-name source-map maintainers-map)
                           (dump-per-type! scope #{"org"})
                           (dump-open-closed! scope #{"org"}))
-            "patches" (dump-patches! reports patches-dir)
-            "text"    (dump-text! reports text-dir)
-            "events"  (do (dump-events! reports events-dir)
+            "patches" (dump-patches! reports patches-dir :since since)
+            "text"    (dump-text! reports text-dir :since since)
+            "events"  (do (dump-events! reports events-dir :since since)
                           (dump-events-filtered! reports reports-dir source-name source-map maintainers-map ef)
                           (dump-events-ics! reports events-dir source-name))
             "html"    (do (dump-json! reports reports-dir source-name source-map maintainers-map)
@@ -1372,9 +1399,9 @@
           (when (ef "org")  (dump-org!  reports reports-dir source-name source-map maintainers-map))
           (dump-per-type! scope ef :changed-types changed-types)
           (dump-open-closed! scope ef :changed-types changed-types)
-          (dump-patches! reports patches-dir)
-          (dump-text! reports text-dir)
-          (dump-events! reports events-dir)
+          (dump-patches! reports patches-dir :since since)
+          (dump-text! reports text-dir :since since)
+          (dump-events! reports events-dir :since since)
           (dump-events-filtered! reports reports-dir source-name source-map maintainers-map ef)
           (dump-events-ics! reports events-dir source-name)
           (dump-docs! base-dir source-name cli-extra)
@@ -1512,20 +1539,21 @@
                                                        (if incremental? " (incremental)" "")))
                                         (try
                                           (delete-dir! (io/file staging))
-                                          ;; Seed only reports/: incremental export
-                                          ;; skips per-type files for unchanged types
-                                          ;; (dump-per-type!/dump-open-closed! honor
-                                          ;; :changed-types), so they must survive the
-                                          ;; atomic swap.  patches/, text/ and events/
-                                          ;; are regenerated in full every run, so
-                                          ;; copying them would only waste I/O and
-                                          ;; risk carrying over orphaned files.
+                                          ;; Seed staging with the previous export so an
+                                          ;; incremental run keeps the files it does not
+                                          ;; rewrite: reports/ (per-type files for
+                                          ;; unchanged types, via :changed-types) and the
+                                          ;; per-mid patches/, text/ and events/ files for
+                                          ;; reports unchanged since last-export (via
+                                          ;; :since).  Aggregate files are always rebuilt.
                                           (when src-changed
-                                            (copy-dir! (io/file final-dir "reports")
-                                                       (io/file staging "reports")))
+                                            (doseq [sub ["reports" "patches" "text" "events"]]
+                                              (copy-dir! (io/file final-dir sub)
+                                                         (io/file staging sub))))
                                           (export-source! format reports staging src-name
                                                           source-map maintainers-map cli-extra
-                                                          :changed-types src-changed)
+                                                          :changed-types src-changed
+                                                          :since (when incremental? last-export))
                                           (atomic-swap-dir! staging final-dir)
                                           (catch Exception e
                                             (log/error e "Export failed for" src-name "-- cleaning up staging dir")

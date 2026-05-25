@@ -12,20 +12,16 @@
 
 (require '[cheshire.core :as json]
          '[clojure.string :as str]
-         '[clojure.edn :as edn]
          '[clojure.java.io :as io]
          '[hiccup2.core :as h]
          '[taoensso.timbre :as log]
-         '[bark.common :refer [report-priority report-status
-                               report-descendant-count format-date format-date-iso
-                               parse-cli-args load-config load-mailmap db-path bark-schema
+         '[bark.common :refer [parse-cli-args load-config load-mailmap db-path bark-schema
                                votes-by-report vote-counts escape-script-payload]]
-         '[bark.common-bb :refer [load-datalevin-pod! all-reports dq]]
-         '[bark.html-bb :refer [pico-cdn resolved-theme set-theme!
-                                bark-description footer-css page-title
+         '[bark.common-bb :refer [load-datalevin-pod! dq]]
+         '[bark.html-bb :refer [set-theme! page-title
                                 bark-footer wrap-js spit-html theme-toggle-js
                                 nav-bar html-head wrap-template
-                                org-inline parse-org-table]])
+                                parse-org-table]])
 
 (load-datalevin-pod!)
 
@@ -637,11 +633,30 @@
       (update :reports-per-type #(some-> % (update-keys name)))
       (update :closed-cancel    #(some-> % (update-keys name)))))
 
+(def ^:private stats-pull-pattern
+  ;; compute-stats only reads dates, type, close-reason, author and
+  ;; subject -- never headers-edn, relations or patches.  A dedicated
+  ;; lean pattern keeps the all-reports re-pull cheap at scale, where
+  ;; the shared report-pull-pattern would drag headers-edn (pulled
+  ;; thrice per report) and every relation sub-tree along for nothing.
+  '[:db/id :report/type :report/message-id :report/close-reason
+    {:report/closed [:email/date-sent]}
+    {:report/email [:email/date-sent :email/author-address
+                    :email/author-name :email/subject :email/source]}])
+
+(defn- all-reports-lean
+  "Like `all-reports` but with `stats-pull-pattern`."
+  [db]
+  (->> (dq (list :find (list 'pull '?r stats-pull-pattern)
+                 :where ['?r :report/type '_])
+           db)
+       (map first)))
+
 (defn- generate-json! [out-file source-name]
   (let [conn (d/get-conn (db-path (load-config)) bark-schema {:wal? false})]
     (try
       (let [db       (d/db conn)
-            all-reps (all-reports db)
+            all-reps (all-reports-lean db)
             reports  (if source-name
                        (filter #(= source-name (get-in % [:report/email :email/source])) all-reps)
                        all-reps)
