@@ -49,7 +49,7 @@
             [clojure.string :as str]
             [clojure.java.io :as io]
             [taoensso.timbre :as log]
-            [bark.common :refer [get-header slugify mid-hash
+            [bark.common :refer [parse-headers slugify mid-hash
                                  format-date format-date-iso
                                  extract-bracketed-id-raw
                                  report-priority report-status report-descendant-count
@@ -292,15 +292,19 @@
 ;; Report -> map
 ;; ---------------------------------------------------------------------------
 
+;; Defined with the export context below; declared here because the
+;; report->map helpers above the context block already use it.
+(declare get-header-cached)
+
 (defn- archived-at [email]
-  (get-header (:email/headers-edn email) "Archived-At"))
+  (get-header-cached (:email/headers-edn email) "Archived-At"))
 
 (defn- raw-message-id
   "Original-case Message-Id from stored headers; nil for synthetic emails.
   Exports use this because public-inbox compares mids case-sensitively."
   [email]
   (extract-bracketed-id-raw
-   (get-header (:email/headers-edn email) "Message-Id")))
+   (get-header-cached (:email/headers-edn email) "Message-Id")))
 
 (defn- export-mid
   "Message-Id to expose in exports: original case when available, else
@@ -433,19 +437,47 @@
 
 (def ^:dynamic ^:private *export-ctx*
   "Export context: {:db <datalevin-db> :votes {eid -> [vote-maps]}
-  :config <config> :author-names {lc-addr -> display-name}}"
-  {:db nil :votes {} :config nil :author-names {}})
+  :config <config> :author-names {lc-addr -> display-name}
+  :report-cache (atom {eid -> exported-map})
+  :headers-cache (atom {headers-edn-string -> parsed-pairs})}"
+  {:db nil :votes {} :config nil :author-names {}
+   :report-cache (atom {}) :headers-cache (atom {})})
 
 (defn- build-export-ctx [db votes config]
   {:db           db
    :votes        votes
    :config       config
-   :author-names (merge (build-author-names db) (load-mailmap))})
+   :author-names (merge (build-author-names db) (load-mailmap))
+   ;; report->map is pure given the (stable) context, yet every output
+   ;; file re-maps its slice -- a closed patch is mapped for all.json,
+   ;; all.org, patches.json, patches.org, all-closed.*, patches-closed.*
+   ;; etc.  Cache by eid so each report is mapped exactly once per run.
+   :report-cache  (atom {})
+   ;; headers-edn is a ~5KB EDN string per email; parsing it dominates
+   ;; the mapping pass (archived-at + raw-message-id, plus relation
+   ;; references to the same email).  Cache the parse by string content.
+   :headers-cache (atom {})})
 
 (defn- ctx-db [] (:db *export-ctx*))
 (defn- ctx-votes [] (:votes *export-ctx*))
 (defn- ctx-config [] (:config *export-ctx*))
 (defn- ctx-author-names [] (:author-names *export-ctx*))
+(defn- ctx-report-cache [] (:report-cache *export-ctx*))
+(defn- ctx-headers-cache [] (:headers-cache *export-ctx*))
+
+(defn- get-header-cached
+  "Like `common/get-header`, but parses each headers-edn string at most
+  once per export run.  Header parsing (edn/read-string of a ~5KB
+  string) otherwise dominates the report->map pass at scale."
+  [headers-edn header-name]
+  (when headers-edn
+    (let [cache  (ctx-headers-cache)
+          parsed (or (get @cache headers-edn)
+                     (let [p (parse-headers headers-edn)]
+                       (swap! cache assoc headers-edn p)
+                       p))
+          lname  (str/lower-case header-name)]
+      (some (fn [[k v]] (when (= (str/lower-case k) lname) v)) parsed))))
 
 (def ^:private default-awaiting-delay-days 14)
 
@@ -582,11 +614,20 @@
                   m)))))
 
 (defn- map-reports
-  "Map reports through report->map, looking up votes from export context."
+  "Map reports through report->map, looking up votes from export context.
+  Memoized by report eid for the duration of the export run, so the
+  many output files that cover overlapping report slices each pay the
+  mapping cost only once."
   [reports source-map maintainers-map]
-  (let [av (ctx-votes)
-        db (ctx-db)]
-    (mapv #(report->map % source-map maintainers-map (get av (:db/id %)) db)
+  (let [av    (ctx-votes)
+        db    (ctx-db)
+        cache (ctx-report-cache)]
+    (mapv (fn [r]
+            (let [eid (:db/id r)]
+              (or (get @cache eid)
+                  (let [m (report->map r source-map maintainers-map (get av eid) db)]
+                    (swap! cache assoc eid m)
+                    m))))
           reports)))
 
 ;; ---------------------------------------------------------------------------
