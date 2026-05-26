@@ -215,13 +215,15 @@
   -- a sibling thread already owns it (see `digesting-mids`).  The
   `:ok` here means \"do not retry / watermark may advance\", not
   \"I digested\" : the sibling thread is responsible for posting
-  :email/digested-at."
-  [db-conn source-map sources email mid]
+  :email/digested-at.  `resolved-source` (or nil) is forwarded to
+  `process-email!` to skip re-classifying a freshly stored email."
+  [{:keys [db-conn source-map sources]} email mid resolved-source]
   (if-not (take-mid-ownership! mid)
     (do (log/debug "Digest already in flight for" mid "-- skipping")
         :ok)
     (try
-      (digest/process-email! db-conn source-map sources email)
+      (digest/process-email! db-conn source-map sources email
+                             {:resolved-source resolved-source})
       :ok
       (catch Exception e
         (log/error e "Failed to digest email" mid (blog/exception-msg e))
@@ -229,61 +231,69 @@
       (finally
         (release-mid-ownership! mid)))))
 
+(defn- guard-reject-reason
+  "Pure pre-storage guard. nil = accept; else a reason keyword:
+  :oversized, :no-mid, or :oversized-mid (over the LMDB key limit)."
+  [msg mid max-size]
+  (let [size (:size msg -1)]
+    (cond
+      (and max-size (pos? size) (> size max-size)) :oversized
+      (nil? mid)                                   :no-mid
+      (not (common/indexable-mid? mid))            :oversized-mid)))
+
 (defn- store-and-process!
   "Classify, store, and digest an email.  Returns :ok (advance watermark),
   :skip (oversized/no source/no mid -- still advance), or :retry
   (transient failure).  Idempotent: emails previously stored but not
   digested are re-digested; already-digested ones skipped."
-  [db-conn source-map sources msg {:keys [max-size max-attachment-size]}]
-  (let [size (:size msg -1)
+  [{:keys [db-conn sources ingest-opts] :as ctx} msg]
+  (let [{:keys [max-size max-attachment-size]} ingest-opts
         id   (:id msg)
         ;; Normalize like `store-email!` so :email/message-id lookups
         ;; resolve consistently after store (raw mid padding can drift).
         mid  (common/extract-bracketed-id (:message-id msg))]
-    (cond
-      (and max-size (pos? size) (> size max-size))
-      (do (log/warn "Skipping oversized email id:" id
-                    "size:" size (str "bytes (max: " max-size ")"))
+    (if-let [reason (guard-reject-reason msg mid max-size)]
+      (do (case reason
+            :oversized     (log/warn "Skipping oversized email id:" id
+                                     "size:" (:size msg -1) (str "bytes (max: " max-size ")"))
+            :no-mid        (log/warn "No Message-ID for id:" id "-- skipping")
+            :oversized-mid (log/warn "Skipping email with oversized Message-ID ("
+                                     (count mid) "chars), id:" id))
           :skip)
+      ;; Classify the source once here; the result is threaded to
+      ;; process-email! (:resolved-source) so it isn't re-classified after store.
+      (let [{:keys [src-name] :as resolved}
+            (digest/pre-classify-source (d/db db-conn) sources msg)]
+        (if-not src-name
+          (do (log/debug "No matching source for id:" id "-- not stored")
+              :skip)
+          (let [lookup     [:email/message-id mid]
+                store-opts (cond-> {:source src-name :message-id mid}
+                             max-attachment-size (assoc :max-attachment-size
+                                                        max-attachment-size))]
+            (if (ingest/store-email! db-conn msg store-opts)
+              (let [eid (d/entid (d/db db-conn) lookup)]
+                (try-digest! ctx
+                             (d/pull (d/db db-conn) digest/email-pull-pattern eid)
+                             mid resolved))
+              ;; store-email! returned false: either dup mid (re-digest the
+              ;; existing entity) or id collision (different mid stored under
+              ;; the same Maildir filename -- skip).  On re-digest, pass no
+              ;; :resolved-source so process-email! reads the stored
+              ;; :email/source (the entity may predate a config change).
+              (if-let [eid (d/entid (d/db db-conn) lookup)]
+                (let [email (d/pull (d/db db-conn) digest/email-pull-pattern eid)]
+                  (cond
+                    (:email/digested-at email)
+                    (do (log/debug "Already digested, skipping:" mid) :ok)
 
-      (nil? mid)
-      (do (log/warn "No Message-ID for id:" id "-- skipping")
-          :skip)
-
-      ;; LMDB key limit: skip oversized mids before any DB op.
-      (not (common/indexable-mid? mid))
-      (do (log/warn "Skipping email with oversized Message-ID (" (count mid)
-                    "chars), id:" id)
-          :skip)
-
-      :else
-      (if-let [src-name (digest/pre-classify-source (d/db db-conn) sources msg)]
-        (let [lookup     [:email/message-id mid]
-              store-opts (cond-> {:source src-name :message-id mid}
-                           max-attachment-size (assoc :max-attachment-size
-                                                      max-attachment-size))]
-          (if (ingest/store-email! db-conn msg store-opts)
-            (let [eid (d/entid (d/db db-conn) lookup)]
-              (try-digest! db-conn source-map sources
-                           (d/pull (d/db db-conn) digest/email-pull-pattern eid) mid))
-            ;; store-email! returned false: either dup mid (re-digest the
-            ;; existing entity) or id collision (different mid stored under
-            ;; the same Maildir filename -- skip).
-            (if-let [eid (d/entid (d/db db-conn) lookup)]
-              (let [email (d/pull (d/db db-conn) digest/email-pull-pattern eid)]
-                (cond
-                  (:email/digested-at email)
-                  (do (log/debug "Already digested, skipping:" mid) :ok)
-
-                  :else
-                  (do (log/info "Re-processing previously stored email:" mid)
-                      (when-not (:email/source email)
-                        (d/transact! db-conn [{:db/id eid :email/source src-name}]))
-                      (try-digest! db-conn source-map sources email mid))))
-              (do (log/warn "Skipping id collision (different Message-ID stored):" mid)
-                  :skip))))
-        (do (log/debug "No matching source for id:" id "-- not stored")
-            :skip)))))
+                    :else
+                    (do (log/info "Re-processing previously stored email:" mid)
+                        (when-not (:email/source email)
+                          (d/transact! db-conn [{:db/id eid :email/source src-name}]))
+                        (try-digest! ctx email mid nil))))
+                (do (log/warn "Skipping id collision (different Message-ID stored):" mid)
+                    :skip)))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Catch-up fetch (store+process per email)
@@ -314,9 +324,9 @@
   the IMAP watermark stays put and the message gets a fresh attempt on
   the next catch-up.  Honours `shutting-down?` -- callers that iterate
   should also check it via a :while clause to stop cleanly."
-  [db-conn source-map sources msg ingest-opts]
+  [ctx msg]
   (try
-    (store-and-process! db-conn source-map sources msg ingest-opts)
+    (store-and-process! ctx msg)
     (catch Exception e
       (log/error e "Failed to process id:" (:id msg) (blog/exception-msg e))
       :retry)))
@@ -324,9 +334,9 @@
 (defn- collect-safe-uids
   "Set of UIDs from `msgs` that didn't need retry.  Caps the IMAP
   watermark advance."
-  [db-conn source-map sources msgs ingest-opts]
+  [ctx msgs]
   (reduce (fn [acc msg]
-            (let [result (safe-store-and-process! db-conn source-map sources msg ingest-opts)]
+            (let [result (safe-store-and-process! ctx msg)]
               (if (and (not= :retry result) (:uid msg))
                 (conj acc (:uid msg))
                 acc)))
@@ -335,15 +345,15 @@
 (defn- process-each!
   "Ingest each message in order; per-message exceptions are logged and
   don't abort the loop.  Stops early on shutdown."
-  [db-conn source-map sources msgs ingest-opts]
+  [ctx msgs]
   (doseq [msg msgs
           :while (not (shutting-down?))]
-    (safe-store-and-process! db-conn source-map sources msg ingest-opts)))
+    (safe-store-and-process! ctx msg)))
 
 (defn- catch-up-imap!
   "IMAP incremental fetch via UID watermark; falls back to first-run
   on UIDVALIDITY change (stored watermark is cleared)."
-  [src db-conn mailbox-name folder fetch-opts source-map sources ingest-opts]
+  [{:keys [db-conn mailbox-name] :as ctx} src folder fetch-opts]
   (let [live-uv   (try (mailseq/uid-validity src folder)
                        (catch Exception e
                          (log/debug "Could not read UIDVALIDITY:" (.getMessage e))
@@ -358,14 +368,14 @@
                                          (str (inc watermark)) nil))))]
     (log/info "Fetched" (count msgs) "messages")
     (when (and (seq msgs) (not (shutting-down?)))
-      (let [safe-ids (collect-safe-uids db-conn source-map sources msgs ingest-opts)]
+      (let [safe-ids (collect-safe-uids ctx msgs)]
         (advance-watermark! db-conn mailbox-name msgs safe-ids)))))
 
 (defn- catch-up-maildir!
   "Maildir incremental fetch: diff list-ids against known :email/id.
   First run honours fetch-opts then seals pre-existing ids as seen;
   the init flag is set last so a crash retries safely."
-  [src db-conn mailbox-name folder fetch-opts source-map sources ingest-opts]
+  [{:keys [db-conn mailbox-name] :as ctx} src folder fetch-opts]
   (let [init-done? (ingest/maildir-init-done? db-conn mailbox-name)
         all-ids    (mailseq/list-ids src folder)]
     (if init-done?
@@ -378,7 +388,7 @@
           (let [msgs (sort-chronologically
                       (mailseq/by-ids src folder (vec new-ids)))]
             (log/info "Fetched" (count msgs) "new messages from Maildir")
-            (process-each! db-conn source-map sources msgs ingest-opts))))
+            (process-each! ctx msgs))))
       ;; First run (or retry after crash): fetch limited set, then seal baseline
       (let [msgs (sort-chronologically (first-run-messages src folder fetch-opts))]
         (cond
@@ -390,7 +400,7 @@
           (log/info "No new messages in Maildir")
           :else
           (do (log/info "Fetched" (count msgs) "messages from Maildir (first run)")
-              (process-each! db-conn source-map sources msgs ingest-opts)))
+              (process-each! ctx msgs)))
         ;; Seal pre-existing ids as seen, then flag init done.
         (let [stored (ingest/known-email-ids db-conn)
               unseen (remove stored all-ids)]
@@ -402,11 +412,11 @@
 (defn catch-up-fetch!
   "Fetch messages missed while the process was down.
   Dispatches to IMAP (watermark) or Maildir (id diff) strategy."
-  [src db-conn mailbox-name folder fetch-opts source-map sources ingest-opts mailbox-type]
+  [ctx src folder fetch-opts mailbox-type]
   (when-not (shutting-down?)
     (case mailbox-type
-      :imap    (catch-up-imap! src db-conn mailbox-name folder fetch-opts source-map sources ingest-opts)
-      :maildir (catch-up-maildir! src db-conn mailbox-name folder fetch-opts source-map sources ingest-opts))))
+      :imap    (catch-up-imap! ctx src folder fetch-opts)
+      :maildir (catch-up-maildir! ctx src folder fetch-opts))))
 
 ;; ---------------------------------------------------------------------------
 ;; Mail source connection
@@ -491,7 +501,7 @@
 
 (defn start-watch!
   "Start watching for new messages, storing+processing each as it arrives."
-  [src db-conn mailbox-name folder source-map sources ingest-opts]
+  [{:keys [db-conn mailbox-name] :as ctx} src folder]
   (log/info "Mailbox" (pr-str mailbox-name) "-- starting watch on" folder)
   (mailseq/watch src folder
                  (fn [msg]
@@ -504,7 +514,7 @@
                                    "-- new message id:" (:id msg)
                                    "Subject:" (:subject msg))
                          (try
-                           (let [result (store-and-process! db-conn source-map sources msg ingest-opts)]
+                           (let [result (store-and-process! ctx msg)]
                              ;; Advance IMAP watermark when applicable
                              (when (and (not= :retry result) (:uid msg))
                                (ingest/save-imap-uid! db-conn mailbox-name (:uid msg))))
@@ -532,6 +542,16 @@
      :mailbox-type (:type mailbox-cfg)
      :fetch-opts   (parse-fetch (or (:fetch effective) {:limit 50}))
      :ingest-opts  (select-keys effective [:max-size :max-attachment-size])}))
+
+(defn- make-run-ctx
+  "Bundle the run-invariant context for one mailbox pass, threaded as a
+  single map through the catch-up / store-and-process call chain."
+  [db-conn mailbox-name source-map sources ingest-opts]
+  {:db-conn      db-conn
+   :mailbox-name mailbox-name
+   :source-map   source-map
+   :sources      sources
+   :ingest-opts  ingest-opts})
 
 (defn- load-context
   "Re-read config, seed maintainers into tenures, return source-map+sources.
@@ -575,6 +595,7 @@
       (let [{:keys [source-map sources]} (load-context db-conn config-path)
             {:keys [mailbox-cfg mailbox-name folder mailbox-type fetch-opts ingest-opts]}
             (live-run-opts mailbox-cfg ingest-cfg cli-fetch-map config-path)
+            ctx (make-run-ctx db-conn mailbox-name source-map sources ingest-opts)
             src (open-mailbox mailbox-cfg)]
         (if-not src
           (do (log/error "Mailbox" (pr-str mailbox-name)
@@ -584,11 +605,10 @@
           (do
             (try
               (log/info "Mailbox" (pr-str mailbox-name) "-- connected, folder:" folder)
-              (catch-up-fetch! src db-conn mailbox-name folder fetch-opts
-                               source-map sources ingest-opts mailbox-type)
+              (catch-up-fetch! ctx src folder fetch-opts mailbox-type)
               (maybe-expire! db-conn source-map sources)
               (when-not (shutting-down?)
-                (start-watch! src db-conn mailbox-name folder source-map sources ingest-opts))
+                (start-watch! ctx src folder))
               (catch Exception e
                 (log/error e "Mailbox" (pr-str mailbox-name)
                            "-- watch interrupted:" (blog/exception-msg e))))
@@ -660,12 +680,12 @@
   the caller can decide whether at least one mailbox advanced)."
   [mailbox-cfg db-conn ingest-cfg cli-fetch-map source-map sources]
   (let [{:keys [mailbox-name folder mailbox-type fetch-opts ingest-opts]}
-        (run-opts mailbox-cfg ingest-cfg cli-fetch-map)]
+        (run-opts mailbox-cfg ingest-cfg cli-fetch-map)
+        ctx (make-run-ctx db-conn mailbox-name source-map sources ingest-opts)]
     (log/info "Mailbox" (pr-str mailbox-name) "-- batch fetch starting")
     (if-let [src (open-mailbox mailbox-cfg)]
       (try
-        (catch-up-fetch! src db-conn mailbox-name folder fetch-opts
-                         source-map sources ingest-opts mailbox-type)
+        (catch-up-fetch! ctx src folder fetch-opts mailbox-type)
         (log/info "Mailbox" (pr-str mailbox-name) "-- batch fetch done")
         true
         (catch Exception e

@@ -366,25 +366,32 @@
      :hdr-src  hdr-src}))
 
 (defn pre-classify-source
-  "Pre-storage source classification on a raw mailseq msg.
-  Returns source-name or nil. When nil the email should not be stored."
+  "Pre-storage source classification on a raw mailseq msg.  Returns
+  `{:src-name :delivery}`; nil `:src-name` means do not store."
   [db sources msg]
   (let [headers (:headers msg)
-        irt     (common/extract-in-reply-to headers)]
-    (:src-name (classify-email-source db sources headers irt))))
+        irt     (common/extract-in-reply-to headers)
+        {:keys [src-name delivery]} (classify-email-source db sources headers irt)]
+    {:src-name src-name :delivery delivery}))
 
 (defn- resolve-email-source!
-  "Classify the email's source and persist to DB.
-  For live emails (pre-classified by store-and-process!) the source is already
-  set; for test emails this runs the full classification."
-  [conn email sources]
+  "Resolve [src-name email delivery] for processing.  `resolved` (from
+  `pre-classify-source`, optional) short-circuits both the DB read and
+  re-classification.  Else: read back a stored :email/source, or -- for
+  test emails with no source -- classify headers and persist it."
+  [conn email sources resolved]
   (let [eid      (:db/id email)
         mid      (:email/message-id email)
         hdrs     (:email/headers-edn email)
         existing (:email/source email)]
-    (if existing
-      (let [delivery (common/classify-delivery hdrs)]
-        [existing email delivery])
+    (cond
+      resolved
+      [(:src-name resolved) email (:delivery resolved)]
+
+      existing
+      [existing email (common/classify-delivery hdrs)]
+
+      :else
       (let [irt (:email/in-reply-to email)
             {:keys [delivery src-name irt-src hdr-src]}
             (classify-email-source (d/db conn) sources hdrs irt)]
@@ -682,14 +689,15 @@
   email is flagged :email/pending-thread? true -- a later arrival or
   the TTL flush will retry.
   Opts:
-    :force-thread? -- bypass the pending-thread guard (TTL flush)."
+    :force-thread?   -- bypass the pending-thread guard (TTL flush)
+    :resolved-source -- pre-classified {:src-name :delivery}, skips re-resolving."
   ([conn source-map sources email] (process-email! conn source-map sources email {}))
-  ([conn source-map sources email {:keys [force-thread?]}]
+  ([conn source-map sources email {:keys [force-thread? resolved-source]}]
   (let [message-id   (:email/message-id email)
         eid          (:db/id email)
         from-addr    (:email/author-address email)
         was-pending? (:email/pending-thread? email)
-        [source-name email delivery] (resolve-email-source! conn email sources)]
+        [source-name email delivery] (resolve-email-source! conn email sources resolved-source)]
     (if-not source-name
       (log/debug "No matching source for" message-id "-- skipping")
       (let [source-cfg   (when-let [cfg (get source-map source-name)]

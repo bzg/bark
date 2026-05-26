@@ -169,16 +169,44 @@
            (log/warn "Failed to parse HTML:" (.getMessage e))
            nil))))
 
-(defn- parse-message-ids
-  "Parse a References value into a space-separated mid string (root
-  first), normalized and deduplicated.  Returns nil if none found."
-  [s]
-  (when s
-    (let [ids (->> (re-seq #"<[^<>\s]+>" s)
-                   (map common/normalize-mid)
-                   distinct
-                   vec)]
-      (when (seq ids) (str/join " " ids)))))
+(defn- attachment-text
+  "Decode an attachment's stored-as-text payload (patch/diff, ICS, or
+  text/plain) to a String, or nil when the attachment carries no text
+  content.  Bytes are decoded as UTF-8."
+  [{:keys [filename content-type data]}]
+  (let [is-text? (or (common/patch-file? filename)
+                     (common/ics-file? filename)
+                     (common/text-attachment? {:attachment/content-type content-type}))]
+    (when (and is-text? data)
+      (cond
+        (string? data) data
+        (bytes? data)  (String. ^bytes data "UTF-8")))))
+
+(defn- attachment->txdata
+  "One mailseq attachment => :attachment/* map.  Text content is stored
+  inline unless it exceeds `max-att-size` (in which case only metadata
+  is kept and a warning is logged)."
+  [att max-att-size]
+  (let [filename  (or (:filename att) "unnamed")
+        data      (:data att)
+        raw-text  (attachment-text att)
+        too-large? (and raw-text (> (count raw-text) max-att-size))]
+    (when too-large?
+      (log/warn "Attachment" filename "exceeds"
+                (str (quot max-att-size 1024) "KB")
+                "limit (" (count raw-text) "chars) -- content not stored"))
+    (cond-> {:attachment/filename     filename
+             :attachment/content-type (:content-type att)
+             :attachment/size         (or (:size att) (when data (count data)))}
+      (and raw-text (not too-large?)) (assoc :attachment/data raw-text))))
+
+(defn- clean-subject
+  "Collapse whitespace in a Subject, falling back to \"(no subject)\"."
+  [subject]
+  (let [s (or subject "")]
+    (if (str/blank? s)
+      "(no subject)"
+      (-> s (str/replace #"\s+" " ") str/trim))))
 
 ;; ---------------------------------------------------------------------------
 ;; Transform
@@ -209,43 +237,19 @@
         headers     (:headers msg)
         headers-edn (when (seq headers) (pr-str headers))
         in-reply-to (common/extract-in-reply-to headers)
+        ;; Stored verbatim (multi-value headers joined): `ancestor-mids-from`
+        ;; re-runs normalization/dedup/indexable filtering at read time, so
+        ;; normalizing here would only duplicate that work.
         references  (when-let [v (get headers "References")]
-                      (parse-message-ids (if (vector? v)
-                                           (str/join " " (keep identity v))
-                                           v)))
+                      (let [s (if (vector? v)
+                                (str/join " " (keep identity v))
+                                v)]
+                        (when-not (str/blank? s) s)))
         ancestor-mids (common/ancestor-mids-from references in-reply-to)
-        attachments (mapv (fn [att]
-                            (let [filename (or (:filename att) "unnamed")
-                                  is-patch (re-find #"(?i)\.(patch|diff)$" filename)
-                                  is-ics   (re-find #"(?i)\.ics$" filename)
-                                  is-text  (and (not (or is-patch is-ics))
-                                                (common/text-attachment?
-                                                  {:attachment/content-type
-                                                   (:content-type att)}))
-                                  data     (:data att)
-                                  raw-text (when (and (or is-patch is-ics is-text) data)
-                                              (cond
-                                                (string? data) data
-                                                (bytes? data)  (String. ^bytes data "UTF-8")
-                                                :else          nil))
-                                  too-large? (and raw-text
-                                                  (> (count raw-text) max-att-size))
-                                  text-data (when (and raw-text (not too-large?)) raw-text)]
-                              (when too-large?
-                                (log/warn "Attachment" filename "exceeds"
-                                          (str (quot max-att-size 1024) "KB")
-                                          "limit (" (count raw-text) "chars) -- content not stored"))
-                              (cond-> {:attachment/filename     filename
-                                       :attachment/content-type (:content-type att)
-                                       :attachment/size         (or (:size att)
-                                                                    (when data (count data)))}
-                                text-data (assoc :attachment/data text-data))))
+        attachments (mapv #(attachment->txdata % max-att-size)
                           (remove nil? (:attachments body)))]
     (cond-> {:email/message-id   message-id
-             :email/subject      (let [s (or (:subject msg) "")]
-                                    (if (str/blank? s)
-                                      "(no subject)"
-                                      (-> s (str/replace #"\s+" " ") str/trim)))
+             :email/subject      (clean-subject (:subject msg))
              :email/content-type (:content-type msg)
              :email/ingested-at  (Date.)}
 
