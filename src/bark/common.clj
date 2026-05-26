@@ -8,6 +8,7 @@
   (:require [clojure.string :as str]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clojure.pprint :as pp]
             [clojure.walk :as walk]
             [taoensso.timbre :as log])
   (:import [java.text Normalizer Normalizer$Form]
@@ -614,6 +615,90 @@
   [source-cfg]
   (let [v (:patch-triggers? source-cfg)]
     (if (nil? v) true (boolean v))))
+
+;; ---------------------------------------------------------------------------
+;; Reproducible per-source config (published in docs.html + reports/config.edn)
+;; ---------------------------------------------------------------------------
+;;
+;; Goal: let anyone re-run BARK on their *own* copy of the same mail and
+;; obtain the same dashboard.  We publish a source's interpretation rules
+;; with the operator's global :labels/:commands/... folded in, so the entry
+;; is self-contained (independent of their global config), and we drop
+;; everything secret or operator-internal: :mailboxes (the reader supplies
+;; their own local source), :db, :logging, :notifications.
+
+(def reproducible-config-header
+  (str ";; Minimal config.edn to reproduce this dashboard on your own copy of\n"
+       ";; the mail.  Replace :mailboxes with YOUR local source -- a Maildir of\n"
+       ";; your subscription, or your own IMAP account; the operator's mailbox\n"
+       ";; is private and not needed here.  See \"Deploying BARK\" in the manual,\n"
+       ";; then validate with: bb test-config\n"))
+
+(defn effective-source-config
+  "Pure.  Return a sanitised, self-contained source map for `source-name`:
+  per-source values with the operator's global :labels/:commands/... folded
+  in, so it reproduces their interpretation without their global config.
+  Drops secrets and operator-internal keys (notably :notifications).
+  Returns nil when no source matches."
+  [config source-name]
+  (when-let [src (some #(when (= (:name %) source-name) %) (:sources config))]
+    (let [;; Emit exactly the one matcher source-type resolves (list >
+          ;; alias > to), so the published config is valid (the schema
+          ;; forbids several) and faithful to what the daemon actually
+          ;; matches on.
+          matcher  (cond (:list src)  [:list  (:list src)]
+                         (:alias src) [:alias (:alias src)]
+                         (:to src)    [:to    (:to src)])
+          labels   (merge (:labels config) (:labels src))
+          commands (merge-with merge (:commands config) (:commands src))
+          csyntax  (or (:command-syntax src) (:command-syntax config))
+          rtypes   (or (:report-types src) (:report-types config))
+          restr    (or (:restricted-types src) (:restricted-types config))
+          expiry   (or (:expiry src) (:expiry config))
+          awaiting (or (:awaiting-delay src) (:awaiting-delay config))
+          formats  (or (:export-formats src) (:export-formats config))
+          ptrig    (cond (contains? src    :patch-triggers?) (:patch-triggers? src)
+                         (contains? config :patch-triggers?) (:patch-triggers? config)
+                         :else true)]
+      (apply array-map
+             (mapcat identity
+                     (cond-> [[:name (:name src)]]
+                       matcher                      (conj matcher)
+                       (:base-url src)              (conj [:base-url (:base-url src)])
+                       (:list-archive src)          (conj [:list-archive (:list-archive src)])
+                       (:archive-format-string src) (conj [:archive-format-string (:archive-format-string src)])
+                       (seq (:maintainers src))     (conj [:maintainers (:maintainers src)])
+                       (seq labels)                 (conj [:labels labels])
+                       (seq commands)               (conj [:commands commands])
+                       (= :strict csyntax)          (conj [:command-syntax :strict])
+                       rtypes                       (conj [:report-types rtypes])
+                       restr                        (conj [:restricted-types restr])
+                       (seq expiry)                 (conj [:expiry expiry])
+                       awaiting                     (conj [:awaiting-delay awaiting])
+                       (false? ptrig)               (conj [:patch-triggers? false])
+                       (seq (:topics-filter src))   (conj [:topics-filter (:topics-filter src)])
+                       formats                      (conj [:export-formats formats])
+                       (seq (:periods src))         (conj [:periods (:periods src)])))))))
+
+(defn reproducible-config
+  "Pure.  EDN data reproducing `source-name`: a complete config whose
+  :mailboxes is a placeholder the reader replaces with their own local
+  source.  Returns nil when no source matches."
+  [config source-name]
+  (when-let [src (effective-source-config config source-name)]
+    (array-map
+     :mailboxes [(array-map :name "local" :type :maildir
+                            :path "/path/to/your/Maildir" :folder "")]
+     :sources   [src])))
+
+(defn reproducible-config-str
+  "Pure.  `reproducible-config` rendered as a commented, pretty-printed
+  config.edn string, or nil when no source matches."
+  [config source-name]
+  (when-let [data (reproducible-config config source-name)]
+    (str reproducible-config-header
+         (str/trimr (with-out-str (pp/pprint data)))
+         "\n")))
 
 ;; ---------------------------------------------------------------------------
 ;; Maintainer tenures (pure -- operate on a seq of tenure maps, no DB access)

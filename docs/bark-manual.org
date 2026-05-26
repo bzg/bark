@@ -841,6 +841,25 @@ filesystem events rather than polling.
  :sources [{:name "my-list" :list "my-list.example.org"}]}
 #+end_src
 
+*** Reproducing a published instance
+
+Every exported source publishes a ready-to-use =reports/config.edn=,
+linked from its =docs.html= under /Configuration/. It is a complete,
+self-contained config: the operator's global =:labels=, =:commands=,
+=:expiry= and so on are folded into the source entry, and everything
+secret or operator-internal (=:mailboxes=, =:db=, =:logging=,
+=:notifications=) is stripped. To get the same dashboard on your own
+copy of the list, download it, replace the placeholder =:mailboxes=
+with /your/ local source (a Maildir of your subscription, or your own
+IMAP account), and run =bb export=.
+
+The companion =reports/meta.json= carries the source /identity/ --
+=:list= / =:alias= / =:to=, =:list-archive=, =:archive-format-string=
+and =:base-url=. Tools such as [[https://codeberg.org/bzg/bone][bone]] use it to bind a published
+source to a local mailbox path of your choosing: the path is yours and
+lives only in your local tool config, while =meta.json= supplies the
+stable key (the =List-Id=) to match against.
+
 *** Multiple mailboxes
 
 =:mailboxes= can declare any combination of IMAP and Maildir entries.

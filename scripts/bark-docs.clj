@@ -14,12 +14,11 @@
 
 (require '[clojure.java.io :as io]
          '[clojure.string :as str]
-         '[clojure.pprint :as pp]
          '[hiccup2.core :as h]
          '[taoensso.timbre :as log]
          '[bark.common :refer [default-labels default-commands
                                resolve-labels-map resolve-commands-map
-                               resolve-command-syntax
+                               resolve-command-syntax reproducible-config-str
                                parse-cli-args load-config load-mailmap db-path build-source-map
                                format-date-iso bark-schema lead-maintainer]]
          '[bark.common-bb :refer [load-datalevin-pod! get-tenures]]
@@ -425,16 +424,21 @@
              "\n</ul>")))))
 
 (defn build-configuration-html
-  "Build an HTML section displaying the raw source entry from config.edn
-  so operators can reproduce this source in their own BARK instance."
+  "Build the Configuration section: a complete, self-contained config.edn
+  the reader drops into their own BARK instance to reproduce this source
+  on their own copy of the mail.  Global :labels/:commands/... are folded
+  in and secrets/operator-internal keys are dropped (see
+  `bark.common/effective-source-config`)."
   [config source-name]
-  (when-let [src (and source-name
-                      (some #(when (= (:name %) source-name) %)
-                            (:sources config)))]
+  (when-let [edn (and source-name (reproducible-config-str config source-name))]
     (str "<h2 id=\"configuration\">Configuration</h2>\n"
-         "<p>Here is how to configure this source in your BARK instance:</p>\n"
+         "<p>To reproduce this dashboard on your own copy of the mail, run "
+         "BARK with this <code>config.edn</code> "
+         "(<a href=\"reports/config.edn\">download</a>). Replace "
+         "<code>:mailboxes</code> with your own local source -- the operator's "
+         "mailbox is private and not needed -- then run <code>bb export</code>.</p>\n"
          "<pre><code>"
-         (html-escape (str/trim (with-out-str (pp/pprint src))))
+         (html-escape (str/trim edn))
          "</code></pre>")))
 
 ;; ---------------------------------------------------------------------------

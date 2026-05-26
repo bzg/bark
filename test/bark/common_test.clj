@@ -3,6 +3,8 @@
   classify-delivery, classify-source, parse-duration-str,
   gate-related helpers, and build-source-map edge cases."
   (:require [clojure.test :refer [deftest is testing]]
+            [clojure.string :as str]
+            [clojure.edn :as edn]
             [bark.common :as common]))
 
 ;; ---------------------------------------------------------------------------
@@ -322,6 +324,56 @@
         ov  (common/resolve-command-overrides cfg)]
     (is (= :maintainer (:scope (:acked ov))))
     (is (= #{:bug} (:report-types (:acked ov))))))
+
+;; ---------------------------------------------------------------------------
+;; effective-source-config / reproducible-config
+;; ---------------------------------------------------------------------------
+
+(deftest effective-source-config-test
+  (let [config {:labels   {:bug ["BUG" "DEFECT"]}
+                :commands {:closed {:words ["Done"]}}
+                :notifications {:smtp {:password "secret"}
+                                :subscribers [{:email "subscriber@example.org"}]}
+                :sources  [{:name          "demo"
+                            :list          "demo.example.org"
+                            :to            "demo@example.org"
+                            :base-url      "https://bark.example.org/public/demo/"
+                            :maintainers   ["lead@example.org"]
+                            :command-syntax :strict
+                            :labels        {:patch ["PATCH"]}
+                            :commands      {:closed {:scope :maintainer}}
+                            :notifications {:enabled false}}]}
+        eff    (common/effective-source-config config "demo")]
+    (testing "exactly one matcher is emitted, by source-type precedence"
+      (is (= "demo.example.org" (:list eff)))
+      (is (not (contains? eff :to))))
+    (testing "links and maintainers are kept"
+      (is (= "https://bark.example.org/public/demo/" (:base-url eff)))
+      (is (= ["lead@example.org"] (:maintainers eff))))
+    (testing "global :labels fold in, per-source :labels merge over them"
+      (is (= {:bug ["BUG" "DEFECT"] :patch ["PATCH"]} (:labels eff))))
+    (testing "global and per-source :commands merge key-by-key"
+      (is (= {:closed {:words ["Done"] :scope :maintainer}} (:commands eff))))
+    (testing ":command-syntax surfaces only when :strict"
+      (is (= :strict (:command-syntax eff))))
+    (testing "secrets and PII never leak"
+      (is (not (contains? eff :notifications)))
+      (is (nil? (some #{"secret"} (tree-seq coll? seq eff)))))
+    (testing "unknown source -> nil"
+      (is (nil? (common/effective-source-config config "missing"))))))
+
+(deftest reproducible-config-test
+  (let [config {:sources [{:name "demo" :list "demo.example.org"}]}
+        data   (common/reproducible-config config "demo")
+        s      (common/reproducible-config-str config "demo")]
+    (testing ":mailboxes is a single Maildir placeholder"
+      (is (= 1 (count (:mailboxes data))))
+      (is (= :maildir (:type (first (:mailboxes data))))))
+    (testing ":sources carries the effective source"
+      (is (= "demo.example.org" (:list (first (:sources data))))))
+    (testing "string form is commented and parses back as the same data"
+      (is (str/starts-with? s ";;"))
+      (is (= data (edn/read-string s))))))
 
 ;; ---------------------------------------------------------------------------
 ;; resolve-command-syntax

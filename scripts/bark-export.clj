@@ -55,6 +55,7 @@
                                  report-priority report-status report-descendant-count
                                  parse-cli-args parse-delay parse-cutoff-date
                                  load-config load-mailmap db-path build-source-map
+                                 reproducible-config-str
                                  bark-schema bark-format
                                  report-type-spec type->plural
                                  votes-by-report vote-counts
@@ -643,6 +644,7 @@
       (:alias cfg)        (assoc :alias         (:alias cfg))
       (:to cfg)           (assoc :to            (:to cfg))
       (:list-archive cfg) (assoc :list-archive  (:list-archive cfg))
+      (:archive-format-string cfg) (assoc :archive-format-string (:archive-format-string cfg))
       (:base-url cfg)     (assoc :base-url      (:base-url cfg)))))
 
 ;; ---------------------------------------------------------------------------
@@ -1301,6 +1303,11 @@
     (spit (str reports-dir "/meta.json")
           (json/generate-string meta-data {:pretty true}))
     (log/info "Wrote meta.json")
+    ;; Self-contained config.edn so anyone can reproduce this dashboard on
+    ;; their own copy of the mail (linked from docs.html under Configuration).
+    (when-let [cfg-edn (reproducible-config-str (ctx-config) source-name)]
+      (spit (str reports-dir "/config.edn") cfg-edn)
+      (log/info "Wrote config.edn"))
     (dump-typed-formats! (with-reports scope open) fmts "all-open" "open reports"
                          :json-always? true :counts counts)
     (dump-typed-formats! (with-reports scope closed) fmts "all-closed" "closed reports"
