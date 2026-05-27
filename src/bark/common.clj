@@ -23,7 +23,7 @@
 
 (def bark-format
   "BARK export format version. Bump when the JSON/Org export shape changes."
-  "0.9.2")
+  "0.9.3")
 
 (def bark-schema
   (edn/read-string (slurp (io/resource "bark-schema.edn"))))

@@ -860,6 +860,13 @@ source to a local mailbox path of your choosing: the path is yours and
 lives only in your local tool config, while =meta.json= supplies the
 stable key (the =List-Id=) to match against.
 
+=meta.json= also lists =:reports-files= -- the JSON files in
+=reports/= that actually hold reports (=all.json=, =all-open.json=,
+=all-closed.json= and the per-type files such as =patches-open.json=),
+as opposed to =meta.json=, =votes.json= and =stats.json=. =bone
+--add-source= reads it to offer only the report files when you add a
+tracker by its base URL.
+
 *** Multiple mailboxes
 
 =:mailboxes= can declare any combination of IMAP and Maildir entries.

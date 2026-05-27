@@ -1292,13 +1292,34 @@
                                             :open   (count (remove :report/closed rs))
                                             :closed (count (filter :report/closed rs))}]))
                           by-type)
+        json?       (boolean (fmts "json"))
+        ;; Authoritative list of JSON files holding reports, so consumers
+        ;; (e.g. bone --add-source) can tell them apart from meta.json,
+        ;; votes.json and stats.json. Mirrors what dump-json!/dump-per-type!/
+        ;; dump-open-closed! actually write for this source.
+        reports-files (vec (concat
+                            (when json? ["all.json"])
+                            ;; always written (json-always? in dump-typed-formats!)
+                            ["all-open.json" "all-closed.json"]
+                            (when json?
+                              (for [rtype report-types
+                                    :let  [plural   (type->plural rtype)
+                                           typed    (get by-type rtype)
+                                           t-open   (filter-reports open {:type rtype})
+                                           t-closed (filter-reports closed {:type rtype})]
+                                    f     (cond-> []
+                                            (seq typed)    (conj (str plural ".json"))
+                                            (seq t-open)   (conj (str plural "-open.json"))
+                                            (seq t-closed) (conj (str plural "-closed.json")))]
+                                f))))
         tenures     (when-let [db (ctx-db)] (get-tenures db source-name))
         meta-data   (merge counts
-                           {:bark-format bark-format
-                            :source      source-name
-                            :generated   (str (java.util.Date.))
-                            :by-type     type-counts
-                            :maintainers (tenures-snapshot (or tenures []))}
+                           {:bark-format   bark-format
+                            :source        source-name
+                            :generated     (str (java.util.Date.))
+                            :by-type       type-counts
+                            :reports-files reports-files
+                            :maintainers   (tenures-snapshot (or tenures []))}
                           (source-metadata source-name source-map))]
     (spit (str reports-dir "/meta.json")
           (json/generate-string meta-data {:pretty true}))
