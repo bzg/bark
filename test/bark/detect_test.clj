@@ -1,6 +1,7 @@
 (ns bark.detect-test
   "Unit tests for ICS detection helpers (common + detect)."
   (:require [clojure.test :refer [deftest is testing]]
+            [clojure.string :as str]
             [bark.common :as common]
             [bark.detect :as detect]))
 
@@ -45,6 +46,93 @@
 
   (testing "plain text without ICS"
     (is (not (common/has-inline-ics? "Hello world")))))
+
+;; ---------------------------------------------------------------------------
+;; ICS parsing and assembly (bark.common)
+;; ---------------------------------------------------------------------------
+
+(deftest normalize-ics-eol-test
+  (testing "lone LF becomes CRLF"
+    (is (= "a\r\nb\r\n" (common/normalize-ics-eol "a\nb\n"))))
+  (testing "existing CRLF is preserved (not doubled)"
+    (is (= "a\r\nb" (common/normalize-ics-eol "a\r\nb"))))
+  (testing "lone CR becomes CRLF"
+    (is (= "a\r\nb" (common/normalize-ics-eol "a\rb"))))
+  (testing "nil-safe"
+    (is (nil? (common/normalize-ics-eol nil)))))
+
+(deftest extract-vevents-test
+  (testing "extracts a single VEVENT, CRLF-normalized and terminated"
+    (is (= ["BEGIN:VEVENT\r\nUID:a@x\r\nEND:VEVENT\r\n"]
+           (common/extract-vevents "BEGIN:VEVENT\nUID:a@x\nEND:VEVENT"))))
+  (testing "extracts multiple adjacent VEVENTs without merging them"
+    (is (= 2 (count (common/extract-vevents
+                     (str "BEGIN:VEVENT\nUID:a\nEND:VEVENT\n"
+                          "BEGIN:VEVENT\nUID:b\nEND:VEVENT\n"))))))
+  (testing "no VEVENT yields nil"
+    (is (nil? (common/extract-vevents "BEGIN:VCALENDAR\nEND:VCALENDAR")))
+    (is (nil? (common/extract-vevents nil)))))
+
+(deftest ics-property-test
+  (testing "reads a property value, trimmed"
+    (is (= "a@x" (common/ics-property "BEGIN:VEVENT\r\nUID:a@x\r\nEND:VEVENT\r\n" "UID"))))
+  (testing "ignores parameters before the colon"
+    (is (= "20260101T100000"
+           (common/ics-property "BEGIN:VEVENT\r\nDTSTART;TZID=Europe/Paris:20260101T100000\r\nEND:VEVENT\r\n"
+                                "DTSTART"))))
+  (testing "case-insensitive property name"
+    (is (= "5" (common/ics-property "uid:x\r\nSEQUENCE:5\r\n" "sequence"))))
+  (testing "absent property yields nil"
+    (is (nil? (common/ics-property "BEGIN:VEVENT\r\nUID:a\r\nEND:VEVENT\r\n" "SUMMARY")))))
+
+(deftest dedupe-vevents-test
+  (let [v0 "BEGIN:VEVENT\r\nUID:a@x\r\nSEQUENCE:0\r\nSUMMARY:old\r\nEND:VEVENT\r\n"
+        v1 "BEGIN:VEVENT\r\nUID:a@x\r\nSEQUENCE:1\r\nSUMMARY:new\r\nEND:VEVENT\r\n"
+        vb "BEGIN:VEVENT\r\nUID:b@x\r\nEND:VEVENT\r\n"]
+    (testing "same UID collapses to the highest SEQUENCE"
+      (is (= [v1] (common/dedupe-vevents [v0 v1]))))
+    (testing "result keeps first-seen UID order"
+      (is (= [v1 vb] (common/dedupe-vevents [v0 vb v1]))))
+    (testing "UID-less blocks are all kept"
+      (let [n1 "BEGIN:VEVENT\r\nSUMMARY:x\r\nEND:VEVENT\r\n"
+            n2 "BEGIN:VEVENT\r\nSUMMARY:y\r\nEND:VEVENT\r\n"]
+        (is (= [n1 n2] (common/dedupe-vevents [n1 n2])))))))
+
+(deftest dedupe-vtimezones-test
+  (let [paris  "BEGIN:VTIMEZONE\r\nTZID:Europe/Paris\r\nEND:VTIMEZONE\r\n"
+        paris2 "BEGIN:VTIMEZONE\r\nTZID:Europe/Paris\r\nX-NOTE:dup\r\nEND:VTIMEZONE\r\n"
+        utc    "BEGIN:VTIMEZONE\r\nTZID:UTC\r\nEND:VTIMEZONE\r\n"
+        anon   "BEGIN:VTIMEZONE\r\nEND:VTIMEZONE\r\n"]
+    (testing "one VTIMEZONE per TZID, first-seen"
+      (is (= [paris utc] (common/dedupe-vtimezones [paris paris2 utc]))))
+    (testing "anonymous (TZID-less) VTIMEZONE is dropped"
+      (is (= [paris] (common/dedupe-vtimezones [anon paris]))))))
+
+(deftest escape-ics-text-test
+  (testing "comma and semicolon are backslash-escaped"
+    (is (= "v1.0\\, final" (common/escape-ics-text "v1.0, final")))
+    (is (= "a\\;b" (common/escape-ics-text "a;b"))))
+  (testing "backslash is escaped first (no double-escaping of added escapes)"
+    (is (= "back\\\\slash" (common/escape-ics-text "back\\slash"))))
+  (testing "newlines become literal \\n"
+    (is (= "l1\\nl2" (common/escape-ics-text "l1\nl2")))
+    (is (= "l1\\nl2" (common/escape-ics-text "l1\r\nl2"))))
+  (testing "plain text is untouched, nil-safe"
+    (is (= "plain subject" (common/escape-ics-text "plain subject")))
+    (is (nil? (common/escape-ics-text nil)))))
+
+(deftest build-vcalendar-test
+  (let [vevent "BEGIN:VEVENT\r\nUID:a@x\r\nEND:VEVENT\r\n"
+        vtz    "BEGIN:VTIMEZONE\r\nTZID:Europe/Paris\r\nEND:VTIMEZONE\r\n"]
+    (testing "nil when there is no event"
+      (is (nil? (common/build-vcalendar "src events" [] [vtz]))))
+    (testing "wraps VTIMEZONE before VEVENT inside one VCALENDAR"
+      (let [doc (common/build-vcalendar "src events" [vevent] [vtz])]
+        (is (str/starts-with? doc "BEGIN:VCALENDAR\r\n"))
+        (is (str/ends-with? doc "END:VCALENDAR\r\n"))
+        (is (str/includes? doc "X-WR-CALNAME:src events\r\n"))
+        (is (< (.indexOf doc "BEGIN:VTIMEZONE")
+               (.indexOf doc "BEGIN:VEVENT")))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Strict label regex: case-sensitive tag, mandatory `\s` or EOL after `]`

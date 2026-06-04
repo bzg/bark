@@ -164,6 +164,122 @@
        (str/includes? body-text "BEGIN:VCALENDAR")
        (str/includes? body-text "BEGIN:VEVENT")))
 
+;; ---------------------------------------------------------------------------
+;; ICS (iCalendar) parsing and assembly -- pure, shared JVM/bb.
+;; ---------------------------------------------------------------------------
+
+(defn normalize-ics-eol
+  "Normalize line endings to CRLF as required by RFC 5545.  Lone LF, lone
+  CR, and existing CRLF all collapse to a single CRLF.  nil-safe."
+  [s]
+  (when s (str/replace s #"\r\n?|\n" "\r\n")))
+
+(defn- ics-component-re [component]
+  (re-pattern (str "(?s)BEGIN:" component "(?:(?!BEGIN:" component ").)*?END:" component)))
+
+(defn extract-ics-blocks
+  "Extract BEGIN:<component>...END:<component> blocks from ICS text.  Each
+  returned block is CRLF-normalized and CRLF-terminated.  The reluctant
+  quantifier is bounded by the next BEGIN to avoid catastrophic
+  backtracking and to keep successive components from merging."
+  [component text]
+  (when (and text (str/includes? text (str "BEGIN:" component)))
+    (map #(str (normalize-ics-eol %) "\r\n")
+         (re-seq (ics-component-re component) text))))
+
+(defn extract-vevents
+  "Extract CRLF-normalized VEVENT blocks from ICS text."
+  [text]
+  (extract-ics-blocks "VEVENT" text))
+
+(defn extract-vtimezones
+  "Extract CRLF-normalized VTIMEZONE blocks from ICS text."
+  [text]
+  (extract-ics-blocks "VTIMEZONE" text))
+
+(defn- unfold-ics
+  "Undo RFC 5545 line folding (a CRLF followed by a space or tab)."
+  [s]
+  (str/replace s #"\r\n[ \t]" ""))
+
+(defn ics-property
+  "Read a top-level ICS property value (ignoring any parameters) from a
+  component block, or nil.  Case-insensitive on the property name."
+  [block prop]
+  (when block
+    (let [re (re-pattern (str "(?im)^" (java.util.regex.Pattern/quote prop)
+                              "(?:;[^:\r\n]*)?:(.*)$"))]
+      (some-> (re-find re (unfold-ics block)) second str/trim))))
+
+(defn vevent-uid [block] (ics-property block "UID"))
+
+(defn vevent-sequence
+  "SEQUENCE number of a VEVENT block (0 when absent or unparseable)."
+  [block]
+  (or (some-> (ics-property block "SEQUENCE") parse-long) 0))
+
+(defn dedupe-vevents
+  "Deduplicate VEVENT blocks by UID, keeping the highest SEQUENCE at the
+  first-seen position.  Blocks without a UID cannot be correlated and are
+  all kept."
+  [vevents]
+  (let [best (reduce (fn [m v]
+                       (if-let [uid (vevent-uid v)]
+                         (if (and (m uid) (>= (vevent-sequence (m uid)) (vevent-sequence v)))
+                           m
+                           (assoc m uid v))
+                         m))
+                     {} vevents)]
+    (first
+     (reduce (fn [[acc seen] v]
+               (if-let [uid (vevent-uid v)]
+                 (if (seen uid)
+                   [acc seen]
+                   [(conj acc (best uid)) (conj seen uid)])
+                 [(conj acc v) seen]))
+             [[] #{}] vevents))))
+
+(defn dedupe-vtimezones
+  "Keep one VTIMEZONE per TZID, first-seen.  VTIMEZONEs without a TZID are
+  dropped -- a TZID is mandatory and an anonymous one is unreferenceable."
+  [vtimezones]
+  (->> vtimezones
+       (filter #(ics-property % "TZID"))
+       (reduce (fn [[acc seen] vtz]
+                 (let [tzid (ics-property vtz "TZID")]
+                   (if (seen tzid)
+                     [acc seen]
+                     [(conj acc vtz) (conj seen tzid)])))
+               [[] #{}])
+       first))
+
+(defn escape-ics-text
+  "Escape an ICS TEXT-typed property value per RFC 5545 section 3.3.11:
+  backslash, semicolon and comma are backslash-escaped, and newlines
+  become the literal `\\n`.  nil-safe."
+  [s]
+  (when s
+    (-> s
+        (str/replace "\\" "\\\\")
+        (str/replace ";" "\\;")
+        (str/replace "," "\\,")
+        (str/replace #"\r\n?|\n" "\\\\n"))))
+
+(defn build-vcalendar
+  "Assemble a complete VCALENDAR document (CRLF-terminated) wrapping the
+  given VTIMEZONE and VEVENT blocks.  Returns nil when there is no event
+  to publish."
+  [cal-name vevents vtimezones]
+  (when (seq vevents)
+    (str "BEGIN:VCALENDAR\r\n"
+         "VERSION:2.0\r\n"
+         "PRODID:-//BARK//Event Export//EN\r\n"
+         "METHOD:PUBLISH\r\n"
+         "X-WR-CALNAME:" (escape-ics-text cal-name) "\r\n"
+         (str/join "" vtimezones)
+         (str/join "" vevents)
+         "END:VCALENDAR\r\n")))
+
 (defn strip-signature
   "Remove the RFC 3676 email signature (everything after a line
   containing exactly \"-- \") from plain-text body."

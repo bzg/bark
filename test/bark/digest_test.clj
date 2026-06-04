@@ -1675,3 +1675,20 @@
                 (str label " is :rel/supersedes -> target-bug"))))
         (finally
           (teardown! ctx))))))
+
+;; ---------------------------------------------------------------------------
+;; report-entity :report/has-ics is scoped to announcements
+;; ---------------------------------------------------------------------------
+
+(deftest report-entity-has-ics-scoped-to-announcements
+  (let [email {:email/attachments [{:attachment/filename     "invite.ics"
+                                    :attachment/content-type "text/calendar"}]
+               :email/author-address "alice@test.org"}
+        has-ics (fn [rtype]
+                  (:report/has-ics
+                   (digest/report-entity 1 "<m@test.org>" {:type rtype} nil email nil)))]
+    (testing "announcement carrying an .ics is flagged"
+      (is (true? (has-ics :announcement))))
+    (testing "other types are never flagged, even with an .ics attachment"
+      (is (false? (has-ics :bug)))
+      (is (false? (has-ics :patch))))))

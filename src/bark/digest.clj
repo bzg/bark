@@ -166,8 +166,12 @@
   [email-eid message-id report-info email-date email now]
   (let [attachments (:email/attachments email)
         body-text   (common/email-body-text email)
-        has-ics     (or (common/has-ics-attachment? attachments)
-                        (common/has-inline-ics? body-text))
+        ;; ICS is only ever exported for announcements (see bark-export
+        ;; dump-events*), so the flag stays false elsewhere rather than
+        ;; recording ICS we will never publish.
+        has-ics     (and (= :announcement (:type report-info))
+                         (or (common/has-ics-attachment? attachments)
+                             (common/has-inline-ics? body-text)))
         has-text    (boolean (some common/text-attachment? attachments))]
     (into {:report/type (:type report-info) :report/email email-eid
            :report/message-id message-id

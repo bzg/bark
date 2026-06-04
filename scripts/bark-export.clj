@@ -59,7 +59,9 @@
                                  bark-schema bark-format
                                  report-type-spec type->plural
                                  votes-by-report vote-counts
-                                 ics-file? text-attachment?]]
+                                 ics-file? text-attachment? email-body-text
+                                 extract-vevents extract-vtimezones
+                                 dedupe-vevents dedupe-vtimezones build-vcalendar]]
             [bark.common-bb :refer [load-datalevin-pod! all-reports dq dpull
                                     fetch-attachment-data get-tenures tenures-snapshot
                                     get-last-modified changed-source-types-since]]
@@ -412,6 +414,32 @@
                 (:patch/date p)    (assoc :date    (:patch/date p))))
             (:report/patches report)))))
 
+(def ^:private inline-ics-basename "inline.ics")
+
+(defn- event-ics-files
+  "The ICS files to publish for one announcement, as
+  [{:basename ... :content ...}].  .ics attachments are published
+  verbatim; when an announcement carries no .ics attachment but has
+  inline VEVENT content, a single synthetic inline.ics is built from the
+  body (VEVENTs deduped by UID, referenced VTIMEZONEs carried along).
+  Shared by dump-events! (writes) and report-attachment-files (lists) so
+  the files on disk and the :events JSON entries never diverge."
+  [report att-email]
+  (let [ics-atts (filter #(and (ics-file? (:attachment/filename %))
+                               (:attachment/data %))
+                         (:email/attachments att-email))]
+    (if (seq ics-atts)
+      (mapv (fn [att] {:basename (attachment-basename att)
+                       :content  (:attachment/data att)})
+            ics-atts)
+      (let [body    (email-body-text att-email)
+            vevents (dedupe-vevents (extract-vevents body))]
+        (when (seq vevents)
+          (let [cal-name (or (get-in report [:report/email :email/subject]) "event")]
+            [{:basename inline-ics-basename
+              :content  (build-vcalendar cal-name vevents
+                                         (dedupe-vtimezones (extract-vtimezones body)))}]))))))
+
 (defn- report-attachment-files
   "Build :events and :texts fields from lazy-fetched attachment data."
   [report att-email]
@@ -420,9 +448,8 @@
       (and (= :announcement (:report/type report))
            (:report/has-ics report))
       (assoc :events
-             (mapv (fn [att] {:file (str h "/" (attachment-basename att))})
-                   (filter #(ics-file? (:attachment/filename %))
-                           (:email/attachments @att-email))))
+             (mapv (fn [f] {:file (str h "/" (:basename f))})
+                   (event-ics-files report @att-email)))
       (:report/has-text-attachments report)
       (assoc :texts
              (mapv (fn [att] {:file (str h "/" (attachment-basename att))})
@@ -431,7 +458,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Export context -- bound for the duration of one export run.
-;; Used by map-reports, dump-events!, dump-text!, and collect-vevents
+;; Used by map-reports, dump-events!, dump-text!, and dump-events-ics!
 ;; to access the DB and votes without threading parameters through
 ;; every dump-* function.
 ;; ---------------------------------------------------------------------------
@@ -1061,42 +1088,29 @@
 ;; Event (ICS) export
 ;; ---------------------------------------------------------------------------
 
-(defn- has-ics-content?
-  "True if an announcement report has ICS content (from digest flags)."
-  [report]
-  (:report/has-ics report))
-
-(defn- extract-vevents
-  "Extract VEVENT blocks from ICS text.
-  Uses a reluctant quantifier bounded by END:VEVENT to avoid
-  catastrophic backtracking on malformed input."
-  [text]
-  (when (and text (str/includes? text "BEGIN:VEVENT"))
-    (re-seq #"(?s)BEGIN:VEVENT(?:(?!BEGIN:VEVENT).)*?END:VEVENT\r?\n?" text)))
+(defn- ics-announcements
+  "Announcements flagged (at ingest) as carrying ICS content."
+  [reports]
+  (filter #(and (= :announcement (:report/type %)) (:report/has-ics %)) reports))
 
 (defn dump-events!
   "Export individual .ics files to events/<mid-hash>/ for announcements with ICS.
   With `:since`, only reports updated after it are (re)written; the
   rest survive in staging via the seeded events/ directory."
   [reports events-dir & {:keys [since]}]
-  (let [ics-reports (cond->> (filter #(and (= :announcement (:report/type %))
-                                           (has-ics-content? %))
-                                     reports)
+  (let [ics-reports (cond->> (ics-announcements reports)
                       since (filter #(updated-since? % since)))
         att-cache   (batch-fetch-attachments ics-reports)
         total       (reduce (fn [n report]
-                              (let [atts     (:email/attachments (get att-cache (:report/message-id report)))
-                                    ics-atts (filter #(and (ics-file? (:attachment/filename %))
-                                                           (:attachment/data %))
-                                                     atts)]
-                          (if (seq ics-atts)
+                              (let [files (event-ics-files
+                                           report (get att-cache (:report/message-id report)))]
+                          (if (seq files)
                             (let [h   (mid-hash (:report/message-id report))
                                   dir (io/file events-dir h)]
                               (.mkdirs dir)
-                              (doseq [att ics-atts]
-                                (spit (io/file dir (attachment-basename att))
-                                      (:attachment/data att)))
-                              (+ n (count ics-atts)))
+                              (doseq [{:keys [basename content]} files]
+                                (spit (io/file dir basename) content))
+                              (+ n (count files)))
                             n)))
                       0
                       ics-reports)]
@@ -1107,9 +1121,7 @@
   "Export events.json/org (open) and events-closed.json/org (closed)
   for announcements that have ICS content."
   [reports reports-dir source-name source-map maintainers-map fmts]
-  (let [events        (filter #(and (= :announcement (:report/type %))
-                                  (has-ics-content? %))
-                            reports)
+  (let [events        (ics-announcements reports)
         open-events   (vec (open-reports events))
         closed-events (vec (filter :report/closed events))]
     (when (seq open-events)
@@ -1133,49 +1145,44 @@
         (dump-rss! closed-events reports-dir source-name source-map maintainers-map
                    "events-closed.xml" "events (closed)")))))
 
-(defn- collect-vevents
-  "Extract all VEVENT blocks from a seq of reports with ICS content."
-  [reports]
-  (let [att-cache (batch-fetch-attachments reports)]
-    (mapcat (fn [report]
-              (let [email        (:report/email (get att-cache (:report/message-id report)))
-                    atts         (:email/attachments email)
-                    att-vevents  (->> atts
-                                     (filter #(and (ics-file? (:attachment/filename %))
-                                                   (:attachment/data %)))
-                                     (mapcat #(extract-vevents (:attachment/data %))))
-                    body-vevents (extract-vevents (:email/body-text email))]
-                (concat att-vevents body-vevents)))
-            reports)))
-
-(defn- spit-ics!
-  "Write a VCALENDAR file wrapping the given VEVENT blocks."
-  [filename source-name cal-name vevents]
-  (when (seq vevents)
-    (let [ics-content (str "BEGIN:VCALENDAR\r\n"
-                           "VERSION:2.0\r\n"
-                           "PRODID:-//BARK//Event Export//EN\r\n"
-                           "X-WR-CALNAME:" source-name " " cal-name "\r\n"
-                           (str/join "" vevents)
-                           "END:VCALENDAR\r\n")]
-      (spit filename ics-content)
-      (log/info "Wrote" (count vevents) "VEVENT(s) to" filename))))
+(defn- report-vcal-blocks
+  "Extract {:vevents [...] :vtimezones [...]} (CRLF-normalized) from a
+  report's ICS sources: every .ics attachment plus the inline body.  The
+  inline body is read through `email-body-text` so detection and
+  extraction agree on what counts as body content."
+  [att-email]
+  (let [ics-texts (conj (->> (:email/attachments att-email)
+                             (filter #(and (ics-file? (:attachment/filename %))
+                                           (:attachment/data %)))
+                             (mapv :attachment/data))
+                        (email-body-text att-email))]
+    {:vevents    (mapcat extract-vevents ics-texts)
+     :vtimezones (mapcat extract-vtimezones ics-texts)}))
 
 (defn dump-events-ics!
-  "Export combined ICS files for announcements with VEVENT content:
-   announcements.ics (all), -open.ics, -closed.ics."
+  "Export combined ICS calendars for announcements with VEVENT content:
+   announcements.ics (all), -open.ics, -closed.ics.  Attachments are
+   fetched once; VEVENTs are deduplicated by UID (highest SEQUENCE wins)
+   and the VTIMEZONE definitions they reference are carried along."
   [reports events-dir source-name]
-  (let [all-events    (filter #(and (= :announcement (:report/type %))
-                                    (has-ics-content? %))
-                              reports)
-        open-events   (remove :report/closed all-events)
-        closed-events (filter :report/closed all-events)]
-    (spit-ics! (str events-dir "/announcements.ics")
-               source-name "events" (collect-vevents all-events))
-    (spit-ics! (str events-dir "/announcements-open.ics")
-               source-name "events (open)" (collect-vevents open-events))
-    (spit-ics! (str events-dir "/announcements-closed.ics")
-               source-name "events (closed)" (collect-vevents closed-events))))
+  (let [events    (ics-announcements reports)
+        att-cache (batch-fetch-attachments events)
+        tagged    (mapv (fn [r]
+                          (assoc (report-vcal-blocks
+                                  (get att-cache (:report/message-id r)))
+                                 :closed? (boolean (:report/closed r))))
+                        events)
+        write!    (fn [filename cal-name recs]
+                    (let [vevents (dedupe-vevents (mapcat :vevents recs))]
+                      (when-let [doc (build-vcalendar
+                                      (str source-name " " cal-name)
+                                      vevents
+                                      (dedupe-vtimezones (mapcat :vtimezones recs)))]
+                        (spit filename doc)
+                        (log/info "Wrote" (count vevents) "VEVENT(s) to" filename))))]
+    (write! (str events-dir "/announcements.ics")        "events"          tagged)
+    (write! (str events-dir "/announcements-open.ics")   "events (open)"   (remove :closed? tagged))
+    (write! (str events-dir "/announcements-closed.ics") "events (closed)" (filter :closed? tagged))))
 
 (defn dump-html!
   "Generate index.html for a single source.
