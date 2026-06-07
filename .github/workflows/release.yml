@@ -31,12 +31,12 @@ jobs:
       - name: Compile AOT
         run: |
           mkdir -p classes
-          clojure -M -e "(compile 'bark.main)"
+          clojure -M -e "(compile 'bone.main)"
 
       - name: Build uberjar
-        run: clojure -M:uberdeps --main-class bark.main
+        run: clojure -M:uberdeps --main-class bone.main
 
       - name: Create release with jar
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create "${{ github.ref_name }}" target/bark.jar --generate-notes
+        run: gh release create "${{ github.ref_name }}" target/bone.jar --generate-notes

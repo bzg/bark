@@ -1,4 +1,4 @@
-;; test/emails.edn -- Test email fixtures for bark-digest.
+;; test/emails.edn -- Test email fixtures for bone-digest.
 ;;
 ;; Each email is a datalevin entity map, inserted directly into the DB.
 ;; Emails are processed in order of :email/ingested-at.
@@ -1306,12 +1306,12 @@
  ;; =========================================================================
  {:email/id        "100"
   :email/message-id  "<100@test.org>"
-  :email/subject     "[public-list] [BUG] BARK prefix source test"
+  :email/subject     "[public-list] [BUG] BONE prefix source test"
   :email/content-type "text/plain"
   :email/from-address "admin@test.org"
   :email/date-sent  #inst "2026-02-01T10:00:00"
   :email/ingested-at #inst "2026-02-01T10:00:00"
-  :email/body-text  "Testing bark prefix classification.\n"}
+  :email/body-text  "Testing bone prefix classification.\n"}
 
  ;; =========================================================================
  ;; 101 -- Maintainer replies off-list: no :email/source, no List-Id, no [source]
@@ -1319,7 +1319,7 @@
  ;; =========================================================================
  {:email/id        "101"
   :email/message-id  "<101@test.org>"
-  :email/subject     "Re: [BUG] BARK prefix source test"
+  :email/subject     "Re: [BUG] BONE prefix source test"
   :email/content-type "text/plain"
   :email/from-address "maint@test.org"
   :email/date-sent  #inst "2026-02-01T11:00:00"

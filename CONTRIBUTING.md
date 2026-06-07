@@ -1,19 +1,19 @@
-# Contributing to BARK
+# Contributing to BONE
 
 This document is for people who want to read, modify, or extend the
-BARK codebase.
+BONE codebase.
 
 ## Reporting and patching
 
-BARK uses its own conventions, on the project's own mailing list:
+BONE uses its own conventions, on the project's own mailing list:
 
 - Bug report: email
-  [`~bzg/barkyard@lists.sr.ht`](mailto:~bzg/barkyard@lists.sr.ht) with
-  subject `[BUG] bark: <short explicit description>`.
+  [`~bzg/boneyard@lists.sr.ht`](mailto:~bzg/boneyard@lists.sr.ht) with
+  subject `[BUG] bone: <short explicit description>`.
 - Patch: email the same address with subject
-  `[PATCH] bark: <commit summary>`.  Attach a `git format-patch` file
+  `[PATCH] bone: <commit summary>`.  Attach a `git format-patch` file
   or include the diff inline; either works.
-- Feature request: subject `[FR] bark: <short description>`.
+- Feature request: subject `[FR] bone: <short description>`.
 - General discussion: any other subject.
 
 For private matters (security, personal context) you can write
@@ -36,41 +36,41 @@ scripts in `scripts/` are read-only.
 - **`bb notify`** -- Reads the database and sends notification
   emails to maintainers via SMTP.
 
-### JVM namespaces (`src/bark/`)
+### JVM namespaces (`src/bone/`)
 
 | Namespace       | Role                                               |
 |-----------------|----------------------------------------------------|
-| `bark.main`     | Entry point (batch by default, `--watch` for IDLE) |
-| `bark.ingest`   | Datalevin connection, email parsing and storage    |
-| `bark.digest`   | Single-email processing (classify, detect, thread) |
-| `bark.detect`   | Report type detection from subject + attachments   |
-| `bark.commands` | Commands (triggers, annotations) and votes         |
-| `bark.roles`    | Permission checks and role management              |
-| `bark.relations`| Qualified relations between reports                |
-| `bark.series`   | Patch series tracking                              |
-| `bark.expire`   | Periodic report expiry (runs inside the daemon)    |
-| `bark.periods`  | Per-source time-windowed config overrides          |
-| `bark.tracking` | Change-tracking for incremental export             |
-| `bark.common`   | Shared utilities (JVM + Babashka)                  |
-| `bark.logging`  | File and email log appenders                       |
+| `bone.main`     | Entry point (batch by default, `--watch` for IDLE) |
+| `bone.ingest`   | Datalevin connection, email parsing and storage    |
+| `bone.digest`   | Single-email processing (classify, detect, thread) |
+| `bone.detect`   | Report type detection from subject + attachments   |
+| `bone.commands` | Commands (triggers, annotations) and votes         |
+| `bone.roles`    | Permission checks and role management              |
+| `bone.relations`| Qualified relations between reports                |
+| `bone.series`   | Patch series tracking                              |
+| `bone.expire`   | Periodic report expiry (runs inside the daemon)    |
+| `bone.periods`  | Per-source time-windowed config overrides          |
+| `bone.tracking` | Change-tracking for incremental export             |
+| `bone.common`   | Shared utilities (JVM + Babashka)                  |
+| `bone.logging`  | File and email log appenders                       |
 
-`bark.common` carries no Datalevin dependency, so both the JVM and
-Babashka scripts load it. All other namespaces under `src/bark/`
+`bone.common` carries no Datalevin dependency, so both the JVM and
+Babashka scripts load it. All other namespaces under `src/bone/`
 are JVM-only.
 
 ### Babashka scripts (`scripts/`)
 
 | Script                 | Role                                                  |
 |------------------------|-------------------------------------------------------|
-| `bark-export.clj`      | Report export (JSON, RSS, Org, patches, events, text) |
-| `bark-notify.clj`      | Notification emails                                   |
-| `bark-index.clj`       | HTML index page generation                            |
-| `bark-stats.clj`       | Statistics and data page generation                   |
-| `bark-docs.clj`        | Documentation page generation                         |
-| `bark-maintenance.clj` | Orphan email purge                                    |
-| `bark-email-test.clj`  | SMTP configuration test                               |
+| `bone-export.clj`      | Report export (JSON, RSS, Org, patches, events, text) |
+| `bone-notify.clj`      | Notification emails                                   |
+| `bone-index.clj`       | HTML index page generation                            |
+| `bone-stats.clj`       | Statistics and data page generation                   |
+| `bone-docs.clj`        | Documentation page generation                         |
+| `bone-maintenance.clj` | Orphan email purge                                    |
+| `bone-email-test.clj`  | SMTP configuration test                               |
 | `validate-config.clj`  | Config validation                                     |
-| `bark`                 | Shell wrapper around the uberjar                      |
+| `bone`                 | Shell wrapper around the uberjar                      |
 
 These scripts must never write to the Datalevin database.  Any
 mutation goes through the JVM daemon.
@@ -89,11 +89,11 @@ Dependencies:
 Clone the repository:
 
 ```sh
-git clone https://codeberg.org/bzg/bark
-cd bark
+git clone https://codeberg.org/bzg/bone
+cd bone
 ```
 
-Run BARK locally:
+Run BONE locally:
 
 ```sh
 cp config.edn.minimal config.edn      # or copy config.edn.example
@@ -112,7 +112,7 @@ clj -M:run -- --fresh
 ## Running tests
 
 Run the suite with `clj -M:test`.  Tests use `clojure.test` and live
-in `test/bark/`; add a file `test/bark/<topic>_test.clj` to extend it
+in `test/bone/`; add a file `test/bone/<topic>_test.clj` to extend it
 and the runner will pick it up.
 
 Fixtures for integration tests live in `resources/emails.edn`.  When
@@ -122,7 +122,7 @@ then reference it by message-id in the new assertion block.
 
 ## Debugging an ingest
 
-When BARK does not digest an email as expected:
+When BONE does not digest an email as expected:
 
 - Run `bb maintenance --failures` to list recent command-parsing
   errors and other ingest-time warnings recorded by the daemon.
@@ -131,13 +131,13 @@ When BARK does not digest an email as expected:
   you point it at.
 - Reproduce the case as a fixture: add the email to
   `resources/emails.edn` and write an assertion in
-  `test/bark/digest_test.clj`.  Faster than cycling through an IMAP
+  `test/bone/digest_test.clj`.  Faster than cycling through an IMAP
   fetch, and the case stays covered in CI.
 
 ## Code conventions
 
-- Pure functions where possible.  `bark.common`, `bark.detect`,
-  `bark.commands.registry` and the tx-builders in `bark.relations`
+- Pure functions where possible.  `bone.common`, `bone.detect`,
+  `bone.commands.registry` and the tx-builders in `bone.relations`
   must stay pure (no `datalevin.core` import).
 - Side-effecting functions end with `!`.  Predicates end with `?`.
 - Comments explain *why*, not *what*.  Add a short docstring to
@@ -151,10 +151,10 @@ When BARK does not digest an email as expected:
 
 ## Versioning
 
-BARK follows [Intentional Versioning](https://intver.org).  The
+BONE follows [Intentional Versioning](https://intver.org).  The
 three audiences considered for every release are:
 
-- *Users* -- end-users and sysadmins who operate BARK instances.
+- *Users* -- end-users and sysadmins who operate BONE instances.
 - *Integrators* -- consumers of the exported JSON, RSS and Org feeds.
 - *Maintainers* -- maintainers of the codebase itself.
 

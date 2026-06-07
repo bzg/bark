@@ -1,11 +1,11 @@
-# Example crontab for BARK in batch mode (alternative to --watch +
+# Example crontab for BONE in batch mode (alternative to --watch +
 # systemd).  Edit paths to match your install.
 #
 # Install with: crontab docs/deploy/crontab.example
 
 # Every 10 minutes: fetch new mail, digest, expire, then refresh
 # the static exports and send any due notification emails.
-*/10 * * * * cd /opt/bark && clj -M:run >> logs/cron.log 2>&1 && bb export >> logs/cron.log 2>&1 && bb notify >> logs/cron.log 2>&1
+*/10 * * * * cd /opt/bone && clj -M:run >> logs/cron.log 2>&1 && bb export >> logs/cron.log 2>&1 && bb notify >> logs/cron.log 2>&1
 
 # Once a week: purge orphan emails older than 90 days.
-# 5 3 * * 0 cd /opt/bark && bb maintenance --delete >> logs/maint.log 2>&1
+# 5 3 * * 0 cd /opt/bone && bb maintenance --delete >> logs/maint.log 2>&1

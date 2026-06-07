@@ -1,0 +1,47 @@
+# systemd unit for BONE in watch mode.
+# Install as /etc/systemd/system/bone.service (root) or
+# ~/.config/systemd/user/bone.service (user).
+#
+# For the root install, create the service user first:
+#   useradd -r -d /opt/bone -s /usr/sbin/nologin bone
+#   chown -R bone: /opt/bone
+# (Omit this step and the User= line below for a --user install.)
+#
+# After editing paths below:
+#   systemctl [--user] daemon-reload
+#   systemctl [--user] enable --now bone
+#   systemctl [--user] status bone
+#   journalctl [--user] -u bone -f
+
+[Unit]
+Description=BONE -- email-driven report tracker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Drop User= for the --user installation path.
+User=bone
+WorkingDirectory=/opt/bone
+# Run `bb build-jar` once to produce target/bone.jar and bin/bone.
+ExecStart=/opt/bone/bin/bone --watch
+
+# Resilience: restart on crash, wait 30 s before retrying.
+Restart=on-failure
+RestartSec=30s
+
+# Only stderr is used by default (no :logging :file in config).
+StandardOutput=journal
+StandardError=journal
+
+# Sandboxing -- safe baseline for a JVM service reading a Maildir and
+# writing a single LMDB directory.  Adjust ReadWritePaths= to match
+# your :db :path and any log/export directories.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/bone/data /opt/bone/public /opt/bone/logs
+
+[Install]
+WantedBy=multi-user.target

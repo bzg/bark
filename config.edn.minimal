@@ -1,4 +1,4 @@
-;; Minimal BARK config -- fills in sensible defaults for :db (data/bark-db),
+;; Minimal BONE config -- fills in sensible defaults for :db (data/bone-db),
 ;; :logging (stderr :info) and :ingest ({:fetch {:limit 50}}).  See
 ;; config.edn.example for the fully annotated template.
 

@@ -1,9 +1,9 @@
-;; BARK config -- reference template.
+;; BONE config -- reference template.
 ;;
-;; By default BARK reads ./config.edn.  Override via:
+;; By default BONE reads ./config.edn.  Override via:
 ;;   - CLI:  clj -M:run -- -c /path/to/config.edn
-;;   - env:  BARK_CONFIG=/path/to/config.edn  (also honored by all bb scripts)
-;; Precedence: -c > BARK_CONFIG > ./config.edn.
+;;   - env:  BONE_CONFIG=/path/to/config.edn  (also honored by all bb scripts)
+;; Precedence: -c > BONE_CONFIG > ./config.edn.
 
 { ;; ---- Connection --------------------------------------------------------
 
@@ -16,8 +16,8 @@
  ;; keep credentials out of config.edn (which is often world-readable
  ;; or backed up unencrypted) by using either:
  ;;
- ;;   :password-file "/etc/bark/imap.pwd"   ; trimmed contents at startup
- ;;   :password #bark/env "BARK_IMAP_PWD"   ; resolved from the env at startup
+ ;;   :password-file "/etc/bone/imap.pwd"   ; trimmed contents at startup
+ ;;   :password #bone/env "BONE_IMAP_PWD"   ; resolved from the env at startup
  ;;
  ;; Both raise a clear error at startup if the file/var is missing,
  ;; rather than silently using nil.  Mutually exclusive with :password.
@@ -41,9 +41,9 @@
              ;;           :max-size 524288}}
              ]
 
- ;; :db is optional.  Omitted → {:path "data/bark-db"}.  Override to
+ ;; :db is optional.  Omitted → {:path "data/bone-db"}.  Override to
  ;; place the Datalevin directory outside the source tree, e.g.:
- ;; :db {:path "/var/lib/bark/db"}
+ ;; :db {:path "/var/lib/bone/db"}
 
  ;; ---- Who monitors what --------------------------------------------------
 
@@ -51,7 +51,7 @@
            ;; (bare, no angle brackets).
            {:name                  "public-list"
             :list                  "bugs.example.org"
-            :base-url              "https://bark.example.org/public/public-list/"
+            :base-url              "https://bone.example.org/public/public-list/"
             :list-archive          "https://list.example.org"
             :archive-format-string "https://list.example.org/%s"
             ;;
@@ -177,10 +177,10 @@
  ;; :awaiting-delay "14d"
 
  ;; Command syntax mode -- :loose (default) or :strict.
- ;;   :loose -- every Bark instruction can be written with or without
- ;;            a "!" prefix. Useful on mailing lists where Bark
+ ;;   :loose -- every Bone instruction can be written with or without
+ ;;            a "!" prefix. Useful on mailing lists where Bone
  ;;            directives mingle with prose.
- ;;   :strict -- every Bark instruction MUST start with "!".
+ ;;   :strict -- every Bone instruction MUST start with "!".
  ;;            Eliminates false positives on common English words.
  ;;            Applies uniformly to triggers (!Closed., !Urgent.),
  ;;            negatives (!Not acked), -by directives (!Acked-by:
@@ -229,7 +229,7 @@
  ;; ---- Notifications -------------------------------------------------------
 
  ;; Optional -- notifications disabled if absent.
- ;; The :smtp map accepts :password-file or #bark/env exactly like the
+ ;; The :smtp map accepts :password-file or #bone/env exactly like the
  ;; mailbox section above.
  ;; :notifications {:enabled false
  ;;                 :smtp {:host     "smtp.example.com"
@@ -237,7 +237,7 @@
  ;;                        :tls      true
  ;;                        :user     "notify@example.com"
  ;;                        :password "secret"
- ;;                        :from     "bark@example.com"}
+ ;;                        :from     "bone@example.com"}
  ;;                 ;; Optional -- copy this address (or vector of
  ;;                 ;; addresses) on every notification (subscriber
  ;;                 ;; digest and direct-to-author failure mail).
@@ -246,11 +246,11 @@
  ;; ---- Logging -------------------------------------------------------------
 
  ;; :logging is optional.  Omitted → stderr only, level :info.
- ;; :logging {:file     "logs/bark.log"    ;; optional
+ ;; :logging {:file     "logs/bone.log"    ;; optional
  ;;           :level    :warn              ;; :debug :info :warn :error
  ;;           :max-size "10MB"             ;; rotate threshold (default 10MB)
  ;;           :backlog  5                  ;; rotated files kept (default 5)
  ;;           ;; Email logging requires :notifications :smtp.
- ;;           :email    {:to "bark@example.com" :level :error}}
+ ;;           :email    {:to "bone@example.com" :level :error}}
 
  }

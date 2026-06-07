@@ -1,30 +1,30 @@
-#+title: BARK! Another Report Keeper
+#+title: BONE! Another Report Keeper
 
 [[https://www.repostatus.org/#active][https://img.shields.io/badge/status-active-brightgreen.svg?style=for-the-badge]]
 [[https://intver.org/][https://img.shields.io/badge/versioning-intver.org-blue.svg?style=for-the-badge]]
 
-BARK is an email-driven report tracker -- see the [[docs/bark-manual.org#principles][principles]].
+BONE is an email-driven report tracker -- see the [[docs/bone-manual.org#principles][principles]].
 
-BARK monitors a single IMAP mailbox or Maildir, classifies incoming
+BONE monitors a single IMAP mailbox or Maildir, classifies incoming
 emails into sources by header matching, detects report types from
 subject tags, applies commands from email bodies, and manages roles
 per source.
 
-BARK reports can be read with other tools:
+BONE reports can be read with other tools:
 
-- As a CLI based on [[https://junegunn.github.io/fzf/][fzf]]: [[https://codeberg.org/bzg/bone][bone]]
-- Via GNU Emacs [[https://gnus.org][Gnus]]: [[https://codeberg.org/bzg/gnus-bone][gnus-bone]]
-- Via GNU Emacs [[https://notmuchmail.org/notmuch-emacs/][notmuch]]: [[https://codeberg.org/bzg/notmuch-bone][notmuch-bone]]
-- Via GNU Emacs [[https://djcbsoftware.nl/code/mu/mu4e.html][mu4e]]: [[https://codeberg.org/bzg/mu4e-bone][mu4e-bone]]
+- As a CLI based on [[https://junegunn.github.io/fzf/][fzf]]: [[https://codeberg.org/bzg/gnaw][gnaw]]
+- Via GNU Emacs [[https://gnus.org][Gnus]]: [[https://codeberg.org/bzg/gnus-gnaw][gnus-gnaw]]
+- Via GNU Emacs [[https://notmuchmail.org/notmuch-emacs/][notmuch]]: [[https://codeberg.org/bzg/notmuch-gnaw][notmuch-gnaw]]
+- Via GNU Emacs [[https://djcbsoftware.nl/code/mu/mu4e.html][mu4e]]: [[https://codeberg.org/bzg/mu4e-gnaw][mu4e-gnaw]]
 
-* BARK manual
+* BONE manual
 
-For more extensive documentation, read the [[docs/bark-manual.org][BARK manual]].
+For more extensive documentation, read the [[docs/bone-manual.org][BONE manual]].
 
 For the codebase, architecture and development setup, see
 [[CONTRIBUTING.md][CONTRIBUTING.md]].
 
-[[bark-capture.jpg]]
+[[bone-capture.jpg]]
 
 * Quick start
 
@@ -39,8 +39,8 @@ clj -M:run
 clj -M:run -- --watch
 
 # 2c. Or build an uberjar and run it (production)
-bb build-jar        # produces target/bark.jar + bin/bark wrapper
-bin/bark --watch
+bb build-jar        # produces target/bone.jar + bin/bone wrapper
+bin/bone --watch
 #+end_src
 
 #+begin_example
@@ -88,7 +88,7 @@ bb maintenance [--delete] [--verbose] [-n source]  Purge orphan emails
        [--failures]                       List recent command failures
 bb test-config [path]                     Validate config.edn
 bb test-smtp [--to addr] [--send]         Test SMTP config (default = dry-run)
-bb build-jar                              Build target/bark.jar + bin/bark wrapper
+bb build-jar                              Build target/bone.jar + bin/bone wrapper
 bb clean                                  Remove all files in public/
 clj -M:run -- --fresh                     Wipe DB + full replay (interactive)
 #+end_example
@@ -102,7 +102,7 @@ theme for HTML exports.  Values are resolved in order:
 2. *file:///path* -- local file, inlined in =<style>=.
 3. *Path ending in .css* -- relative or absolute path, inlined
    in =<style>=.
-4. *Bare name* -- treated as a [[https://github.com/bzg/pico-themes][pico-themes]] name; base theme and bark
+4. *Bare name* -- treated as a [[https://github.com/bzg/pico-themes][pico-themes]] name; base theme and bone
    overlay are loaded from jsDelivr.
 
 Set to ="none"= to disable theming.
@@ -121,15 +121,15 @@ See =config.edn.example=.  The configuration has three main sections.
 
 ** Config file location
 
-By default BARK reads =./config.edn=.  To override:
+By default BONE reads =./config.edn=.  To override:
 
 - Pass =-c <path>= to the daemon:
   =clj -M:run -- -c /path/to/config.edn=
-- Or set =BARK_CONFIG=; all =bb= scripts honor it.
+- Or set =BONE_CONFIG=; all =bb= scripts honor it.
 
-Precedence: =-c= > =BARK_CONFIG= > =./config.edn=.
+Precedence: =-c= > =BONE_CONFIG= > =./config.edn=.
 
-The =BARK_DB= env var is honored as a fallback when no
+The =BONE_DB= env var is honored as a fallback when no
 =:db {:path …}= entry is set.
 
 ** Mail sources (=:mailboxes=)
@@ -150,7 +150,7 @@ keyed per =:name=, so IMAP UID state never mixes between mailboxes.
 | =:path=         | Maildir only | Root path of the Maildir                     |
 | =:folder=       | no           | Folder name (default: ="INBOX"=)               |
 
-See the manual ([[file:docs/bark-manual.org][docs/bark-manual.org]] § Multiple mailboxes) for the
+See the manual ([[file:docs/bone-manual.org][docs/bone-manual.org]] § Multiple mailboxes) for the
 behaviour of batch and watch modes with several mailboxes.
 
 ** Ingest settings (=:ingest=)
@@ -191,7 +191,7 @@ exactly one of the three type keys:
 | =:awaiting-delay=        | no       | Duration before "awaiting reply" flag, e.g. ="14d"= (default: 14 days) |
 
 Send all state-changing actions (commands, role controls) through
-the source's public channel.  Anyone running BARK on the same source
+the source's public channel.  Anyone running BONE on the same source
 then sees the same state.
 
 *** Maintainers and the "lead"
@@ -206,7 +206,7 @@ the *first entry* is the *lead maintainer*.
 
 Each =Add= / =Remove= opens or closes a *tenure* in the DB -- a
 =[from, to)= interval recording when someone held maintainer
-status.  BARK exports the full history (active and closed) to
+status.  BONE exports the full history (active and closed) to
 =meta.json= and renders it in =docs.html=, so a fresh deployment
 replays commands consistently even when maintainers have changed.
 
@@ -219,13 +219,13 @@ person, create =mailmap.edn= at the repo root:
 {"Bastien Guerry" ["bzg@gnu.org" "bzg@bzg.fr"]}
 #+end_src
 
-BARK applies the mailmap at export time only (the DB is untouched)
+BONE applies the mailmap at export time only (the DB is untouched)
 to maintainers, authors, and owners.  Unlisted emails keep their
 last observed =From:= name.
 
 For sources whose maintainer list or vocabulary evolved over time,
 declare the history inline via =:periods= on the source (see
-=docs/bark-manual.org §Source periods=).
+=docs/bone-manual.org §Source periods=).
 
 ** Example config
 
@@ -243,13 +243,13 @@ declare the history inline via =:periods= on the source (see
             :alias "team@example.com"}
            {:name "direct-inbox"
             :to "inbox@example.com"}]
- :db {:path "data/bark-db"}
+ :db {:path "data/bone-db"}
  :ingest {:fetch {:limit 50}
           :max-size 1048576}
  :notifications {:enabled true
                  :smtp {:host "smtp.example.com" :port 587 :tls true
                         :user "notify@example.com" :password "secret"
-                        :from "bark@example.com"}}}
+                        :from "bone@example.com"}}}
 #+end_src
 
 ** Report labels (=:labels=)
@@ -320,7 +320,7 @@ You can also [[mailto:bzg@bzg.fr][send me an email]] and support my work on [[ht
 
 This project uses [[https://intver.org][Intentional Versioning]].  The three audiences:
 
-- =Users= : end-users and sysadmins who operate BARK instances
+- =Users= : end-users and sysadmins who operate BONE instances
 - =Integrators= : consumers of the exported JSON/RSS/Org formats
 - =Maintainers= : maintainers of the codebase
 

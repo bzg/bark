@@ -13,9 +13,9 @@
             [clojure.string :as str]
             [clojure.java.io :as io]
             [taoensso.timbre :as log]
-            [bark.common :as common]
-            [bark.commands.registry :as reg]
-            [bark.periods :as periods]))
+            [bone.common :as common]
+            [bone.commands.registry :as reg]
+            [bone.periods :as periods]))
 
 ;; ---------------------------------------------------------------------------
 ;; Specs
@@ -44,12 +44,12 @@
 (s/def :mailbox/folder (s/or :empty #{""} :name ::non-blank-string))
 (s/def :mailbox/path ::non-blank-string)
 
-(s/def :bark/mailbox
+(s/def :bone/mailbox
   (s/and (s/keys :req-un [:mailbox/name :mailbox/type]
                  :opt-un [:mailbox/host :mailbox/port :mailbox/ssl
                           :mailbox/user :mailbox/password :mailbox/oauth2-token
                           :mailbox/folder :mailbox/path
-                          :bark/ingest])
+                          :bone/ingest])
          (fn [m]
            (case (:type m)
              :imap    (and (:host m) (:user m)
@@ -57,8 +57,8 @@
              :maildir (:path m)
              false))))
 
-(s/def :bark/mailboxes
-  (s/and (s/coll-of :bark/mailbox :kind vector? :min-count 1)
+(s/def :bone/mailboxes
+  (s/and (s/coll-of :bone/mailbox :kind vector? :min-count 1)
          (fn [mbs] (common/all-distinct? (map :name mbs)))))
 
 ;; Source match spec
@@ -85,7 +85,7 @@
 ;; Per-source export overrides
 (s/def ::export-format #{"json" "rss" "org" "html" "stats" "patches" "text" "events"})
 (s/def :source/export-formats (s/coll-of ::export-format :kind vector? :min-count 1))
-(s/def :bark/export-formats :source/export-formats)
+(s/def :bone/export-formats :source/export-formats)
 
 ;; Per-source topics filter
 (s/def :source/topics-filter (s/coll-of ::non-blank-string :kind vector? :min-count 1))
@@ -114,13 +114,13 @@
                           :source/periods])
          exactly-one-source-type?))
 
-(s/def :bark/sources
+(s/def :bone/sources
   (s/and (s/coll-of ::source :kind vector? :min-count 1)
          (fn [srcs] (common/all-distinct? (map :name srcs)))))
 
 ;; DB
 (s/def :db/path ::non-blank-string)
-(s/def :bark/db (s/keys :req-un [:db/path]))
+(s/def :bone/db (s/keys :req-un [:db/path]))
 
 ;; Ingest -- :fetch accepts exactly one of three disjoint map shapes.
 (s/def :ingest.fetch/limit pos-int?)
@@ -142,12 +142,12 @@
                          (or (nil? start) (nil? end) (neg? (compare start end)))))))
 (s/def :ingest/max-size pos-int?)
 (s/def :ingest/max-attachment-size pos-int?)
-(s/def :bark/ingest (s/keys :opt-un [:ingest/fetch
+(s/def :bone/ingest (s/keys :opt-un [:ingest/fetch
                                      :ingest/max-size
                                      :ingest/max-attachment-size]))
 
 ;; Theme (optional, global only)
-(s/def :bark/theme ::non-blank-string)
+(s/def :bone/theme ::non-blank-string)
 
 ;; SMTP
 (s/def :smtp/host ::non-blank-string)
@@ -183,7 +183,7 @@
   (s/map-of ::email
             (s/coll-of :notif/subscription :kind vector? :min-count 1)))
 
-(s/def :bark/notifications (s/keys :req-un [:notif/enabled]
+(s/def :bone/notifications (s/keys :req-un [:notif/enabled]
                                    :opt-un [:notif/smtp :notif/subscribers :notif/admin-bcc]))
 
 ;; Valid report type keywords -- derived from common/report-type-spec.
@@ -204,7 +204,7 @@
 ;; The :setter-or-maintainer scope is only valid on the unset-style
 ;; commands whose target attribute is tracked by a ref to the
 ;; pose-email.  The authoritative set is derived from the shared
-;; `bark.commands.registry`.
+;; `bone.commands.registry`.
 (def valid-plain-scopes  #{:user :maintainer})
 (def valid-setter-scopes #{:user :maintainer :setter-or-maintainer})
 
@@ -240,7 +240,7 @@
 (s/def :source/commands ::commands-map)
 
 ;; Global commands (optional) -- same shape as per-source
-(s/def :bark/commands ::commands-map)
+(s/def :bone/commands ::commands-map)
 
 ;; Subject triggers: map of report-type keyword -> vector of tag strings
 ;; e.g. {:bug ["BUG" "DEFECT"] :request ["POLL" "TODO" "FR"]}
@@ -249,14 +249,14 @@
   (s/map-of #{:bug :patch :request :announcement :release :change}
             ::label-tags))
 (s/def :source/labels ::labels)
-(s/def :bark/labels ::labels)
+(s/def :bone/labels ::labels)
 
 ;; Report types: filters which report types are detected at ingest
 ;; AND exported. Default: all types. Per-source overrides global.
 (s/def ::report-types
   (s/coll-of valid-report-types :kind set? :min-count 1))
 (s/def :source/report-types ::report-types)
-(s/def :bark/report-types ::report-types)
+(s/def :bone/report-types ::report-types)
 
 ;; Restricted types: which report types require maintainer status to
 ;; create. Default: #{:announcement :release :change}. The empty set
@@ -264,7 +264,7 @@
 (s/def ::restricted-types
   (s/coll-of valid-report-types :kind set?))
 (s/def :source/restricted-types ::restricted-types)
-(s/def :bark/restricted-types ::restricted-types)
+(s/def :bone/restricted-types ::restricted-types)
 
 ;; Expiry rules (optional)
 ;; Each report type maps to a rule map with :inactive-after and optional conditions.
@@ -282,7 +282,7 @@
 (s/def ::expiry
   (s/map-of valid-report-types ::expiry-rule))
 (s/def :source/expiry ::expiry)
-(s/def :bark/expiry ::expiry)
+(s/def :bone/expiry ::expiry)
 
 ;; Logging (optional)
 (s/def :logging/file ::non-blank-string)
@@ -296,28 +296,28 @@
 (s/def :logging/email (s/keys :req-un [:log-email/to]
                               :opt-un [:log-email/level]))
 
-(s/def :bark/logging (s/keys :opt-un [:logging/file :logging/level :logging/max-size
+(s/def :bone/logging (s/keys :opt-un [:logging/file :logging/level :logging/max-size
                                       :logging/backlog :logging/email]))
 
 ;; Awaiting-reply delay -- same units as parse-duration-str (d/w/m/y)
-(s/def :bark/awaiting-delay
+(s/def :bone/awaiting-delay
   (s/and ::non-blank-string #(re-matches #"\d+[dwmy](?:\s+\d+[dwmy])*" %)))
-(s/def :source/awaiting-delay :bark/awaiting-delay)
+(s/def :source/awaiting-delay :bone/awaiting-delay)
 
-;; Command syntax mode: :loose (default -- ! is optional on every Bark
-;; instruction) or :strict (! required on every Bark instruction).
+;; Command syntax mode: :loose (default -- ! is optional on every Bone
+;; instruction) or :strict (! required on every Bone instruction).
 ;; For historical evolution of this setting, declare multiple periods
 ;; on the source.
-(s/def :bark/command-syntax #{:loose :strict})
-(s/def :source/command-syntax :bark/command-syntax)
+(s/def :bone/command-syntax #{:loose :strict})
+(s/def :source/command-syntax :bone/command-syntax)
 
 ;; Whether patches on this source act as triggers on the bugs/requests
 ;; they resolve. When false, a patch in reply to a bug/request does not
 ;; auto-set Acked/Owned, and closing the patch as :resolved does not
 ;; close the parent. Default true.
-(s/def :bark/patch-triggers? boolean?)
-(s/def :source/patch-triggers? :bark/patch-triggers?)
-(s/def :period/patch-triggers? :bark/patch-triggers?)
+(s/def :bone/patch-triggers? boolean?)
+(s/def :source/patch-triggers? :bone/patch-triggers?)
+(s/def :period/patch-triggers? :bone/patch-triggers?)
 
 ;; Per-source periods (optional) -- time-windowed overrides for
 ;; :maintainers / :commands / :command-syntax / :labels.
@@ -330,7 +330,7 @@
 (s/def :period/end :period/start)
 (s/def :period/maintainers :source/maintainers)
 (s/def :period/commands ::commands-map)
-(s/def :period/command-syntax :bark/command-syntax)
+(s/def :period/command-syntax :bone/command-syntax)
 (s/def :period/labels ::labels)
 (s/def :period/restricted-types ::restricted-types)
 (s/def ::period-entry
@@ -342,14 +342,14 @@
 
 ;; Top-level config
 (s/def ::config
-  (s/keys :req-un [:bark/mailboxes :bark/sources]
-          :opt-un [:bark/db :bark/ingest :bark/notifications :bark/labels
-                   :bark/commands
-                   :bark/report-types :bark/restricted-types
-                   :bark/awaiting-delay
-                   :bark/expiry :bark/logging
-                   :bark/command-syntax :bark/theme
-                   :bark/export-formats]))
+  (s/keys :req-un [:bone/mailboxes :bone/sources]
+          :opt-un [:bone/db :bone/ingest :bone/notifications :bone/labels
+                   :bone/commands
+                   :bone/report-types :bone/restricted-types
+                   :bone/awaiting-delay
+                   :bone/expiry :bone/logging
+                   :bone/command-syntax :bone/theme
+                   :bone/export-formats]))
 
 ;; ---------------------------------------------------------------------------
 ;; Validation
@@ -407,7 +407,7 @@
     (seq errs)))
 
 (defn- pre-check-periods
-  "Validate :periods on each source via bark.periods/validate-periods."
+  "Validate :periods on each source via bone.periods/validate-periods."
   [config]
   (seq
    (mapcat (fn [src]
@@ -434,7 +434,7 @@
         (seq errs)))))
 
 (defn- pre-check-singleton-mailbox
-  "BARK is in 0.y.z -- reject the singleton :mailbox key outright
+  "BONE is in 0.y.z -- reject the singleton :mailbox key outright
   (no silent wrap to :mailboxes)."
   [config]
   (when (contains? config :mailbox)
@@ -460,7 +460,7 @@
 ;; ---------------------------------------------------------------------------
 
 (let [path (or (first *command-line-args*)
-               (System/getenv "BARK_CONFIG")
+               (System/getenv "BONE_CONFIG")
                "config.edn")
       file (io/file path)]
   (if-not (.exists file)
@@ -475,7 +475,7 @@
           inline-pwds (common/inline-password-locations path)]
       (doseq [loc inline-pwds]
         (log/warn "Inline :password in" loc
-                  "-- consider :password-file or #bark/env to keep"
+                  "-- consider :password-file or #bone/env to keep"
                   "credentials out of config.edn (see manual)."))
       (if (:valid? result)
         (do (log/info "✓" path "is valid.")
@@ -509,7 +509,7 @@
                             (conj (str "notify: " (get-in src [:notifications :enabled]))))]
                 (log/info "    -" (:name src) (str/join " " parts))))
             (log/info "  DB path:" (or (common/expand-home (get-in config [:db :path]))
-                                        "data/bark-db (default)"))
+                                        "data/bone-db (default)"))
             (when-let [ingest (:ingest config)]
               (when-let [v (:fetch ingest)]
                 (log/info "  Fetch:" (pr-str v))))

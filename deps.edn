@@ -12,7 +12,7 @@
  :aliases
  {;; Main daemon: ingest + digest + periodic expire
   :run
-  {:main-opts ["-m" "bark.main"]
+  {:main-opts ["-m" "bone.main"]
    :jvm-opts  ["--add-opens=java.base/java.nio=ALL-UNNAMED"
               "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
               "--enable-native-access=ALL-UNNAMED"]}
@@ -23,7 +23,7 @@
    :extra-deps  {io.github.cognitect-labs/test-runner {:git/tag "v0.5.1"
                                                        :git/sha "dfb30dd"}}
    :main-opts   ["-m" "cognitect.test-runner"]
-   :exec-fn     bark.test-runner/test
+   :exec-fn     bone.test-runner/test
    :jvm-opts    ["--add-opens=java.base/java.nio=ALL-UNNAMED"
                  "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
                  "--enable-native-access=ALL-UNNAMED"]}
