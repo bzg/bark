@@ -18,6 +18,9 @@ BONE reports can be read with other tools:
 - Via GNU Emacs [[https://notmuchmail.org/notmuch-emacs/][notmuch]]: [[https://codeberg.org/bzg/notmuch-gnaw][notmuch-gnaw]]
 - Via GNU Emacs [[https://djcbsoftware.nl/code/mu/mu4e.html][mu4e]]: [[https://codeberg.org/bzg/mu4e-gnaw][mu4e-gnaw]]
 
+The =gnus-gnaw=, =notmuch-gnaw= and =mu4e-gnaw= front-ends are
+unmaintained proofs of concept.
+
 * BONE manual
 
 For more extensive documentation, read the [[docs/bone-manual.org][BONE manual]].
