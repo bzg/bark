@@ -206,9 +206,7 @@
     [:li [:a {:href "docs.html"} "Documentation"]]
     [:li [:a {:href "reports/all.xml"} "Subscribe via RSS"]]
     [:li [:a {:href "https://codeberg.org/bzg/gnaw"} "gnaw"] " -- CLI based on fzf"]
-    [:li [:a {:href "https://codeberg.org/bzg/gnus-gnaw"} "gnus-gnaw"] " -- Gnus"]
-    [:li [:a {:href "https://codeberg.org/bzg/notmuch-gnaw"} "notmuch-gnaw"] " -- GNU Emacs notmuch"]
-    [:li [:a {:href "https://codeberg.org/bzg/mu4e-gnaw"} "mu4e-gnaw"] " -- mu4e"]
+    [:li [:a {:href "https://codeberg.org/bzg/gnaw.el"} "gnaw.el"] " -- GNU Emacs client"]
     [:li [:a {:href bone-repo-url} "BONE source repository"]]]])
 
 (defn wrap-template

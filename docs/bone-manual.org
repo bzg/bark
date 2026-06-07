@@ -744,9 +744,10 @@ them through a minimal search syntax:
 Durations are =Nd= (days), =Nw= (weeks), =Nm= (months). =date:= looks backward
 from today; =deadline:= and =expired:= look forward.
 
-** The =gnaw= CLI tool, =gnus-gnaw.el= and =notmuch-gnaw.el=
+** The =gnaw= CLI tool and Emacs clients
 
 - [[https://codeberg.org/bzg/gnaw][gnaw]] lets you browse and filter BONE reports from the terminal.
+- [[https://codeberg.org/bzg/gnaw.el][gnaw.el]] provides the same view as a standalone GNU Emacs tool.
 - [[https://codeberg.org/bzg/gnus-gnaw][gnus-gnaw.el]] integrates the same view in [[https://gnus.org/][Emacs Gnus]].
 - [[https://codeberg.org/bzg/notmuch-gnaw][notmuch-gnaw.el]] provides the same integration for [[https://notmuchmail.org/][notmuch]].
 - [[https://codeberg.org/bzg/mu4e-gnaw][mu4e-gnaw.el]] provides the same integration for [[https://djcbsoftware.nl/code/mu/mu4e.html][mu4e]].

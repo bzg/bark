@@ -13,6 +13,7 @@ per source.
 BONE reports can be read with other tools:
 
 - As a CLI based on [[https://junegunn.github.io/fzf/][fzf]]: [[https://codeberg.org/bzg/gnaw][gnaw]]
+- As a standalone GNU Emacs tool: [[https://codeberg.org/bzg/gnaw.el][gnaw.el]]
 - Via GNU Emacs [[https://gnus.org][Gnus]]: [[https://codeberg.org/bzg/gnus-gnaw][gnus-gnaw]]
 - Via GNU Emacs [[https://notmuchmail.org/notmuch-emacs/][notmuch]]: [[https://codeberg.org/bzg/notmuch-gnaw][notmuch-gnaw]]
 - Via GNU Emacs [[https://djcbsoftware.nl/code/mu/mu4e.html][mu4e]]: [[https://codeberg.org/bzg/mu4e-gnaw][mu4e-gnaw]]
