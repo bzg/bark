@@ -1,8 +1,8 @@
-#+title: BONE! Another Report Keeper
+#+title: BONE - Backlog Of Notable Emails
 #+subtitle: User manual
 #+options: toc:1
 
-* EmBONE
+* Introduction
 
 /BONE/ is an email-driven report tracker. A /report/ is an email that BONE
 has classified from its subject label -- a bug, a patch, a feature

@@ -260,7 +260,6 @@
   pre { font-size: 0.85rem; padding: 1rem; }
   .theme-toggle { cursor: pointer; background: none; border: none; font-size: 1.2rem; padding: 0.3rem; }
   .meta { font-size: 0.78rem; color: var(--pico-muted-color); margin-bottom: 2rem; }
-  [data-theme=dark] .bone-logo svg { filter: invert(0.7); }
 " footer-css))
 
 (defn docs-page [body-html {:keys [ical]}]

@@ -131,7 +131,6 @@
          (str "<link rel=\"alternate\" type=\"application/rss+xml\" "
               "title=\"BONE Reports RSS\" href=\"" rss-href "\">\n"))
        "<title>" title "</title>\n"
-       "<style>\n[data-theme=dark] .bone-logo svg { filter: invert(0.7); }\n</style>\n"
        (when css (str "<style>\n" css "\n</style>\n"))
        (or extra-head "")
        "</head>\n"))
@@ -146,12 +145,12 @@
    [:span#theme-icon "🌙"]])
 
 ;; ---------------------------------------------------------------------------
-;; Inline SVG logo (loaded from resources/ at build time)
+;; Text logo
 ;; ---------------------------------------------------------------------------
 
-(def bone-logo-svg
-  "Inline SVG logo for the nav bar, scaled to match text height."
-  (slurp "resources/bone-logo.svg"))
+(def bone-logo
+  "Text logo for the nav bar."
+  "8==8")
 
 ;; ---------------------------------------------------------------------------
 ;; Shared nav bar (hiccup vector)
@@ -171,7 +170,7 @@
   [title current]
   [:nav
    [:ul [:li [:a {:href "index.html" :style "display:flex;align-items:center;gap:0.5rem;text-decoration:none;color:inherit"}
-              [:span.bone-logo (h/raw bone-logo-svg)]
+              [:span.bone-logo bone-logo]
               [:strong title]]]]
    [:ul
     (when current

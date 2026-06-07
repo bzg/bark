@@ -1,9 +1,9 @@
-* BONE! Another Report Keeper
+* BONE - Backlog Of Notable Emails
 
 BONE monitors a mailbox and turns incoming emails into reports.
-Replies in the same thread update each report through a small
-fixed vocabulary of commands.  Maintainers can also write to the
-inbox directly to manage roles and receive periodic digests.
+Replies in the same thread update each report through a small fixed
+vocabulary of commands. Maintainers can also write to the inbox
+directly to manage roles and receive periodic digests.
 
 To browse BONE reports from the terminal, use [[https://codeberg.org/bzg/gnaw][gnaw]].  In
 GNU Emacs, use [[https://codeberg.org/bzg/gnaw.el][gnaw.el]].

@@ -82,7 +82,6 @@
   .vote-neg { background: var(--bone-vote-neg-bg, #c0392b33); color: var(--bone-vote-neg, #c0392b); }
   .vote-zero { background: var(--bone-vote-zero-bg, #95a5a622); color: var(--bone-vote-zero, #7f8c8d); }
   .theme-toggle { cursor: pointer; background: none; border: none; font-size: 1.2rem; padding: 0.3rem; }
-  [data-theme=dark] .bone-logo svg { filter: invert(0.7); }
 
   /* Responsive: progressively hide columns -- only Subject remains */
   @media (max-width: 1200px) {

@@ -70,8 +70,6 @@
   padding: 0.3rem;
 }
 
-[data-theme=dark] .bone-logo svg { filter: invert(0.7); }
-
 footer.bone-footer {
   font-size: 0.78rem;
   color: var(--pico-muted-color);
