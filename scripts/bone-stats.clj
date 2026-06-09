@@ -16,7 +16,7 @@
          '[hiccup2.core :as h]
          '[taoensso.timbre :as log]
          '[bone.common :refer [parse-cli-args load-config load-mailmap db-path bone-schema
-                               votes-by-report vote-counts escape-script-payload]]
+                               votes-by-report vote-counts]]
          '[bone.common-bb :refer [load-datalevin-pod! dq]]
          '[bone.html-bb :refer [set-theme! page-title
                                 bone-footer wrap-js spit-html theme-toggle-js
@@ -393,12 +393,6 @@
 
 (def stats-css (slurp "resources/bone-data.css"))
 
-(defn chart-div [id spec]
-  (str "<div class=\"chart\" id=\"" id "\"></div>"
-       "<script>" (wrap-js (str "boneSpecs['" id "']="
-                                (escape-script-payload (json/generate-string spec))
-                                ";")) "</script>"))
-
 ;; Individual chart specs
 
 (defn chart-by-month [by-month]
@@ -478,16 +472,6 @@
 
 ;; HTML assembly
 
-(defn kpi [value label & [sub]]
-  (str "<div class=\"kpi\">"
-       "<div class=\"kpi-v\">" value "</div>"
-       "<div class=\"kpi-l\">" label "</div>"
-       (when sub (str "<div class=\"kpi-s\">" sub "</div>"))
-       "</div>"))
-
-(defn chart-box [id spec]
-  (str "<div class=\"box\">" (chart-div id spec) "</div>"))
-
 ;; ---------------------------------------------------------------------------
 ;; data.org rendering (reuses org table parser from bone-docs logic)
 ;; ---------------------------------------------------------------------------
@@ -542,13 +526,62 @@
 ;; HTML assembly
 ;; ---------------------------------------------------------------------------
 
-(defn render-html [stats out-dir source-name]
-  (let [{:keys [generated-at reports-per-type reports-by-month
-                time-to-close open-closed-ratio open-last-year
-                top-openers email-ratio closed-cancel
-                participants-by-month contributors-by-month maintainers-by-month
-                total-participants total-contributors total-maintainers]} stats
-        title        (page-title "Data" source-name)
+;; View model: KPIs and chart specs, derived from the computed stats.
+;; These are written into stats.json (alongside the raw numbers) and the
+;; client builds the DOM from them, so data.html itself carries no data.
+
+(defn view-kpis
+  "Ordered KPI cards as {:v value :l label :s sub?} maps, nil-filtered."
+  [stats]
+  (let [{:keys [reports-per-type open-closed-ratio open-last-year time-to-close
+                email-ratio total-participants total-contributors total-maintainers]} stats
+        pct  #(when % (str (Math/round (* 100.0 %)) "%"))
+        n-yr (reduce + (vals reports-per-type))]
+    (filterv some?
+      [{:v n-yr :l "Reports (last 12 months)" :s (str open-last-year " still open")}
+       {:v (:open open-closed-ratio) :l "Open (all time)"
+        :s (str (pct (:ratio open-closed-ratio)) " of all")}
+       {:v (:closed open-closed-ratio) :l "Closed (all time)"}
+       (when time-to-close
+         {:v (str (:median-days time-to-close) "d") :l "Median to close"
+          :s (str "avg " (:avg-days time-to-close) "d")})
+       (when email-ratio
+         {:v (or (:ratio email-ratio) "--") :l "Report/email ratio (last 12 months)"
+          :s (str (:reports-last-year email-ratio) " reports / "
+                  (:emails-last-year email-ratio) " emails")})
+       (when total-participants
+         {:v total-participants :l "Participants"
+          :s (when total-contributors (str total-contributors " contributors"))})
+       (when total-maintainers
+         {:v total-maintainers :l "Maintainers"})])))
+
+(defn view-charts
+  "Ordered Vega-Lite chart specs as {:id dom-id :spec spec} maps,
+  nil-filtered.  Mirrors the previous server-rendered chart set."
+  [stats]
+  (let [{:keys [reports-per-type reports-by-month time-to-close top-openers
+                closed-cancel participants-by-month contributors-by-month
+                maintainers-by-month]} stats]
+    (filterv some?
+      [{:id "chart-month"   :spec (chart-by-month reports-by-month)}
+       {:id "chart-type"    :spec (chart-per-type reports-per-type)}
+       (when (or (seq participants-by-month) (seq contributors-by-month))
+         {:id "chart-people" :spec (chart-people (or participants-by-month [])
+                                                 (or contributors-by-month [])
+                                                 (or maintainers-by-month []))})
+       (when time-to-close
+         {:id "chart-ttc"    :spec (chart-ttc time-to-close)})
+       {:id "chart-openers" :spec (chart-openers top-openers)}
+       (when (seq closed-cancel)
+         {:id "chart-cancel" :spec (chart-cancel-breakdown closed-cancel)})])))
+
+(defn render-shell
+  "Static data.html shell: nav, empty KPI/chart containers, the JS-less
+  \"Available data\" table, and the scripts.  Carries no report data --
+  bone-stats.js fetches stats.json (via meta.json) and fills it in, so the
+  file stays byte-stable across data-only changes."
+  [out-dir source-name]
+  (let [title        (page-title "Data" source-name)
         has-ical?    (.exists (io/file out-dir "events" "announcements.ics"))
         data-section (render-data-section out-dir)
         vega-scripts (str "<script src=\"https://cdn.jsdelivr.net/npm/vega@5/build/vega.min.js\"></script>\n"
@@ -556,49 +589,15 @@
                           "<script src=\"https://cdn.jsdelivr.net/npm/vega-embed@6/build/vega-embed.min.js\"></script>\n"
                           "<script>\n" (wrap-js theme-toggle-js) "\n</script>\n"
                           "<script>\n" (wrap-js stats-js) "\n</script>\n")
-        n-yr         (reduce + (vals reports-per-type))
-        pct          #(when % (str (Math/round (* 100.0 %)) "%"))
-        ;; The three blocks below are injected only when JS runs.  JS-less
-        ;; browsers (eww, w3m, lynx) skip <script> bodies entirely, so the
-        ;; page reduces to <noscript><h1></h1></noscript> + Available data.
+        ;; Injected only when JS runs (wrap-template).  JS-less browsers skip
+        ;; <script> bodies, so the page reduces to <noscript><h1></h1></noscript>
+        ;; + the Available-data table.
         tpl-nav      (str (h/html (nav-bar title "data"))
-                          "\n<p class=\"meta\">Generated " generated-at "</p>\n")
+                          "\n<p class=\"meta\" id=\"generated-at\"></p>\n")
         tpl-stats    (str "<section class=\"stats-section\">\n"
                           "<h3>Statistics</h3>\n"
-                          "<div id=\"kpi-area\" class=\"kpis\">\n"
-                          ;; Baked fallback (replaced by stats.json fetch when served over HTTP)
-                          (kpi n-yr "Reports (last 12 months)"
-                               (str open-last-year " still open"))
-                          (kpi (:open open-closed-ratio) "Open (all time)"
-                               (str (pct (:ratio open-closed-ratio)) " of all"))
-                          (kpi (:closed open-closed-ratio) "Closed (all time)")
-                          (when time-to-close
-                            (kpi (str (:median-days time-to-close) "d") "Median to close"
-                                 (str "avg " (:avg-days time-to-close) "d")))
-                          (when email-ratio
-                            (kpi (or (:ratio email-ratio) "--") "Report/email ratio (last 12 months)"
-                                 (str (:reports-last-year email-ratio) " reports / "
-                                      (:emails-last-year email-ratio) " emails")))
-                          (when total-participants
-                            (kpi total-participants "Participants"
-                                 (when total-contributors (str total-contributors " contributors"))))
-                          (when total-maintainers
-                            (kpi total-maintainers "Maintainers"))
-                          "</div>\n"
-                          "<div class=\"grid\">\n"
-                          (chart-box "chart-month"   (chart-by-month reports-by-month))
-                          (chart-box "chart-type"    (chart-per-type reports-per-type))
-                          (when (or (seq participants-by-month) (seq contributors-by-month))
-                            (chart-box "chart-people"
-                                       (chart-people (or participants-by-month [])
-                                                     (or contributors-by-month [])
-                                                     (or maintainers-by-month []))))
-                          (when time-to-close
-                            (chart-box "chart-ttc"   (chart-ttc time-to-close)))
-                          (chart-box "chart-openers" (chart-openers top-openers))
-                          (when (seq closed-cancel)
-                            (chart-box "chart-cancel" (chart-cancel-breakdown closed-cancel)))
-                          "</div>\n"
+                          "<div id=\"kpi-area\" class=\"kpis\"></div>\n"
+                          "<div id=\"chart-grid\" class=\"grid\"></div>\n"
                           "</section>\n")
         tpl-footer   (str (h/html (bone-footer {:ical has-ical?})))]
     (str
@@ -621,17 +620,6 @@
 ;; ---------------------------------------------------------------------------
 ;; Main
 ;; ---------------------------------------------------------------------------
-
-(defn- load-stats-json
-  "Read a published stats.json and reconstruct the in-memory shape produced
-  by `compute-stats`. Cheshire keywordizes every map key, so we restore string
-  keys for the two maps whose keys are report-type names (e.g. \"bug\", \"patch\")
-  rather than fixed enum tags. Without this restore, Vega data points would
-  carry keyword values like :bug instead of \"bug\"."
-  [path]
-  (-> (json/parse-string (slurp path) true)
-      (update :reports-per-type #(some-> % (update-keys name)))
-      (update :closed-cancel    #(some-> % (update-keys name)))))
 
 (def ^:private stats-pull-pattern
   ;; compute-stats only reads dates, type, close-reason, author and
@@ -660,21 +648,22 @@
             reports  (if source-name
                        (filter #(= source-name (get-in % [:report/email :email/source])) all-reps)
                        all-reps)
-            stats    (compute-stats reports db source-name)]
-        (spit out-file (json/generate-string stats {:pretty true}))
+            stats    (compute-stats reports db source-name)
+            ;; Bundle the data.html view model (KPI cards + chart specs)
+            ;; into stats.json so the data.html shell can render entirely
+            ;; client-side; raw stat keys remain for other consumers.
+            payload  (assoc stats :kpis   (view-kpis stats)
+                                  :charts (view-charts stats))]
+        (spit out-file (json/generate-string payload {:pretty true}))
         (log/info "Wrote" out-file "(JSON," (count reports) "reports)"))
       (finally
         (try (d/close conn) (catch Exception _ nil))))))
 
-(defn- generate-html! [out-file out-dir json-file source-name]
-  (let [json-path (or json-file (str out-dir "/reports/stats.json"))]
-    (when-not (.exists (io/file json-path))
-      (throw (ex-info (str "stats.json not found at " json-path
-                           " -- generate it first with `bb stats`")
-                      {:path json-path})))
-    (let [stats (load-stats-json json-path)]
-      (spit-html out-file (render-html stats out-dir source-name))
-      (log/info "Wrote" out-file "(HTML, from" json-path ")"))))
+(defn- generate-html! [out-file out-dir source-name]
+  ;; A static shell: no stats are read here.  bone-stats.js fetches
+  ;; stats.json (discovered via meta.json) and fills the page in.
+  (spit-html out-file (render-shell out-dir source-name))
+  (log/info "Wrote shell" out-file))
 
 (defn -main [& args]
   (let [opts        (parse-cli-args args)
@@ -687,6 +676,6 @@
                         (.getParent (io/file out-file)))]
     (io/make-parents out-file)
     (if html?
-      (generate-html! out-file out-dir (:json-file opts) source-name)
+      (generate-html! out-file out-dir source-name)
       (generate-json! out-file source-name))))
 (apply -main *command-line-args*)

@@ -475,5 +475,7 @@
   ((resolve 'pod.huahaiy.datalevin/close) conn)
   (.mkdirs (.getParentFile (io/file out-file)))
   (spit-html out-file html)
-  (binding [*out* *err*]
-    (log/info "Wrote" out-file)))
+  ;; Routine progress on stdout (captured in the export log), not stderr:
+  ;; docs.html is now regenerated only on structural changes, and the cron
+  ;; notification is driven by an explicit summary line in bone-export.clj.
+  (log/info "Wrote" out-file))

@@ -119,19 +119,19 @@
 
 (def ^:private index-js (slurp "resources/bone-index.js"))
 
-(defn page-js [types-json total open-count closed-count source-type page-size reports-json]
-  (wrap-js (str "var boneConfig = {types:" types-json
-                ",typeLabels:" (escape-script-payload (json/generate-string type-labels))
-                ",total:" total
-                ",openCount:" open-count
-                ",closedCount:" closed-count
+;; The page is a static shell: open reports are no longer inlined as
+;; `boneData`.  The client fetches them from `openJsonUrl` at load time
+;; (mirroring how closed reports are lazy-loaded from `closedJsonUrl`),
+;; so index.html stays byte-identical across data-only changes.
+(defn page-js [source-type page-size]
+  (wrap-js (str "var boneConfig = {typeLabels:" (escape-script-payload (json/generate-string type-labels))
+                ",openJsonUrl:'reports/all-open.json'"
                 ",closedJsonUrl:'reports/all-closed.json'"
                 (when source-type
                   (str ",sourceType:'" source-type "'"))
                 (when page-size
                   (str ",pageSize:" page-size))
                 "};\n"
-                "var boneData = " reports-json ";\n"
                 index-js "\n"
                 theme-toggle-js)))
 
@@ -139,20 +139,17 @@
 ;; Page assembly
 ;; ---------------------------------------------------------------------------
 
-(defn index-page [reports reports-dir envelope page-size]
+;; The shell embeds no report data: only stable metadata (source
+;; name/type, RSS/ICS presence) shapes the markup, so the file does not
+;; change when reports do.
+(defn index-page [reports-dir envelope page-size]
   (let [source-type  (get envelope "source-type")
         source-name  (get envelope "source")
         title        (page-title "Reports" source-name)
-        types        (vec (distinct (map #(get % "type") reports)))
-        types-json   (escape-script-payload (json/generate-string types))
-        total        (get envelope "total" (count reports))
-        open-count   (get envelope "open-count" (count reports))
-        closed-count (get envelope "closed-count" 0)
         has-rss?     (.exists (clojure.java.io/file reports-dir "all.xml"))
         ;; ICS lives one level up from reports-dir, in events/
         base-dir     (.getParent (clojure.java.io/file reports-dir))
         has-ical?    (and base-dir (.exists (clojure.java.io/file base-dir "events" "announcements.ics")))
-        generated-at (str (java.util.Date.))
         rss-href     "reports/all.xml"
         cols         [[:th {:data-sort "type"     :onclick "sortTable(0,'type')"}     "Type"]
                       [:th {:data-sort "priority" :onclick "sortTable(1,'priority')"} "Prio"]
@@ -168,17 +165,15 @@
                        [:main.container
                         (nav-bar title "reports")
                         [:p.generated-at
-                         {:style "font-size:0.78rem;color:var(--pico-muted-color);margin-bottom:1rem"}
-                         (str "Generated " generated-at)]
+                         {:id "generated-at"
+                          :style "font-size:0.78rem;color:var(--pico-muted-color);margin-bottom:1rem"}]
                         [:div.toolbar
                          [:input#si {:type        "search"
                                      :placeholder "Press / to search -- see Docs for syntax"
                                      :oninput     "onSearchInput()"}]
-                         [:div.filters
-                          (for [t types]
-                            [:button {:data-type t
-                                      :onclick (str "toggleType('" t "',this)")}
-                             (get type-labels t t)])]
+                         ;; Filled client-side from the fetched reports
+                         ;; (buildTypeFilters), so the shell stays data-independent.
+                         [:div.filters {:id "type-filters"}]
                          [:div.filters.status-filters
                           [:button#btn-open.open-btn
                            {:onclick "toggleOpen(this)" :title "Toggle visibility of open reports only"}
@@ -232,8 +227,7 @@
        [:body
         (noscript-banner title)
         (h/raw (wrap-template "js-tpl" tpl-body))
-        [:script (h/raw (page-js types-json total open-count closed-count source-type page-size
-                                 (escape-script-payload (json/generate-string reports))))]]]))))
+        [:script (h/raw (page-js source-type page-size))]]]))))
 
 ;; ---------------------------------------------------------------------------
 ;; Main
@@ -249,8 +243,10 @@
   (let [reports-dir (or out-dir (.getParent (clojure.java.io/file json-file)))]
     (.mkdirs (clojure.java.io/file (.getParent (clojure.java.io/file out-file))))
     (let [envelope (json/parse-string (slurp json-file))
-          reports  (get envelope "reports" envelope)
-          html     (index-page reports reports-dir envelope page-size)]
+          n-open   (count (get envelope "reports"))
+          html     (index-page reports-dir envelope page-size)]
       (spit-html out-file html)
-      (binding [*out* *err*]
-        (log/info "Wrote" (count reports) "reports to" out-file)))))
+      ;; Log to stdout (not stderr): this is routine progress, captured in
+      ;; the export log, not a cron-mail trigger.  Real errors still go to
+      ;; stderr above.
+      (log/info "Wrote shell" out-file "(" n-open "open reports in JSON)"))))

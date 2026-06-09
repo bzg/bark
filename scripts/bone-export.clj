@@ -98,6 +98,70 @@
   (spit last-export-file (str (.getTime ts))))
 
 ;; ---------------------------------------------------------------------------
+;; Shell regeneration triggers
+;; ---------------------------------------------------------------------------
+;; index.html and docs.html are data-independent shells: index.html fetches
+;; reports from all-open.json at runtime, and docs.html is built from the
+;; template + config + maintainers.  On an incremental, data-only run they
+;; are NOT rewritten (so they stay byte-stable and the cron stays quiet).
+;; They ARE rebuilt when their inputs change, detected below.
+
+;; Files whose content shapes the HTML shells.  When any is newer than the
+;; last export, the shells are rebuilt even on an incremental run --
+;; otherwise a code/template/asset change would not propagate until the
+;; next full (`--force`) export.
+(def ^:private shell-asset-files
+  ["resources/bone-index.js"
+   "resources/bone-stats.js"
+   "resources/bone-data.css"
+   "resources/docs-tpl.org"
+   "resources/data.org"
+   "scripts/bone-index.clj"
+   "scripts/bone-docs.clj"
+   "scripts/bone-stats.clj"
+   "scripts/bone/html_bb.clj"])
+
+(defn- shell-assets-changed?
+  "True when any shell-asset file is newer than `last-export`."
+  [^java.util.Date last-export]
+  (boolean
+   (when last-export
+     (let [le (.getTime last-export)]
+       (some (fn [p]
+               (let [f (io/file p)]
+                 (and (.exists f) (> (.lastModified f) le))))
+             shell-asset-files)))))
+
+(defn- maintainers-changed-since?
+  "True when a maintainer tenure for `source-name` opened or closed after
+  `since`.  docs.html lists maintainers, so such a change must rebuild it
+  even though no report's :report/updated-at moved."
+  [db source-name ^java.util.Date since]
+  (boolean
+   (when since
+     (let [st    (.getTime since)
+           froms (d/q '[:find [?t ...] :in $ ?src
+                        :where [?e :maint-tenure/source ?src] [?e :maint-tenure/from ?t]]
+                      db source-name)
+           tos   (d/q '[:find [?t ...] :in $ ?src
+                        :where [?e :maint-tenure/source ?src] [?e :maint-tenure/to ?t]]
+                      db source-name)]
+       (some (fn [^java.util.Date dt] (> (.getTime dt) st)) (concat froms tos))))))
+
+(defn- preserve-shell!
+  "When `regen?` is false, copy a previously-exported top-level file from
+  `final-dir` into `staging` so it survives the atomic swap.  Staging is
+  built fresh and the subdir seed does not cover top-level files, so a
+  shell we choose not to regenerate would otherwise be lost."
+  [regen? final-dir staging filename]
+  (when-not regen?
+    (let [src (io/file final-dir filename)]
+      (when (.exists src)
+        (let [dst (io/file staging filename)]
+          (io/make-parents dst)
+          (io/copy src dst))))))
+
+;; ---------------------------------------------------------------------------
 ;; Atomic export via staging directory
 ;; ---------------------------------------------------------------------------
 
@@ -1320,12 +1384,17 @@
                                             (seq t-closed) (conj (str plural "-closed.json")))]
                                 f))))
         tenures     (when-let [db (ctx-db)] (get-tenures db source-name))
+        generated   (str (java.util.Date.))
         meta-data   (merge counts
                            {:bone-format   bone-format
                             :source        source-name
-                            :generated     (str (java.util.Date.))
+                            :generated     generated
                             :by-type       type-counts
                             :reports-files reports-files
+                            ;; JSON file(s) holding the data.html view model
+                            ;; (KPIs + chart specs); the data.html shell reads
+                            ;; this list to know what to fetch.
+                            :stats-files   ["stats.json"]
                             :maintainers   (tenures-snapshot (or tenures []))}
                           (source-metadata source-name source-map))]
     (spit (str reports-dir "/meta.json")
@@ -1336,8 +1405,10 @@
     (when-let [cfg-edn (reproducible-config-str (ctx-config) source-name)]
       (spit (str reports-dir "/config.edn") cfg-edn)
       (log/info "Wrote config.edn"))
+    ;; all-open.json carries :generated so the (now data-independent)
+    ;; index.html shell can show a freshness timestamp client-side.
     (dump-typed-formats! (with-reports scope open) fmts "all-open" "open reports"
-                         :json-always? true :counts counts)
+                         :json-always? true :counts (assoc counts :generated generated))
     (dump-typed-formats! (with-reports scope closed) fmts "all-closed" "closed reports"
                          :json-always? true :counts counts)
     (doseq [rtype report-types
@@ -1430,7 +1501,8 @@
   `changed-types` (optional set of keywords) limits per-type file regeneration
   to those types during incremental export; aggregate files are always rebuilt."
   [format reports base-dir source-name source-map maintainers-map cli-extra
-   & {:keys [changed-types since]}]
+   & {:keys [changed-types since regen-shell? regen-docs?]
+      :or   {regen-shell? true regen-docs? true}}]
   (let [reports-dir (str base-dir "/reports")
         patches-dir (str base-dir "/patches")
         events-dir  (str base-dir "/events")
@@ -1480,10 +1552,13 @@
           (dump-events! reports events-dir :since since)
           (dump-events-filtered! reports reports-dir source-name source-map maintainers-map ef)
           (dump-events-ics! reports events-dir source-name)
-          (dump-docs! base-dir source-name cli-extra)
-          (dump-html! base-dir reports-dir cli-extra)
+          ;; stats.json is a data file (always refreshed); data.html, like
+          ;; index.html/docs.html, is a data-independent shell skipped on
+          ;; data-only runs (the orchestrator preserves it across the swap).
           (dump-stats! base-dir reports-dir source-name "json" cli-extra)
-          (dump-stats! base-dir reports-dir source-name "html" cli-extra))
+          (when regen-docs?  (dump-docs! base-dir source-name cli-extra))
+          (when regen-shell? (dump-html! base-dir reports-dir cli-extra))
+          (when regen-shell? (dump-stats! base-dir reports-dir source-name "html" cli-extra)))
       (do-format format))))
 
 ;; ---------------------------------------------------------------------------
@@ -1519,8 +1594,13 @@
           config-changed? (and last-export config-mtime
                                (> ^long config-mtime
                                   (.getTime ^java.util.Date last-export)))
+          ;; A changed shell asset (template/JS) forces a full re-export so
+          ;; the new shells are rebuilt -- even with no report activity, which
+          ;; would otherwise skip the run and leave the old HTML in place.
+          shell-changed?  (shell-assets-changed? last-export)
           incremental?    (and (not force-all?)
                                (not config-changed?)
+                               (not shell-changed?)
                                (= format "all")
                                last-export last-modified)
           skip?           (and incremental?
@@ -1528,6 +1608,8 @@
                                    (.getTime ^java.util.Date last-export)))]
       (when config-changed?
         (log/info "Config changed since last export, forcing full re-export."))
+      (when (and shell-changed? (not config-changed?))
+        (log/info "Shell assets changed since last export, forcing full re-export."))
       (if skip?
         (log/info "Nothing changed since last export, skipping.")
         ;; Resolve source list *before* the expensive DB pull
@@ -1559,9 +1641,9 @@
               (doseq [s skipped]
                 (log/info (str "[" s "]") "no changes, skipping."))))
           ;; Only load all reports and votes when there is actual work to do.
-          ;; Track whether any source was actually exported so we can skip
-          ;; the root index when nothing changed.
-          (let [any-exported?
+          ;; Collect the source names actually exported so we can skip the
+          ;; root index when nothing changed and notify on the cron mail.
+          (let [exported-srcs
                 (if (and (not= format "root") (seq export-names))
                   (let [maintainers-map (if config (build-maintainers db source-map) {})
                         all-reps        (all-reports-by-date db)
@@ -1592,7 +1674,7 @@
                                             effective-theme (into ["--theme" effective-theme])
                                             effective-ps    (into ["--page-size" (str effective-ps)])))]
                     (binding [*export-ctx* (build-export-ctx db votes config)]
-                      (reduce (fn [exported? src-name]
+                      (reduce (fn [exported src-name]
                                 (let [reports     (filter-reports all-reps {:source       src-name
                                                                             :min-priority min-priority
                                                                             :min-status   min-status})
@@ -1606,10 +1688,20 @@
                                       slug        (slugify src-name)
                                       staging     (str "public/.staging-" slug)
                                       final-dir   (str "public/" slug)
-                                      src-changed (when (seq changed-st) (get changed-st src-name))]
+                                      src-changed (when (seq changed-st) (get changed-st src-name))
+                                      ;; HTML shells: a full run (incremental? false,
+                                      ;; which also covers config/asset changes) rebuilds
+                                      ;; both.  On an incremental run we rebuild only when
+                                      ;; the file is missing or -- for docs -- maintainers
+                                      ;; changed; otherwise the shells stay byte-stable.
+                                      regen-shell? (or (not incremental?)
+                                                       (not (.exists (io/file final-dir "index.html"))))
+                                      regen-docs?  (or (not incremental?)
+                                                       (maintainers-changed-since? db src-name last-export)
+                                                       (not (.exists (io/file final-dir "docs.html"))))]
                                   (if (empty? reports)
                                     (do (log/info "No reports for source" (str "'" src-name "'") ", skipping.")
-                                        exported?)
+                                        exported)
                                     (do (log/info (str "[" src-name "] " (count reports) " report(s)"
                                                        " (" (count (open-reports reports)) " open)"
                                                        (if incremental? " (incremental)" "")))
@@ -1626,23 +1718,39 @@
                                             (doseq [sub ["reports" "patches" "text" "events"]]
                                               (copy-dir! (io/file final-dir sub)
                                                          (io/file staging sub))))
+                                          ;; Preserve the previous HTML shells when not
+                                          ;; regenerating them: they are top-level files
+                                          ;; not covered by the subdir seed above, and
+                                          ;; would vanish in the atomic swap.
+                                          (preserve-shell! regen-shell? final-dir staging "index.html")
+                                          (preserve-shell! regen-shell? final-dir staging "data.html")
+                                          (preserve-shell! regen-docs?  final-dir staging "docs.html")
                                           (export-source! format reports staging src-name
                                                           source-map maintainers-map cli-extra
                                                           :changed-types src-changed
-                                                          :since (when incremental? last-export))
+                                                          :since (when incremental? last-export)
+                                                          :regen-shell? regen-shell?
+                                                          :regen-docs? regen-docs?)
                                           (atomic-swap-dir! staging final-dir)
                                           (catch Exception e
                                             (log/error e "Export failed for" src-name "-- cleaning up staging dir")
                                             (delete-dir! (io/file staging))
                                             (throw e)))
-                                        true))))
-                              false export-names)))
-                  false)]
+                                        (conj exported src-name)))))
+                              [] export-names)))
+                  [])]
             ;; Only regenerate root index when at least one source was exported,
             ;; or when explicitly requested via "bb export root".
             (when (and (#{"all" "root"} format)
-                       (or (= format "root") any-exported?))
-              (dump-root-index! source-names source-map)))
+                       (or (= format "root") (seq exported-srcs)))
+              (dump-root-index! source-names source-map))
+            ;; Cron notification: a single concise stderr line when real work
+            ;; was published, so the cron mail fires iff new info was exported
+            ;; (routine "Wrote ..." progress now goes to stdout).
+            (when (seq exported-srcs)
+              (binding [*out* *err*]
+                (println (str "bone: exported " (count exported-srcs)
+                              " source(s): " (str/join ", " exported-srcs))))))
           (save-last-export! (java.util.Date.)))))
     (finally
       (d/close conn))))

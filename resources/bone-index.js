@@ -2,14 +2,15 @@
 // Copyright (c) 2026 Bastien Guerry <bzg@gnu.org>
 // SPDX-License-Identifier: MPL-2.0
 //
-// Expects global objects:
-//   boneConfig -- .types, .typeLabels, .total, .openCount, .closedCount,
-//                 .closedJsonUrl, .pageSize, .sourceType
-//   boneData   -- array of report objects (open reports, embedded in page)
+// Expects a global object:
+//   boneConfig -- .typeLabels, .openJsonUrl, .closedJsonUrl,
+//                 .pageSize, .sourceType
+// Open reports are fetched from openJsonUrl at startup (see init at the
+// bottom); .total/.openCount/.closedCount are filled in from that
+// payload. Closed reports stay lazy-loaded from closedJsonUrl.
 
-var allTypes = boneConfig.types;
+var allTypes = [];          // populated from the fetched open reports
 var activeTypes = {};
-allTypes.forEach(function(t) { activeTypes[t] = true; });
 var onlyOpen    = true;
 var onlyAcked   = false;
 var onlyOwned   = false;
@@ -1098,6 +1099,22 @@ function syncToolbarButtons() {
   });
 }
 
+// Build the per-type filter buttons from the loaded report types. The
+// server used to emit these statically; we now build them from data so
+// the HTML shell carries no report-derived markup.
+function buildTypeFilters() {
+  var container = document.getElementById('type-filters');
+  if (!container) return;
+  container.textContent = '';
+  allTypes.forEach(function(t) {
+    var btn = document.createElement('button');
+    btn.setAttribute('data-type', t);
+    btn.textContent = _typeLabels[t] || t;
+    btn.addEventListener('click', function() { toggleType(t, btn); });
+    container.appendChild(btn);
+  });
+}
+
 function isolateType(type) {
   var active = allTypes.filter(function(t) { return activeTypes[t]; });
   if (active.length === 1 && active[0] === type) {
@@ -1332,22 +1349,53 @@ var _setupToggles, _showTogglesIfNeeded;
 
 /* ── Initialize ──────────────────────────────────────────────── */
 
-// Prepare all embedded report data into indexed objects
-console.time('bone:prepare');
-for (var _i = 0; _i < boneData.length; _i++) {
-  _allReports.push(prepareReport(boneData[_i]));
+// Distinct report types in first-appearance order. Matches the old
+// server-side `(distinct (map type reports))`, which followed report date.
+function collectTypes() {
+  allTypes = [];
+  for (var i = 0; i < _allReports.length; i++) {
+    var t = _allReports[i].type;
+    if (t && allTypes.indexOf(t) === -1) allTypes.push(t);
+  }
+  activeTypes = {};
+  allTypes.forEach(function(t) { activeTypes[t] = true; });
 }
-computeClusters();
-console.timeEnd('bone:prepare');
+
+// Consume the fetched all-open.json payload: prepare reports, derive the
+// type set, fill in the counts the renderer needs, build the filter
+// buttons, then restore UI state from the URL.
+function initOpenReports(data) {
+  data = data || {};
+  var reports = data.reports || [];
+  console.time('bone:prepare');
+  for (var i = 0; i < reports.length; i++) {
+    _allReports.push(prepareReport(reports[i]));
+  }
+  collectTypes();
+  computeClusters();
+  console.timeEnd('bone:prepare');
+
+  function numOr(v, fallback) { return v != null ? v : fallback; }
+  boneConfig.total       = numOr(data.total,           _allReports.length);
+  boneConfig.openCount   = numOr(data['open-count'],   _allReports.length);
+  boneConfig.closedCount = numOr(data['closed-count'], 0);
+
+  buildTypeFilters();
+
+  if (data.generated) {
+    var g = document.getElementById('generated-at');
+    if (g) g.textContent = 'Generated ' + data.generated;
+  }
+
+  console.time('bone:initial-render');
+  restoreFromURL();
+  console.timeEnd('bone:initial-render');
+  updateStatusButtons();
+}
 
 // Single delegated listener on tbody (the node persists across renders;
 // only its children are replaced).
 document.querySelector('tbody').addEventListener('click', tbodyClick);
-
-console.time('bone:initial-render');
-restoreFromURL();
-console.timeEnd('bone:initial-render');
-updateStatusButtons();
 window.addEventListener('popstate', function() { restoreFromURL(); });
 
 document.addEventListener('keydown', function(e) {
@@ -1358,3 +1406,13 @@ document.addEventListener('keydown', function(e) {
     getSearchInput().focus();
   }
 });
+
+document.getElementById('status').textContent = 'Loading reports…';
+fetch(boneConfig.openJsonUrl)
+  .then(function(resp) { return resp.json(); })
+  .then(initOpenReports)
+  .catch(function(err) {
+    console.error('Failed to load open reports:', err);
+    var s = document.getElementById('status');
+    if (s) s.textContent = 'Failed to load reports.';
+  });

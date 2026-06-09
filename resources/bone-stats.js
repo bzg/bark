@@ -2,8 +2,9 @@
 // Copyright (c) 2026 Bastien Guerry <bzg@gnu.org>
 // SPDX-License-Identifier: MPL-2.0
 //
-// Expects:
-//   boneSpecs -- object populated by inline <script> tags (id -> vega-lite spec)
+// data.html is a static shell: on load we fetch stats.json (its location
+// discovered via reports/meta.json) and build the KPI cards and charts
+// client-side from its `kpis` and `charts` fields.
 //   toggleTheme() from bone-theme.js (extended here to re-render charts)
 
 var boneSpecs = {};
@@ -52,10 +53,59 @@ function boneHideTooltip() {
   if (el) el.classList.remove('visible');
 }
 
+// ── Build the page from the fetched stats payload ───────────────
+function boneKpiEl(k) {
+  var div = document.createElement('div');
+  div.className = 'kpi';
+  [['kpi-v', k.v], ['kpi-l', k.l], ['kpi-s', k.s]].forEach(function(pair) {
+    if (pair[0] === 'kpi-s' && !k.s) return;
+    var el = document.createElement('div');
+    el.className = pair[0];
+    el.textContent = pair[1];
+    div.appendChild(el);
+  });
+  return div;
+}
+
+function boneBuildStats(stats) {
+  var kpiArea = document.getElementById('kpi-area');
+  if (kpiArea && stats.kpis) {
+    kpiArea.textContent = '';
+    stats.kpis.forEach(function(k) { kpiArea.appendChild(boneKpiEl(k)); });
+  }
+  var grid = document.getElementById('chart-grid');
+  boneSpecs = {};
+  if (grid && stats.charts) {
+    grid.textContent = '';
+    stats.charts.forEach(function(c) {
+      var box = document.createElement('div'); box.className = 'box';
+      var chart = document.createElement('div'); chart.className = 'chart'; chart.id = c.id;
+      box.appendChild(chart);
+      grid.appendChild(box);
+      boneSpecs[c.id] = c.spec;
+    });
+  }
+  var gen = document.getElementById('generated-at');
+  if (gen && stats['generated-at']) gen.textContent = 'Generated ' + stats['generated-at'];
+  boneRenderAll();
+}
+
+// Discover the stats file via meta.json (the per-source manifest), then
+// fetch it. Falls back to stats.json if the manifest omits the list.
+function boneLoadStats() {
+  fetch('reports/meta.json')
+    .then(function(r) { return r.json(); })
+    .then(function(meta) {
+      var files = (meta && meta['stats-files']) || ['stats.json'];
+      return fetch('reports/' + files[0]).then(function(r) { return r.json(); });
+    })
+    .then(boneBuildStats)
+    .catch(function(err) { console.error('Failed to load stats:', err); });
+}
+
 // Wait for DOMContentLoaded so bone-theme.js has defined toggleTheme.
 // Then wrap it to also re-render charts on theme change.
 document.addEventListener('DOMContentLoaded', function() {
-  boneRenderAll();
   if (typeof toggleTheme === 'function') {
     var origToggle = toggleTheme;
     toggleTheme = function() { origToggle(); boneRenderAll(); };
@@ -64,4 +114,5 @@ document.addEventListener('DOMContentLoaded', function() {
   document.addEventListener('touchstart', function(e) {
     if (!e.target.closest || !e.target.closest('.chart')) boneHideTooltip();
   }, {passive: true});
+  boneLoadStats();
 });
