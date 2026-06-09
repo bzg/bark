@@ -89,13 +89,15 @@
       db))
 
 (defn changed-source-types-since
-  "Return a map {source-name #{report-type ...}} for reports updated
-  after `since-ts`.  Enables both source-level and per-type skip logic."
+  "Return a map {source-name {report-type count}} for reports updated
+  after `since-ts`.  Enables source-level and per-type skip logic (a
+  present type maps to a truthy count, so the map doubles as a set-like
+  predicate) and per-type change reporting."
   [db since-ts]
-  (reduce (fn [m [src rtype]]
-            (update m src (fnil conj #{}) rtype))
+  (reduce (fn [m [src rtype n]]
+            (assoc-in m [src rtype] n))
           {}
-          (dq '[:find ?src ?t
+          (dq '[:find ?src ?t (count ?r)
                 :in $ ?since
                 :where
                 [?r :report/updated-at ?u] [(> ?u ?since)]

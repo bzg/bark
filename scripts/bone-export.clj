@@ -161,6 +161,12 @@
           (io/make-parents dst)
           (io/copy src dst))))))
 
+(defn- fmt-type-counts
+  "Format a {report-type count} map as \"bug×3 patch×1\", sorted by type."
+  [type-counts]
+  (str/join " " (map (fn [[t c]] (str (name t) "×" c))
+                     (sort-by (comp name key) type-counts))))
+
 ;; ---------------------------------------------------------------------------
 ;; Atomic export via staging directory
 ;; ---------------------------------------------------------------------------
@@ -1634,7 +1640,7 @@
                                 source-names)]
           (when (and incremental? (seq changed-st))
             (log/info "Incremental: changed sources:"
-                      (str/join ", " (map (fn [[s ts]] (str s " (" (str/join " " (map name ts)) ")"))
+                      (str/join ", " (map (fn [[s ts]] (str s " (" (fmt-type-counts ts) ")"))
                                           changed-st))))
           (when (and incremental? (seq changed-st) (< (count export-names) (count source-names)))
             (let [skipped (remove (set export-names) source-names)]
@@ -1746,11 +1752,20 @@
               (dump-root-index! source-names source-map))
             ;; Cron notification: a single concise stderr line when real work
             ;; was published, so the cron mail fires iff new info was exported
-            ;; (routine "Wrote ..." progress now goes to stdout).
+            ;; (routine "Wrote ..." progress now goes to stdout).  On an
+            ;; incremental run we name the changed report types per source
+            ;; (what's new); a full re-export is flagged as such.
             (when (seq exported-srcs)
               (binding [*out* *err*]
-                (println (str "bone: exported " (count exported-srcs)
-                              " source(s): " (str/join ", " exported-srcs))))))
+                (println
+                 (str "bone: exported "
+                      (str/join ", "
+                                (map (fn [s]
+                                       (if-let [counts (get changed-st s)]
+                                         (str s " (" (fmt-type-counts counts) ")")
+                                         s))
+                                     exported-srcs))
+                      (when-not incremental? " [full re-export]"))))))
           (save-last-export! (java.util.Date.)))))
     (finally
       (d/close conn))))
