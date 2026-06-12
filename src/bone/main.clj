@@ -853,8 +853,7 @@
     (let [mailboxes     (validate-mailboxes! config)
           ingest-cfg    (or (:ingest config) {})
           cli-fetch-map (some-> cli-fetch cli-fetch->map)
-          db-path       (common/expand-home
-                         (or (:path (:db config)) "data/bone-db"))]
+          db-path       (common/expand-home (common/db-path config))]
       (when fresh? (maybe-wipe-db! db-path))
       (let [db-conn (ingest/connect db-path)]
         (log/info "Datalevin connected.")
