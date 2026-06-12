@@ -720,7 +720,9 @@
 
 (defn- parse-main-args [args]
   (let [arg-set (set args)
-        pairs   (partition 2 args)]
+        ;; Sliding pairs: non-overlapping (partition 2) drops valued flags
+        ;; depending on position (e.g. --watch --fetch 50 loses the 50).
+        pairs   (partition 2 1 args)]
     {:watch?      (arg-set "--watch")
      :fresh?      (arg-set "--fresh")
      :cli-fetch   (some (fn [[a b]] (when (= "--fetch" a) b)) pairs)

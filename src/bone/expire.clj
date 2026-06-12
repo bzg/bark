@@ -16,6 +16,17 @@
 ;; Rule evaluation
 ;; ---------------------------------------------------------------------------
 
+(defn- parse-delay-safe
+  "Like common/parse-delay but logs and returns nil on an invalid
+  duration (parse-delay throws on unknown units): a bad :expiry rule
+  must skip the rule, not kill the daemon."
+  [v]
+  (try (common/parse-delay v)
+       (catch Exception e
+         (log/warn "Ignoring expiry rule with invalid duration:"
+                   (pr-str v) "--" (ex-message e))
+         nil)))
+
 (defn- parse-expiry-rule
   "Normalize an expiry rule map.
   Expects a map with :inactive-after (integer, duration string, ISO date, or :deadline)."
@@ -30,11 +41,11 @@
         (if (re-matches #"\d{4}-\d{2}-\d{2}" after)
           (when-let [d (common/parse-iso-date after)]
             (assoc v :expires-on-date d))
-          (when-let [d (common/parse-delay after)]
+          (when-let [d (parse-delay-safe after)]
             (assoc v :delay-days d)))
 
         :else
-        (when-let [d (common/parse-delay after)]
+        (when-let [d (parse-delay-safe after)]
           (assoc v :delay-days d))))))
 
 (defn- report-activity-score

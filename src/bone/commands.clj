@@ -314,7 +314,9 @@
   (if-not (common/sent-via-source-channel? delivery source-cfg)
     (log/info "Vote ignored (private email on public source)" from-addr)
     (let [report-mid (:report/message-id (d/entity (d/db conn) report-eid))
-          vote-key   (str report-mid ":" from-addr)]
+          ;; Lowercase so Bob@X.org and bob@x.org count as one voter.
+          addr       (some-> from-addr str/lower-case)
+          vote-key   (str report-mid ":" addr)]
       ;; :vote/key has :db.unique/identity -- if this voter already voted,
       ;; the upsert overwrites silently (first vote wins in practice,
       ;; since we only transact when key is new).
@@ -323,7 +325,7 @@
                             :vote/report report-eid
                             :vote/email  (:db/id email)
                             :vote/value  vote
-                            :vote/voter  from-addr}])
+                            :vote/voter  addr}])
         (tracking/bump-report-updated! conn report-eid)
         (log/info "Vote" (case vote :up "+1" :down "-1" "0") "by" from-addr)))))
 
@@ -946,7 +948,7 @@
         (tracking/bump-report-updated! conn report-eid))))
 
 (defn apply-lines! [conn report-eid lines email-eid from-addr is-maintainer?
-                    failure-ctx]
+                    failure-ctx source-cfg]
   (let [db         (d/db conn)
         ;; Surface relation setters under their :setter-attr so the
         ;; scope check on :unsuperseded-by / :unsupersedes / :unduplicate-of
@@ -969,7 +971,16 @@
             posed-at    (Date.)
             did-work?   (or (seq attr-tx) (seq valid-rows) (seq clear-rows))]
         (when (seq attr-tx)
-          (d/transact! conn attr-tx))
+          (d/transact! conn attr-tx)
+          ;; Closing a patch via `Closed-by:` must propagate to the
+          ;; bugs/requests it resolves, exactly like the bareword
+          ;; `Closed.` path in apply-words!.  Same opt-out: sources
+          ;; with ":patch-triggers? false" skip the :resolved propagation.
+          (when (and (= :patch source-type)
+                     (contains? (:set resolved) :report/closed)
+                     (common/patch-triggers? source-cfg))
+            (rel/propagate-patch-closure! conn report-eid :patch email-eid
+                                          :resolved nil)))
         (doseq [row valid-rows]
           (apply-closure-set-row! conn row email-eid from-addr posed-at source-type))
         (doseq [row clear-rows]
@@ -1243,5 +1254,6 @@
                        true))]
         (apply-words! conn report-eid word-result eid (:email/message-id email) from-addr
                       source-cfg)
-        (apply-lines! conn report-eid lines eid from-addr is-maint? fail-ctx)
+        (apply-lines! conn report-eid lines eid from-addr is-maint? fail-ctx
+                      source-cfg)
         (boolean (or (seq word-result) (seq lines) voted?))))))

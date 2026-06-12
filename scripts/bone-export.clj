@@ -919,6 +919,23 @@
                       (conj acc (assoc rep :series-summary summary)))))))
             [] report-maps)))
 
+(defn- delete-stale-file!
+  "Delete a previously-seeded export file.  Incremental staging dirs are
+  seeded from the previous export; a file whose data slice became empty
+  is no longer rewritten and must be deleted, or the atomic swap would
+  keep publishing its old content forever."
+  [dir basename]
+  (let [f (io/file dir basename)]
+    (when (.exists f)
+      (io/delete-file f true)
+      (log/info "Deleted stale" basename))))
+
+(defn- delete-stale-typed!
+  "delete-stale-file! for `stem` across all per-type export formats."
+  [dir stem]
+  (doseq [ext [".json" ".xml" ".org"]]
+    (delete-stale-file! dir (str stem ext))))
+
 (defn dump-rss!
   "Dump reports as RSS 2.0 for a single source.
   Only includes open reports, capped at rss-limit (50).
@@ -932,18 +949,21 @@
          items    (str/join "\n" (map report->rss-item data))
          list-url (get-in source-map [source-name :list-archive] "")
          filename (str out-dir "/" basename)]
-     (when (seq data)
-       (spit filename
-             (str "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                  "<rss version=\"2.0\">\n"
-                  "  <channel>\n"
-                  "    <title>BONE " (xml-escape source-name) " " (xml-escape feed-label) "</title>\n"
-                  "    <link>" (xml-escape list-url) "</link>\n"
-                  "    <description>Reports from the Bug And Report Keeper</description>\n"
-                  items "\n"
-                  "  </channel>\n"
-                  "</rss>\n"))
-       (log/info "Wrote" (count data) "reports to" filename)))))
+     (if (seq data)
+       (do (spit filename
+                 (str "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                      "<rss version=\"2.0\">\n"
+                      "  <channel>\n"
+                      "    <title>BONE " (xml-escape source-name) " " (xml-escape feed-label) "</title>\n"
+                      "    <link>" (xml-escape list-url) "</link>\n"
+                      "    <description>Reports from the Bug And Report Keeper</description>\n"
+                      items "\n"
+                      "  </channel>\n"
+                      "</rss>\n"))
+           (log/info "Wrote" (count data) "reports to" filename))
+       ;; No open reports left: drop the seeded feed instead of letting
+       ;; it keep announcing reports closed since the last export.
+       (delete-stale-file! out-dir basename)))))
 
 (defn- format-org-inactive-ts
   "Format a java.util.Date as an Org inactive timestamp like
@@ -1078,10 +1098,11 @@
                         acc)))
                   {}
                   reports)]
-    (when (seq entries)
+    (if (seq entries)
       (let [filename (str out-dir "/votes.json")]
         (spit filename (json/generate-string entries {:pretty true}))
-        (log/info "Wrote" (count entries) "report(s) with votes to" filename)))))
+        (log/info "Wrote" (count entries) "report(s) with votes to" filename))
+      (delete-stale-file! out-dir "votes.json"))))
 
 (defn- patch-basename
   "Return the basename of a :report/patches entry (handles absolute paths)."
@@ -1338,13 +1359,14 @@
   "Export per-type JSON, Org, and RSS files for all report types
   present.  When `changed-types` is non-nil, only re-export files for
   those types."
-  [{:keys [reports] :as scope} fmts & {:keys [changed-types]}]
+  [{:keys [reports reports-dir] :as scope} fmts & {:keys [changed-types]}]
   (doseq [rtype report-types
+          :when (or (nil? changed-types) (changed-types rtype))
           :let  [typed  (filter-reports reports {:type rtype})
-                 plural (type->plural rtype)]
-          :when (and (seq typed)
-                     (or (nil? changed-types) (changed-types rtype)))]
-    (dump-typed-formats! (with-reports scope typed) fmts plural plural)))
+                 plural (type->plural rtype)]]
+    (if (seq typed)
+      (dump-typed-formats! (with-reports scope typed) fmts plural plural)
+      (delete-stale-typed! reports-dir plural))))
 
 (defn- dump-open-closed!
   "Export open/closed split files and meta.json with summary counts.
@@ -1422,12 +1444,14 @@
             :let  [plural   (type->plural rtype)
                    t-open   (filter-reports open {:type rtype})
                    t-closed (filter-reports closed {:type rtype})]]
-      (when (seq t-open)
+      (if (seq t-open)
         (dump-typed-formats! (with-reports scope t-open) fmts
-                             (str plural "-open") (str plural " (open)")))
-      (when (seq t-closed)
+                             (str plural "-open") (str plural " (open)"))
+        (delete-stale-typed! reports-dir (str plural "-open")))
+      (if (seq t-closed)
         (dump-typed-formats! (with-reports scope t-closed) fmts
-                             (str plural "-closed") (str plural " (closed)"))))))
+                             (str plural "-closed") (str plural " (closed)"))
+        (delete-stale-typed! reports-dir (str plural "-closed"))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Root index -- public/index.html listing all sources
@@ -1592,7 +1616,12 @@
     (when (and min-status (not (<= 1 min-status 7)))
       (log/error "Invalid --min-status:" min-status "(must be 1–7)")
       (System/exit 1))
-    (let [db              (d/db conn)
+    (let [;; Watermark for save-last-export!: taken *before* the DB snapshot,
+          ;; otherwise daemon transactions racing with this export would fall
+          ;; before the saved watermark and be skipped forever by the next
+          ;; incremental run.
+          run-started     (java.util.Date.)
+          db              (d/db conn)
           last-modified   (get-last-modified db)
           last-export     (get-last-export)
           config-path     (or (System/getenv "BONE_CONFIG") "config.edn")
@@ -1748,9 +1777,12 @@
                   [])]
             ;; Only regenerate root index when at least one source was exported,
             ;; or when explicitly requested via "bb export root".
+            ;; Always list every configured source: source-names is narrowed
+            ;; to one entry by -n, and the root index must not shrink to it
+            ;; (the :when meta filter drops never-exported sources anyway).
             (when (and (#{"all" "root"} format)
                        (or (= format "root") (seq exported-srcs)))
-              (dump-root-index! source-names source-map))
+              (dump-root-index! (mapv :name (:sources config)) source-map))
             ;; Cron notification: a single concise stderr line when real work
             ;; was published, so the cron mail fires iff new info was exported
             ;; (routine "Wrote ..." progress now goes to stdout).  On an
@@ -1768,6 +1800,6 @@
                                          s))
                                      exported-srcs))
                       (when-not incremental? " [full re-export]"))))))
-          (save-last-export! (java.util.Date.)))))
+          (save-last-export! run-started))))
     (finally
       (d/close conn))))

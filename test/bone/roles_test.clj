@@ -12,9 +12,24 @@
 
 (use-fixtures :once th/with-temp-failures-file)
 
+;; fresh-conn registers each connection here so the :each fixture can
+;; close it and delete its /tmp directory -- without it every run leaked
+;; one directory and one open connection per call site.
+(def ^:private live-conns (atom []))
+
 (defn- fresh-conn []
-  (let [path (str "/tmp/bone-roles-test-" (System/nanoTime))]
-    (d/get-conn path common/bone-schema)))
+  (let [path (str "/tmp/bone-roles-test-" (System/nanoTime))
+        conn (d/get-conn path common/bone-schema)]
+    (swap! live-conns conj {:conn conn :db-path path})
+    conn))
+
+(defn- with-conn-cleanup [f]
+  (try (f)
+       (finally
+         (doseq [c @live-conns] (th/teardown! c))
+         (reset! live-conns []))))
+
+(use-fixtures :each with-conn-cleanup)
 
 (defn- seed-two-maintainers!
   "Seed two maintainers on source `src`; the first is the lead."

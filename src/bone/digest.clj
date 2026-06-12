@@ -776,11 +776,15 @@
                             [?e :email/pending-thread? true]
                             [?e :email/ancestor-mids ?mid]]
                           (d/db conn) (vec ancestors))]
-        (doseq [pending-eid pendings]
-          (let [pending-email (d/pull (d/db conn) email-pull-pattern pending-eid)]
-            (log/info "Retrying pending email" (:email/message-id pending-email)
-                      "(triggered by" own-mid ")")
-            (process-email! conn source-map sources pending-email)))))))
+        (doseq [pending-eid pendings
+                :let [pending-email (d/pull (d/db conn) email-pull-pattern
+                                            pending-eid)]
+                ;; A recursive rescue triggered by an earlier iteration may
+                ;; have already processed this email and cleared its flag.
+                :when (:email/pending-thread? pending-email)]
+          (log/info "Retrying pending email" (:email/message-id pending-email)
+                    "(triggered by" own-mid ")")
+          (process-email! conn source-map sources pending-email))))))
 
 ;; ---------------------------------------------------------------------------
 ;; TTL flush -- force-process pending emails older than max-age-days
@@ -801,9 +805,14 @@
     (when (seq pendings)
       (log/info "Flushing" (count pendings)
                 "stale pending email(s) older than" max-age-days "day(s)"))
-    (doseq [eid pendings]
-      (d/transact! conn [[:db/retract eid :email/pending-thread? true]])
-      (let [email (d/pull (d/db conn) email-pull-pattern eid)]
-        (log/info "TTL-flush" (:email/message-id email))
-        (process-email! conn source-map sources email {:force-thread? true})))
+    ;; Keep the pending flag set: process-email! retracts it itself, which
+    ;; both enables its report-eid recovery (was-pending?) and leaves the
+    ;; email retriable at the next flush if processing throws.
+    (doseq [eid pendings
+            :let [email (d/pull (d/db conn) email-pull-pattern eid)]
+            ;; A rescue triggered by an earlier iteration may have already
+            ;; processed this email and cleared its flag.
+            :when (:email/pending-thread? email)]
+      (log/info "TTL-flush" (:email/message-id email))
+      (process-email! conn source-map sources email {:force-thread? true}))
     (count pendings)))

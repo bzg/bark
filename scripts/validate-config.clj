@@ -270,7 +270,9 @@
 ;; Each report type maps to a rule map with :inactive-after and optional conditions.
 (s/def :expiry/inactive-after (s/or :deadline #{:deadline}
                                     :date (s/and ::non-blank-string #(re-matches #"\d{4}-\d{2}-\d{2}" %))
-                                    :string (s/and ::non-blank-string #(re-seq #"\d+\s*[ydwm]" %))
+                                    ;; Full match, not re-seq: "30 days" must be
+                                    ;; rejected here, parse-duration-str throws on it.
+                                    :string (s/and ::non-blank-string #(re-matches #"(?:\d+\s*[ydwm]\s*)+" %))
                                     :int pos-int?))
 (s/def :expiry/max-status (s/and int? #(<= 0 % 3)))
 (s/def :expiry/max-priority (s/and int? #(<= 0 % 3)))
