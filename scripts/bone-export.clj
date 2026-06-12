@@ -35,7 +35,6 @@
 ;;   bb export root          -- regenerate public/index.html (source listing)
 ;;   bb export all           -- all formats (still incremental)
 ;;   bb export --force       -- force full export, ignore timestamps
-;;   bb export --only-open   -- also export -open files (all-open.json, etc.)
 ;;   bb export json -n src   -- export only source "src"
 ;;   bb export json -p 2     -- only priority >= 2
 ;;   bb export json -s 3     -- only status >= 3
@@ -600,7 +599,12 @@
               src-cfg                  (get source-map source-name)
               delay-str                (or (:awaiting-delay src-cfg)
                              (:awaiting-delay config))
-              delay-days               (if delay-str (parse-delay delay-str) default-awaiting-delay-days)
+              ;; Guard both failure modes of parse-delay: nil on a
+              ;; valueless string, throw on unknown units.
+              delay-days               (or (when delay-str
+                                             (try (parse-delay delay-str)
+                                                  (catch Exception _ nil)))
+                                           default-awaiting-delay-days)
               ^java.util.Date last-act (:report/last-activity report)
               elapsed-ms               (- (System/currentTimeMillis) (.getTime last-act))
               elapsed-days             (/ elapsed-ms (* 24 60 60 1000))]
@@ -912,7 +916,10 @@
                     acc ;; already emitted representative
                     (let [_       (vswap! seen conj sid)
                           members (get groups sid)
-                          sorted  (sort-by #(parse-long (re-find #"^\d+" (or (:patch-seq %) "0"))) members)
+                          sorted  (sort-by #(or (some-> (re-find #"^\d+" (or (:patch-seq %) ""))
+                                                        parse-long)
+                                                0)
+                                           members)
                           cover   (first (filter #(str/starts-with? (or (:patch-seq %) "") "0/") sorted))
                           rep     (or cover (first sorted))
                           summary (series-status-summary members)]
@@ -1666,7 +1673,14 @@
               changed-st      (when (and incremental? last-export)
                                 (changed-source-types-since db last-export))
               export-names    (if (and incremental? (seq changed-st))
-                                (filterv (fn [s] (contains? changed-st s)) source-names)
+                                ;; Maintainers-only changes don't bump any
+                                ;; report, so they never reach changed-st --
+                                ;; without this check the source is skipped
+                                ;; and its docs.html stays stale.
+                                (filterv (fn [s]
+                                           (or (contains? changed-st s)
+                                               (maintainers-changed-since? db s last-export)))
+                                         source-names)
                                 source-names)]
           (when (and incremental? (seq changed-st))
             (log/info "Incremental: changed sources:"
@@ -1750,7 +1764,14 @@
                                           ;; per-mid patches/, text/ and events/ files for
                                           ;; reports unchanged since last-export (via
                                           ;; :since).  Aggregate files are always rebuilt.
-                                          (when src-changed
+                                          ;; Seed on every incremental run, not
+                                          ;; only when src-changed: :since is
+                                          ;; passed below whenever incremental?,
+                                          ;; so unseeded per-mid files would be
+                                          ;; lost in the swap (e.g. a source
+                                          ;; exported for a maintainers-only
+                                          ;; change).
+                                          (when incremental?
                                             (doseq [sub ["reports" "patches" "text" "events"]]
                                               (copy-dir! (io/file final-dir sub)
                                                          (io/file staging sub))))

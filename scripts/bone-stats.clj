@@ -90,25 +90,30 @@
        db))
 
 (defn- all-active-tenures
-  "Return all currently-active tenures (no :to) across all sources
-  as maps with :email and :from."
-  [db]
-  (let [eids (d/q '[:find [?e ...]
-                    :where [?e :maint-tenure/email _]]
-                  db)]
-    (->> eids
-         (map (fn [eid]
-                (d/pull db '[:maint-tenure/email
-                             :maint-tenure/from
-                             :maint-tenure/to] eid)))
-         (remove :maint-tenure/to)
-         (mapv (fn [m] {:email (:maint-tenure/email m)
-                        :from  (:maint-tenure/from m)})))))
+  "Return currently-active tenures (no :to) as maps with :email and
+  :from -- all sources, or only `source-name`'s when given (the stats
+  page is per-source, a global count there would be misleading)."
+  ([db] (all-active-tenures db nil))
+  ([db source-name]
+   (let [eids (d/q '[:find [?e ...]
+                     :where [?e :maint-tenure/email _]]
+                   db)]
+     (->> eids
+          (map (fn [eid]
+                 (d/pull db '[:maint-tenure/email
+                              :maint-tenure/from
+                              :maint-tenure/to
+                              :maint-tenure/source] eid)))
+          (remove :maint-tenure/to)
+          (filter (fn [m] (or (nil? source-name)
+                              (= source-name (:maint-tenure/source m)))))
+          (mapv (fn [m] {:email (:maint-tenure/email m)
+                         :from  (:maint-tenure/from m)}))))))
 
 (defn total-maintainers
-  "Count distinct currently-active maintainer addresses across all sources."
-  [db]
-  (->> (all-active-tenures db)
+  "Count distinct currently-active maintainer addresses."
+  [tenures]
+  (->> tenures
        (keep :email)
        distinct
        count))
@@ -118,17 +123,17 @@
   (\"yyyy-MM-dd\"). Tenures with :from = nil are excluded -- they are
   counted via `maintainers-without-since` and fed as `n-always` to the
   cumulative chart."
-  [db]
+  [tenures]
   (let [fmt (doto (java.text.SimpleDateFormat. "yyyy-MM-dd")
               (.setTimeZone (java.util.TimeZone/getTimeZone "UTC")))]
-    (->> (all-active-tenures db)
+    (->> tenures
          (keep :from)
          (mapv #(.format fmt ^java.util.Date %)))))
 
 (defn- maintainers-without-since
   "Count currently-active tenures with no :from (seeded 'forever')."
-  [db]
-  (->> (all-active-tenures db)
+  [tenures]
+  (->> tenures
        (filter #(nil? (:from %)))
        count))
 
@@ -344,9 +349,10 @@
                                   source-name (filter #(= source-name (second %)))))
          participants  (when db (cond->> (all-participants db)
                                   source-name (filter #(= source-name (second %)))))
-         n-maintainers (when db (total-maintainers db))
-         maint-since   (when db (all-maintainer-since-dates db))
-         n-always      (when db (maintainers-without-since db))
+         tenures       (when db (all-active-tenures db source-name))
+         n-maintainers (when db (total-maintainers tenures))
+         maint-since   (when db (all-maintainer-since-dates tenures))
+         n-always      (when db (maintainers-without-since tenures))
          all-votes     (if db
                          (votes-by-report
                           (d/q '[:find ?r ?val ?voter ?emid

@@ -195,9 +195,13 @@
       (log/warn "Attachment" filename "exceeds"
                 (str (quot max-att-size 1024) "KB")
                 "limit (" (count raw-text) "chars) -- content not stored"))
-    (cond-> {:attachment/filename     filename
-             :attachment/content-type (:content-type att)
-             :attachment/size         (or (:size att) (when data (count data)))}
+    ;; No nil values: Datalevin rejects them and a single malformed
+    ;; attachment would poison the whole message (store fails, the
+    ;; IMAP watermark never advances past it).
+    (cond-> {:attachment/filename filename}
+      (:content-type att) (assoc :attachment/content-type (:content-type att))
+      (or (:size att) data) (assoc :attachment/size
+                                   (or (:size att) (count data)))
       (and raw-text (not too-large?)) (assoc :attachment/data raw-text))))
 
 (defn- clean-subject
@@ -250,9 +254,12 @@
                           (remove nil? (:attachments body)))]
     (cond-> {:email/message-id   message-id
              :email/subject      (clean-subject (:subject msg))
-             :email/content-type (:content-type msg)
              :email/ingested-at  (Date.)}
 
+      ;; Conditional like every other optional header: a nil here makes
+      ;; Datalevin reject the transaction and blocks the watermark on
+      ;; this message forever.
+      (:content-type msg)         (assoc :email/content-type (:content-type msg))
       id                          (assoc :email/id id)
 
       (:address from)             (assoc :email/from-address (:address from))

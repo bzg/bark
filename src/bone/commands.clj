@@ -985,12 +985,12 @@
           (apply-closure-set-row! conn row email-eid from-addr posed-at source-type))
         (doseq [row clear-rows]
           (apply-closure-clear-row! conn report-eid row email-eid))
+        ;; No per-target bump here: apply-closure-set-row! and
+        ;; apply-closure-clear-row! already bump both parties of the rows
+        ;; they transact, and bumping invalid rows' targets (nothing
+        ;; transacted) would trigger spurious incremental re-exports.
         (when did-work?
           (tracking/bump-report-updated! conn report-eid)
-          (doseq [{:keys [resolved]} rows
-                  :let [t (:target-eid resolved)]
-                  :when t]
-            (tracking/bump-report-updated! conn t))
           (log/info "Commands:"
                     (describe-lines resolved)
                     (str "(by " from-addr ")")))
@@ -1227,9 +1227,14 @@
                               (= :report/acked (:attr d))
                               reporter
                               (= (some-> (:email-address d) str/lower-case) reporter)))
-        word-result   (cond-> (merge implicit body-words)
-                        self-ack? (dissoc :report/acked)
-                        :always   (filter-words-by-scope overrides is-maint? fail-ctx))
+        ;; Scope-filter implicit ack/own without a failure-ctx: the user
+        ;; never typed those commands, so a denial must not surface as an
+        ;; :insufficient-scope failure in maintainer notifications.
+        word-result   (cond-> (merge (filter-words-by-scope implicit overrides
+                                                            is-maint? nil)
+                                     (filter-words-by-scope body-words overrides
+                                                            is-maint? fail-ctx))
+                        self-ack? (dissoc :report/acked))
         keep-line?    (case line-filter
                         :carrier-only #(contains? carrier-eligible-ids (:id %))
                         :no-carrier   #(not (contains? carrier-eligible-ids (:id %)))

@@ -28,10 +28,13 @@
                         :where [?s :series/id ?sid]
                         [(clojure.string/starts-with? ?sid ?prefix)]]
                       db base)
-        ;; "base" itself counts as suffix 1; "base#N" yields N.
+        ;; "base" itself counts as suffix 1; "base#N" yields N.  The
+        ;; starts-with? query prefix also matches longer totals
+        ;; ("t|s|5" matches "t|s|55#3"), so re-check the boundary here.
         suffix-n (fn [sid]
-                   (if (= sid base)
-                     1
+                   (cond
+                     (= sid base) 1
+                     (str/starts-with? sid (str base "#"))
                      (some-> (re-find #"#(\d+)$" sid) second parse-long)))
         max-n    (reduce max 0 (keep suffix-n existing))]
     (if (zero? max-n) base (str base "#" (inc max-n)))))

@@ -22,9 +22,10 @@
 ;; ---------------------------------------------------------------------------
 
 (defn parse-size
-  "\"10MB\" → bytes (supports KB/MB/GB).  Returns nil on bad input."
+  "\"10MB\" → bytes (supports KB/MB/GB, internal spaces tolerated).
+  Returns nil on bad input."
   [s]
-  (let [s (str/upper-case (str/trim (str s)))]
+  (let [s (str/replace (str/upper-case (str s)) #"\s+" "")]
     (cond
       (str/ends-with? s "GB") (some-> (parse-long (str/replace s #"GB$" "")) (* 1024 1024 1024))
       (str/ends-with? s "MB") (some-> (parse-long (str/replace s #"MB$" "")) (* 1024 1024))
@@ -66,7 +67,11 @@
     :or   {level :warn max-size "10MB" backlog 5}}]
   (when file
     (io/make-parents file)
-    (let [max-bytes (parse-size max-size)]
+    (let [max-bytes (or (parse-size max-size)
+                        ;; nil would NPE in rotate-log! on every append.
+                        (do (log/warn "Invalid :max-size" (pr-str max-size)
+                                      "-- falling back to 10MB")
+                            (parse-size "10MB")))]
       (log/merge-config!
        {:appenders
         {:file

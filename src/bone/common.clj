@@ -1144,7 +1144,7 @@
 (defn parse-cli-args
   "Parse common CLI flags into a map.
   Recognises: -o/--output, -n/--source, -p/--min-priority, -s/--min-status,
-  --json, --dir, --force, --only-open, --theme, --page-size, --closed-retention,
+  --json, --dir, --force, --theme, --page-size, --closed-retention,
   --topics-filter.
   Any leading non-flag token is captured as :format.
   Warns when a valued flag is missing its argument or followed by another flag."
@@ -1153,7 +1153,6 @@
     (cond
       (nil? a)                        opts
       (= "--force" a)                 (recur (assoc opts :force-all? true) more)
-      (= "--only-open" a)             (recur (assoc opts :only-open? true) more)
       (= "--index-only" a)            (recur (assoc opts :format "root") more)
       (contains? valued-flags a)      (let [[k xf] (valued-flags a)]
                                         (case (check-flag-value a v)

@@ -592,13 +592,32 @@
   [mailbox-cfg db-conn ingest-cfg cli-fetch-map config-path]
   (loop [backoff-ms 1000]
     (when-not (shutting-down?)
-      (let [{:keys [source-map sources]} (load-context db-conn config-path)
-            {:keys [mailbox-cfg mailbox-name folder mailbox-type fetch-opts ingest-opts]}
-            (live-run-opts mailbox-cfg ingest-cfg cli-fetch-map config-path)
-            ctx (make-run-ctx db-conn mailbox-name source-map sources ingest-opts)
-            src (open-mailbox mailbox-cfg)]
+      (let [;; Config reload + connection run inside try: a half-edited
+            ;; config.edn (edn/read-string throws) or a bad :fetch value
+            ;; must back off and retry, not kill this watch loop for good.
+            setup (try
+                    (let [{:keys [source-map sources]} (load-context db-conn config-path)
+                          {:keys [mailbox-cfg mailbox-name folder mailbox-type
+                                  fetch-opts ingest-opts]}
+                          (live-run-opts mailbox-cfg ingest-cfg cli-fetch-map config-path)
+                          ctx (make-run-ctx db-conn mailbox-name source-map sources
+                                            ingest-opts)]
+                      {:mailbox-name mailbox-name
+                       :folder       folder
+                       :mailbox-type mailbox-type
+                       :fetch-opts   fetch-opts
+                       :source-map   source-map
+                       :sources      sources
+                       :ctx          ctx
+                       :src          (open-mailbox mailbox-cfg)})
+                    (catch Exception e
+                      (log/error e "Mailbox" (pr-str (:name mailbox-cfg))
+                                 "-- setup failed:" (blog/exception-msg e))
+                      nil))
+            {:keys [mailbox-name folder mailbox-type fetch-opts
+                    source-map sources ctx src]} setup]
         (if-not src
-          (do (log/error "Mailbox" (pr-str mailbox-name)
+          (do (log/error "Mailbox" (pr-str (or mailbox-name (:name mailbox-cfg)))
                          "-- connection failed, retrying in" (/ backoff-ms 1000) "s")
               (Thread/sleep backoff-ms)
               (recur (min (* backoff-ms 2) max-backoff-ms)))
