@@ -13,6 +13,7 @@
 ;; single sensible default).  --dir defaults to the directory of -o.
 
 (require '[clojure.java.io :as io]
+         '[clojure.java.shell]
          '[clojure.string :as str]
          '[hiccup2.core :as h]
          '[taoensso.timbre :as log]
@@ -158,6 +159,30 @@
                           (drop (inc t1-end) lines))))
 
       :else org-text)))
+
+;; ---------------------------------------------------------------------------
+;; Version stamp
+;; ---------------------------------------------------------------------------
+
+(defn- bone-version
+  "BONE version for display in docs.html: `git describe --tags` from
+  the checkout running the export (releases are tagged, so this reads
+  e.g. \"0.92.6\", or \"0.92.6-3-gabc1234\" between releases).
+  Returns nil when git or the repo is unavailable."
+  []
+  (try
+    (let [{:keys [exit out]} (clojure.java.shell/sh "git" "describe" "--tags" "--always")]
+      (when (zero? exit)
+        (not-empty (str/trim out))))
+    (catch Exception _ nil)))
+
+(defn- substitute-version
+  "Replace the [version] placeholder with the running BONE version,
+  or drop it (with its leading space) when the version is unknown."
+  [org-text version]
+  (if version
+    (str/replace org-text "[version]" version)
+    (str/replace org-text " [version]" "")))
 
 ;; ---------------------------------------------------------------------------
 ;; Minimal org -> HTML conversion
@@ -465,6 +490,7 @@
       maint-html  (build-maintainers-html db source-name)
       config-html (build-configuration-html config source-name)
       org-text    (-> (slurp "resources/docs-tpl.org")
+                      (substitute-version (bone-version))
                       (substitute-template labels cmds prefix)
                       (filter-feed-links effective-dir))
       body-html   (cond-> (org->html org-text)

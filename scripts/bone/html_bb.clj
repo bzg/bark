@@ -145,14 +145,6 @@
    [:span#theme-icon "🌙"]])
 
 ;; ---------------------------------------------------------------------------
-;; Text logo
-;; ---------------------------------------------------------------------------
-
-(def bone-logo
-  "Text logo for the nav bar."
-  "8==8")
-
-;; ---------------------------------------------------------------------------
 ;; Shared nav bar (hiccup vector)
 ;; ---------------------------------------------------------------------------
 
@@ -163,14 +155,13 @@
    ["data"    "Data"    "data.html"]])
 
 (defn nav-bar
-  "Render a <nav> with BONE logo, title, and Reports/Docs/Data links.
+  "Render a <nav> with title and Reports/Docs/Data links.
   `current` is the id of the active page (bolded).  When `current` is
   nil, the per-source page links are omitted -- useful on the root
   index where those paths live one directory deeper."
   [title current]
   [:nav
-   [:ul [:li [:a {:href "index.html" :style "display:flex;align-items:center;gap:0.5rem;text-decoration:none;color:inherit"}
-              [:span.bone-logo bone-logo]
+   [:ul [:li [:a {:href "index.html" :style "text-decoration:none;color:inherit"}
               [:strong title]]]]
    [:ul
     (when current
