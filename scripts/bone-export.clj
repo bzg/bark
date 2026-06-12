@@ -1504,8 +1504,9 @@
   "Export a single source in the given format(s).
   Always produces all-open.json and all-closed.json (used by index.html).
   When format is \"all\", per-type feeds respect :export-formats from config.
-  `changed-types` (optional set of keywords) limits per-type file regeneration
-  to those types during incremental export; aggregate files are always rebuilt."
+  `changed-types` (optional map {report-type count}, used as a set-like
+  predicate) limits per-type file regeneration to those types during
+  incremental export; aggregate files are always rebuilt."
   [format reports base-dir source-name source-map maintainers-map cli-extra
    & {:keys [changed-types since regen-shell? regen-docs?]
       :or   {regen-shell? true regen-docs? true}}]
@@ -1631,7 +1632,7 @@
                                                  (str/join ", " (keys source-map)))
                                       (System/exit 1)))
                                 (mapv :name (:sources config)))
-              ;; Per-source, per-type change detection: {source -> #{types}}.
+              ;; Per-source, per-type change detection: {source -> {type count}}.
               ;; Enables both source-level skip and intra-source per-type skip.
               changed-st      (when (and incremental? last-export)
                                 (changed-source-types-since db last-export))
@@ -1753,8 +1754,9 @@
             ;; Cron notification: a single concise stderr line when real work
             ;; was published, so the cron mail fires iff new info was exported
             ;; (routine "Wrote ..." progress now goes to stdout).  On an
-            ;; incremental run we name the changed report types per source
-            ;; (what's new); a full re-export is flagged as such.
+            ;; incremental run we name the report types changed in the DB per
+            ;; source (before per-source export filters, so a count may exceed
+            ;; what gets published); a full re-export is flagged as such.
             (when (seq exported-srcs)
               (binding [*out* *err*]
                 (println
