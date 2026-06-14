@@ -125,6 +125,16 @@
  :report/has-ics               {:db/valueType :db.type/boolean}
  :report/has-text-attachments  {:db/valueType :db.type/boolean}
  :report/updated-at            {:db/valueType :db.type/instant}
+ ;; Wall-clock instant the report was first created (ingested), as opposed
+ ;; to the originating email's date (`:report/email` -> :email/date-sent),
+ ;; which can be back- or future-dated.  Lets the cron notification count
+ ;; genuine additions reliably, regardless of the email's Date header.
+ :report/created-at            {:db/valueType :db.type/instant}
+ ;; Like :report/updated-at but bumped only on *effective* changes to the
+ ;; report itself (status, flags, relations, expiry, ...), never on mere
+ ;; thread growth (a reply attached as a descendant).  Lets the cron
+ ;; notification tell genuine report modifications from contextual noise.
+ :report/state-changed-at      {:db/valueType :db.type/instant}
 
  ;; --- Global metadata (export change tracking) ---
  :meta/ident         {:db/valueType :db.type/string

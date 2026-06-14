@@ -177,7 +177,8 @@
            :report/message-id message-id
            :report/last-activity (or email-date now)}
           (remove (comp nil? val))
-          {:report/last-activity-address (:email/author-address email)
+          {:report/created-at now
+           :report/last-activity-address (:email/author-address email)
            :report/version (:version report-info)
            :report/topic (when (:topic report-info) email-eid)
            :report/topic-value (:topic report-info)
@@ -498,7 +499,11 @@
             (ensure-participant! conn source-name from-addr
                                  (:email/author-name email) (:email/date-sent email)
                                  :contributor? (= :patch (:type report-info)))
-            (tracking/bump-report-updated! conn rid)
+            ;; create-report! stamps :report/created-at, which the cron
+            ;; notification uses to report this as a new addition rather than
+            ;; a modification -- so bump updated-at only (to drive re-export),
+            ;; not state-changed-at.
+            (tracking/bump-report-updated! conn rid false)
             [rid report-info]))
 
       (:denied-channel :denied-role)
@@ -518,7 +523,10 @@
   [conn eid email from-addr parent-eids]
   (doseq [rid parent-eids]
     (add-descendant! conn rid eid (:email/date-sent email) from-addr))
-  (tracking/bump-report-updated! conn parent-eids))
+  ;; A threaded reply grows the report's context but does not change the
+  ;; report's own state -- bump updated-at (for re-export) only, not
+  ;; state-changed-at.
+  (tracking/bump-report-updated! conn parent-eids false))
 
 (defn- rids->type+source
   "Pull `[report-type source-name]` for each report eid.  Returns a

@@ -11,14 +11,25 @@
 (def ^:const meta-ident "global")
 
 (defn bump-report-updated!
-  "Set :report/updated-at and :meta/last-modified to now.
+  "Mark reports as changed for incremental export.
+  Always sets :report/updated-at (which drives source re-export) and the
+  global :meta/last-modified to now.  When `state-change?` is true (the
+  default), also sets :report/state-changed-at -- the timestamp of the
+  last *effective* change to the report itself (status, flags, relations,
+  expiry...).  Pass false for purely contextual changes, such as a new
+  reply threaded under the report or the report's own creation: these must
+  trigger re-export but are not modifications of the report's own state,
+  and the cron notification reports them separately (or not at all).
   `report-eid` can be a single eid or a collection of eids."
-  [conn report-eid]
-  (let [now  (Date.)
-        eids (if (coll? report-eid) report-eid [report-eid])]
-    (d/transact! conn (into [{:meta/ident meta-ident :meta/last-modified now}]
-                            (map (fn [eid] {:db/id eid :report/updated-at now}))
-                            eids))))
+  ([conn report-eid] (bump-report-updated! conn report-eid true))
+  ([conn report-eid state-change?]
+   (let [now  (Date.)
+         eids (if (coll? report-eid) report-eid [report-eid])
+         base (cond-> {:report/updated-at now}
+                state-change? (assoc :report/state-changed-at now))]
+     (d/transact! conn (into [{:meta/ident meta-ident :meta/last-modified now}]
+                             (map (fn [eid] (assoc base :db/id eid)))
+                             eids)))))
 
 (defn bump-global-modified!
   "Bump :meta/last-modified without targeting a specific report."

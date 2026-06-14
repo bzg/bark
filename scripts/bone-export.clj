@@ -63,7 +63,9 @@
                                  dedupe-vevents dedupe-vtimezones build-vcalendar]]
             [bone.common-bb :refer [load-datalevin-pod! all-reports dq dpull
                                     fetch-attachment-data get-tenures tenures-snapshot
-                                    get-last-modified changed-source-types-since]]
+                                    get-last-modified changed-source-types-since
+                                    new-source-types-since
+                                    state-changed-source-types-since]]
             [bone.html-bb :refer [set-theme! html-head footer-css bone-footer
                                   wrap-js spit-html theme-toggle-js nav-bar]]
             [hiccup2.core :as h]))
@@ -165,6 +167,24 @@
   [type-counts]
   (str/join " " (map (fn [[t c]] (str (name t) "×" c))
                      (sort-by (comp name key) type-counts))))
+
+(defn- fmt-change-summary
+  "Format a source's change counts for the cron line, telling genuine
+  additions from effective modifications: \"new: patch×1; updated: bug×2\".
+  `new-counts` are newly created reports; `state-counts` are reports whose
+  own state changed (the new ones are subtracted out so each report is
+  listed once).  Returns nil when nothing new or modified -- the caller
+  then prints the bare source name (re-export was triggered by thread
+  growth alone)."
+  [new-counts state-counts]
+  (let [updated (reduce-kv (fn [m t c]
+                             (let [u (- c (get new-counts t 0))]
+                               (cond-> m (pos? u) (assoc t u))))
+                           {} (or state-counts {}))
+        parts   (cond-> []
+                  (seq new-counts) (conj (str "new: " (fmt-type-counts new-counts)))
+                  (seq updated)    (conj (str "updated: " (fmt-type-counts updated))))]
+    (when (seq parts) (str/join "; " parts))))
 
 ;; ---------------------------------------------------------------------------
 ;; Atomic export via staging directory
@@ -1672,6 +1692,14 @@
               ;; Enables both source-level skip and intra-source per-type skip.
               changed-st      (when (and incremental? last-export)
                                 (changed-source-types-since db last-export))
+              ;; Split the cron notification's counts: genuine additions
+              ;; (new reports, by origin-email date) vs effective report
+              ;; modifications (status/flags/relations/expiry), excluding
+              ;; mere thread growth.  changed-st still drives re-export.
+              new-st          (when (and incremental? last-export)
+                                (new-source-types-since db last-export))
+              state-st        (when (and incremental? last-export)
+                                (state-changed-source-types-since db last-export))
               export-names    (if (and incremental? (seq changed-st))
                                 ;; Maintainers-only changes don't bump any
                                 ;; report, so they never reach changed-st --
@@ -1810,17 +1838,28 @@
             ;; incremental run we name the report types changed in the DB per
             ;; source (before per-source export filters, so a count may exceed
             ;; what gets published); a full re-export is flagged as such.
-            (when (seq exported-srcs)
-              (binding [*out* *err*]
-                (println
-                 (str "bone: exported "
-                      (str/join ", "
-                                (map (fn [s]
-                                       (if-let [counts (get changed-st s)]
-                                         (str s " (" (fmt-type-counts counts) ")")
-                                         s))
-                                     exported-srcs))
-                      (when-not incremental? " [full re-export]"))))))
+            ;; Incremental runs triggered solely by thread replies (re-export
+            ;; needed, but no report added or modified) stay silent: we only
+            ;; mail when a source has a genuine add/modification, or on a full
+            ;; re-export.
+            (let [summaries (into {}
+                                  (keep (fn [s]
+                                          (when-let [sm (fmt-change-summary
+                                                         (get new-st s) (get state-st s))]
+                                            [s sm])))
+                                  exported-srcs)]
+              (when (and (seq exported-srcs)
+                         (or (not incremental?) (seq summaries)))
+                (binding [*out* *err*]
+                  (println
+                   (str "bone: exported "
+                        (str/join ", "
+                                  (map (fn [s]
+                                         (if-let [summary (get summaries s)]
+                                           (str s " (" summary ")")
+                                           s))
+                                       exported-srcs))
+                        (when-not incremental? " [full re-export]")))))))
           (save-last-export! run-started))))
     (finally
       (d/close conn))))
