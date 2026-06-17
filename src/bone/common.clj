@@ -225,28 +225,29 @@
   (or (some-> (ics-property block "SEQUENCE") parse-long) 0))
 
 (defn dedupe-vevents
-  "Deduplicate VEVENT blocks by [UID, RECURRENCE-ID], keeping the highest
-  SEQUENCE at the first-seen position.  RECURRENCE-ID is part of the key so
-  per-occurrence overrides of a recurring event (same UID, distinct
-  RECURRENCE-ID) survive rather than collapsing into the master.  Blocks
-  without a UID cannot be correlated and are all kept."
+  "Deduplicate VEVENT blocks, preserving first-seen order.  Blocks with a
+  UID are correlated by [UID, RECURRENCE-ID], keeping the highest SEQUENCE;
+  RECURRENCE-ID is part of the key so per-occurrence overrides of a
+  recurring event (same UID, distinct RECURRENCE-ID) survive rather than
+  collapsing into the master.  Blocks without a UID cannot be correlated,
+  so they are deduplicated only when byte-for-byte identical -- the
+  normalized block text itself is the key."
   [vevents]
-  (let [vkey (fn [v] (when-let [uid (vevent-uid v)]
-                       [uid (vevent-recurrence-id v)]))
+  (let [vkey (fn [v] (if-let [uid (vevent-uid v)]
+                       [uid (vevent-recurrence-id v)]
+                       v))
         best (reduce (fn [m v]
-                       (if-let [k (vkey v)]
+                       (let [k (vkey v)]
                          (if (and (m k) (>= (vevent-sequence (m k)) (vevent-sequence v)))
                            m
-                           (assoc m k v))
-                         m))
+                           (assoc m k v))))
                      {} vevents)]
     (first
      (reduce (fn [[acc seen] v]
-               (if-let [k (vkey v)]
+               (let [k (vkey v)]
                  (if (seen k)
                    [acc seen]
-                   [(conj acc (best k)) (conj seen k)])
-                 [(conj acc v) seen]))
+                   [(conj acc (best k)) (conj seen k)])))
              [[] #{}] vevents))))
 
 (defn dedupe-vtimezones
@@ -297,7 +298,14 @@
 (defn build-vcalendar
   "Assemble a complete VCALENDAR document (CRLF-terminated) wrapping the
   given VTIMEZONE and VEVENT blocks.  Returns nil when there is no event
-  to publish."
+  to publish.
+
+  The calendar is always emitted with METHOD:PUBLISH: a BONE export is a
+  read-only subscription feed, not a scheduling exchange.  Any METHOD from
+  the source (REQUEST, REPLY, CANCEL...) is intentionally dropped -- those
+  belong to an interactive iTIP workflow BONE does not participate in.  A
+  cancelled occurrence is still represented faithfully when its VEVENT
+  carries STATUS:CANCELLED, which is preserved verbatim inside the block."
   [cal-name vevents vtimezones]
   (when (seq vevents)
     (str "BEGIN:VCALENDAR\r\n"

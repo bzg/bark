@@ -93,10 +93,15 @@
       (is (= [v1] (common/dedupe-vevents [v0 v1]))))
     (testing "result keeps first-seen UID order"
       (is (= [v1 vb] (common/dedupe-vevents [v0 vb v1]))))
-    (testing "UID-less blocks are all kept"
+    (testing "distinct UID-less blocks are all kept"
       (let [n1 "BEGIN:VEVENT\r\nSUMMARY:x\r\nEND:VEVENT\r\n"
             n2 "BEGIN:VEVENT\r\nSUMMARY:y\r\nEND:VEVENT\r\n"]
         (is (= [n1 n2] (common/dedupe-vevents [n1 n2])))))
+    (testing "identical UID-less blocks collapse to a single first-seen copy"
+      (let [n1 "BEGIN:VEVENT\r\nSUMMARY:x\r\nEND:VEVENT\r\n"
+            n2 "BEGIN:VEVENT\r\nSUMMARY:y\r\nEND:VEVENT\r\n"]
+        (is (= [n1] (common/dedupe-vevents [n1 n1])))
+        (is (= [n1 n2] (common/dedupe-vevents [n1 n2 n1])))))
 
     ;; Recurring event: the master and a per-occurrence override share the
     ;; same UID but differ by RECURRENCE-ID -- both must survive.
