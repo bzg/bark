@@ -86,9 +86,9 @@
    {:id :undeadline  :kind :annotation :action :unset-deadline :attr :report/deadline :scope :setter-or-maintainer
     :syntax "No deadline" :report-types #{:bug :patch :request}}
    {:id :expiry      :kind :annotation :action :set-expiry   :attr :report/expiry :scope :user
-    :syntax "Expiry" :param :date-or-duration :report-types #{:bug :patch :request}}
+    :syntax "Expiry" :param :date-or-duration}
    {:id :unexpiry    :kind :annotation :action :unset-expiry :attr :report/expiry :scope :setter-or-maintainer
-    :syntax "No expiry" :report-types #{:bug :patch :request}}
+    :syntax "No expiry"}
    {:id :topic       :kind :annotation :action :set-topic   :attr :report/topic :scope :user
     :syntax "Topic" :param :word}
    {:id :untopic     :kind :annotation :action :unset-topic :attr :report/topic :scope :setter-or-maintainer

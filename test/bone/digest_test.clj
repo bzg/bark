@@ -686,8 +686,11 @@
                 result (commands/detect-lines :bug "Expiry: 1m 2w\n" nil email-date)]
             (is (= 1 (count result)))
             (is (= (parse-date-iso "2026-02-14") (:date (first result)))))
-          ;; Expiry not applicable to announcements
-          (is (= [] (commands/detect-lines :announcement "Expiry: 2026-09-01\n"))))
+          ;; Expiry now applies to all report types, including announcements
+          (let [result (commands/detect-lines :announcement "Expiry: 2026-09-01\n")]
+            (is (= 1 (count result)))
+            (is (= :set-expiry (:action (first result))))
+            (is (= (parse-date-iso "2026-09-01") (:date (first result))))))
 
         ;; --- resolve-commands unit tests ---
         (testing "resolve-commands"

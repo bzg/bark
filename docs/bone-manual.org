@@ -624,8 +624,8 @@ and inter-report links.
 |-------------+---------------------------------------+----------------------+---------------------|
 | =:deadline=   | =Deadline: 2025-03-19= or =Deadline: 30d= | any user             | bug, patch, request |
 | =:undeadline= | =No deadline=                           | setter or maintainer | bug, patch, request |
-| =:expiry=     | =Expiry: 2025-06-15= or =Expiry: 30d=     | any user             | bug, patch, request |
-| =:unexpiry=   | =No expiry=                             | setter or maintainer | bug, patch, request |
+| =:expiry=     | =Expiry: 2025-06-15= or =Expiry: 30d=     | any user             | all types           |
+| =:unexpiry=   | =No expiry=                             | setter or maintainer | all types           |
 
 **** Relations
 
