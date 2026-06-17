@@ -133,6 +133,29 @@
     (is (= "plain subject" (common/escape-ics-text "plain subject")))
     (is (nil? (common/escape-ics-text nil)))))
 
+(deftest fold-ics-line-test
+  (testing "short line is returned unchanged"
+    (is (= "X-WR-CALNAME:hi" (common/fold-ics-line "X-WR-CALNAME:hi"))))
+  (testing "nil-safe"
+    (is (nil? (common/fold-ics-line nil))))
+  (testing "long line is folded; no content line exceeds 75 octets"
+    (let [line   (str "X-WR-CALNAME:" (apply str (repeat 200 "a")))
+          folded (common/fold-ics-line line)]
+      (is (str/includes? folded "\r\n "))
+      (is (every? #(<= (alength (.getBytes ^String % "UTF-8")) 75)
+                  (str/split folded #"\r\n")))))
+  (testing "unfolding (CRLF + leading space removed) restores the original"
+    (let [line   (str "X-WR-CALNAME:" (apply str (repeat 200 "a")))
+          folded (common/fold-ics-line line)]
+      (is (= line (str/replace folded #"\r\n " "")))))
+  (testing "a multi-octet character is never split across a fold"
+    ;; 40 'e accent aigu' = 80 UTF-8 octets, forcing at least one fold.
+    (let [line   (str "X-WR-CALNAME:" (apply str (repeat 40 "é")))
+          folded (common/fold-ics-line line)]
+      (is (str/includes? folded "\r\n "))
+      ;; round-trips cleanly: no é was cut in half
+      (is (= line (str/replace folded #"\r\n " ""))))))
+
 (deftest build-vcalendar-test
   (let [vevent "BEGIN:VEVENT\r\nUID:a@x\r\nEND:VEVENT\r\n"
         vtz    "BEGIN:VTIMEZONE\r\nTZID:Europe/Paris\r\nEND:VTIMEZONE\r\n"]
@@ -144,7 +167,11 @@
         (is (str/ends-with? doc "END:VCALENDAR\r\n"))
         (is (str/includes? doc "X-WR-CALNAME:src events\r\n"))
         (is (< (.indexOf doc "BEGIN:VTIMEZONE")
-               (.indexOf doc "BEGIN:VEVENT")))))))
+               (.indexOf doc "BEGIN:VEVENT")))))
+    (testing "a long calendar name is folded so no line exceeds 75 octets"
+      (let [doc (common/build-vcalendar (apply str (repeat 120 "x")) [vevent] [])]
+        (is (every? #(<= (alength (.getBytes ^String % "UTF-8")) 75)
+                    (str/split doc #"\r\n")))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Strict label regex: case-sensitive tag, mandatory `\s` or EOL after `]`

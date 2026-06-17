@@ -59,6 +59,7 @@
                                  report-type-spec type->plural
                                  votes-by-report vote-counts
                                  ics-file? text-attachment? email-body-text
+                                 normalize-ics-eol
                                  extract-vevents extract-vtimezones
                                  dedupe-vevents dedupe-vtimezones build-vcalendar]]
             [bone.common-bb :refer [load-datalevin-pod! all-reports dq dpull
@@ -507,8 +508,8 @@
 
 (defn- event-ics-files
   "The ICS files to publish for one announcement, as
-  [{:basename ... :content ...}].  .ics attachments are published
-  verbatim; when an announcement carries no .ics attachment but has
+  [{:basename ... :content ...}].  .ics attachments are published as-is
+  (only CRLF-normalized); when an announcement carries no .ics attachment but has
   inline VEVENT content, a single synthetic inline.ics is built from the
   body (VEVENTs deduped by UID, referenced VTIMEZONEs carried along).
   Shared by dump-events! (writes) and report-attachment-files (lists) so
@@ -518,8 +519,11 @@
                                (:attachment/data %))
                          (:email/attachments att-email))]
     (if (seq ics-atts)
+      ;; Attachments are published essentially as-is; only line endings are
+      ;; normalized to CRLF (RFC 5545 requires it) so per-report files and
+      ;; the combined calendars agree on EOLs.
       (mapv (fn [att] {:basename (attachment-basename att)
-                       :content  (:attachment/data att)})
+                       :content  (normalize-ics-eol (:attachment/data att))})
             ics-atts)
       (let [body    (email-body-text att-email)
             vevents (dedupe-vevents (extract-vevents body))]

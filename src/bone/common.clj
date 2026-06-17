@@ -275,6 +275,25 @@
         (str/replace "," "\\,")
         (str/replace #"\r\n?|\n" "\\\\n"))))
 
+(defn fold-ics-line
+  "Fold a single content line to <=75 octets per RFC 5545 section 3.1,
+  inserting a CRLF followed by one space at each fold point.  Counts
+  UTF-8 octets (not chars) and never splits a multi-octet character.
+  Returns the folded line without a trailing CRLF.  nil-safe."
+  [line]
+  (when line
+    (let [limit 75]
+      (loop [chars (seq line)
+             width 0
+             ^StringBuilder out (StringBuilder.)]
+        (if (empty? chars)
+          (.toString out)
+          (let [c (first chars)
+                n (alength (.getBytes (str c) "UTF-8"))]
+            (if (> (+ width n) limit)
+              (recur (rest chars) (+ 1 n) (-> out (.append "\r\n ") (.append c)))
+              (recur (rest chars) (+ width n) (.append out c)))))))))
+
 (defn build-vcalendar
   "Assemble a complete VCALENDAR document (CRLF-terminated) wrapping the
   given VTIMEZONE and VEVENT blocks.  Returns nil when there is no event
@@ -285,7 +304,7 @@
          "VERSION:2.0\r\n"
          "PRODID:-//BONE//Event Export//EN\r\n"
          "METHOD:PUBLISH\r\n"
-         "X-WR-CALNAME:" (escape-ics-text cal-name) "\r\n"
+         (fold-ics-line (str "X-WR-CALNAME:" (escape-ics-text cal-name))) "\r\n"
          (str/join "" vtimezones)
          (str/join "" vevents)
          "END:VCALENDAR\r\n")))
