@@ -96,7 +96,19 @@
     (testing "UID-less blocks are all kept"
       (let [n1 "BEGIN:VEVENT\r\nSUMMARY:x\r\nEND:VEVENT\r\n"
             n2 "BEGIN:VEVENT\r\nSUMMARY:y\r\nEND:VEVENT\r\n"]
-        (is (= [n1 n2] (common/dedupe-vevents [n1 n2])))))))
+        (is (= [n1 n2] (common/dedupe-vevents [n1 n2])))))
+
+    ;; Recurring event: the master and a per-occurrence override share the
+    ;; same UID but differ by RECURRENCE-ID -- both must survive.
+    (let [master   "BEGIN:VEVENT\r\nUID:r@x\r\nDTSTART:20260601T100000Z\r\nRRULE:FREQ=WEEKLY\r\nEND:VEVENT\r\n"
+          occ      "BEGIN:VEVENT\r\nUID:r@x\r\nRECURRENCE-ID:20260608T100000Z\r\nSEQUENCE:0\r\nDTSTART:20260608T150000Z\r\nEND:VEVENT\r\n"
+          occ-v1   "BEGIN:VEVENT\r\nUID:r@x\r\nRECURRENCE-ID:20260608T100000Z\r\nSEQUENCE:1\r\nDTSTART:20260608T160000Z\r\nEND:VEVENT\r\n"]
+      (testing "master and per-occurrence override (same UID, distinct RECURRENCE-ID) are both kept"
+        (is (= [master occ] (common/dedupe-vevents [master occ]))))
+      (testing "two updates of the same occurrence collapse to the highest SEQUENCE"
+        (is (= [occ-v1] (common/dedupe-vevents [occ occ-v1]))))
+      (testing "master is independent of its occurrence overrides"
+        (is (= [master occ-v1] (common/dedupe-vevents [master occ occ-v1])))))))
 
 (deftest dedupe-vtimezones-test
   (let [paris  "BEGIN:VTIMEZONE\r\nTZID:Europe/Paris\r\nEND:VTIMEZONE\r\n"

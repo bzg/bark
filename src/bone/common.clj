@@ -213,29 +213,39 @@
 
 (defn vevent-uid [block] (ics-property block "UID"))
 
+(defn vevent-recurrence-id
+  "RECURRENCE-ID of a VEVENT block, or nil.  Distinguishes the override of
+  a single occurrence from the recurring master that shares its UID."
+  [block]
+  (ics-property block "RECURRENCE-ID"))
+
 (defn vevent-sequence
   "SEQUENCE number of a VEVENT block (0 when absent or unparseable)."
   [block]
   (or (some-> (ics-property block "SEQUENCE") parse-long) 0))
 
 (defn dedupe-vevents
-  "Deduplicate VEVENT blocks by UID, keeping the highest SEQUENCE at the
-  first-seen position.  Blocks without a UID cannot be correlated and are
-  all kept."
+  "Deduplicate VEVENT blocks by [UID, RECURRENCE-ID], keeping the highest
+  SEQUENCE at the first-seen position.  RECURRENCE-ID is part of the key so
+  per-occurrence overrides of a recurring event (same UID, distinct
+  RECURRENCE-ID) survive rather than collapsing into the master.  Blocks
+  without a UID cannot be correlated and are all kept."
   [vevents]
-  (let [best (reduce (fn [m v]
-                       (if-let [uid (vevent-uid v)]
-                         (if (and (m uid) (>= (vevent-sequence (m uid)) (vevent-sequence v)))
+  (let [vkey (fn [v] (when-let [uid (vevent-uid v)]
+                       [uid (vevent-recurrence-id v)]))
+        best (reduce (fn [m v]
+                       (if-let [k (vkey v)]
+                         (if (and (m k) (>= (vevent-sequence (m k)) (vevent-sequence v)))
                            m
-                           (assoc m uid v))
+                           (assoc m k v))
                          m))
                      {} vevents)]
     (first
      (reduce (fn [[acc seen] v]
-               (if-let [uid (vevent-uid v)]
-                 (if (seen uid)
+               (if-let [k (vkey v)]
+                 (if (seen k)
                    [acc seen]
-                   [(conj acc (best uid)) (conj seen uid)])
+                   [(conj acc (best k)) (conj seen k)])
                  [(conj acc v) seen]))
              [[] #{}] vevents))))
 
