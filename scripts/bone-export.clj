@@ -280,15 +280,29 @@
                 (.before closed-at cutoff-date))))
           reports))
 
+(defn- resolve-closed-retention [v]
+  (when v
+    (try
+      (or (parse-cutoff-date v)
+          (do
+            (log/error "Invalid --closed-retention:" v
+                       "(expected ISO date or duration like 90d, 6m, 1y)")
+            (System/exit 1)))
+      (catch Exception e
+        (log/error "Invalid --closed-retention:" v "--" (.getMessage e))
+        (System/exit 1)))))
+
 (defn- resolve-topics-filter
   "Parse a topics filter value into a set of lower-cased topic strings.
   Accepts a comma-separated string (CLI) or a vector (config.edn).
   Returns nil when no filter is active."
   [v]
   (when v
-    (let [topics (if (string? v)
-                   (map str/trim (str/split v #","))
-                   (map str v))]
+    (let [topics (->> (if (string? v)
+                        (str/split v #",")
+                        v)
+                      (map #(str/trim (str %)))
+                      (remove str/blank?))]
       (when (seq topics)
         (set (map str/lower-case topics))))))
 
@@ -1099,13 +1113,14 @@
   ([reports out-dir source-name source-map maintainers-map basename title-label]
    (let [data     (map-reports reports source-map maintainers-map)
          filename (str out-dir "/" basename)]
-     (when (seq data)
+     (if (seq data)
        (let [entries (str/join "\n" (map report->org-entry data))]
          (spit filename
                (str "#+TITLE: BONE " source-name " " title-label "\n"
                     "#+DATE: " (java.time.LocalDate/now) "\n\n"
                     entries))
-         (log/info "Wrote" (count data) "reports to" filename))))))
+         (log/info "Wrote" (count data) "reports to" filename))
+       (delete-stale-file! out-dir basename)))))
 
 (defn dump-votes!
   "Export votes.json for a single source.
@@ -1246,26 +1261,36 @@
   (let [events        (ics-announcements reports)
         open-events   (vec (open-reports events))
         closed-events (vec (filter :report/closed events))]
-    (when (seq open-events)
-      (when (fmts "json")
-        (dump-json! open-events reports-dir source-name source-map maintainers-map
-                    "events.json"))
-      (when (fmts "org")
-        (dump-org! open-events reports-dir source-name source-map maintainers-map
-                   "events.org" "events"))
-      (when (fmts "rss")
-        (dump-rss! open-events reports-dir source-name source-map maintainers-map
-                   "events.xml" "events")))
-    (when (seq closed-events)
-      (when (fmts "json")
-        (dump-json! closed-events reports-dir source-name source-map maintainers-map
-                    "events-closed.json"))
-      (when (fmts "org")
-        (dump-org! closed-events reports-dir source-name source-map maintainers-map
-                   "events-closed.org" "events (closed)"))
-      (when (fmts "rss")
-        (dump-rss! closed-events reports-dir source-name source-map maintainers-map
-                   "events-closed.xml" "events (closed)")))))
+    (if (seq open-events)
+      (do
+        (when (fmts "json")
+          (dump-json! open-events reports-dir source-name source-map maintainers-map
+                      "events.json"))
+        (when (fmts "org")
+          (dump-org! open-events reports-dir source-name source-map maintainers-map
+                     "events.org" "events"))
+        (when (fmts "rss")
+          (dump-rss! open-events reports-dir source-name source-map maintainers-map
+                     "events.xml" "events")))
+      (do
+        (delete-stale-file! reports-dir "events.json")
+        (delete-stale-file! reports-dir "events.org")
+        (delete-stale-file! reports-dir "events.xml")))
+    (if (seq closed-events)
+      (do
+        (when (fmts "json")
+          (dump-json! closed-events reports-dir source-name source-map maintainers-map
+                      "events-closed.json"))
+        (when (fmts "org")
+          (dump-org! closed-events reports-dir source-name source-map maintainers-map
+                     "events-closed.org" "events (closed)"))
+        (when (fmts "rss")
+          (dump-rss! closed-events reports-dir source-name source-map maintainers-map
+                     "events-closed.xml" "events (closed)")))
+      (do
+        (delete-stale-file! reports-dir "events-closed.json")
+        (delete-stale-file! reports-dir "events-closed.org")
+        (delete-stale-file! reports-dir "events-closed.xml")))))
 
 (defn- report-vcal-blocks
   "Extract {:vevents [...] :vtimezones [...]} (CRLF-normalized) from a
@@ -1294,17 +1319,19 @@
                                   (get att-cache (:report/message-id r)))
                                  :closed? (boolean (:report/closed r))))
                         events)
-        write!    (fn [filename cal-name recs]
+        write!    (fn [basename cal-name recs]
                     (let [vevents (dedupe-vevents (mapcat :vevents recs))]
-                      (when-let [doc (build-vcalendar
-                                      (str source-name " " cal-name)
-                                      vevents
-                                      (dedupe-vtimezones (mapcat :vtimezones recs)))]
-                        (spit filename doc)
-                        (log/info "Wrote" (count vevents) "VEVENT(s) to" filename))))]
-    (write! (str events-dir "/announcements.ics")        "events"          tagged)
-    (write! (str events-dir "/announcements-open.ics")   "events (open)"   (remove :closed? tagged))
-    (write! (str events-dir "/announcements-closed.ics") "events (closed)" (filter :closed? tagged))))
+                      (if-let [doc (build-vcalendar
+                                    (str source-name " " cal-name)
+                                    vevents
+                                    (dedupe-vtimezones (mapcat :vtimezones recs)))]
+                        (let [filename (str events-dir "/" basename)]
+                          (spit filename doc)
+                          (log/info "Wrote" (count vevents) "VEVENT(s) to" filename))
+                        (delete-stale-file! events-dir basename))))]
+    (write! "announcements.ics"        "events"          tagged)
+    (write! "announcements-open.ics"   "events (open)"   (remove :closed? tagged))
+    (write! "announcements-closed.ics" "events (closed)" (filter :closed? tagged))))
 
 (defn dump-html!
   "Generate index.html for a single source.
@@ -1741,7 +1768,7 @@
                                               db))
                         effective-ps    page-size
                         cli-tf          (resolve-topics-filter topics-filter)
-                        drop-cutoff     (parse-cutoff-date closed-retention)
+                        drop-cutoff     (resolve-closed-retention closed-retention)
                         _               (when cli-tf
                                           (log/info "CLI topics filter:" (str/join ", " cli-tf)))
                         _               (when drop-cutoff
@@ -1770,6 +1797,7 @@
                                       slug        (slugify src-name)
                                       staging     (str "public/.staging-" slug)
                                       final-dir   (str "public/" slug)
+                                      exported-before? (.exists (io/file final-dir))
                                       src-changed (when (seq changed-st) (get changed-st src-name))
                                       ;; HTML shells: a full run (incremental? false,
                                       ;; which also covers config/asset changes) rebuilds
@@ -1781,51 +1809,54 @@
                                       regen-docs?  (or (not incremental?)
                                                        (maintainers-changed-since? db src-name last-export)
                                                        (not (.exists (io/file final-dir "docs.html"))))]
-                                  (if (empty? reports)
-                                    (do (log/info "No reports for source" (str "'" src-name "'") ", skipping.")
-                                        exported)
-                                    (do (log/info (str "[" src-name "] " (count reports) " report(s)"
-                                                       " (" (count (open-reports reports)) " open)"
-                                                       (if incremental? " (incremental)" "")))
-                                        (try
+                                  (if (and (empty? reports) (not exported-before?))
+                                    (do
+                                      (log/info "No reports for source" (str "'" src-name "'")
+                                                "and no previous export, skipping.")
+                                      exported)
+                                    (do
+                                      (log/info (str "[" src-name "] " (count reports) " report(s)"
+                                                     " (" (count (open-reports reports)) " open)"
+                                                     (if incremental? " (incremental)" "")))
+                                      (try
+                                        (delete-dir! (io/file staging))
+                                        ;; Seed staging with the previous export so an
+                                        ;; incremental run keeps the files it does not
+                                        ;; rewrite: reports/ (per-type files for
+                                        ;; unchanged types, via :changed-types) and the
+                                        ;; per-mid patches/, text/ and events/ files for
+                                        ;; reports unchanged since last-export (via
+                                        ;; :since).  Aggregate files are always rebuilt.
+                                        ;; Seed on every incremental run, not
+                                        ;; only when src-changed: :since is
+                                        ;; passed below whenever incremental?,
+                                        ;; so unseeded per-mid files would be
+                                        ;; lost in the swap (e.g. a source
+                                        ;; exported for a maintainers-only
+                                        ;; change).
+                                        (when incremental?
+                                          (doseq [sub ["reports" "patches" "text" "events"]]
+                                            (copy-dir! (io/file final-dir sub)
+                                                       (io/file staging sub))))
+                                        ;; Preserve the previous HTML shells when not
+                                        ;; regenerating them: they are top-level files
+                                        ;; not covered by the subdir seed above, and
+                                        ;; would vanish in the atomic swap.
+                                        (preserve-shell! regen-shell? final-dir staging "index.html")
+                                        (preserve-shell! regen-shell? final-dir staging "data.html")
+                                        (preserve-shell! regen-docs?  final-dir staging "docs.html")
+                                        (export-source! format reports staging src-name
+                                                        source-map maintainers-map cli-extra
+                                                        :changed-types src-changed
+                                                        :since (when incremental? last-export)
+                                                        :regen-shell? regen-shell?
+                                                        :regen-docs? regen-docs?)
+                                        (atomic-swap-dir! staging final-dir)
+                                        (catch Exception e
+                                          (log/error e "Export failed for" src-name "-- cleaning up staging dir")
                                           (delete-dir! (io/file staging))
-                                          ;; Seed staging with the previous export so an
-                                          ;; incremental run keeps the files it does not
-                                          ;; rewrite: reports/ (per-type files for
-                                          ;; unchanged types, via :changed-types) and the
-                                          ;; per-mid patches/, text/ and events/ files for
-                                          ;; reports unchanged since last-export (via
-                                          ;; :since).  Aggregate files are always rebuilt.
-                                          ;; Seed on every incremental run, not
-                                          ;; only when src-changed: :since is
-                                          ;; passed below whenever incremental?,
-                                          ;; so unseeded per-mid files would be
-                                          ;; lost in the swap (e.g. a source
-                                          ;; exported for a maintainers-only
-                                          ;; change).
-                                          (when incremental?
-                                            (doseq [sub ["reports" "patches" "text" "events"]]
-                                              (copy-dir! (io/file final-dir sub)
-                                                         (io/file staging sub))))
-                                          ;; Preserve the previous HTML shells when not
-                                          ;; regenerating them: they are top-level files
-                                          ;; not covered by the subdir seed above, and
-                                          ;; would vanish in the atomic swap.
-                                          (preserve-shell! regen-shell? final-dir staging "index.html")
-                                          (preserve-shell! regen-shell? final-dir staging "data.html")
-                                          (preserve-shell! regen-docs?  final-dir staging "docs.html")
-                                          (export-source! format reports staging src-name
-                                                          source-map maintainers-map cli-extra
-                                                          :changed-types src-changed
-                                                          :since (when incremental? last-export)
-                                                          :regen-shell? regen-shell?
-                                                          :regen-docs? regen-docs?)
-                                          (atomic-swap-dir! staging final-dir)
-                                          (catch Exception e
-                                            (log/error e "Export failed for" src-name "-- cleaning up staging dir")
-                                            (delete-dir! (io/file staging))
-                                            (throw e)))
-                                        (conj exported src-name)))))
+                                          (throw e)))
+                                      (conj exported src-name)))))
                               [] export-names)))
                   [])]
             ;; Only regenerate root index when at least one source was exported,

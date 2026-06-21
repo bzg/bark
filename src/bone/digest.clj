@@ -364,7 +364,7 @@
   Returns {:delivery :src-name :irt-src :hdr-src}."
   [db sources headers in-reply-to]
   (let [irt-src (source-from-in-reply-to db in-reply-to)
-        hdr-src (when-not irt-src (common/classify-source headers sources))]
+        hdr-src (common/classify-source headers sources)]
     {:delivery (common/classify-delivery headers)
      :src-name (or irt-src hdr-src)
      :irt-src  irt-src

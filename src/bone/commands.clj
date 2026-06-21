@@ -17,7 +17,8 @@
             [bone.periods :as periods]
             [bone.relations :as rel]
             [bone.tracking :as tracking])
-  (:import [java.time LocalDate ZoneOffset]
+  (:import [java.nio.file AtomicMoveNotSupportedException Files StandardCopyOption]
+           [java.time LocalDate ZoneOffset]
            [java.util Date]))
 
 ;; ---------------------------------------------------------------------------
@@ -211,12 +212,35 @@
 
 (def ^:private max-failure-age-ms (* 365 24 60 60 1000))
 
+(def ^:private failures-lock (Object.))
+
 (defn- load-failures []
   (common/read-failures-file *failures-file*))
 
+(defn- move-file-replace! [src dst]
+  (let [from (.toPath (io/file src))
+        to   (.toPath (io/file dst))]
+    (try
+      (Files/move from to
+                  (into-array java.nio.file.CopyOption
+                              [StandardCopyOption/ATOMIC_MOVE
+                               StandardCopyOption/REPLACE_EXISTING]))
+      (catch AtomicMoveNotSupportedException _
+        (Files/move from to
+                    (into-array java.nio.file.CopyOption
+                                [StandardCopyOption/REPLACE_EXISTING]))))))
+
 (defn- save-failures! [failures]
-  (io/make-parents (io/file *failures-file*))
-  (spit *failures-file* (pr-str failures)))
+  (let [target (io/file *failures-file*)]
+    (io/make-parents target)
+    (let [parent (or (.getParentFile target) (io/file "."))
+          tmp    (java.io.File/createTempFile ".failures-" ".edn" parent)]
+      (try
+        (spit tmp (pr-str failures))
+        (move-file-replace! tmp target)
+        (finally
+          (when (.exists tmp)
+            (io/delete-file tmp true)))))))
 
 (defn record-failure!
   "Append a command failure to the failures file for later notification.
@@ -232,10 +256,6 @@
   [{:keys [source from-addr email-date reason command report-mid audience]}]
   (let [now-ms   (System/currentTimeMillis)
         cutoff   (Date. (- now-ms max-failure-age-ms))
-        existing (load-failures)
-        pruned   (filterv (fn [{:keys [date]}]
-                            (and date (.after ^Date date cutoff)))
-                          existing)
         entry    {:source     source
                   :from       (str/lower-case from-addr)
                   :date       (or email-date (Date.))
@@ -243,7 +263,12 @@
                   :command    command
                   :report-mid (or report-mid "")
                   :audience   (or audience :author)}]
-    (save-failures! (conj pruned entry))
+    (locking failures-lock
+      (let [existing (load-failures)
+            pruned   (filterv (fn [{:keys [date]}]
+                                (and date (.after ^Date date cutoff)))
+                              existing)]
+        (save-failures! (conj pruned entry))))
     (log/info "Command failure:" reason command "from" from-addr
               (str "(audience: " (name (:audience entry)) ")"))))
 

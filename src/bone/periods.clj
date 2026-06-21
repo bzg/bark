@@ -5,16 +5,19 @@
 (ns bone.periods
   "Per-source time-windowed overrides.  A source's :periods vector
   declares how :maintainers / :commands / :command-syntax / :labels
-  / :restricted-types change over time.  Periods are contiguous
-  half-open [from, to) windows; unspecified fields inherit source-
-  level defaults.  Pure."
+  / :restricted-types / :patch-triggers? change over time.  Periods are
+  contiguous half-open [from, to) windows; unspecified fields inherit
+  source-level defaults.  Pure."
   (:require [bone.common :as common]))
 
 (def ^:private overridable-keys
-  #{:maintainers :commands :command-syntax :labels :restricted-types})
+  #{:maintainers :commands :command-syntax :labels
+    :restricted-types :patch-triggers?})
 
 (defn- iso-date? [s]
-  (boolean (and (string? s) (re-matches #"\d{4}-\d{2}-\d{2}" s))))
+  (boolean (and (string? s)
+                (re-matches #"\d{4}-\d{2}-\d{2}" s)
+                (common/parse-iso-date s))))
 
 (defn- normalize-period
   "{:from Date|nil :to Date|nil + overridable keys} resolved against

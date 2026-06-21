@@ -374,16 +374,23 @@
 
 (defn parse-duration-str
   "Parse \"2y 3m 10d 2w\" into a total number of days.
-  Returns nil if no valid tokens. Throws on unrecognized units."
+  Returns nil if no valid tokens. Throws on unrecognized units or
+  trailing junk after at least one valid token."
   [s]
   (let [valid     (re-seq #"(\d+)\s*(y|m|w|d)" s)
         bad-units (->> (re-seq #"(\d+)\s*([a-zA-Z]+)" s)
                        (remove (fn [[_ _ u]] (contains? duration-unit-days u)))
-                       (map #(nth % 2)))]
+                       (map #(nth % 2)))
+        leftover  (some-> s
+                           (str/replace #"(\d+)\s*(y|m|w|d)" "")
+                           str/trim)]
     (when (seq bad-units)
       (throw (ex-info (str "Unknown duration unit(s): " (str/join ", " bad-units)
                            " (expected y, m, w, d)")
                       {:value s :bad-units (vec bad-units)})))
+    (when (and (seq valid) (seq leftover))
+      (throw (ex-info (str "Invalid duration syntax: " (pr-str s))
+                      {:value s :leftover leftover})))
     (when (seq valid)
       (reduce (fn [acc [_ n unit]]
                 (+ acc (* (parse-long n) (duration-unit-days unit))))
@@ -403,8 +410,12 @@
   "Parse an ISO date string (\"2024-01-01\") into a java.util.Date, or nil."
   [^String s]
   (when s
-    (try (.parse (java.text.SimpleDateFormat. "yyyy-MM-dd") s)
-         (catch Exception _ nil))))
+    (try
+      (let [fmt (doto (java.text.SimpleDateFormat. "yyyy-MM-dd")
+                  (.setLenient false))]
+        (when (re-matches #"\d{4}-\d{2}-\d{2}" s)
+          (.parse fmt s)))
+      (catch Exception _ nil))))
 
 (defn parse-cutoff-date
   "Resolve a retention value to a java.util.Date cutoff in the past.
@@ -1014,22 +1025,38 @@
         global-ef       (:export-formats config)
         global-expiry   (:expiry config)
         global-rt       (:report-types config)
-        global-cs       (:command-syntax config)]
+        global-cs       (:command-syntax config)
+        global-restr    (:restricted-types config)
+        global-ptrig?   (contains? config :patch-triggers?)
+        global-ptrig    (:patch-triggers? config)]
     (into {}
           (keep (fn [src]
                  (if-let [stype (source-type src)]
-                   [(:name src)
-                    (merge {:source-type stype}
-                           (select-keys src [:list :alias :to :commands :labels :notifications
-                                             :archive-format-string :list-archive :base-url
-                                             :maintainers :awaiting-delay :topics-filter :periods])
-                           (when global-st {:global-labels global-st})
-                           (when global-cmd {:global-commands global-cmd})
-                           {:export-formats (set (or (:export-formats src) global-ef ["json" "org" "rss"]))
-                            :report-types (when-let [rt (or (:report-types src) global-rt)]
-                                            (set (map keyword rt)))
-                            :expiry (or (:expiry src) global-expiry)
-                            :command-syntax (or (:command-syntax src) global-cs :loose)})]
+                   (let [restricted (if (contains? src :restricted-types)
+                                      (:restricted-types src)
+                                      global-restr)
+                         ptrig-set? (or (contains? src :patch-triggers?)
+                                        global-ptrig?)
+                         ptrig      (if (contains? src :patch-triggers?)
+                                      (:patch-triggers? src)
+                                      global-ptrig)]
+                     [(:name src)
+                      (merge {:source-type stype}
+                             (select-keys src [:list :alias :to :commands :labels :notifications
+                                               :archive-format-string :list-archive :base-url
+                                               :maintainers :awaiting-delay :topics-filter :periods])
+                             (when global-st {:global-labels global-st})
+                             (when global-cmd {:global-commands global-cmd})
+                             (cond-> {:export-formats (set (or (:export-formats src) global-ef ["json" "org" "rss"]))
+                                      :report-types (when-let [rt (or (:report-types src) global-rt)]
+                                                      (set (map keyword rt)))
+                                      :expiry (or (:expiry src) global-expiry)
+                                      :command-syntax (or (:command-syntax src) global-cs :loose)}
+                               (some? restricted)
+                               (assoc :restricted-types (set (map keyword restricted)))
+
+                               ptrig-set?
+                               (assoc :patch-triggers? (boolean ptrig))))])
                    (log/warn "Source has no :list, :alias, or :to key -- skipping:" (:name src)))))
           (:sources config))))
 

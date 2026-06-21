@@ -499,7 +499,7 @@
       has-ical?   (.exists (io/file effective-dir "events" "announcements.ics"))
       html        (docs-page body-html {:ical has-ical?})]
   ((resolve 'pod.huahaiy.datalevin/close) conn)
-  (.mkdirs (.getParentFile (io/file out-file)))
+  (io/make-parents out-file)
   (spit-html out-file html)
   ;; Routine progress on stdout (captured in the export log), not stderr:
   ;; docs.html is now regenerated only on structural changes, and the cron

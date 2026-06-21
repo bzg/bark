@@ -39,7 +39,22 @@
     (is (thrown-with-msg? Exception #"Unknown duration unit"
                           (common/parse-duration-str "5h")))
     (is (thrown-with-msg? Exception #"Unknown duration unit"
-                          (common/parse-duration-str "2x 1d")))))
+                          (common/parse-duration-str "2x 1d"))))
+
+  (testing "throws on junk after a valid token"
+    (is (thrown-with-msg? Exception #"Invalid duration syntax"
+                          (common/parse-duration-str "1d garbage")))))
+
+;; ---------------------------------------------------------------------------
+;; parse-iso-date
+;; ---------------------------------------------------------------------------
+
+(deftest parse-iso-date-test
+  (testing "valid calendar dates"
+    (is (some? (common/parse-iso-date "2026-02-28"))))
+  (testing "invalid calendar dates are rejected, not normalized"
+    (is (nil? (common/parse-iso-date "2026-02-31")))
+    (is (nil? (common/parse-iso-date "2026-13-01")))))
 
 ;; ---------------------------------------------------------------------------
 ;; strip-signature
@@ -166,6 +181,21 @@
         sm     (common/build-source-map config)]
     (is (contains? sm "good"))
     (is (not (contains? sm "bad")))))
+
+(deftest build-source-map-propagates-runtime-options
+  (let [config {:restricted-types #{:bug}
+                :patch-triggers? false
+                :sources [{:name "global" :list "global.example.org"}
+                          {:name "source" :list "source.example.org"
+                           :restricted-types #{}
+                           :patch-triggers? true}]}
+        sm     (common/build-source-map config)]
+    (testing "global values apply when a source does not override them"
+      (is (= #{:bug} (get-in sm ["global" :restricted-types])))
+      (is (false? (get-in sm ["global" :patch-triggers?]))))
+    (testing "source values override globals, including empty/falsey values"
+      (is (= #{} (get-in sm ["source" :restricted-types])))
+      (is (true? (get-in sm ["source" :patch-triggers?]))))))
 
 ;; ---------------------------------------------------------------------------
 ;; slugify
@@ -491,4 +521,3 @@
             {:from-address "alice@example.org"
              :from-name    "Alice via \"L\""
              :reply-to     [{:address "alice@example.org"}]})))))
-

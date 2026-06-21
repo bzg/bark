@@ -16,6 +16,7 @@
 ;; directory of --json.
 
 (require '[cheshire.core :as json]
+         '[clojure.java.io :as io]
          '[clojure.string :as str]
          '[hiccup2.core :as h]
          '[taoensso.timbre :as log]
@@ -241,7 +242,7 @@
       (log/error "bone-index.clj requires --json <file> and -o <file>"))
     (System/exit 2))
   (let [reports-dir (or out-dir (.getParent (clojure.java.io/file json-file)))]
-    (.mkdirs (clojure.java.io/file (.getParent (clojure.java.io/file out-file))))
+    (io/make-parents out-file)
     (let [envelope (json/parse-string (slurp json-file))
           n-open   (count (get envelope "reports"))
           html     (index-page reports-dir envelope page-size)]

@@ -322,7 +322,8 @@
 (s/def :period/patch-triggers? :bone/patch-triggers?)
 
 ;; Per-source periods (optional) -- time-windowed overrides for
-;; :maintainers / :commands / :command-syntax / :labels.
+;; :maintainers / :commands / :command-syntax / :labels /
+;; :restricted-types / :patch-triggers?.
 ;; Each period is a map with optional :start, :end (ISO yyyy-MM-dd) and
 ;; any subset of the overridable keys. Periods must be contiguous.
 ;; Only the first may omit :start (unbounded past); only the last may
@@ -348,7 +349,7 @@
           :opt-un [:bone/db :bone/ingest :bone/notifications :bone/labels
                    :bone/commands
                    :bone/report-types :bone/restricted-types
-                   :bone/awaiting-delay
+                   :bone/awaiting-delay :bone/patch-triggers?
                    :bone/expiry :bone/logging
                    :bone/command-syntax :bone/theme
                    :bone/export-formats]))

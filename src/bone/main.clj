@@ -558,7 +558,10 @@
   Called once in batch mode, on every reconnect in watch mode (so
   config edits take effect without restart).  Idempotent."
   [db-conn config-path]
-  (let [config (or (common/load-config config-path) {})]
+  (let [config (common/load-config config-path)]
+    (when-not config
+      (throw (ex-info (str "Config file not found: " config-path)
+                      {:config-path config-path})))
     (roles/sync-all-sources! db-conn config)
     {:source-map (common/build-source-map config)
      :sources    (or (:sources config) [])}))

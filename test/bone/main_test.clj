@@ -6,6 +6,7 @@
 (def parse-fetch (var-get #'main/parse-fetch))
 (def cli-fetch->map (var-get #'main/cli-fetch->map))
 (def run-opts (var-get #'main/run-opts))
+(def load-context (var-get #'main/load-context))
 
 (deftest parse-fetch-limit
   (testing "{:limit N} with positive integer"
@@ -194,6 +195,12 @@
     (testing "CLI --fetch is the sole survivor in :fetch-opts"
       (is (= {:limit 7} (select-keys (:fetch-opts opts) [:limit])))
       (is (nil? (:since (:fetch-opts opts)))))))
+
+(deftest load-context-rejects-missing-config
+  (let [missing-path (str (System/getProperty "java.io.tmpdir")
+                          "/bone-missing-config-" (System/nanoTime) ".edn")]
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Config file not found"
+                          (load-context nil missing-path)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Mid lock -- prevents concurrent digest of the same email when two

@@ -109,6 +109,14 @@
       (is (= {:closed {:words ["Closed"]}} (:commands cfg))
           "expired period's overrides do not bleed past its :to"))))
 
+(deftest source-cfg-at-date-applies-patch-trigger-period-override
+  (let [src {:patch-triggers? true
+             :periods [{:start "2026-01-01"
+                        :end "2027-01-01"
+                        :patch-triggers? false}]}
+        cfg (p/source-cfg-at-date src (d "2026-06-01"))]
+    (is (false? (:patch-triggers? cfg)))))
+
 ;; ---------------------------------------------------------------------------
 ;; validate-periods
 ;; ---------------------------------------------------------------------------
@@ -125,6 +133,11 @@
 (deftest validate-periods-rejects-non-iso-date
   (let [errs (p/validate-periods
               {:periods [{:start "01/01/2020"}]})]
+    (is (some #(re-find #":start not ISO" %) errs))))
+
+(deftest validate-periods-rejects-invalid-calendar-date
+  (let [errs (p/validate-periods
+              {:periods [{:start "2026-02-31"}]})]
     (is (some #(re-find #":start not ISO" %) errs))))
 
 (deftest validate-periods-rejects-start-not-before-end
