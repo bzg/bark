@@ -1,11 +1,11 @@
 {:paths ["src" "resources" "classes"]
 
  :deps
- {org.clojure/clojure     {:mvn/version "1.12.4"}
+ {org.clojure/clojure     {:mvn/version "1.12.5"}
   org.clojars.bzg/mailseq {:mvn/version "0.0.9"}
-  datalevin/datalevin     {:mvn/version "0.10.7"}
+  datalevin/datalevin     {:mvn/version "0.10.18"}
   org.clojure/data.json   {:mvn/version "2.5.2"}
-  org.jsoup/jsoup         {:mvn/version "1.22.1"}
+  org.jsoup/jsoup         {:mvn/version "1.22.2"}
   com.taoensso/timbre     {:mvn/version "6.8.0"}
   com.draines/postal      {:mvn/version "2.0.5"}}
 
