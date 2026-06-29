@@ -17,7 +17,7 @@
 (def pico-cdn "https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css")
 
 ;; ---------------------------------------------------------------------------
-;; Theme CDN -- set via config.edn :theme or --theme CLI flag
+;; Theme CDN -- set via config.edn :theme or --html-theme CLI flag
 ;; ---------------------------------------------------------------------------
 
 (def ^:private themes-cdn
@@ -25,7 +25,7 @@
   "https://cdn.jsdelivr.net/gh/bzg/pico-themes@latest/")
 
 (defn resolve-css-theme
-  "Resolve a --theme / :theme value to a seq of maps, or nil.
+  "Resolve a --html-theme / :theme value to a seq of maps, or nil.
   Each map is either {:link url} or {:inline css-content}.
 
   Resolution order:

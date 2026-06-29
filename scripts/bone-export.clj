@@ -293,15 +293,12 @@
         (System/exit 1)))))
 
 (defn- resolve-topics-filter
-  "Parse a topics filter value into a set of lower-cased topic strings.
-  Accepts a comma-separated string (CLI) or a vector (config.edn).
-  Returns nil when no filter is active."
+  "Parse the CLI topics filter into a set of lower-cased topic strings.
+  Accepts a comma-separated string.  Returns nil when no filter is active."
   [v]
   (when v
-    (let [topics (->> (if (string? v)
-                        (str/split v #",")
-                        v)
-                      (map #(str/trim (str %)))
+    (let [topics (->> (str/split v #",")
+                      (map str/trim)
                       (remove str/blank?))]
       (when (seq topics)
         (set (map str/lower-case topics))))))
@@ -1378,13 +1375,6 @@
   (or (get-in source-map [source-name :export-formats])
       default-export-formats))
 
-(defn- resolve-source-topics-filter
-  "Return the topics filter for a source: CLI override > per-source > global.
-  Returns a set of lower-cased topic strings, or nil (meaning no filter)."
-  [source-name source-map cli-topics-filter]
-  (or cli-topics-filter
-      (resolve-topics-filter (get-in source-map [source-name :topics-filter]))))
-
 ;; Export scope: the 5-tuple {:reports :reports-dir :source-name
 ;; :source-map :maintainers-map} that every dump-* orchestrator
 ;; consumes.  Built once in `export-source!` and propagated as a map
@@ -1775,13 +1765,13 @@
                                           (log/info "Dropping reports closed before" drop-cutoff))
                         cli-extra       (let [drop (into #{} (remove nil?)
                                                               [format "-n" source-name "--force"
-                                                               "--theme" theme
-                                                               "--page-size" (some-> page-size str)
+                                                               "--html-theme" theme
+                                                               "--html-page-size" (some-> page-size str)
                                                                "--closed-retention" closed-retention
                                                                "--topics-filter" topics-filter])]
                                           (cond-> (vec (remove drop (rest *command-line-args*)))
-                                            effective-theme (into ["--theme" effective-theme])
-                                            effective-ps    (into ["--page-size" (str effective-ps)])))]
+                                            effective-theme (into ["--html-theme" effective-theme])
+                                            effective-ps    (into ["--html-page-size" (str effective-ps)])))]
                     (binding [*export-ctx* (build-export-ctx db votes config)]
                       (reduce (fn [exported src-name]
                                 (let [reports     (filter-reports all-reps {:source       src-name
@@ -1790,10 +1780,7 @@
                                       rt          (get-in source-map [src-name :report-types])
                                       reports     (if rt (filter #(contains? rt (:report/type %)) reports) reports)
                                       reports     (if drop-cutoff (drop-old-closed reports drop-cutoff) reports)
-                                      src-tf      (resolve-source-topics-filter src-name source-map cli-tf)
-                                      _           (when src-tf
-                                                 (log/info (str "[" src-name "]") "topics filter:" (str/join ", " src-tf)))
-                                      reports     (filter-by-topics reports src-tf)
+                                      reports     (filter-by-topics reports cli-tf)
                                       slug        (slugify src-name)
                                       staging     (str "public/.staging-" slug)
                                       final-dir   (str "public/" slug)

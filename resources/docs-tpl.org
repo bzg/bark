@@ -49,15 +49,19 @@ punctuation (=.= =,= =;= =:= =?= =!=), whitespace, or end of line.
 
 Accepted keywords per action:
 
-| Effect on report  | Keyword (recommended)                                 | To retract     |
-|-------------------+-------------------------------------------------------+----------------|
-| Mark as acked     | =Confirmed.= (bug), =Approved.= (patch), =Acked.= (request) | =Not acked.=     |
-| Mark as owned     | =Owned.=                                                | =Not owned.=     |
-| Mark as closed    | =Fixed.= (bug), =Applied.= (patch), =Completed.= (request)  | =Not closed.=    |
-| Mark as canceled  | =Canceled.=                                             | =Not closed.=    |
-| Mark as expired   | =Expired.=                                              | =Not closed.=    |
-| Mark as urgent    | =Urgent.=                                               | =Not urgent.=    |
-| Mark as important | =Important.=                                            | =Not important.= |
+| Effect on report         | Keyword (recommended) | To retract     |
+|--------------------------+-----------------------+----------------|
+| Mark a bug as acked      | =Confirmed.=            | =Not acked.=     |
+| Mark a patch as acked    | =Approved.=             | =Not acked.=     |
+| Mark a request as acked  | =Acked.=                | =Not acked.=     |
+| Mark as owned            | =Owned.=                | =Not owned.=     |
+| Mark a bug as closed     | =Fixed.=                | =Not closed.=    |
+| Mark a patch as closed   | =Applied.=              | =Not closed.=    |
+| Mark a request as closed | =Completed.=            | =Not closed.=    |
+| Mark as canceled         | =Canceled.=             | =Not closed.=    |
+| Mark as expired          | =Expired.=              | =Not closed.=    |
+| Mark as urgent           | =Urgent.=               | =Not urgent.=    |
+| Mark as important        | =Important.=            | =Not important.= |
 
 To retract, reply with the matching =Not= form: =Not acked.=,
 =Not owned.=, =Not closed.= (also undoes canceled and expired),

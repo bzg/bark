@@ -120,11 +120,64 @@
 
 (def ^:private index-js (slurp "resources/bone-index.js"))
 
+;; ---------------------------------------------------------------------------
+;; Report-table columns (CLI: --html-columns / --html-columns-sort)
+;; ---------------------------------------------------------------------------
+
+;; Columns in their fixed render order.  --html-columns selects a subset;
+;; unselected columns are hidden via CSS (nth-child position), the order is
+;; not configurable.  Each pair maps the CLI name to the JS sort key used by
+;; data-sort / boneConfig.columnsSort ("author" sorts on the "from" key).
+(def ^:private canonical-columns
+  [["type" "type"] ["priority" "priority"] ["due" "due"] ["flags" "flags"]
+   ["subject" "subject"] ["author" "from"] ["owner" "owner"] ["date" "date"]
+   ["replies" "replies"]])
+
+(def ^:private column-names (mapv first canonical-columns))
+(def ^:private column-sort-key (into {} canonical-columns))
+
+(defn- parse-columns
+  "Parse --html-columns CSV into an ordered vector of valid column names.
+  Unknown names are dropped with a warning.  Blank/nil -> all columns."
+  [s]
+  (if (str/blank? s)
+    column-names
+    (let [known (set column-names)
+          req   (->> (str/split s #",") (map str/trim) (remove str/blank?))
+          bad   (remove known req)]
+      (when (seq bad)
+        (binding [*out* *err*]
+          (println (str "Warning: unknown --html-columns ignored: " (str/join ", " bad)))))
+      (or (not-empty (vec (distinct (filter known req)))) column-names))))
+
+(defn- columns-mask-css
+  "CSS hiding every column NOT in `selected`, by its 1-based nth-child
+  position in the canonical order.  Returns nil when nothing to hide."
+  [selected]
+  (let [sel    (set selected)
+        hidden (keep-indexed (fn [i nm] (when-not (sel nm) (inc i))) column-names)]
+    (when (seq hidden)
+      (str/join "\n"
+                (map #(str "  td:nth-child(" % "), th:nth-child(" % ") { display: none; }")
+                     hidden)))))
+
+(defn- resolve-columns-sort
+  "Map a --html-columns-sort CLI name to its JS sort key, or nil when the
+  flag is absent -- the client then keeps the server's date-desc order.
+  An unknown name warns and falls back to nil (default order)."
+  [s]
+  (when-not (str/blank? s)
+    (let [nm (str/trim s)]
+      (or (column-sort-key nm)
+          (binding [*out* *err*]
+            (println (str "Warning: unknown --html-columns-sort '" nm "', using default order"))
+            nil)))))
+
 ;; The page is a static shell: open reports are no longer inlined as
 ;; `boneData`.  The client fetches them from `openJsonUrl` at load time
 ;; (mirroring how closed reports are lazy-loaded from `closedJsonUrl`),
 ;; so index.html stays byte-identical across data-only changes.
-(defn page-js [source-type page-size]
+(defn page-js [source-type page-size columns-sort]
   (wrap-js (str "var boneConfig = {typeLabels:" (escape-script-payload (json/generate-string type-labels))
                 ",openJsonUrl:'reports/all-open.json'"
                 ",closedJsonUrl:'reports/all-closed.json'"
@@ -132,6 +185,8 @@
                   (str ",sourceType:'" source-type "'"))
                 (when page-size
                   (str ",pageSize:" page-size))
+                (when columns-sort
+                  (str ",columnsSort:'" columns-sort "'"))
                 "};\n"
                 index-js "\n"
                 theme-toggle-js)))
@@ -143,8 +198,9 @@
 ;; The shell embeds no report data: only stable metadata (source
 ;; name/type, RSS/ICS presence) shapes the markup, so the file does not
 ;; change when reports do.
-(defn index-page [reports-dir envelope page-size]
-  (let [source-type  (get envelope "source-type")
+(defn index-page [reports-dir envelope page-size columns columns-sort]
+  (let [mask-css     (columns-mask-css columns)
+        source-type  (get envelope "source-type")
         source-name  (get envelope "source")
         title        (page-title "Reports" source-name)
         has-rss?     (.exists (clojure.java.io/file reports-dir "all.xml"))
@@ -224,19 +280,22 @@
           [:link {:rel "alternate" :type "application/rss+xml"
                   :title "BONE Reports RSS" :href rss-href}])
         [:title title]
-        [:style (h/raw page-css)]]
+        [:style (h/raw page-css)]
+        (when mask-css [:style (h/raw mask-css)])]
        [:body
         (noscript-banner title)
         (h/raw (wrap-template "js-tpl" tpl-body))
-        [:script (h/raw (page-js source-type page-size))]]]))))
+        [:script (h/raw (page-js source-type page-size columns-sort))]]]))))
 
 ;; ---------------------------------------------------------------------------
 ;; Main
 ;; ---------------------------------------------------------------------------
 
-(let [{:keys [out-file json-file out-dir theme page-size]}
+(let [{:keys [out-file json-file out-dir theme page-size html-columns html-columns-sort]}
       (parse-cli-args *command-line-args*)
-      _           (when theme (set-theme! theme))]
+      _            (when theme (set-theme! theme))
+      columns      (parse-columns html-columns)
+      columns-sort (resolve-columns-sort html-columns-sort)]
   (when (or (str/blank? json-file) (str/blank? out-file))
     (binding [*out* *err*]
       (log/error "bone-index.clj requires --json <file> and -o <file>"))
@@ -245,7 +304,7 @@
     (io/make-parents out-file)
     (let [envelope (json/parse-string (slurp json-file))
           n-open   (count (get envelope "reports"))
-          html     (index-page reports-dir envelope page-size)]
+          html     (index-page reports-dir envelope page-size columns columns-sort)]
       (spit-html out-file html)
       ;; Log to stdout (not stderr): this is routine progress, captured in
       ;; the export log, not a cron-mail trigger.  Real errors still go to

@@ -840,7 +840,6 @@
                        (seq expiry)                 (conj [:expiry expiry])
                        awaiting                     (conj [:awaiting-delay awaiting])
                        (false? ptrig)               (conj [:patch-triggers? false])
-                       (seq (:topics-filter src))   (conj [:topics-filter (:topics-filter src)])
                        formats                      (conj [:export-formats formats])
                        (seq (:periods src))         (conj [:periods (:periods src)])))))))
 
@@ -1044,7 +1043,7 @@
                       (merge {:source-type stype}
                              (select-keys src [:list :alias :to :commands :labels :notifications
                                                :archive-format-string :list-archive :base-url
-                                               :maintainers :awaiting-delay :topics-filter :periods])
+                                               :maintainers :awaiting-delay :periods])
                              (when global-st {:global-labels global-st})
                              (when global-cmd {:global-commands global-cmd})
                              (cond-> {:export-formats (set (or (:export-formats src) global-ef ["json" "org" "rss"]))
@@ -1198,18 +1197,20 @@
   {"-o" [:out-file identity] "--output" [:out-file identity]
    "-n" [:source-name identity] "--source" [:source-name identity]
    "--json" [:json-file identity] "--dir" [:out-dir identity]
-   "--theme" [:theme identity]
+   "--html-theme" [:theme identity]
    "-p" [:min-priority parse-long] "--min-priority" [:min-priority parse-long]
    "-s" [:min-status parse-long] "--min-status" [:min-status parse-long]
-   "--page-size" [:page-size parse-long]
+   "--html-page-size" [:page-size parse-long]
+   "--html-columns" [:html-columns identity]
+   "--html-columns-sort" [:html-columns-sort identity]
    "--closed-retention" [:closed-retention identity]
    "--topics-filter" [:topics-filter identity]})
 
 (defn parse-cli-args
   "Parse common CLI flags into a map.
   Recognises: -o/--output, -n/--source, -p/--min-priority, -s/--min-status,
-  --json, --dir, --force, --theme, --page-size, --closed-retention,
-  --topics-filter.
+  --json, --dir, --force, --html-theme, --html-page-size, --html-columns,
+  --html-columns-sort, --closed-retention, --topics-filter.
   Any leading non-flag token is captured as :format.
   Warns when a valued flag is missing its argument or followed by another flag."
   [args]

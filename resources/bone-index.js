@@ -1273,6 +1273,15 @@ function restoreFromURL() {
       sortState[key] = dir;
       th.classList.add(dir);
     }
+  } else if (boneConfig.columnsSort) {
+    // Default sort from --html-columns-sort (date -> desc, else asc).
+    var dkey = boneConfig.columnsSort;
+    var ddir = dkey === 'date' ? 'desc' : 'asc';
+    var dth  = document.querySelector('th[data-sort="' + dkey + '"]');
+    if (dth) {
+      sortState[dkey] = ddir;
+      dth.classList.add(ddir);
+    }
   }
 
   currentPage = params.has('page') ? parseInt(params.get('page'), 10) || 1 : 1;

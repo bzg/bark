@@ -685,9 +685,11 @@ regenerated. Use =--force= to rebuild everything, or =bb export
 | =-n <source>=        | restrict to one source                                   | --           |
 | =-p <N>=             | filter by minimum priority                               | --           |
 | =-s <N>=             | filter by minimum status                                 | --           |
-| =--page-size <N>=    | paginate HTML report table (client-side rendering)       | CLI only     |
+| =--html-page-size <N>= | paginate HTML report table (client-side rendering)     | CLI only     |
+| =--html-columns <C>=   | HTML table columns to show (CSV subset; default: all)  | CLI only     |
+| =--html-columns-sort=  | default sort column for the HTML table (default: date) | CLI only     |
 | =--closed-retention= | exclude reports closed before given ISO date or duration | CLI only     |
-| =--topics-filter=    | restrict to topics (comma-separated, case-insensitive)   | per source   |
+| =--topics-filter=    | restrict to topics (comma-separated, case-insensitive)   | CLI only     |
 | =--force=            | force a full re-export                                   | CLI only     |
 
 Durations accept =Nd=, =Nw=, =Nm=, =Ny= (e.g. =--closed-retention 1y= keeps
@@ -1345,27 +1347,28 @@ format, =:start= strictly before =:end=.
 The export, notification and maintenance tasks are run through
 [[https://babashka.org/][Babashka]]. Each task and its main flags:
 
-| Task                            | Description                                                    |
-|---------------------------------+----------------------------------------------------------------|
-| =bb export=                       | Incremental export of all formats (skip if unchanged)          |
-| =bb export --force=               | Full rebuild, ignore timestamps                                |
-| =bb export root=                  | Regenerate top-level =index.html= only                           |
-| =bb export --page-size 100=       | Paginate HTML table (100 reports/page)                         |
-| =bb export --closed-retention 1y= | Keep only reports closed within the last 12 months             |
-| =bb export --topics-filter "a,b"= | Only export reports whose topic is in the list                 |
-| =bb export --only-open=           | Also export =-open= files (all-open.json, etc.)                  |
-| =bb export FORMAT=                | Single format: json, rss, org, html, stats, patches,           |
-|                                 | text, events, root, all                                        |
-| =bb notify=                       | Send notification emails                                       |
-| =bb notify --dry-run=             | Preview notifications without sending                          |
-| =bb notify --debug=               | Verbose filtering diagnostics                                  |
-| =bb maintenance=                  | Show orphan emails (add =--delete= to purge)                     |
-| =bb maintenance --retention 6m=   | Override orphan retention (default 90d)                        |
-| =bb maintenance --failures=       | List recent command failures                                   |
-| =bb clean=                        | Remove all files in =public/=                                    |
-| =bb build-jar=                    | Build =target/bone.jar= + =bin/bone= wrapper                       |
-| =bb test-config=                  | Validate =config.edn=                                            |
-| =bb test-smtp=                    | Test SMTP config (=--to addr=, =--send=; default = dry-run)        |
+| Task                                              | Description                                             |
+|---------------------------------------------------+---------------------------------------------------------|
+| =bb export=                                         | Incremental export of all formats (skip if unchanged)   |
+| =bb export --force=                                 | Full rebuild, ignore timestamps                         |
+| =bb export root=                                    | Regenerate top-level =index.html= only                    |
+| =bb export --html-page-size 100=                    | Paginate HTML table (100 reports/page)                  |
+| =bb export html --html-columns "type,subject,date"= | Show only those HTML table columns                      |
+| =bb export --closed-retention 1y=                   | Keep only reports closed within the last 12 months      |
+| =bb export --topics-filter "a,b"=                   | Only export reports whose topic is in the list          |
+| =bb export --only-open=                             | Also export =-open= files (all-open.json, etc.)           |
+| =bb export FORMAT=                                  | Single format: json, rss, org, html, stats, patches,    |
+|                                                   | text, events, root, all                                 |
+| =bb notify=                                         | Send notification emails                                |
+| =bb notify --dry-run=                               | Preview notifications without sending                   |
+| =bb notify --debug=                                 | Verbose filtering diagnostics                           |
+| =bb maintenance=                                    | Show orphan emails (add =--delete= to purge)              |
+| =bb maintenance --retention 6m=                     | Override orphan retention (default 90d)                 |
+| =bb maintenance --failures=                         | List recent command failures                            |
+| =bb clean=                                          | Remove all files in =public/=                             |
+| =bb build-jar=                                      | Build =target/bone.jar= + =bin/bone= wrapper                |
+| =bb test-config=                                    | Validate =config.edn=                                     |
+| =bb test-smtp=                                      | Test SMTP config (=--to addr=, =--send=; default = dry-run) |
 
 Export accepts =-n <source>= (restrict to one source), =-p <N>= (minimum
 priority), =-s <N>= (minimum status).

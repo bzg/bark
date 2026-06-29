@@ -87,9 +87,6 @@
 (s/def :source/export-formats (s/coll-of ::export-format :kind vector? :min-count 1))
 (s/def :bone/export-formats :source/export-formats)
 
-;; Per-source topics filter
-(s/def :source/topics-filter (s/coll-of ::non-blank-string :kind vector? :min-count 1))
-
 ;; Per-source notifications (optional) -- override global notification gate
 (s/def :source-notif/enabled boolean?)
 (s/def :source/notifications (s/keys :req-un [:source-notif/enabled]))
@@ -109,7 +106,7 @@
                           :source/report-types :source/restricted-types
                           :source/maintainers :source/notifications
                           :source/expiry :source/awaiting-delay
-                          :source/export-formats :source/topics-filter
+                          :source/export-formats
                           :source/command-syntax :source/patch-triggers?
                           :source/periods])
          exactly-one-source-type?))

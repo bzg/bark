@@ -207,23 +207,27 @@
 
  ;; Export formats (optional) -- per-type feed files generated.
  ;; Default: ["json" "org" "rss"]. Per-source overrides global.
- ;; :export-formats ["json" "rss"]
+ ;; :export-formats ["json" "org" "rss"]
 
  ;; The following are CLI-only (bb export):
- ;;   --page-size 100           HTML pagination (0/absent = off)
+ ;;   --html-page-size 100      HTML pagination (0/absent = off)
+ ;;   --html-columns "type,subject,date"
+ ;;                             HTML table columns to show, in canonical
+ ;;                             order (default: all). Known columns: type,
+ ;;                             priority, due, flags, subject, author,
+ ;;                             owner, date, replies.
+ ;;   --html-columns-sort date  default HTML sort column (default: date)
  ;;   --closed-retention 1y     drop reports closed before the cutoff
  ;;                             (accepts duration or ISO date)
- ;;   --topics-filter "a,b"     overrides any per-source :topics-filter.
-
- ;; Per-source topics filter (optional, vector of strings, case-insensitive):
- ;; {:name "community" :topics-filter ["event" "meetup"]}
+ ;;   --topics-filter "a,b"     restrict export to matching topics
+ ;;                             (comma-separated, case-insensitive)
 
  ;; Theme for HTML pages (optional). Resolution order:
  ;;   https://...  → external <link>
  ;;   file:///...   → inline <style> from local file
  ;;   path.css     → inline <style> (relative/absolute path)
  ;;   bare name    → pico-themes CDN. "none" disables theming.
- ;; CLI: bb export --theme org
+ ;; CLI: bb export --html-theme org
  ;; :theme "org"
 
  ;; ---- Notifications -------------------------------------------------------

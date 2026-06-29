@@ -80,9 +80,11 @@ clj -M:test
 bb export [--force]                       Incremental export of all formats
        [-n source] [-p 1|2|3] [-s 1-7]    Filter by source, priority, status
        [--only-open]                      Also export -open files
-       [--theme THEME]                    Override CSS theme (see below)
+       [--html-theme THEME]               Override CSS theme (see below)
        [--topics-filter TOPICS]           Only export matching topics (csv)
-       [--page-size N]                    Paginate HTML table (N rows/page)
+       [--html-page-size N]               Paginate HTML table (N rows/page)
+       [--html-columns COLS]              HTML table columns (csv subset)
+       [--html-columns-sort COL]          Default sort column (default: date)
        [--closed-retention DUR]           Drop reports closed before cutoff
 bb export <format>                        Single format: json|rss|org|html|
                                           stats|patches|text|events|root|all
@@ -97,9 +99,9 @@ bb clean                                  Remove all files in public/
 clj -M:run -- --fresh                     Wipe DB + full replay (interactive)
 #+end_example
 
-** Theme (=--theme= / =:theme=)
+** Theme (=--html-theme= / =:theme=)
 
-The =--theme= flag (or =:theme= in =config.edn=) controls the CSS
+The =--html-theme= flag (or =:theme= in =config.edn=) controls the CSS
 theme for HTML exports.  Values are resolved in order:
 
 1. *https:// URL* -- used as an external =<link>= stylesheet.
@@ -112,11 +114,11 @@ theme for HTML exports.  Values are resolved in order:
 Set to ="none"= to disable theming.
 
 #+begin_example
-bb export html --theme org                                  # pico-themes name
-bb export html --theme https://example.com/custom.css       # external URL
-bb export html --theme file:///home/user/my-theme.css       # local file
-bb export html --theme themes/custom.css                    # relative path
-bb export html --theme none                                 # no theme
+bb export html --html-theme org                             # pico-themes name
+bb export html --html-theme https://example.com/custom.css  # external URL
+bb export html --html-theme file:///home/user/my-theme.css  # local file
+bb export html --html-theme themes/custom.css               # relative path
+bb export html --html-theme none                            # no theme
 #+end_example
 
 * Configuration
@@ -189,7 +191,6 @@ exactly one of the three type keys:
 | =:base-url=              | no       | Base URL where this source's public directory is served              |
 | =:report-types=          | no       | Restrict detected and exported types, e.g. =#{:bug :patch}=            |
 | =:export-formats=        | no       | Output formats (default: =["json" "org" "rss"]=)                       |
-| =:topics-filter=         | no       | Only export reports with matching topics, e.g. =["event"]=             |
 | =:expiry=                | no       | Auto-close delays in days per type                                   |
 | =:notifications=         | no       | ={:enabled false}= silences notifications for this source              |
 | =:awaiting-delay=        | no       | Duration before "awaiting reply" flag, e.g. ="14d"= (default: 14 days) |
