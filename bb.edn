@@ -39,7 +39,7 @@
   test-config {:doc  "Validate config.edn (pass path as arg, default: ./config.edn)"
                :task (apply shell "bb scripts/validate-config.clj" *command-line-args*)}
 
-  maintenance {:doc  "Purge orphan emails: bb maintenance [--delete] [--verbose] [-n source]"
+  maintenance {:doc  "Purge orphan emails: bb maintenance [--delete] [--verbose] [-n source] [--retention 90d] [--failures]"
                :task (apply shell "bb scripts/bone-maintenance.clj" *command-line-args*)}
 
   build-jar  {:doc  "Build target/bone.jar + bin/bone wrapper (one-shot uberjar build)"

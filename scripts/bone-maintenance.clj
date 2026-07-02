@@ -51,8 +51,9 @@
 
 (defn- report-referenced-eids
   "All email entity IDs reachable from any report via any ref attribute,
-  PLUS the emails referenced by qualified relations (:rel/email).
-  If an email is pointed to by a report or a relation, it's protected."
+  PLUS the emails referenced by qualified relations (:rel/email), series
+  (:series/cover-letter, :series/closed) and votes (:vote/email).
+  If an email is pointed to by any of these, it's protected."
   [db]
   (let [via-reports (dq '[:find [?e ...]
                           :where
@@ -60,20 +61,24 @@
                           [?r _ ?e]
                           [?e :email/message-id _]]
                         db)
-        via-rels    (dq '[:find [?e ...]
-                          :where
-                          [?rel :rel/kind _]
-                          [?rel :rel/email ?e]
-                          [?e :email/message-id _]]
-                        db)]
-    (set (concat via-reports via-rels))))
+        via-attr    (fn [attr]
+                      (dq '[:find [?e ...]
+                            :in $ ?attr
+                            :where
+                            [?x ?attr ?e]
+                            [?e :email/message-id _]]
+                          db attr))]
+    (set (concat via-reports
+                 (mapcat via-attr [:rel/email
+                                   :series/cover-letter :series/closed
+                                   :vote/email])))))
 
 (defn- maintainer-addresses
   "Union of all addresses that ever held maintainer status on any source,
   including closed tenures -- these are still 'privileged' for the purpose
   of orphan detection (we don't want to delete emails from a former
   maintainer just because their tenure was closed)."
-  [db _config source-map]
+  [db source-map]
   (->> source-map
        (mapcat (fn [[src-name _]]
                  (keep :email (get-tenures db src-name))))
@@ -97,19 +102,27 @@
 ;; Orphan detection
 ;; ---------------------------------------------------------------------------
 
+(defn- resolve-retention-cutoff
+  "Resolve --retention to a cutoff Date (default: 90 days ago).
+  Exits with an error on an unparseable value -- called before the DB
+  connection is opened, so the exit leaves nothing to clean up."
+  [retention]
+  (if retention
+    (or (parse-cutoff-date retention)
+        (do (log/error "Invalid --retention value:" (pr-str retention)
+                       "(expected duration like \"90d\", \"6m\", \"1y\""
+                       "or ISO date \"yyyy-MM-dd\")")
+            (System/exit 1)))
+    (java.util.Date. (- (System/currentTimeMillis) (* 90 24 60 60 1000)))))
+
 (defn- find-orphans
   "Returns a seq of {:eid :source :from :date :mid} for orphan emails."
-  [db config source-map {:keys [source-name retention]}]
+  [db source-map source-name cutoff-date]
   (let [protected   (report-referenced-eids db)
-        maintainers (maintainer-addresses db config source-map)
-        parsed      (when retention (parse-cutoff-date retention))
-        _           (when (and retention (nil? parsed))
-                      (log/error "Invalid --retention value:" (pr-str retention)
-                                 "(expected duration like \"90d\", \"6m\", \"1y\""
-                                 "or ISO date \"yyyy-MM-dd\")")
-                      (System/exit 1))
-        cutoff-date (or parsed
-                        (java.util.Date. (- (System/currentTimeMillis) (* 90 24 60 60 1000))))
+        maintainers (maintainer-addresses db source-map)
+        source-ok?  (if source-name
+                      #(= (:source %) source-name)
+                      (constantly true))
         emails      (all-emails db)]
     (log/info "Total emails in DB:" (count emails))
     (log/info "Protected by reports:" (count protected))
@@ -118,9 +131,9 @@
     (->> emails
          (remove #(contains? protected (:eid %)))
          (remove #(contains? maintainers (str/lower-case (or (:from %) ""))))
-         (filter #(if source-name (= (:source %) source-name) true))
-         (filter #(when-let [^java.util.Date d (:date %)]
-                    (.before d cutoff-date)))
+         (filter source-ok?)
+         ;; :email/date-sent is required by the all-emails query.
+         (filter #(.before ^java.util.Date (:date %) cutoff-date))
          vec)))
 
 ;; ---------------------------------------------------------------------------
@@ -143,7 +156,9 @@
                         " | " source
                         " | " from
                         " | " command
-                        " -- " (get reason-labels reason (name reason)))))))))
+                        " -- " (or (get reason-labels reason)
+                                   (some-> reason name)
+                                   "unknown"))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Main
@@ -151,7 +166,7 @@
 
 (load-datalevin-pod!)
 
-(let [{:keys [delete? verbose? failures? source-name] :as opts}
+(let [{:keys [delete? verbose? failures? source-name retention]}
       (parse-args *command-line-args*)
       config  (load-config)
       _       (when-not config
@@ -163,13 +178,16 @@
                 (log/error "Unknown source:" source-name)
                 (log/error "Available:" (str/join ", " (keys source-map)))
                 (System/exit 1))
+      ;; Validated before the connection opens: System/exit here must
+      ;; not skip the (finally (d/close conn)) below.
+      cutoff  (resolve-retention-cutoff retention)
       ;; Open with WAL for potential writes
       conn    (d/get-conn dbp bone-schema {})]
   (try
     (let [db (d/db conn)]
       (if failures?
         (show-failures source-name)
-        (let [orphans (find-orphans db config source-map opts)]
+        (let [orphans (find-orphans db source-map source-name cutoff)]
           (if (empty? orphans)
             (log/info "No orphan emails found.")
             (let [by-source (group-by :source orphans)]

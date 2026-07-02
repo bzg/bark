@@ -120,6 +120,15 @@
                     (make-headers "X-Original-To" "me@example.org"
                                  "To" "me@example.org")))))
 
+  (testing "multi-valued (vector) headers classify without crashing"
+    ;; Repeated headers come back from get-header as vectors.
+    (is (= :direct (common/classify-delivery
+                    (make-headers "X-Original-To" ["me@example.org"]
+                                  "To" ["me@example.org" "other@example.org"]))))
+    (is (= :alias (common/classify-delivery
+                   (make-headers "X-Original-To" ["alias@example.org" "x@y.org"]
+                                 "To" ["someone@else.org"])))))
+
   (testing "no special headers → :direct"
     (is (= :direct (common/classify-delivery
                     (make-headers "To" "inbox@example.org")))))

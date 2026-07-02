@@ -3,8 +3,9 @@
 ;; License-Filename: LICENSES/EPL-2.0.txt
 
 (ns bone.common
-  "Shared pure utilities for BONE. No datalevin dependency -- loadable by both
-  JVM and Babashka."
+  "Shared utilities for BONE.  The invariant is: no datalevin dependency,
+  loadable by both JVM and Babashka.  Mostly pure functions, plus a few
+  file/env readers (load-config, load-mailmap, read-failures-file...)."
   (:require [clojure.string :as str]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
@@ -13,7 +14,7 @@
             [taoensso.timbre :as log])
   (:import [java.text Normalizer Normalizer$Form]
            [java.security MessageDigest]
-           [java.time ZoneId]
+           [java.time LocalDate ZoneId]
            [java.time.format DateTimeFormatter]
            [java.util Date]))
 
@@ -38,7 +39,6 @@
   "Read the failures EDN file at `path`, returning a vector ([] if
   missing or unparseable).  `on-error` is invoked with the exception
   on parse failure."
-  ([] (read-failures-file failures-file-path nil))
   ([path] (read-failures-file path nil))
   ([path on-error]
    (let [f (io/file path)]
@@ -242,13 +242,8 @@
                            m
                            (assoc m k v))))
                      {} vevents)]
-    (first
-     (reduce (fn [[acc seen] v]
-               (let [k (vkey v)]
-                 (if (seen k)
-                   [acc seen]
-                   [(conj acc (best k)) (conj seen k)])))
-             [[] #{}] vevents))))
+    ;; distinct preserves first-seen key order.
+    (mapv best (distinct (map vkey vevents)))))
 
 (defn dedupe-vtimezones
   "Keep one VTIMEZONE per TZID, first-seen.  VTIMEZONEs without a TZID are
@@ -407,14 +402,14 @@
     :else        nil))
 
 (defn parse-iso-date
-  "Parse an ISO date string (\"2024-01-01\") into a java.util.Date, or nil."
+  "Parse an ISO date string (\"2024-01-01\") into a java.util.Date at
+  UTC midnight, or nil.  UTC keeps period bounds, expiry rules and
+  deadlines consistent with format-date-iso, whatever the local TZ."
   [^String s]
-  (when s
+  (when (and s (re-matches #"\d{4}-\d{2}-\d{2}" s))
     (try
-      (let [fmt (doto (java.text.SimpleDateFormat. "yyyy-MM-dd")
-                  (.setLenient false))]
-        (when (re-matches #"\d{4}-\d{2}-\d{2}" s)
-          (.parse fmt s)))
+      (Date/from (.toInstant (.atStartOfDay (LocalDate/parse s)
+                                            (ZoneId/of "UTC"))))
       (catch Exception _ nil))))
 
 (defn parse-cutoff-date
@@ -578,11 +573,18 @@
     (> (count vals) 1)))
 
 (defn- original-recipient-not-in-to-cc?
-  "True when the original recipient address appears in neither To nor Cc."
+  "True when the original recipient address appears in neither To nor Cc.
+  Repeated headers come back from get-header as vectors: take the first
+  original recipient, and match against all To/Cc values joined."
   [hdrs]
-  (let [orig (some-> (original-recipient hdrs) str/lower-case)
-        to   (some-> (get-header hdrs "To") str/lower-case)
-        cc   (some-> (get-header hdrs "Cc") str/lower-case)]
+  (let [joined (fn [header-name]
+                 (when-let [vals (seq (get-header-values hdrs header-name))]
+                   (str/lower-case (str/join " " vals))))
+        orig (some-> (original-recipient hdrs)
+                     (as-> v (if (vector? v) (first v) v))
+                     str/lower-case)
+        to   (joined "To")
+        cc   (joined "Cc")]
     (boolean (and orig
                   (not (some-> to (str/includes? orig)))
                   (not (some-> cc (str/includes? orig)))))))

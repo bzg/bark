@@ -300,7 +300,8 @@
     (binding [*out* *err*]
       (log/error "bone-index.clj requires --json <file> and -o <file>"))
     (System/exit 2))
-  (let [reports-dir (or out-dir (.getParent (clojure.java.io/file json-file)))]
+  (let [;; getParent is nil for a bare filename: default to ".".
+        reports-dir (or out-dir (.getParent (clojure.java.io/file json-file)) ".")]
     (io/make-parents out-file)
     (let [envelope (json/parse-string (slurp json-file))
           n-open   (count (get envelope "reports"))

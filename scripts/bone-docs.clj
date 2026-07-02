@@ -17,7 +17,7 @@
          '[clojure.string :as str]
          '[hiccup2.core :as h]
          '[taoensso.timbre :as log]
-         '[bone.common :refer [default-labels default-commands
+         '[bone.common :refer [default-labels default-commands close-reasons
                                resolve-labels-map resolve-commands-map
                                resolve-command-syntax reproducible-config-str
                                parse-cli-args load-config load-mailmap db-path build-source-map
@@ -26,7 +26,7 @@
          '[bone.html-bb :refer [pico-cdn resolved-theme set-theme!
                                 bone-description footer-css bone-footer wrap-js
                                 spit-html theme-toggle-js nav-bar
-                                org-inline parse-org-table]])
+                                org-inline parse-org-table html-escape]])
 
 ;; ---------------------------------------------------------------------------
 ;; Build the org table from resolved labels + commands
@@ -87,16 +87,21 @@
   `prefix` is the source's instruction prefix (\"\" for :loose, \"!\"
   for :strict)."
   [cmds prefix]
-  (let [rows [["Mark as acked"             (fmt-command-words (:acked cmds) prefix)  "Status"]
+  (let [;; Words mapping to each close reason come from the runtime
+        ;; authority (common/close-reasons); anything else resolves.
+        reason-words (fn [reason]
+                       (set (keep (fn [[w r]] (when (= r reason) w))
+                                  close-reasons)))
+        canceled     (reason-words :canceled)
+        expired      (reason-words :expired)
+        resolved?    #(not (contains? (set (keys close-reasons)) %))
+        rows [["Mark as acked"             (fmt-command-words (:acked cmds) prefix)  "Status"]
               ["Mark as owned"             (fmt-command-words (:owned cmds) prefix)  "Status"]
-              ["Mark as closed (canceled)" (fmt-command-words (filterv #(contains? #{"Canceled" "Cancelled"} %)
-                                                                       (:closed cmds)) prefix) "Status"]
-              ["Mark as closed (expired)"  (fmt-command-words (filterv #(= "Expired" %)
-                                                                       (:closed cmds)) prefix) "Status"]
-              ["Mark as closed (resolved)" (fmt-command-words (filterv #(not (contains? #{"Canceled" "Cancelled" "Expired"} %))
-                                                                       (:closed cmds)) prefix) "Status"]
-              ["Mark as urgent"            (fmt-command-words ["Urgent."] prefix)    "Priority"]
-              ["Mark as important"         (fmt-command-words ["Important."] prefix) "Priority"]]
+              ["Mark as closed (canceled)" (fmt-command-words (filterv canceled (:closed cmds)) prefix) "Status"]
+              ["Mark as closed (expired)"  (fmt-command-words (filterv expired (:closed cmds)) prefix) "Status"]
+              ["Mark as closed (resolved)" (fmt-command-words (filterv resolved? (:closed cmds)) prefix) "Status"]
+              ["Mark as urgent"            (fmt-command-words (:urgent cmds) prefix)    "Priority"]
+              ["Mark as important"         (fmt-command-words (:important cmds) prefix) "Priority"]]
         w-effect  (apply max (count "Effect on report")  (map #(count (nth % 0)) rows))
         w-command (apply max (count "Command keyword")   (map #(count (nth % 1)) rows))
         w-type    (apply max (count "Type")              (map #(count (nth % 2)) rows))
@@ -266,8 +271,7 @@
             (let [acc (if in-para? (conj! acc "</p>") acc)]
               (recur (inc i) acc false))
 
-            (or (str/starts-with? trimmed "#")
-                (str/starts-with? trimmed "#+"))
+            (str/starts-with? trimmed "#")
             (recur (inc i) acc in-para?)
 
             :else
@@ -398,16 +402,6 @@
                    (if (str/blank? name) acc (assoc acc email name)))
                  {}))))
 
-(defn- html-escape
-  "Escape HTML special characters in a string."
-  [s]
-  (when s
-    (-> s
-        (str/replace "&" "&amp;")
-        (str/replace "<" "&lt;")
-        (str/replace ">" "&gt;")
-        (str/replace "\"" "&quot;"))))
-
 (defn build-maintainers-html
   "Build an HTML section listing all maintainer tenures (active and closed),
   with :from/:to dates when known. The lead maintainer is highlighted.
@@ -486,19 +480,24 @@
       dbp         (db-path config)
       _           (load-datalevin-pod!)
       conn        ((resolve 'pod.huahaiy.datalevin/get-conn) dbp bone-schema {:wal? false})
-      db          ((resolve 'pod.huahaiy.datalevin/db) conn)
-      maint-html  (build-maintainers-html db source-name)
-      config-html (build-configuration-html config source-name)
-      org-text    (-> (slurp "resources/docs-tpl.org")
-                      (substitute-version (bone-version))
-                      (substitute-template labels cmds prefix)
-                      (filter-feed-links effective-dir))
-      body-html   (cond-> (org->html org-text)
-                    maint-html  (str "\n" maint-html)
-                    config-html (str "\n" config-html))
-      has-ical?   (.exists (io/file effective-dir "events" "announcements.ics"))
-      html        (docs-page body-html {:ical has-ical?})]
-  ((resolve 'pod.huahaiy.datalevin/close) conn)
+      ;; try/finally so the connection is closed even when the template
+      ;; slurp or rendering throws (same pattern as the other scripts).
+      html        (try
+                    (let [db          ((resolve 'pod.huahaiy.datalevin/db) conn)
+                          maint-html  (build-maintainers-html db source-name)
+                          config-html (build-configuration-html config source-name)
+                          org-text    (-> (slurp "resources/docs-tpl.org")
+                                          (substitute-version (bone-version))
+                                          (substitute-template labels cmds prefix)
+                                          (filter-feed-links effective-dir))
+                          body-html   (cond-> (org->html org-text)
+                                        maint-html  (str "\n" maint-html)
+                                        config-html (str "\n" config-html))
+                          has-ical?   (.exists (io/file effective-dir "events"
+                                                        "announcements.ics"))]
+                      (docs-page body-html {:ical has-ical?}))
+                    (finally
+                      ((resolve 'pod.huahaiy.datalevin/close) conn)))]
   (io/make-parents out-file)
   (spit-html out-file html)
   ;; Routine progress on stdout (captured in the export log), not stderr:

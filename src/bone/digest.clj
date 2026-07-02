@@ -558,6 +558,15 @@
               [(not= ?r ?rid)]]
             db rid)))
 
+(defn- roles-by-source
+  "Tenures per source for the sources appearing in `info` (a map of
+  rid -> [type source]).  Reports from another source must be checked
+  against that source's roles, not the current email's."
+  [db info]
+  (into {}
+        (map (fn [s] [s (roles/get-tenures db s)]))
+        (into #{} (keep (fn [[_ [_t s]]] s)) info)))
+
 (defn- broadcast-cover-commands!
   "When `rid` is a series cover letter, apply trigger and non-cross-
   reference annotation commands to every patch of the series.  Pure
@@ -570,9 +579,7 @@
   (when-let [patches (cover-letter-patches (d/db conn) rid)]
     (let [db         (d/db conn)
           info       (rids->type+source db patches)
-          src->roles (into {}
-                           (map (fn [s] [s (roles/get-tenures db s)]))
-                           (into #{} (keep (fn [[_ [_t s]]] s)) info))]
+          src->roles (roles-by-source db info)]
       (doseq [patch-rid patches
               :let [[ptype psrc] (get info patch-rid)]
               :when ptype]
@@ -592,9 +599,7 @@
   [conn email from-addr source-name rroles source-map delivery nearest-eids line-filter]
   (let [db       (d/db conn)
         info     (rids->type+source db nearest-eids)
-        src->roles (into {}
-                         (map (fn [s] [s (roles/get-tenures db s)]))
-                         (into #{} (keep (fn [[_ [_t s]]] s)) info))
+        src->roles (roles-by-source db info)
         any-cmd? (reduce (fn [acc rid]
                            (if-let [[rtype rsrc] (get info rid)]
                              (let [r (or (get src->roles rsrc) rroles)]

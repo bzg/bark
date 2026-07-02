@@ -38,11 +38,12 @@
         (assoc v :expires-on-deadline true)
 
         (string? after)
-        (if (re-matches #"\d{4}-\d{2}-\d{2}" after)
-          (when-let [d (common/parse-iso-date after)]
-            (assoc v :expires-on-date d))
-          (when-let [d (parse-delay-safe after)]
-            (assoc v :delay-days d)))
+        ;; parse-iso-date validates the ISO shape itself; anything else
+        ;; is tried as a duration.
+        (or (when-let [d (common/parse-iso-date after)]
+              (assoc v :expires-on-date d))
+            (when-let [d (parse-delay-safe after)]
+              (assoc v :delay-days d)))
 
         :else
         (when-let [d (parse-delay-safe after)]
@@ -55,8 +56,10 @@
      (if (:report/acked report) 1 0)))
 
 (defn- rule-matches?
-  "Check whether a report matches all expiry rule conditions.
-  Returns true if the report should be expired."
+  "Check whether a report matches all expiry rule conditions.  A delay
+  rule needs strictly more than `delay-days` whole days of inactivity
+  (\"0d\" = after one full day; the Expiry: command path expires at
+  the deadline itself)."
   [rule report-data now]
   (let [{:keys [delay-days expires-on-deadline expires-on-date max-status max-priority]} rule
         last-activity (:report/last-activity report-data)]
@@ -69,7 +72,10 @@
        expires-on-date
        (.before ^Date expires-on-date now)
        :else
+       ;; .before guards against a forged future Date: header --
+       ;; days-between is absolute, so "future" would look "old".
        (and delay-days last-activity
+            (.before ^Date last-activity now)
             (> (common/days-between last-activity now) delay-days)))
      ;; Status ceiling (activity score: acked=1 + owned=2, range 0–3)
      (or (nil? max-status)
@@ -120,15 +126,18 @@
   expire (open + matching the expiry rule)."
   [candidates db-snap source-map now]
   (keep (fn [[rid rtype src]]
-          (let [report-data (d/pull db-snap [:report/acked :report/owned
+          (let [report-data (d/pull db-snap [:report/message-id
+                                             :report/acked :report/owned
                                              :report/urgent :report/important
                                              :report/closed
                                              :report/expiry-value :report/deadline-value
                                              :report/last-activity] rid)]
+            ;; Defensive: expire-reports! already excludes closed
+            ;; reports, but direct callers may pass any candidates.
             (when (and (nil? (:report/closed report-data))
                        (should-expire? report-data source-map src rtype now))
               {:rid rid :rtype rtype :src src
-               :report-mid (:report/message-id (d/entity db-snap rid))})))
+               :report-mid (:report/message-id report-data)})))
         candidates))
 
 (defn expire-reports!
@@ -136,24 +145,26 @@
   :report/close-reason :expired."
   [conn source-map]
   (let [now (Date.)
+        ;; One snapshot for query and pulls, so they can't disagree.
+        db  (d/db conn)
         candidates (d/q '[:find ?r ?type ?src
                           :where
                           [?r :report/type ?type]
                           [?r :report/email ?e]
                           [?e :email/source ?src]
                           (not [?r :report/closed _])]
-                        (d/db conn))
-        db-snap  (d/db conn)
-        to-expire (filter-expirable candidates db-snap source-map now)
-        expired  (reduce
-                  (fn [n {:keys [rid rtype src report-mid]}]
-                    (let [synth-eid (find-or-create-expiry-email! conn src report-mid now)]
-                      (d/transact! conn [[:db/add rid :report/closed synth-eid]
-                                         [:db/add rid :report/closed-address "bone-system"]
-                                         [:db/add rid :report/close-reason :expired]])
-                      (tracking/bump-report-updated! conn rid)
-                      (log/info "Expired" (name rtype) "report:" report-mid)
-                      (inc n)))
-                  0 to-expire)]
-    (when (pos? expired)
-      (log/info "Expired" expired "report(s)."))))
+                        db)
+        to-expire (filter-expirable candidates db source-map now)
+        expired-rids (reduce
+                      (fn [acc {:keys [rid rtype src report-mid]}]
+                        (let [synth-eid (find-or-create-expiry-email! conn src report-mid now)]
+                          (d/transact! conn [[:db/add rid :report/closed synth-eid]
+                                             [:db/add rid :report/closed-address "bone-system"]
+                                             [:db/add rid :report/close-reason :expired]])
+                          (log/info "Expired" (name rtype) "report:" report-mid)
+                          (conj acc rid)))
+                      [] to-expire)]
+    (when (seq expired-rids)
+      ;; One bump for the whole batch.
+      (tracking/bump-report-updated! conn expired-rids)
+      (log/info "Expired" (count expired-rids) "report(s)."))))

@@ -98,10 +98,15 @@
   [all-failures {:keys [email source since]}]
   (let [addr (str/lower-case email)]
     (->> all-failures
-         (filter (fn [{:keys [from audience date] src :source}]
+         (filter (fn [{:keys [from audience date recorded-at] src :source}]
                    (and (= source src)
                         (or (nil? since)
-                            (and date (.after ^java.util.Date date since)))
+                            ;; Watermark on the wall-clock :recorded-at,
+                            ;; not :date (the email's Date: header): a
+                            ;; delayed email must still be notified.
+                            ;; Old entries fall back to :date.
+                            (let [^java.util.Date ts (or recorded-at date)]
+                              (and ts (.after ts since))))
                         (case (or audience :author)
                           :author      (= addr from)
                           :maintainers true

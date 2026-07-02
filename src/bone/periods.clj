@@ -15,9 +15,8 @@
     :restricted-types :patch-triggers?})
 
 (defn- iso-date? [s]
-  (boolean (and (string? s)
-                (re-matches #"\d{4}-\d{2}-\d{2}" s)
-                (common/parse-iso-date s))))
+  ;; parse-iso-date validates the ISO shape (and the calendar) itself.
+  (boolean (and (string? s) (common/parse-iso-date s))))
 
 (defn- normalize-period
   "{:from Date|nil :to Date|nil + overridable keys} resolved against

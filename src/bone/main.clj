@@ -12,6 +12,7 @@
             [bone.common :as common]
             [bone.digest :as digest]
             [bone.expire :as expire]
+            [bone.periods :as periods]
             [bone.roles :as roles]
             [datalevin.core :as d]
             [mailseq :as mailseq]
@@ -90,7 +91,9 @@
 
 (defn- iso->date [s]
   (when (and (string? s) (re-matches #"\d{4}-\d{2}-\d{2}" s))
-    (Date/from (Instant/parse (str s "T00:00:00Z")))))
+    ;; "2026-02-30" matches the regex but fails to parse: nil → fetch-err.
+    (try (Date/from (Instant/parse (str s "T00:00:00Z")))
+         (catch Exception _ nil))))
 
 (defn- duration->days [s]
   (when (and (string? s) (re-matches #"\d+[dwmy]" s))
@@ -288,10 +291,17 @@
                     (do (log/debug "Already digested, skipping:" mid) :ok)
 
                     :else
+                    ;; Backfill :email/source in the pulled map too (it
+                    ;; predates the transact): process-email! reads it
+                    ;; when :resolved-source is nil.
                     (do (log/info "Re-processing previously stored email:" mid)
                         (when-not (:email/source email)
                           (d/transact! db-conn [{:db/id eid :email/source src-name}]))
-                        (try-digest! ctx email mid nil))))
+                        (try-digest! ctx
+                                     (cond-> email
+                                       (not (:email/source email))
+                                       (assoc :email/source src-name))
+                                     mid nil))))
                 (do (log/warn "Skipping id collision (different Message-ID stored):" mid)
                     :skip)))))))))
 
@@ -333,13 +343,16 @@
 
 (defn- collect-safe-uids
   "Set of UIDs from `msgs` that didn't need retry.  Caps the IMAP
-  watermark advance."
+  watermark advance.  Stops early on shutdown so the grace period
+  isn't spent looping over a large catch-up."
   [ctx msgs]
   (reduce (fn [acc msg]
-            (let [result (safe-store-and-process! ctx msg)]
-              (if (and (not= :retry result) (:uid msg))
-                (conj acc (:uid msg))
-                acc)))
+            (if (shutting-down?)
+              (reduced acc)
+              (let [result (safe-store-and-process! ctx msg)]
+                (if (and (not= :retry result) (:uid msg))
+                  (conj acc (:uid msg))
+                  acc))))
           #{} msgs))
 
 (defn- process-each!
@@ -503,27 +516,34 @@
   "Start watching for new messages, storing+processing each as it arrives."
   [{:keys [db-conn mailbox-name] :as ctx} src folder]
   (log/info "Mailbox" (pr-str mailbox-name) "-- starting watch on" folder)
-  (mailseq/watch src folder
-                 (fn [msg]
-                   (when-not (shutting-down?)
-                     (if (nil? msg)
-                       (log/warn "Mailbox" (pr-str mailbox-name)
-                                 "-- watch delivered nil message, skipping")
-                       (do
-                         (log/info "Mailbox" (pr-str mailbox-name)
-                                   "-- new message id:" (:id msg)
-                                   "Subject:" (:subject msg))
-                         (try
-                           (let [result (store-and-process! ctx msg)]
-                             ;; Advance IMAP watermark when applicable
-                             (when (and (not= :retry result) (:uid msg))
-                               (ingest/save-imap-uid! db-conn mailbox-name (:uid msg))))
-                           (catch Exception e
-                             (log/error e "Mailbox" (pr-str mailbox-name)
-                                        "-- error processing message id:" (:id msg)
-                                        (blog/exception-msg e))))))))
-                 {:parse-opts   {:attachments? true}
-                  :heartbeat-ms (* 20 60 1000)}))
+  ;; After a failed message (:retry or exception), stop advancing the
+  ;; watermark for this connection: moving it past the failed UID would
+  ;; keep the reconnect catch-up from ever re-fetching that email.
+  (let [watermark-frozen? (atom false)]
+    (mailseq/watch src folder
+                   (fn [msg]
+                     (when-not (shutting-down?)
+                       (if (nil? msg)
+                         (log/warn "Mailbox" (pr-str mailbox-name)
+                                   "-- watch delivered nil message, skipping")
+                         (do
+                           (log/info "Mailbox" (pr-str mailbox-name)
+                                     "-- new message id:" (:id msg)
+                                     "Subject:" (:subject msg))
+                           (try
+                             (let [result (store-and-process! ctx msg)]
+                               ;; Advance IMAP watermark when applicable
+                               (if (= :retry result)
+                                 (reset! watermark-frozen? true)
+                                 (when (and (:uid msg) (not @watermark-frozen?))
+                                   (ingest/save-imap-uid! db-conn mailbox-name (:uid msg)))))
+                             (catch Exception e
+                               (reset! watermark-frozen? true)
+                               (log/error e "Mailbox" (pr-str mailbox-name)
+                                          "-- error processing message id:" (:id msg)
+                                          (blog/exception-msg e))))))))
+                   {:parse-opts   {:attachments? true}
+                    :heartbeat-ms (* 20 60 1000)})))
 
 ;; ---------------------------------------------------------------------------
 ;; Run context -- shared by batch and watch modes
@@ -553,6 +573,19 @@
    :sources      sources
    :ingest-opts  ingest-opts})
 
+(defn- validate-source-periods!
+  "Fail fast on malformed :periods: normalize-period silently turns an
+  unparseable :start/:end into an unbounded window, so a typo would
+  quietly apply a period to mails it was never meant to cover."
+  [config]
+  (let [errs (for [src (:sources config)
+                   err (periods/validate-periods src)]
+               (str "Source " (pr-str (:name src)) ": " err))]
+    (when (seq errs)
+      (throw (ex-info (str "Invalid :periods in config:\n"
+                           (str/join "\n" errs))
+                      {:errors (vec errs)})))))
+
 (defn- load-context
   "Re-read config, seed maintainers into tenures, return source-map+sources.
   Called once in batch mode, on every reconnect in watch mode (so
@@ -562,6 +595,7 @@
     (when-not config
       (throw (ex-info (str "Config file not found: " config-path)
                       {:config-path config-path})))
+    (validate-source-periods! config)
     (roles/sync-all-sources! db-conn config)
     {:source-map (common/build-source-map config)
      :sources    (or (:sources config) [])}))
@@ -754,7 +788,7 @@
 
 (defn- confirm-fresh! [db-path]
   (print (str "Wipe DB at " db-path "? [y/N] ")) (flush)
-  (#{"y" "Y" "yes" "YES"} (some-> (read-line) clojure.string/trim)))
+  (#{"y" "Y" "yes" "YES"} (some-> (read-line) str/trim)))
 
 (defn- delete-recursively! [^java.io.File f]
   (when (.isDirectory f)

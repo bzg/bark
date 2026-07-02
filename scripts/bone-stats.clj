@@ -2,10 +2,9 @@
 
 ;; bone-stats.clj -- Compute statistics from BONE data.
 ;;
-;; Usage:
-;;   bb stats                        -> writes public/stats.json
-;;   bb stats html                   -> writes public/data.html (Vega-Lite charts)
-;;   bb scripts/bone-stats.clj html -o path/to/data.html
+;; Usage (normally invoked per source by bone-export.clj):
+;;   bb scripts/bone-stats.clj json -o <reports-dir>/stats.json -n <source>
+;;   bb scripts/bone-stats.clj html -o <base-dir>/data.html -n <source>
 ;;
 ;; Environment / defaults:
 ;;   BONE_DB -- path to db (default: ./data/bone-db)
@@ -338,51 +337,49 @@
        (sort-by :score >) (take n)))
 
 (defn compute-stats
-  ([reports] (compute-stats reports nil nil))
-  ([reports db] (compute-stats reports db nil))
-  ([reports db source-name]
-   (let [mailmap       (load-mailmap)
-         last-year     (filter #(within-last-year? (report-date %)) reports)
-         open-yr       (remove :report/closed last-year)
-         emails-yr     (when db (emails-last-year db))
-         contributors  (when db (cond->> (all-contributors db)
-                                  source-name (filter #(= source-name (second %)))))
-         participants  (when db (cond->> (all-participants db)
-                                  source-name (filter #(= source-name (second %)))))
-         tenures       (when db (all-active-tenures db source-name))
-         n-maintainers (when db (total-maintainers tenures))
-         maint-since   (when db (all-maintainer-since-dates tenures))
-         n-always      (when db (maintainers-without-since tenures))
-         all-votes     (if db
-                         (votes-by-report
-                          (d/q '[:find ?r ?val ?voter ?emid
-                                 :where
-                                 [?v :vote/report ?r]
-                                 [?v :vote/value  ?val]
-                                 [?v :vote/voter  ?voter]
-                                 [?v :vote/email  ?e]
-                                 [?e :email/message-id ?emid]]
-                               db))
-                         {})]
-     (cond->
-       {:generated-at      (str (java.util.Date.))
-        :reports-per-type  (reports-per-type reports)
-        :reports-by-month  (reports-by-month reports)
-        :time-to-close     (time-to-close-stats reports)
-        :open-closed-ratio (open-closed-ratio reports)
-        :open-last-year    (count open-yr)
-        :total-last-year   (count last-year)
-        :top-openers       (top-openers reports 10 mailmap)
-        :vote-leaders      (vote-leaders reports all-votes 10)
-        :closed-cancel     (closed-cancel-breakdown reports)}
-       emails-yr     (assoc :email-ratio (email-vs-reports-ratio reports emails-yr))
-       contributors  (assoc :contributors-by-month (contributors-by-month contributors)
-                            :total-contributors (count contributors))
-       participants  (assoc :participants-by-month (participants-by-month participants)
-                            :total-participants (count participants))
-       n-maintainers (assoc :total-maintainers n-maintainers)
-       maint-since   (assoc :maintainers-by-month
-                           (maintainers-by-month maint-since (or n-always 0)))))))
+  [reports db source-name]
+  (let [mailmap       (load-mailmap)
+        last-year     (filter #(within-last-year? (report-date %)) reports)
+        open-yr       (remove :report/closed last-year)
+        emails-yr     (when db (emails-last-year db))
+        contributors  (when db (cond->> (all-contributors db)
+                                 source-name (filter #(= source-name (second %)))))
+        participants  (when db (cond->> (all-participants db)
+                                 source-name (filter #(= source-name (second %)))))
+        tenures       (when db (all-active-tenures db source-name))
+        n-maintainers (when db (total-maintainers tenures))
+        maint-since   (when db (all-maintainer-since-dates tenures))
+        n-always      (when db (maintainers-without-since tenures))
+        all-votes     (if db
+                        (votes-by-report
+                         (d/q '[:find ?r ?val ?voter ?emid
+                                :where
+                                [?v :vote/report ?r]
+                                [?v :vote/value  ?val]
+                                [?v :vote/voter  ?voter]
+                                [?v :vote/email  ?e]
+                                [?e :email/message-id ?emid]]
+                              db))
+                        {})]
+    (cond->
+      {:generated-at      (str (java.util.Date.))
+       :reports-per-type  (reports-per-type reports)
+       :reports-by-month  (reports-by-month reports)
+       :time-to-close     (time-to-close-stats reports)
+       :open-closed-ratio (open-closed-ratio reports)
+       :open-last-year    (count open-yr)
+       :total-last-year   (count last-year)
+       :top-openers       (top-openers reports 10 mailmap)
+       :vote-leaders      (vote-leaders reports all-votes 10)
+       :closed-cancel     (closed-cancel-breakdown reports)}
+      emails-yr     (assoc :email-ratio (email-vs-reports-ratio reports emails-yr))
+      contributors  (assoc :contributors-by-month (contributors-by-month contributors)
+                           :total-contributors (count contributors))
+      participants  (assoc :participants-by-month (participants-by-month participants)
+                           :total-participants (count participants))
+      n-maintainers (assoc :total-maintainers n-maintainers)
+      maint-since   (assoc :maintainers-by-month
+                           (maintainers-by-month maint-since (or n-always 0))))))
 
 ;; ---------------------------------------------------------------------------
 ;; HTML / Vega-Lite rendering
@@ -513,8 +510,7 @@
         tlines   (filterv #(str/starts-with? (str/trim %) "|") lines)
         filtered (if out-dir
                    (let [processed (mapv (fn [line]
-                                           {:orig line
-                                            :had-links (boolean (re-find #"\[\[" line))
+                                           {:had-links (boolean (re-find #"\[\[" line))
                                             :result (if (re-find #"\[\[" line)
                                                       (strip-dead-data-links line out-dir)
                                                       line)})
@@ -684,4 +680,6 @@
     (if html?
       (generate-html! out-file out-dir source-name)
       (generate-json! out-file source-name))))
-(apply -main *command-line-args*)
+;; Guard for tests and load-file (same pattern as bone-notify).
+(when (= (System/getProperty "babashka.file") *file*)
+  (apply -main *command-line-args*))

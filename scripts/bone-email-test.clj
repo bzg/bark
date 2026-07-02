@@ -11,7 +11,6 @@
 ;;   bb test-smtp --to me@example.com --send -- send to a specific address
 
 (require '[babashka.pods :as pods]
-         '[clojure.edn :as edn]
          '[clojure.string :as str]
          '[bone.common :refer [load-config]])
 
@@ -49,13 +48,20 @@
 ;; ---------------------------------------------------------------------------
 
 (when (= (System/getProperty "babashka.file") *file*)
-  (let [args     *command-line-args*
+  (let [args     (vec *command-line-args*)
         send?    (some #{"--send"} args)
-        to-idx   (some #(when (= "--to" (nth args % nil)) %) (range (count args)))
-        to-arg   (when to-idx (nth args (inc to-idx) nil))
+        to-idx   (.indexOf args "--to")
+        to-arg   (when (nat-int? to-idx) (get args (inc to-idx)))
         config   (load-config)]
 
     (println "== BONE SMTP test ==\n")
+
+    ;; --to without a value must not fall back to the lead maintainer:
+    ;; with --send the test email would go to the wrong recipient.
+    (when (and (nat-int? to-idx)
+               (or (nil? to-arg) (str/starts-with? to-arg "--")))
+      (println "✗ --to requires an address (e.g. --to me@example.com).")
+      (System/exit 1))
 
     ;; --- Check config.edn ---
     (when-not config

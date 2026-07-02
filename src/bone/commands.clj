@@ -95,18 +95,18 @@
 ;; Detection (pure)
 ;; ---------------------------------------------------------------------------
 
-(defn- detect-close-reason [closed-words body-text strict-syntax?]
-  (when (seq closed-words)
-    (let [pattern (apply word-pattern false strict-syntax? closed-words)]
-      (when-let [[_ matched] (re-find pattern body-text)]
-        (get common/close-reasons matched :resolved)))))
+(defn- detect-close-reason
+  "Close reason from the first matched closing word, using the
+  precompiled :closed pattern from :word-patterns."
+  [closed-pattern body-text]
+  (when closed-pattern
+    (when-let [[_ matched] (re-find closed-pattern body-text)]
+      (get common/close-reasons matched :resolved))))
 
 (defn- parse-date-iso [s]
-  (try
-    (-> (LocalDate/parse s) (.atStartOfDay ZoneOffset/UTC) .toInstant Date/from)
-    (catch Exception _
-      (log/warn "Invalid ISO date in command:" s)
-      nil)))
+  (or (common/parse-iso-date s)
+      (do (log/warn "Invalid ISO date in command:" s)
+          nil)))
 
 (defn- parse-date-or-duration
   "Parse a YYYY-MM-DD date string or a duration like '2d', '3w', '1m 2w'.
@@ -130,13 +130,13 @@
 (defn detect-words
   "Detect bareword command matches in `body-text` for a given
   `report-type`, using the precompiled vocabulary in `source-commands`."
-  [report-type body-text {:keys [word-patterns commands strict-syntax? overrides]}]
+  [report-type body-text {:keys [word-patterns overrides]}]
   (when body-text
     (let [all-sets (match-words word-patterns body-text)
           ;; Pre-compute close-reason from unfiltered matches so it survives
           ;; any future refactoring of the filter step.
           reason   (when (:report/closed all-sets)
-                     (detect-close-reason (:closed commands) body-text strict-syntax?))
+                     (detect-close-reason (get word-patterns :closed) body-text))
           filtered (into {}
                         (keep (fn [[attr :as entry]]
                                 (let [cmd (attr->word-cmd attr)
@@ -158,7 +158,6 @@
   `build-source-commands`); if omitted, the loose-mode defaults are
   used."
   ([report-type body-text] (detect-lines report-type body-text nil nil compiled-lines-loose))
-  ([report-type body-text overrides] (detect-lines report-type body-text overrides nil compiled-lines-loose))
   ([report-type body-text overrides email-date] (detect-lines report-type body-text overrides email-date compiled-lines-loose))
   ([report-type body-text overrides email-date compiled]
    (when body-text
@@ -250,19 +249,22 @@
   - :author      -- the address that sent the command (the default,
                      used for typo-class failures like `Superseded-by:`
                      with an unknown target).
-  - :maintainers -- all maintainer subscribers on the source, so a
-                     permission denial is visible to the people who can
-                     act on it."
+  - :maintainers -- every subscriber on the source (subscribers are
+                     operator-configured; no per-subscriber maintainer
+                     check is applied)."
   [{:keys [source from-addr email-date reason command report-mid audience]}]
   (let [now-ms   (System/currentTimeMillis)
         cutoff   (Date. (- now-ms max-failure-age-ms))
-        entry    {:source     source
-                  :from       (str/lower-case from-addr)
-                  :date       (or email-date (Date.))
-                  :reason     reason
-                  :command    command
-                  :report-mid (or report-mid "")
-                  :audience   (or audience :author)}]
+        entry    {:source      source
+                  :from        (str/lower-case from-addr)
+                  :date        (or email-date (Date.))
+                  ;; Wall-clock time: the notifier watermarks on this, not
+                  ;; on :date -- a delayed email must still be notified.
+                  :recorded-at (Date.)
+                  :reason      reason
+                  :command     command
+                  :report-mid  (or report-mid "")
+                  :audience    (or audience :author)}]
     (locking failures-lock
       (let [existing (load-failures)
             pruned   (filterv (fn [{:keys [date]}]
@@ -391,9 +393,12 @@
         new-sets     (into {} (remove (fn [[k _]] (get current k))) ref-result)
         addr-lc      (some-> from-addr str/lower-case)
         all-tx       (cond-> (when (seq new-sets)
-                               (into [(into {:db/id report-eid} (map (fn [[k _]] [k email-eid])) new-sets)]
-                                     (map (fn [[k _]] [:db/add report-eid (address-attrs k) addr-lc]))
-                                     new-sets))
+                               (cond-> [(into {:db/id report-eid} (map (fn [[k _]] [k email-eid])) new-sets)]
+                                 ;; No From: address: skip the -address
+                                 ;; datoms, datalevin rejects nil values.
+                                 addr-lc
+                                 (into (map (fn [[k _]] [:db/add report-eid (address-attrs k) addr-lc]))
+                                       new-sets)))
                        (and close-reason (:report/closed new-sets))
                        (conj [:db/add report-eid :report/close-reason close-reason]))]
     (when (seq all-tx) [(vec all-tx) new-sets close-reason])))
@@ -628,20 +633,21 @@
 
 (defn- filter-permitted-lines
   "Return the subset of `lines` whose scope permits `from-addr` to
-  act, further filtered by `action-pred`. `current-d` is the delay
-  passed through to `scope-permits?` -- only forced when at least one
-  line has scope :setter-or-maintainer.
+  act, further filtered by `line-pred` (a predicate on the whole
+  parsed line). `current-d` is the delay passed through to
+  `scope-permits?` -- only forced when at least one line has scope
+  :setter-or-maintainer.
 
   When `failure-ctx` is non-nil, lines that are rejected by the
-  scope check (but pass `action-pred`) are written to the failures
+  scope check (but pass `line-pred`) are written to the failures
   file as :insufficient-scope, audience :maintainers, so they
   surface in the next notification round."
-  [lines current-d from-addr is-maintainer? action-pred failure-ctx]
+  [lines current-d from-addr is-maintainer? line-pred failure-ctx]
   ;; Eager realization via `filterv` so the recording side effect in
   ;; the denial branch fires deterministically, regardless of whether
   ;; callers seq or reduce over the result.
-  (filterv (fn [{:keys [scope attr action] :as line}]
-             (and (action-pred action)
+  (filterv (fn [{:keys [scope attr] :as line}]
+             (and (line-pred line)
                   (or (scope-permits? scope attr from-addr is-maintainer? current-d)
                       (do (when failure-ctx
                             (record-failure!
@@ -1056,8 +1062,17 @@
                                    db report-eid unclose-relation-rows)))
         permitted   (filter-permitted-lines
                      lines current-d from-addr is-maintainer?
-                     #{:unset :unset-superseded :unset-duplicate
-                       :set-related :unset-related} failure-ctx)
+                     ;; On a closed report only closure commands apply;
+                     ;; other :unset lines (Not urgent., ...) would be
+                     ;; no-ops -- don't scope-check them into noisy
+                     ;; :insufficient-scope failures.
+                     (fn [{:keys [action attr]}]
+                       (case action
+                         :unset (= attr :report/closed)
+                         (:unset-superseded :unset-duplicate
+                          :set-related :unset-related) true
+                         false))
+                     failure-ctx)
         resolved    (resolve-commands permitted)
         unset       (:unset resolved)
         unset-closed? (contains? unset :report/closed)]

@@ -88,57 +88,40 @@
         :where [?e :meta/ident "global"] [?e :meta/last-modified ?t]]
       db))
 
-(defn changed-source-types-since
-  "Return a map {source-name {report-type count}} for reports updated
-  after `since-ts`.  Enables source-level and per-type skip logic (a
-  present type maps to a truthy count, so the map doubles as a set-like
-  predicate) and per-type change reporting."
-  [db since-ts]
+(defn- source-types-since
+  "Return a map {source-name {report-type count}} for reports whose
+  `attr` timestamp is after `since-ts`.  A present type maps to a
+  truthy count, so the map doubles as a set-like predicate."
+  [db attr since-ts]
   (reduce (fn [m [src rtype n]]
             (assoc-in m [src rtype] n))
           {}
           (dq '[:find ?src ?t (count ?r)
-                :in $ ?since
+                :in $ ?a ?since
                 :where
-                [?r :report/updated-at ?u] [(> ?u ?since)]
+                [?r ?a ?u] [(> ?u ?since)]
                 [?r :report/type ?t]
                 [?r :report/email ?e] [?e :email/source ?src]]
-              db since-ts)))
+              db attr since-ts)))
+
+(defn changed-source-types-since
+  "Reports *touched* after `since-ts` (`:report/updated-at`): status
+  changes, new replies, relations...  Drives the source-level and
+  per-type re-export skip logic."
+  [db since-ts]
+  (source-types-since db :report/updated-at since-ts))
 
 (defn new-source-types-since
-  "Return a map {source-name {report-type count}} for reports *created*
-  (ingested) after `since-ts`, keyed by `:report/created-at` -- the
-  wall-clock ingestion instant, not the email's Date header (which may be
-  back- or future-dated).  Unlike `changed-source-types-since` (which
-  counts every report touched, including status changes and new replies),
-  this counts only genuine additions, so the cron notification can tell
-  new reports apart from mere updates."
+  "Reports *created* (ingested) after `since-ts` (`:report/created-at`
+  -- the wall-clock ingestion instant, not the email's Date header,
+  which may be back- or future-dated).  Counts only genuine additions,
+  so the cron notification can tell new reports apart from updates."
   [db since-ts]
-  (reduce (fn [m [src rtype n]]
-            (assoc-in m [src rtype] n))
-          {}
-          (dq '[:find ?src ?t (count ?r)
-                :in $ ?since
-                :where
-                [?r :report/created-at ?c] [(> ?c ?since)]
-                [?r :report/type ?t]
-                [?r :report/email ?e] [?e :email/source ?src]]
-              db since-ts)))
+  (source-types-since db :report/created-at since-ts))
 
 (defn state-changed-source-types-since
-  "Return a map {source-name {report-type count}} for reports whose own
-  state changed after `since-ts` (`:report/state-changed-at`), excluding
-  mere thread growth.  Used by the cron notification to count effective
-  report modifications, as opposed to `changed-source-types-since` (any
-  touch, which drives re-export) or `new-source-types-since` (additions)."
+  "Reports whose own *state* changed after `since-ts`
+  (`:report/state-changed-at`), excluding mere thread growth.  Used by
+  the cron notification to count effective report modifications."
   [db since-ts]
-  (reduce (fn [m [src rtype n]]
-            (assoc-in m [src rtype] n))
-          {}
-          (dq '[:find ?src ?t (count ?r)
-                :in $ ?since
-                :where
-                [?r :report/state-changed-at ?u] [(> ?u ?since)]
-                [?r :report/type ?t]
-                [?r :report/email ?e] [?e :email/source ?src]]
-              db since-ts)))
+  (source-types-since db :report/state-changed-at since-ts))

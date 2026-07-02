@@ -39,23 +39,24 @@
 ;; Config seeding -- per-period sync
 ;; ---------------------------------------------------------------------------
 
+(defn- window-contains?
+  "True when the tenure's half-open window [:from, :to) contains `as-of`
+  (nil bounds = unbounded)."
+  [{:keys [^Date from ^Date to]} ^Date as-of]
+  (and (or (nil? from) (not (.after from as-of)))
+       (or (nil? to)   (.after to as-of))))
+
 (defn- active-as-of
   "Tenures whose half-open window [:from, :to) contains `as-of`.
   nil `as-of` (dawn of time) returns []."
   [tenures ^Date as-of]
   (when as-of
-    (filter (fn [{:keys [^Date from ^Date to]}]
-              (and (or (nil? from) (not (.after from as-of)))
-                   (or (nil? to)   (.after to as-of))))
-            tenures)))
+    (filter #(window-contains? % as-of) tenures)))
 
 (defn- covering-tenure
   "Return the tenure for `email` whose window contains `as-of`, or nil."
   [tenures email ^Date as-of]
-  (first (filter (fn [{:keys [^Date from ^Date to] e :email}]
-                   (and (= e email)
-                        (or (nil? from) (not (.after from as-of)))
-                        (or (nil? to)   (.after to as-of))))
+  (first (filter #(and (= email (:email %)) (window-contains? % as-of))
                  tenures)))
 
 (defn- existing-tenure-with-from
@@ -141,27 +142,32 @@
          vec)))
 
 (defn parse-role-controls
-  ([body-text] (parse-role-controls body-text false))
-  ([body-text strict-syntax?]
-   (when body-text
-     (->> (re-seq (role-control-pattern strict-syntax?) body-text)
-          (mapv (fn [[_ cmd addrs]]
-                  {:command cmd :addresses (parse-addresses addrs)}))))))
+  [body-text strict-syntax?]
+  (when body-text
+    (->> (re-seq (role-control-pattern strict-syntax?) body-text)
+         (mapv (fn [[_ cmd addrs]]
+                 {:command cmd :addresses (parse-addresses addrs)})))))
 
 (defn- open-tenure!
   "Open a new tenure for each address that does not already have an active one.
+  Addresses are lowercased and deduped first, so `Add maintainer: A@b a@b`
+  cannot open two concurrent tenures for the same person.
   Returns the list of addresses for which a tenure was actually created."
   [conn source-name addresses email-date]
   (let [db    (d/db conn)
-        opens (remove #(active-tenure-eid db source-name %) addresses)]
+        opens (->> addresses
+                   (map str/lower-case)
+                   distinct
+                   (remove #(active-tenure-eid db source-name %))
+                   vec)]
     (when (seq opens)
       (d/transact! conn
                    (mapv (fn [addr]
                            {:maint-tenure/source source-name
-                            :maint-tenure/email  (str/lower-case addr)
+                            :maint-tenure/email  addr
                             :maint-tenure/from   email-date})
                          opens))
-      (mapv str/lower-case opens))))
+      opens)))
 
 (defn- close-tenure!
   "Close active tenures for `addresses` (setting :to = email-date).
@@ -200,7 +206,12 @@
    (apply-role-controls! conn tenures source-name from-addr body-text email-date false))
   ([conn tenures source-name from-addr body-text email-date strict-syntax?]
    (let [controls    (parse-role-controls body-text strict-syntax?)
-         is-maint    (common/maintainer? tenures from-addr)
+         ;; as-of the email's date: sync-all-sources! installs *all*
+         ;; config periods up front, so on a --fresh replay a now-closed
+         ;; tenure must still grant what it granted at the time.
+         is-maint    (common/maintainer? tenures from-addr email-date)
+         ;; Lead stays a "current" notion: Remove maintainer is
+         ;; lead-only as of now.
          is-lead     (common/lead-maintainer? tenures from-addr)
          failure-ctx (when (and from-addr source-name)
                        {:source     source-name

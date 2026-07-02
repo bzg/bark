@@ -83,7 +83,8 @@
   (d/transact! conn [{:db/id series-eid :series/closed email-eid}]))
 
 (defn- supersede-series-reports!
-  "Close all open reports in a superseded series with reason :superseded."
+  "Close all open reports in a superseded series with reason :superseded.
+  One transaction + one bump for the whole batch."
   [conn series-eid email-eid]
   (let [db (d/db conn)
         report-eids (d/q '[:find [?r ...]
@@ -91,11 +92,13 @@
                            :where [?s :series/patches ?r]
                            (not [?r :report/closed _])]
                          db series-eid)]
-    (doseq [rid report-eids]
-      (d/transact! conn [{:db/id rid
-                          :report/closed email-eid
-                          :report/close-reason :superseded}])
-      (tracking/bump-report-updated! conn rid))))
+    (when (seq report-eids)
+      (d/transact! conn (mapv (fn [rid]
+                                {:db/id rid
+                                 :report/closed email-eid
+                                 :report/close-reason :superseded})
+                              report-eids))
+      (tracking/bump-report-updated! conn report-eids))))
 
 (defn add-patch-to-series! [conn series-eid report-eid email]
   (let [existing (d/q '[:find [?r ...]
@@ -106,14 +109,19 @@
     (d/transact! conn [[:db/add series-eid :series/patches report-eid]
                        {:db/id report-eid :report/series series-eid}])
     ;; Cross-link siblings via :related-to (idempotent via :rel/id).
+    ;; Siblings that gain a link must re-export -- contextual change
+    ;; (a new patch joined the series), not a state change.
     (let [opts {:from-eid  report-eid
                 :kind      :related-to
                 :setter    (:email/author-address email)
                 :email-eid (:db/id email)
                 :posed-at  (or (:email/date-sent email) (Date.))
-                :value     nil}]
-      (doseq [sibling-eid existing]
-        (rel/pose-if-absent! conn (assoc opts :to-eid sibling-eid))))))
+                :value     nil}
+          linked (filterv (fn [sibling-eid]
+                            (rel/pose-if-absent! conn (assoc opts :to-eid sibling-eid)))
+                          existing)]
+      (when (seq linked)
+        (tracking/bump-report-updated! conn linked false)))))
 
 (defn set-cover-letter! [conn series-eid email-eid]
   (d/transact! conn [{:db/id series-eid :series/cover-letter email-eid}]))

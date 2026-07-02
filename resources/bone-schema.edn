@@ -164,7 +164,8 @@
  ;;
  ;; :rel/id encodes <from-eid>:<kind>:<to-eid> for replay idempotence.
  ;; :rel/active? is flipped to false on retract; the entity is kept
- ;; for audit instead of being physically retracted.
+ ;; for audit instead of being physically retracted.  A re-pose dated
+ ;; after the retraction flips it back (see pose-if-absent!).
  :rel/id           {:db/valueType :db.type/string
                     :db/unique    :db.unique/identity}
  :rel/from         {:db/valueType :db.type/ref}

@@ -104,6 +104,17 @@
 ;; Shared <head> builder
 ;; ---------------------------------------------------------------------------
 
+(defn html-escape
+  "Escape HTML special characters in a string (element and attribute
+  contexts)."
+  [s]
+  (when s
+    (-> s
+        (str/replace "&" "&amp;")
+        (str/replace "<" "&lt;")
+        (str/replace ">" "&gt;")
+        (str/replace "\"" "&quot;"))))
+
 (defn html-head
   "Render a <head> block as a string.
    opts keys:
@@ -112,28 +123,30 @@
      :extra-head -- raw HTML string inserted before </head> (optional)
      :rss-href   -- href for <link rel=alternate> RSS (optional)"
   [{:keys [title css extra-head rss-href]}]
-  (str "<head>\n"
-       "<meta charset=\"UTF-8\">\n"
-       "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
-       "<meta name=\"color-scheme\" content=\"light dark\">\n"
-       "<meta name=\"description\" content=\"" bone-description "\">\n"
-       "<meta property=\"og:title\" content=\"" title "\">\n"
-       "<meta property=\"og:description\" content=\"" bone-description "\">\n"
-       "<meta property=\"og:type\" content=\"website\">\n"
-       "<link rel=\"stylesheet\" href=\"" pico-cdn "\">\n"
-       (when-let [entries (resolved-theme)]
-         (str/join (map (fn [{:keys [link inline]}]
-                          (if link
-                            (str "<link rel=\"stylesheet\" href=\"" link "\">\n")
-                            (str "<style>\n" inline "\n</style>\n")))
-                        entries)))
-       (when rss-href
-         (str "<link rel=\"alternate\" type=\"application/rss+xml\" "
-              "title=\"BONE Reports RSS\" href=\"" rss-href "\">\n"))
-       "<title>" title "</title>\n"
-       (when css (str "<style>\n" css "\n</style>\n"))
-       (or extra-head "")
-       "</head>\n"))
+  (let [title    (html-escape title)
+        rss-href (html-escape rss-href)]
+    (str "<head>\n"
+         "<meta charset=\"UTF-8\">\n"
+         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
+         "<meta name=\"color-scheme\" content=\"light dark\">\n"
+         "<meta name=\"description\" content=\"" bone-description "\">\n"
+         "<meta property=\"og:title\" content=\"" title "\">\n"
+         "<meta property=\"og:description\" content=\"" bone-description "\">\n"
+         "<meta property=\"og:type\" content=\"website\">\n"
+         "<link rel=\"stylesheet\" href=\"" pico-cdn "\">\n"
+         (when-let [entries (resolved-theme)]
+           (str/join (map (fn [{:keys [link inline]}]
+                            (if link
+                              (str "<link rel=\"stylesheet\" href=\"" link "\">\n")
+                              (str "<style>\n" inline "\n</style>\n")))
+                          entries)))
+         (when rss-href
+           (str "<link rel=\"alternate\" type=\"application/rss+xml\" "
+                "title=\"BONE Reports RSS\" href=\"" rss-href "\">\n"))
+         "<title>" title "</title>\n"
+         (when css (str "<style>\n" css "\n</style>\n"))
+         (or extra-head "")
+         "</head>\n")))
 
 ;; ---------------------------------------------------------------------------
 ;; Shared nav theme-toggle button (hiccup vector)
@@ -207,10 +220,11 @@
   DOM at that position.
 
   A literal </script> in `body` would close the outer template, so it
-  is replaced with a placeholder and restored client-side."
+  is replaced with a placeholder and restored client-side.  The match
+  is case-insensitive, like the HTML parser's end-tag scan."
   [id body]
   (str "<script type=\"text/x-html\" id=\"" id "\">"
-       (str/replace body "</script>" "__BONE_END_SCRIPT__")
+       (str/replace body #"(?i)</script>" "__BONE_END_SCRIPT__")
        "</script>\n"
        "<script>document.write("
        "document.getElementById('" id "').textContent"

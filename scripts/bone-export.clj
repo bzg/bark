@@ -115,6 +115,7 @@
 (def ^:private shell-asset-files
   ["resources/bone-index.js"
    "resources/bone-stats.js"
+   "resources/bone-theme.js"
    "resources/bone-data.css"
    "resources/docs-tpl.org"
    "resources/data.org"
@@ -478,7 +479,10 @@
   (let [source-name (:email/source email)
         src-type    (get-in source-map [source-name :source-type])]
     (when-not (#{:alias :mailbox} src-type)
-      (let [raw (archived-at email)
+      (let [;; Archived-At is sender-controlled and published as <a href>
+            ;; and RSS <link>: http(s) only (no javascript:/data:).
+            raw (when-let [aa (archived-at email)]
+                  (when (re-matches #"(?i)https?://\S+" aa) aa))
             mid (some-> (export-mid report email) (str/replace #"^<|>$" ""))
             fmt (get-in source-map [source-name :archive-format-string])]
         (if (and fmt mid) (str/replace fmt "%s" mid) raw)))))
@@ -985,7 +989,9 @@
   ([reports out-dir source-name source-map maintainers-map]
    (dump-rss! reports out-dir source-name source-map maintainers-map "all.xml" "reports"))
   ([reports out-dir source-name source-map maintainers-map basename feed-label]
-   (let [open     (->> reports open-reports (take (* rss-limit 20)))
+   (let [;; 20x headroom: series folding can collapse many reports into
+         ;; one item, a plain (take rss-limit) could starve the final cap.
+         open     (->> reports open-reports (take (* rss-limit 20)))
          data     (map-reports open source-map maintainers-map)
          data     (->> data fold-series (take rss-limit))
          items    (str/join "\n" (map report->rss-item data))
@@ -1067,7 +1073,8 @@
       (str ":" label ": " (if xf (xf raw) raw)))))
 
 (defn- report->org-entry [m]
-  (let [todo    (if (= (nth (:flags m "---") 2 \-) \C) "DONE" "TODO")
+  (let [;; Flag position 2 is the close flag: C/E/S/R, or - when open.
+        todo    (if (= (nth (:flags m "---") 2 \-) \-) "TODO" "DONE")
         prio    (case (:priority m 0)
                   3 "[#A] " 2 "[#B] " 1 "[#C] " "")
         subject (org-safe (:subject m ""))
@@ -1516,7 +1523,7 @@
 (defn dump-root-index!
   "Generate public/index.html listing all exported sources.
   Reads each source's reports/meta.json for summary counts."
-  [source-names _source-map]
+  [source-names]
   (let [rows (for [src-name source-names
                    :let     [slug     (slugify src-name)
                          base-dir (str "public/" slug)
@@ -1647,7 +1654,7 @@
 (def formats #{"json" "rss" "org" "html" "all" "stats" "patches" "text" "events" "root"})
 
 (let [{:keys [format source-name min-priority min-status force-all? theme page-size closed-retention
-              topics-filter]
+              topics-filter html-columns html-columns-sort]
        :or   {format "all"}}
       (parse-cli-args *command-line-args*)
       config (load-config)
@@ -1682,9 +1689,22 @@
           ;; the new shells are rebuilt -- even with no report activity, which
           ;; would otherwise skip the run and leave the old HTML in place.
           shell-changed?  (shell-assets-changed? last-export)
+          ;; --closed-retention and :awaiting-delay depend on the clock,
+          ;; not on DB transactions: reports cross those thresholds with
+          ;; no tx to re-trigger their export.  When either is configured,
+          ;; force one full run per UTC day so the incremental output
+          ;; can't diverge from --force for long.
+          day-crossed?    (boolean
+                           (and last-export
+                                (or closed-retention
+                                    (:awaiting-delay config)
+                                    (some :awaiting-delay (:sources config)))
+                                (not= (format-date-iso last-export)
+                                      (format-date-iso run-started))))
           incremental?    (and (not force-all?)
                                (not config-changed?)
                                (not shell-changed?)
+                               (not day-crossed?)
                                (= format "all")
                                last-export last-modified)
           skip?           (and incremental?
@@ -1694,6 +1714,8 @@
         (log/info "Config changed since last export, forcing full re-export."))
       (when (and shell-changed? (not config-changed?))
         (log/info "Shell assets changed since last export, forcing full re-export."))
+      (when (and day-crossed? (not config-changed?) (not shell-changed?) (not force-all?))
+        (log/info "Retention/awaiting configured and a day has passed, forcing full re-export."))
       (if skip?
         (log/info "Nothing changed since last export, skipping.")
         ;; Resolve source list *before* the expensive DB pull
@@ -1756,22 +1778,22 @@
                                                 [?e :email/message-id ?emid]
                                                 [(get-else $ ?e :email/headers-edn "") ?hdrs]]
                                               db))
-                        effective-ps    page-size
                         cli-tf          (resolve-topics-filter topics-filter)
                         drop-cutoff     (resolve-closed-retention closed-retention)
                         _               (when cli-tf
                                           (log/info "CLI topics filter:" (str/join ", " cli-tf)))
                         _               (when drop-cutoff
                                           (log/info "Dropping reports closed before" drop-cutoff))
-                        cli-extra       (let [drop (into #{} (remove nil?)
-                                                              [format "-n" source-name "--force"
-                                                               "--html-theme" theme
-                                                               "--html-page-size" (some-> page-size str)
-                                                               "--closed-retention" closed-retention
-                                                               "--topics-filter" topics-filter])]
-                                          (cond-> (vec (remove drop (rest *command-line-args*)))
-                                            effective-theme (into ["--html-theme" effective-theme])
-                                            effective-ps    (into ["--html-page-size" (str effective-ps)])))]
+                        ;; Flags forwarded to the index/stats/docs
+                        ;; sub-scripts: an explicit whitelist rebuilt from
+                        ;; the parsed flags (raw-token subtraction used to
+                        ;; strip flags whose value collided, e.g. with the
+                        ;; format name).
+                        cli-extra       (cond-> []
+                                          effective-theme   (into ["--html-theme" effective-theme])
+                                          page-size         (into ["--html-page-size" (str page-size)])
+                                          html-columns      (into ["--html-columns" html-columns])
+                                          html-columns-sort (into ["--html-columns-sort" html-columns-sort]))]
                     (binding [*export-ctx* (build-export-ctx db votes config)]
                       (reduce (fn [exported src-name]
                                 (let [reports     (filter-reports all-reps {:source       src-name
@@ -1791,8 +1813,11 @@
                                       ;; both.  On an incremental run we rebuild only when
                                       ;; the file is missing or -- for docs -- maintainers
                                       ;; changed; otherwise the shells stay byte-stable.
+                                      ;; regen-shell? also governs data.html
+                                      ;; (dump-stats! "html"), so check both.
                                       regen-shell? (or (not incremental?)
-                                                       (not (.exists (io/file final-dir "index.html"))))
+                                                       (not (.exists (io/file final-dir "index.html")))
+                                                       (not (.exists (io/file final-dir "data.html"))))
                                       regen-docs?  (or (not incremental?)
                                                        (maintainers-changed-since? db src-name last-export)
                                                        (not (.exists (io/file final-dir "docs.html"))))]
@@ -1853,7 +1878,7 @@
             ;; (the :when meta filter drops never-exported sources anyway).
             (when (and (#{"all" "root"} format)
                        (or (= format "root") (seq exported-srcs)))
-              (dump-root-index! (mapv :name (:sources config)) source-map))
+              (dump-root-index! (mapv :name (:sources config))))
             ;; Cron notification: a single concise stderr line when real work
             ;; was published, so the cron mail fires iff new info was exported
             ;; (routine "Wrote ..." progress now goes to stdout).  On an

@@ -14,6 +14,7 @@
             [bone.commands :as commands]
             [bone.common :as common]
             [bone.digest :as digest]
+            [bone.relations :as rel]
             [bone.test-helpers :as th]))
 
 ;; Denied/invalid commands exercised below must not pollute the real
@@ -852,4 +853,45 @@
                 "close-reason unchanged")
             (is (some :active? rels)
                 ":related-to is posted even on a closed report")))
+        (finally (close-and-cleanup! setup))))))
+
+(deftest pose-if-absent-reactivates-after-retract
+  (testing "re-posing a retracted relation reactivates it iff dated after the retraction"
+    (let [{:keys [conn] :as setup} (fresh-conn)]
+      (try
+        (let [e1 (mk-email! conn "<pose@x>"    "alice@x" #inst "2026-01-01")
+              e2 (mk-email! conn "<retract@x>" "alice@x" #inst "2026-01-02")
+              e3 (mk-email! conn "<repose@x>"  "bob@x"   #inst "2026-01-03")
+              r1 (mk-report! conn "<pose@x>"    e1 :patch)
+              r2 (mk-report! conn "<repose@x>"  e3 :patch)
+              base {:from-eid r1 :to-eid r2 :kind :supersedes :value nil}]
+          (is (some? (rel/pose-if-absent!
+                      conn (assoc base :setter "alice@x" :email-eid e1
+                                  :posed-at #inst "2026-01-01")))
+              "initial pose transacts")
+          (is (nil? (rel/pose-if-absent!
+                     conn (assoc base :setter "alice@x" :email-eid e1
+                                 :posed-at #inst "2026-01-01")))
+              "re-pose of an active relation is a no-op")
+          (is (true? (rel/retract-pair! conn r1 :supersedes r2 e2))
+              "retraction (by the email dated 2026-01-02)")
+          (is (nil? (rel/pose-if-absent!
+                     conn (assoc base :setter "alice@x" :email-eid e1
+                                 :posed-at #inst "2026-01-01")))
+              "a pose dated before the retraction does NOT reactivate (replay safety)")
+          (is (every? (complement :active?)
+                      (get-relations (d/db conn) r1))
+              "relation still retracted after the out-of-order pose")
+          (is (some? (rel/pose-if-absent!
+                      conn (assoc base :setter "BOB@x" :email-eid e3
+                                  :posed-at #inst "2026-01-03")))
+              "a pose dated after the retraction reactivates")
+          (let [rels (filter #(= :supersedes (:kind %))
+                             (get-relations (d/db conn) r1))]
+            (is (seq rels))
+            (is (every? :active? (get-relations (d/db conn) r1))
+                "both directions active again")
+            (is (every? #(= "bob@x" (:setter %))
+                        (get-relations (d/db conn) r1))
+                "the re-poser becomes the setter (lowercased)")))
         (finally (close-and-cleanup! setup))))))

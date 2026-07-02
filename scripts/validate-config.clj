@@ -3,8 +3,8 @@
 ;; validate-config.clj -- Validate config.edn against spec.
 ;;
 ;; Usage:
+;;   bb test-config [path]
 ;;   bb scripts/validate-config.clj [path]
-;;   bb config [path]
 ;;
 ;; Defaults to ./config.edn if no path given.
 
@@ -186,17 +186,10 @@
 ;; Valid report type keywords -- derived from common/report-type-spec.
 (def valid-report-types common/report-type-keywords)
 
-;; Command IDs (for extended :commands format)
+;; Command IDs (for extended :commands format) -- derived from the
+;; registry so a new command is automatically accepted here.
 (def valid-command-ids
-  #{:acked :owned :closed :urgent :important
-    :acked-by :owned-by :closed-by
-    :unacked :unowned :unclosed :unurgent :unimportant
-    :deadline :undeadline :expiry :unexpiry
-    :topic :untopic
-    :superseded-by :unsuperseded-by
-    :supersedes :unsupersedes
-    :duplicate-of :unduplicate-of
-    :related-to :unrelated-to})
+  (into #{} (map :id) reg/commands))
 
 ;; The :setter-or-maintainer scope is only valid on the unset-style
 ;; commands whose target attribute is tracked by a ref to the
@@ -395,10 +388,15 @@
       (str where " " (pr-str cmd-id) ": " err))))
 
 (defn- pre-check-commands
-  "Return a seq of human-readable errors for all :commands and
-  :global-commands maps in the config, or nil if everything is fine."
+  "Return a seq of human-readable errors for the top-level :commands
+  map and each source's :commands map, or nil.  A top-level
+  :global-commands is rejected: the application only reads :commands,
+  so that key would be silently ignored at runtime."
   [config]
-  (let [errs (concat (commands-map-errors ":global-commands" (:global-commands config))
+  (let [errs (concat (when (contains? config :global-commands)
+                       [(str ":global-commands is not a top-level config key"
+                             " -- use :commands for global defaults")])
+                     (commands-map-errors ":commands" (:commands config))
                      (mapcat (fn [src]
                                (commands-map-errors
                                 (str ":sources [" (pr-str (:name src)) "] :commands")
@@ -441,10 +439,12 @@
     [common/singleton-mailbox-error]))
 
 (defn validate-config [config]
-  (if-let [errs (or (pre-check-singleton-mailbox config)
-                    (pre-check-commands config)
-                    (pre-check-periods config)
-                    (pre-check-subscribers config))]
+  ;; concat, not or: show every pre-check category at once instead of
+  ;; making the user fix one family of errors per run.
+  (if-let [errs (seq (concat (pre-check-singleton-mailbox config)
+                             (pre-check-commands config)
+                             (pre-check-periods config)
+                             (pre-check-subscribers config)))]
     {:valid? false
      :explanation (str/join "\n" errs)}
     (if (s/valid? ::config config)
@@ -484,7 +484,10 @@
               (log/info "    -" (:name mb) (pr-str (:type mb))
                         (case (:type mb)
                           :imap    (str (:user mb) "@" (:host mb) "/" (or (:folder mb) "INBOX"))
-                          :maildir (str (str/replace (common/expand-home (:path mb)) #"/+$" "") "/" (or (:folder mb) "INBOX"))
+                          ;; No default subfolder for a maildir: the path
+                          ;; itself is the box (:folder only if declared).
+                          :maildir (cond-> (str/replace (common/expand-home (:path mb)) #"/+$" "")
+                                     (:folder mb) (str "/" (:folder mb)))
                           ""))
               (when-let [ing (:ingest mb)]
                 (log/info "        :ingest" (pr-str ing))))

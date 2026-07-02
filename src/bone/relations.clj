@@ -9,7 +9,8 @@
   datoms (one per direction); :related-to stores one canonicalized
   by ascending eid order.  See bone-schema.edn for the :rel/* attrs."
   (:require [clojure.string :as str]
-            [datalevin.core :as d]))
+            [datalevin.core :as d]
+            [bone.tracking :as tracking]))
 
 (def all-kinds
   #{:resolves :resolved-by
@@ -84,9 +85,9 @@
 
 (defn pose-tx
   "Datoms to pose a relation: 2 entity maps for asymmetric kinds, 1
-  for symmetric.  Caller must have validated via `valid-pose?` and
-  must check idempotence via :rel/id (do not reactivate a retracted
-  relation by re-posing).  `value` is optional."
+  for symmetric.  Caller must have validated via `valid-pose?`; go
+  through `pose-if-absent!` for idempotence and reactivation.
+  `value` is optional."
   [{:keys [from-eid to-eid kind setter email-eid posed-at value]}]
   (let [mk-rel (fn [f t k]
                  (cond-> {:rel/id       (make-relation-id f k t)
@@ -125,15 +126,48 @@
 ;; IO helpers (require datalevin)
 ;; ---------------------------------------------------------------------------
 
+(defn- reactivate-tx
+  "Datoms to reactivate a retracted relation under a new pose: the
+  re-poser becomes the setter, the retraction audit is cleared."
+  [{eid :db/id retracted-by :rel/retracted-by} {:keys [setter email-eid posed-at value]}]
+  (cond-> [(cond-> {:db/id eid :rel/active? true}
+             setter    (assoc :rel/setter (str/lower-case setter))
+             email-eid (assoc :rel/email email-eid)
+             posed-at  (assoc :rel/posed-at posed-at)
+             value     (assoc :rel/value value))]
+    (:db/id retracted-by)
+    (conj [:db/retract eid :rel/retracted-by (:db/id retracted-by)])))
+
 (defn pose-if-absent!
-  "Pose a relation iff no datom with the same :rel/id exists (active
-  or retracted).  Idempotent; never reactivates a retract."
+  "Pose a relation, idempotently via :rel/id.  Active relation: no-op.
+  Retracted relation: reactivated iff the pose is dated after the
+  retraction (so `Superseded-by:` after `Not superseded-by.` works,
+  but an out-of-order re-digest of an old pose cannot undo a later
+  retract).  Returns the tx result when something changed, else nil."
   [conn opts]
-  (let [db        (d/db conn)
-        ids       (paired-relation-ids (:kind opts) (:from-eid opts) (:to-eid opts))
-        existing? (some #(d/entid db [:rel/id %]) ids)]
-    (when-not existing?
-      (d/transact! conn (pose-tx opts)))))
+  (let [db   (d/db conn)
+        ids  (paired-relation-ids (:kind opts) (:from-eid opts) (:to-eid opts))
+        rels (keep (fn [id]
+                     (when-let [e (d/entid db [:rel/id id])]
+                       (d/pull db [:db/id :rel/active?
+                                   {:rel/retracted-by [:db/id :email/date-sent]}]
+                               e)))
+                   ids)]
+    (cond
+      (empty? rels)
+      (d/transact! conn (pose-tx opts))
+
+      (some :rel/active? rels)
+      nil
+
+      :else
+      (let [^java.util.Date posed-at     (:posed-at opts)
+            ^java.util.Date retracted-at (some-> (first rels)
+                                                 :rel/retracted-by
+                                                 :email/date-sent)]
+        (when (or (nil? posed-at) (nil? retracted-at)
+                  (.after posed-at retracted-at))
+          (d/transact! conn (into [] (mapcat #(reactivate-tx % opts)) rels)))))))
 
 (defn pose-from-email!
   "Pose a relation triggered by `email` (a pull/entity with :db/id,
@@ -291,8 +325,9 @@
   "Propagate a patch's closure to the bugs/requests it :resolves:
   :resolved closes them; :canceled retracts auto-credits; :superseded
   transfers :owned to `successor-eid` (acked stays with the original
-  acker -- a historical act, not transferable).  No-op if
-  `patch-type` ≠ :patch."
+  acker -- a historical act, not transferable).  Bumps every modified
+  target so the incremental export and notifications pick them up.
+  No-op if `patch-type` ≠ :patch."
   [conn patch-eid patch-type email-eid close-reason successor-eid]
   (when (= :patch patch-type)
     (let [db   (d/db conn)
@@ -305,25 +340,33 @@
                             (set (d/q '[:find [?b ...]
                                         :in $ [?b ...]
                                         :where [?b :report/closed _]]
-                                      db bugs)))]
-          (doseq [bug-eid bugs]
-            (when-not (contains? closed-bugs bug-eid)
-              (d/transact! conn [{:db/id bug-eid
-                                  :report/closed email-eid
-                                  :report/close-reason :resolved}]))))
+                                      db bugs)))
+              to-close    (remove #(contains? closed-bugs %) bugs)]
+          (doseq [bug-eid to-close]
+            (d/transact! conn [{:db/id bug-eid
+                                :report/closed email-eid
+                                :report/close-reason :resolved}]))
+          (when (seq to-close)
+            (tracking/bump-report-updated! conn to-close)))
 
         :canceled
-        (doseq [bug-eid bugs]
-          (let [db' (d/db conn)
-                tx  (cond-> []
-                      (auto-credit? db' bug-eid :report/acked)
-                      (into (retract-auto-credit-tx db' bug-eid
-                                                    :report/acked :report/acked-address))
-                      (auto-credit? db' bug-eid :report/owned)
-                      (into (retract-auto-credit-tx db' bug-eid
-                                                    :report/owned :report/owned-address)))]
-            (when (seq tx)
-              (d/transact! conn tx))))
+        (let [touched (reduce
+                       (fn [acc bug-eid]
+                         (let [db' (d/db conn)
+                               tx  (cond-> []
+                                     (auto-credit? db' bug-eid :report/acked)
+                                     (into (retract-auto-credit-tx db' bug-eid
+                                                                   :report/acked :report/acked-address))
+                                     (auto-credit? db' bug-eid :report/owned)
+                                     (into (retract-auto-credit-tx db' bug-eid
+                                                                   :report/owned :report/owned-address)))]
+                           (if (seq tx)
+                             (do (d/transact! conn tx)
+                                 (conj acc bug-eid))
+                             acc)))
+                       [] bugs)]
+          (when (seq touched)
+            (tracking/bump-report-updated! conn touched)))
 
         :superseded
         ;; Transfer :owned to the successor; :acked is a historical act
@@ -336,20 +379,29 @@
                 succ-eml-eid (some-> succ :report/email :db/id)
                 succ-addr    (some-> succ :report/email :email/author-address)
                 succ-date    (or (some-> succ :report/email :email/date-sent)
-                                 (java.util.Date.))]
-            (doseq [bug-eid bugs]
-              (let [db' (d/db conn)
-                    tx  (when (auto-credit? db' bug-eid :report/owned)
-                          (transfer-auto-credit-tx
-                            bug-eid :report/owned :report/owned-address
-                            succ-eml-eid succ-addr))]
-                (when (seq tx)
-                  (d/transact! conn tx))
-                ;; Successor inherits the :resolves link (idempotent).
-                (pose-if-absent! conn {:from-eid successor-eid :to-eid bug-eid
-                                       :kind :resolves
-                                       :setter succ-addr :email-eid succ-eml-eid
-                                       :posed-at succ-date :value nil})))))
+                                 (java.util.Date.))
+                touched (reduce
+                         (fn [acc bug-eid]
+                           (let [db' (d/db conn)
+                                 tx  (when (auto-credit? db' bug-eid :report/owned)
+                                       (transfer-auto-credit-tx
+                                         bug-eid :report/owned :report/owned-address
+                                         succ-eml-eid succ-addr))
+                                 _   (when (seq tx)
+                                       (d/transact! conn tx))
+                                 ;; Successor inherits the :resolves link
+                                 ;; (truthy iff something changed).
+                                 posed (pose-if-absent!
+                                        conn {:from-eid successor-eid :to-eid bug-eid
+                                              :kind :resolves
+                                              :setter succ-addr :email-eid succ-eml-eid
+                                              :posed-at succ-date :value nil})]
+                             (if (or (seq tx) posed)
+                               (conj acc bug-eid)
+                               acc)))
+                         [] bugs)]
+            (when (seq touched)
+              (tracking/bump-report-updated! conn touched))))
 
         ;; Other reasons (:expired, etc.) do not propagate.
         nil))))

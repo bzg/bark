@@ -37,8 +37,8 @@
 (def ^:private post-bracket-re #".*\]\s*(.*)")
 
 (defn- extract-colon-topic [subject]
-  (when-let [[_ rest] (re-find post-bracket-re subject)]
-    (let [parts (str/split rest #":" -1)]
+  (when-let [[_ after-bracket] (re-find post-bracket-re subject)]
+    (let [parts (str/split after-bracket #":" -1)]
       (when (> (count parts) 1)
         (let [topic (str/trim (first parts))]
           (when-not (str/blank? topic) topic))))))
@@ -102,11 +102,11 @@
       (let [inner   (extract-inner m)
             seq-m   (when inner (re-find patch-seq-pattern inner))
             seq-str (when seq-m (first seq-m))
-            rest    (when inner
+            no-seq  (when inner
                       (str/trim (if seq-str
                                   (subs inner 0 (- (count inner) (count seq-str)))
                                   inner)))
-            tokens  (when (and rest (not (str/blank? rest))) (str/split rest #"\s+"))
+            tokens  (when (and no-seq (not (str/blank? no-seq))) (str/split no-seq #"\s+"))
             version (when (and tokens (re-matches patch-version-pattern (last tokens)))
                       (last tokens))
             topic-tokens (if version (butlast tokens) tokens)
@@ -210,7 +210,10 @@
           (when (not= stripped subject)
             (allowed? (detect-patch-subject stripped patterns)))))
       ;; 2. Real git format-patch attachment -- catches replies whose
-      ;; outer subject does not carry [PATCH].
+      ;; outer subject does not carry [PATCH].  Deliberate: content
+      ;; detection (like the .ics detection for announcements) outranks
+      ;; the label, so a label rejected by :report-types does not veto
+      ;; this branch.
       (when (format-patch-submission? email)
         (allowed? {:type :patch :patch-source #{:attachment}}))))))
 
