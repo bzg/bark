@@ -77,6 +77,9 @@
   #status { font-size: 0.8rem; margin-bottom: 0.5rem; }
   .row-icon { font-size: 0.75rem; text-decoration: none; }
   a.row-icon[data-action] { margin-right: 0.3em; }
+  /* Same footprint as the fold caret (char + margin), so unfolded
+     children read as indented under their parent. */
+  .child-indent { display: inline-block; width: 1.3em; }
   .vote-badge { display: inline-block; padding: 0.1rem 0.4rem; border-radius: 3px; font-size: 0.7rem;
                 font-weight: 600; margin-left: 0.4em; margin-right: 0.4em; vertical-align: middle; }
   .vote-pos { background: var(--bone-vote-pos-bg, #27ae6033); color: var(--bone-vote-pos, #27ae60); }

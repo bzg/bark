@@ -827,6 +827,10 @@ function buildRowElement(rpt) {
                  (rpt._clusterSummary ? ' (' + rpt._clusterSummary + ')' : '');
     seriesHtml = '<a href="#" class="row-icon" data-action="cluster-fold" data-id="' +
       escAttr(rpt._clusterId) + '" title="' + escAttr(ctitle) + '">' + carrow + '</a>';
+  } else if (rpt._isSeriesChild || rpt._isClusterChild) {
+    // Indent unfolded children past the parent's caret so the
+    // parent/child relationship stays visible.
+    seriesHtml = '<span class="row-icon child-indent"></span>';
   }
 
   var patchHtml = attachmentLink(r.patches, 'patches', 'patch file', '\uD83E\uDE79');
