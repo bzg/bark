@@ -72,8 +72,25 @@
   tr.stripe td       { background-color: var(--bone-stripe-bg); }
   tr:not(.stripe) td { background-color: var(--bone-row-bg); }
   td:nth-child(3) { white-space: nowrap; }
-  td:nth-child(8) { min-width: 740px; }                                   /* Subject */
-  td:nth-child(7) { max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } /* Author */
+  /* Fixed layout: deterministic across engines (the auto algorithm +
+     percentage cells behave differently in Firefox and Chromium).
+     Column widths come from the header row below; Subject, the only
+     unsized column, absorbs ALL the leftover width.  Columns hidden by
+     --html-columns or the responsive rules are display:none and their
+     width goes back into the pool. */
+  #reports-table table { width: 100%; table-layout: fixed; }
+  #reports-table th:nth-child(1) { width: 110px; } /* Type */
+  #reports-table th:nth-child(2) { width: 70px; }  /* Prio */
+  #reports-table th:nth-child(3) { width: 100px; } /* Due */
+  #reports-table th:nth-child(4) { width: 100px; } /* Flags */
+  #reports-table th:nth-child(5) { width: 70px; }  /* Replies */
+  #reports-table th:nth-child(6) { width: 160px; } /* Owner */
+  #reports-table th:nth-child(7) { width: 160px; } /* Author */
+  #reports-table th:nth-child(9) { width: 130px; } /* Date */
+  td:nth-child(1) { white-space: nowrap; }                                            /* Type badge */
+  td:nth-child(6) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } /* Owner */
+  td:nth-child(7) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } /* Author */
+  td:nth-child(9) { white-space: nowrap; }                                            /* Date */
   #status { font-size: 0.8rem; margin-bottom: 0.5rem; }
   .row-icon { font-size: 0.75rem; text-decoration: none; }
   a.row-icon[data-action] { margin-right: 0.3em; }
@@ -96,7 +113,6 @@
   }
   @media (max-width: 860px) {
     td:nth-child(2), th:nth-child(2) { display: none; } /* Priority */
-    td:nth-child(8) { min-width: auto; }                /* Subject */
   }
   @media (max-width: 780px) {
     td:nth-child(5), th:nth-child(5) { display: none; } /* Replies */

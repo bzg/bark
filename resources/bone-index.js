@@ -1302,8 +1302,10 @@ var _setupToggles, _showTogglesIfNeeded;
 (function() {
   var style = document.createElement('style');
   style.textContent =
-    /* nth-child(8) = the Subject column */
-    'td:nth-child(8) { position: relative; white-space: nowrap; overflow: hidden; max-width: 740px; }' +
+    /* nth-child(8) = the Subject column.  The table is table-layout:
+       fixed (see the page CSS): Subject gets all the leftover width,
+       and this rule clips whatever does not fit it. */
+    'td:nth-child(8) { position: relative; white-space: nowrap; overflow: hidden; }' +
     'td:nth-child(8).expanded { white-space: normal; overflow: visible; }' +
     '.unfold { position: absolute; right: 0; top: 50%; transform: translateY(-50%);' +
     '  cursor: pointer; font-weight: 700; font-size: 1em;' +
