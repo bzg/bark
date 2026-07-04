@@ -72,8 +72,8 @@
   tr.stripe td       { background-color: var(--bone-stripe-bg); }
   tr:not(.stripe) td { background-color: var(--bone-row-bg); }
   td:nth-child(3) { white-space: nowrap; }
-  td:nth-child(5) { min-width: 740px; }
-  td:nth-child(6) { max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  td:nth-child(8) { min-width: 740px; }                                   /* Subject */
+  td:nth-child(7) { max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } /* Author */
   #status { font-size: 0.8rem; margin-bottom: 0.5rem; }
   .row-icon { font-size: 0.75rem; text-decoration: none; }
   a.row-icon[data-action] { margin-right: 0.3em; }
@@ -96,19 +96,19 @@
   }
   @media (max-width: 860px) {
     td:nth-child(2), th:nth-child(2) { display: none; } /* Priority */
-    td:nth-child(5) { min-width: auto; }
+    td:nth-child(8) { min-width: auto; }                /* Subject */
   }
   @media (max-width: 780px) {
-    td:nth-child(9), th:nth-child(9) { display: none; } /* Replies */
+    td:nth-child(5), th:nth-child(5) { display: none; } /* Replies */
   }
   @media (max-width: 740px) {
-    td:nth-child(8), th:nth-child(8) { display: none; } /* Date */
+    td:nth-child(9), th:nth-child(9) { display: none; } /* Date */
   }
   @media (max-width: 680px) {
-    td:nth-child(7), th:nth-child(7) { display: none; } /* Owner */
+    td:nth-child(6), th:nth-child(6) { display: none; } /* Owner */
   }
   @media (max-width: 540px) {
-    td:nth-child(6), th:nth-child(6) { display: none; } /* Author */
+    td:nth-child(7), th:nth-child(7) { display: none; } /* Author */
     input[type=search] { max-width: none; min-width: 0; width: 100%; }
     .toolbar { flex-direction: column; align-items: stretch; }
   }
@@ -133,8 +133,8 @@
 ;; data-sort / boneConfig.columnsSort ("author" sorts on the "from" key).
 (def ^:private canonical-columns
   [["type" "type"] ["priority" "priority"] ["due" "due"] ["flags" "flags"]
-   ["subject" "subject"] ["author" "from"] ["owner" "owner"] ["date" "date"]
-   ["replies" "replies"]])
+   ["replies" "replies"] ["owner" "owner"] ["author" "from"]
+   ["subject" "subject"] ["date" "date"]])
 
 (def ^:private column-names (mapv first canonical-columns))
 (def ^:private column-sort-key (into {} canonical-columns))
@@ -211,15 +211,15 @@
         base-dir     (.getParent (clojure.java.io/file reports-dir))
         has-ical?    (and base-dir (.exists (clojure.java.io/file base-dir "events" "announcements.ics")))
         rss-href     "reports/all.xml"
-        cols         [[:th {:data-sort "type"     :onclick "sortTable(0,'type')"}     "Type"]
-                      [:th {:data-sort "priority" :onclick "sortTable(1,'priority')"} "Prio"]
-                      [:th {:data-sort "due"      :onclick "sortTable(2,'due')"}      "Due"]
-                      [:th {:data-sort "flags"    :onclick "sortTable(3,'flags')"}    "Flags"]
-                      [:th {:data-sort "subject"  :onclick "sortTable(4,'subject')" :title "Sort by last activity"} "Subject"]
-                      [:th {:data-sort "from"     :onclick "sortTable(5,'from')"}     "Author"]
-                      [:th {:data-sort "owner"    :onclick "sortTable(6,'owner')"}    "Owner"]
-                      [:th {:data-sort "date"     :onclick "sortTable(7,'date')"}     "Date"]
-                      [:th {:data-sort "replies"  :onclick "sortTable(8,'replies')"}  "↩"]]
+        cols         [[:th {:data-sort "type"     :onclick "sortTable(0,'type')"     :title "Sort by type"}     "Type"]
+                      [:th {:data-sort "priority" :onclick "sortTable(1,'priority')" :title "Sort by priority"} "Prio"]
+                      [:th {:data-sort "due"      :onclick "sortTable(2,'due')"      :title "Sort by deadline"} "Due"]
+                      [:th {:data-sort "flags"    :onclick "sortTable(3,'flags')"    :title "Sort by flags"}    "Flags"]
+                      [:th {:data-sort "replies"  :onclick "sortTable(4,'replies')"  :title "Sort by number of replies"} "↩"]
+                      [:th {:data-sort "owner"    :onclick "sortTable(5,'owner')"    :title "Sort by owner"}    "Owner"]
+                      [:th {:data-sort "from"     :onclick "sortTable(6,'from')"     :title "Sort by author"}   "Author"]
+                      [:th {:data-sort "subject"  :onclick "sortTable(7,'subject')"  :title "Sort by last activity"} "Subject"]
+                      [:th {:data-sort "date"     :onclick "sortTable(8,'date')"     :title "Sort by date"}     "Date"]]
         tpl-body     (str
                       (h/html
                        [:main.container

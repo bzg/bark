@@ -917,11 +917,11 @@ function buildRowElement(rpt) {
     '<td title="' + priTitle + '" style="text-align:center">' + priLabel + '</td>' +
     '<td style="text-align:center;' + dueStyle + '">' + dueHtml + '</td>' +
     '<td title="' + escAttr(flagsTitle) + '" style="text-align:center;font-family:monospace;font-size:0.8rem;letter-spacing:0.1em">' + flagsStr + '</td>' +
-    '<td>' + seriesHtml + patchHtml + eventsHtml + textsHtml + relatedHtml + votesHtml + (awaitingFlag ? '<span class="row-icon" title="Awaiting reply">\u231A </span>' : '') + subjectHtml + '</td>' +
-    '<td class="secondary">' + authorHtml + '</td>' +
+    '<td style="text-align:center">' + rpt.replies + '</td>' +
     '<td class="secondary" title="' + escAttr(ownerAddr) + '">' + ownerHtml + '</td>' +
-    '<td title="Filter">' + dateHtml + '</td>' +
-    '<td style="text-align:center">' + rpt.replies + '</td>';
+    '<td class="secondary">' + authorHtml + '</td>' +
+    '<td>' + seriesHtml + patchHtml + eventsHtml + textsHtml + relatedHtml + votesHtml + (awaitingFlag ? '<span class="row-icon" title="Awaiting reply">\u231A </span>' : '') + subjectHtml + '</td>' +
+    '<td title="Filter">' + dateHtml + '</td>';
 
   return tr;
 }
@@ -1302,8 +1302,9 @@ var _setupToggles, _showTogglesIfNeeded;
 (function() {
   var style = document.createElement('style');
   style.textContent =
-    'td:nth-child(5) { position: relative; white-space: nowrap; overflow: hidden; max-width: 740px; }' +
-    'td:nth-child(5).expanded { white-space: normal; overflow: visible; }' +
+    /* nth-child(8) = the Subject column */
+    'td:nth-child(8) { position: relative; white-space: nowrap; overflow: hidden; max-width: 740px; }' +
+    'td:nth-child(8).expanded { white-space: normal; overflow: visible; }' +
     '.unfold { position: absolute; right: 0; top: 50%; transform: translateY(-50%);' +
     '  cursor: pointer; font-weight: 700; font-size: 1em;' +
     '  padding: 0.1em 0.4em 0.1em 0.6em; user-select: none; z-index: 1;' +
@@ -1311,7 +1312,7 @@ var _setupToggles, _showTogglesIfNeeded;
   document.head.appendChild(style);
 
   _setupToggles = function(container) {
-    container.querySelectorAll('td:nth-child(5)').forEach(function(td) {
+    container.querySelectorAll('td:nth-child(8)').forEach(function(td) {
       if (td.querySelector('.unfold') || td.classList.contains('expanded')) return;
       var toggle = document.createElement('span');
       toggle.className = 'unfold';
@@ -1332,7 +1333,7 @@ var _setupToggles, _showTogglesIfNeeded;
   };
 
   _showTogglesIfNeeded = function() {
-    var toggles = document.querySelectorAll('td:nth-child(5) .unfold');
+    var toggles = document.querySelectorAll('td:nth-child(8) .unfold');
     // Only processes rendered rows (current page), not all 2000+
     var items = [];
     for (var i = 0; i < toggles.length; i++) {
