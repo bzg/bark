@@ -24,7 +24,7 @@
 
 (def bone-format
   "BONE export format version. Bump when the JSON/Org export shape changes."
-  "0.9.3")
+  "0.9.4")
 
 (def bone-schema
   (edn/read-string (slurp (io/resource "bone-schema.edn"))))

@@ -314,3 +314,22 @@
                  {:email/subject     "Re: Discussion"
                   :email/in-reply-to "<parent@test.org>"
                   :email/attachments att-diff}))))))
+
+;; ---------------------------------------------------------------------------
+;; Colon-based topic extraction (bone.detect)
+;; ---------------------------------------------------------------------------
+
+(deftest colon-topic-test
+  (let [topic (fn [subject]
+                (:topic (detect/detect-report {:email/subject subject})))]
+    (testing "one colon token"
+      (is (= "orgweb" (topic "[BUG] orgweb: broken layout"))))
+    (testing "nested colon tokens all become topics"
+      (is (= "topic1 topic2" (topic "[BUG] topic1: topic2: an explanation"))))
+    (testing "a sentence colon is not a topic"
+      (is (nil? (topic "[BUG] When I press RET: nothing happens"))))
+    (testing "a URL colon is not a topic"
+      (is (nil? (topic "[BUG] see https://example.org: broken"))))
+    (testing "paths and dots are single topics"
+      (is (= "net/mlx5e" (topic "[BUG] net/mlx5e: crash")))
+      (is (= "org-demo.html" (topic "[BUG] org-demo.html: bad aside"))))))

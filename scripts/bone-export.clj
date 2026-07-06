@@ -305,14 +305,14 @@
         (set (map str/lower-case topics))))))
 
 (defn- filter-by-topics
-  "Keep only reports whose :report/topic-value matches one of the
-  given topics (case-insensitive).  Returns all reports when `topics`
-  is nil."
+  "Keep only reports one of whose space-separated :report/topic-value
+  tokens matches one of the given topics (case-insensitive).  Returns
+  all reports when `topics` is nil."
   [reports topics]
   (if topics
     (filter (fn [r]
               (when-let [t (:report/topic-value r)]
-                (topics (str/lower-case t))))
+                (some topics (str/split (str/lower-case t) #"\s+"))))
             reports)
     reports))
 

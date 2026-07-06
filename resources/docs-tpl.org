@@ -36,8 +36,11 @@ For release and change, a single value is read as =<version>=:
 =[REL 2.0]= sets version to "2.0".  Use both for topic and version:
 =[REL parser 2.0]=.
 
-The topic can also be set with a colon prefix after the label:
-=[BUG] parser: crash on empty input= sets the topic to "parser".
+Topics can also be set with colon prefixes after the label:
+=[BUG] parser: crash on empty input= sets the topic to "parser", and
+=[BUG] parser: input: crash= sets the two topics "parser" and
+"input". A topic is a single word followed by =:= and a space; a
+sentence containing a colon sets no topic.
 
 ** Status & priority commands
 

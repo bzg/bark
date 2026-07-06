@@ -138,13 +138,17 @@ have broader retraction rights, described in [[#undoing-updates][Undoing updates
 
 ** Setting a topic
 
-A /topic/ is a short string attached to a report. Set it from the
-subject in two ways:
+A /topic/ is a short string, without whitespace, attached to a
+report; a report may carry several. Set topics from the subject in
+two ways:
 
-- Inside the label: =[BUG parser]= sets the topic to "parser".
-- As a colon prefix after the label: =[BUG] parser: crash on empty
-  input= also sets the topic to "parser" -- the segment before the
-  first colon after the closing bracket.
+- Inside the label: =[BUG parser]= sets the topic to "parser", and
+  =[BUG parser input]= sets the two topics "parser" and "input".
+- As colon prefixes after the label: =[BUG] parser: crash on empty
+  input= also sets the topic to "parser", and =[BUG] parser: input:
+  crash= sets "parser" and "input". Each topic must be a single word
+  followed by =:= and a space; a sentence containing a colon (or a
+  URL) sets no topic.
 
 To change the topic on an existing report, reply with:
 
@@ -1355,7 +1359,7 @@ The export, notification and maintenance tasks are run through
 | =bb export --html-page-size 100=                    | Paginate HTML table (100 reports/page)                  |
 | =bb export html --html-columns "type,subject,date"= | Show only those HTML table columns                      |
 | =bb export --closed-retention 1y=                   | Keep only reports closed within the last 12 months      |
-| =bb export --topics-filter "a,b"=                   | Only export reports whose topic is in the list          |
+| =bb export --topics-filter "a,b"=                   | Only export reports with a topic in the list            |
 | =bb export --only-open=                             | Also export =-open= files (all-open.json, etc.)           |
 | =bb export FORMAT=                                  | Single format: json, rss, org, html, stats, patches,    |
 |                                                   | text, events, root, all                                 |

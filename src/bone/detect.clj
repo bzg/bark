@@ -35,13 +35,19 @@
 ;; ---------------------------------------------------------------------------
 
 (def ^:private post-bracket-re #".*\]\s*(.*)")
+(def ^:private topic-token-re #"^([^\s:]+):(?:\s+|$)")
 
-(defn- extract-colon-topic [subject]
+(defn- extract-colon-topic
+  "Space-joined `token:` prefixes of the post-bracket subject.
+  Topics are whitespace-free tokens, each closed by `: `, so
+  \"a: b: Fix it\" yields \"a b\" while a sentence colon
+  (\"press RET: nothing happens\") yields nil."
+  [subject]
   (when-let [[_ after-bracket] (re-find post-bracket-re subject)]
-    (let [parts (str/split after-bracket #":" -1)]
-      (when (> (count parts) 1)
-        (let [topic (str/trim (first parts))]
-          (when-not (str/blank? topic) topic))))))
+    (loop [s after-bracket acc []]
+      (if-let [[m t] (re-find topic-token-re s)]
+        (recur (subs s (count m)) (conj acc t))
+        (when (seq acc) (str/join " " acc))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Report detection (pure, table-driven)
