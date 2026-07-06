@@ -994,6 +994,15 @@
     (when (seq permitted)
       (let [current     @current-d
             resolved    (resolve-commands permitted)
+            ;; Superseded-by: and Duplicate-of: in one email contradict
+            ;; each other -- both close this report, and the winning
+            ;; close-reason would be arbitrated by closure-relation-rows
+            ;; order, not by the email.  Apply neither.
+            resolved    (if (and (:superseded-by resolved) (:duplicate-of resolved))
+                          (do (log/warn "Superseded-by: and Duplicate-of: in the same"
+                                        "email -- contradictory, neither applied")
+                              (dissoc resolved :superseded-by :duplicate-of))
+                          resolved)
             source-type (:report/type current)
             rows        (compute-closure-rows db report-eid source-type resolved)
             valid-rows  (filterv (comp :valid? :resolved) rows)

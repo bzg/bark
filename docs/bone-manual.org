@@ -206,6 +206,19 @@ the last path segment of an archive URL such as
 =https://list.orgmode.org/orgmode/id@host/=. Both reports must be of the
 same type: bug to bug, patch to patch, request to request.
 
+A report has at most one superseder: when an email carries several
+=Superseded-by:= lines (or several =Supersedes:= or =Duplicate-of:=
+lines), only the last one applies; earlier lines are silently
+ignored.
+
+=Superseded-by:= and =Duplicate-of:= in the same email contradict
+each other: neither is applied.
+
+These commands act on open reports only.  On a closed report,
+=Superseded-by:=, =Supersedes:= and =Duplicate-of:= are silently
+ignored; reopen the report first with =Not closed.= and resend the
+command.
+
 To undo, reply with =Not superseded-by: <new-message-id@example.com>=
 from the closed report's thread, or with =Not supersedes:
 <old-message-id@example.com>= from the replacement's thread.

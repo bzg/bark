@@ -329,6 +329,38 @@
               (is (= (str "Superseded-by: " bug-mid) (:command entry))))))
         (finally (close-and-cleanup! setup))))))
 
+(deftest conflicting-closure-commands-apply-neither
+  (testing "Superseded-by: and Duplicate-of: in one email contradict
+            each other: neither applies (the winning close-reason would
+            otherwise be arbitrated by closure-relation-rows order, an
+            implementation detail the email does not control)."
+    (let [{:keys [conn] :as setup} (fresh-conn)]
+      (try
+        (let [old-mid   "<patch-old-c@x>"
+              sup-mid   "<patch-sup@x>"
+              dup-mid   "<patch-dup-c@x>"
+              old-email (mk-email! conn old-mid "alice@x" #inst "2026-04-01")
+              old-eid   (mk-report! conn old-mid old-email :patch)
+              sup-email (mk-email! conn sup-mid "alice@x" #inst "2026-04-02")
+              _sup-eid  (mk-report! conn sup-mid sup-email :patch)
+              dup-email (mk-email! conn dup-mid "alice@x" #inst "2026-04-03")
+              _dup-eid  (mk-report! conn dup-mid dup-email :patch)
+              cmd-eid   (mk-email! conn "<cmd-conflict@x>" "alice@x" #inst "2026-04-04")
+              cmd-email {:db/id cmd-eid
+                         :email/author-address "alice@x"
+                         :email/date-sent #inst "2026-04-04"
+                         :email/body-text (str "Superseded-by: " sup-mid "\n"
+                                               "Duplicate-of: " dup-mid "\n")}]
+          (commands/apply-commands! conn old-eid :patch cmd-email
+                                    {} {} :direct nil)
+          (let [after (d/pull (d/db conn)
+                              [:report/closed :report/close-reason] old-eid)
+                rels  (get-relations (d/db conn) old-eid)]
+            (is (nil? (:report/closed after)) "report stays open")
+            (is (nil? (:report/close-reason after)) "no close-reason")
+            (is (empty? rels) "no relation posed")))
+        (finally (close-and-cleanup! setup))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Phase 4 (partial): Duplicate-of directive
 ;; ---------------------------------------------------------------------------
