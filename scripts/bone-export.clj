@@ -114,6 +114,7 @@
 ;; next full (`--force`) export.
 (def ^:private shell-asset-files
   ["resources/bone-index.js"
+   "resources/bone-search.js"
    "resources/bone-stats.js"
    "resources/bone-theme.js"
    "resources/bone-data.css"

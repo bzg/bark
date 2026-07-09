@@ -39,6 +39,9 @@
   test-config {:doc  "Validate config.edn (pass path as arg, default: ./config.edn)"
                :task (apply shell "bb scripts/validate-config.clj" *command-line-args*)}
 
+  test-search {:doc  "Run the search-engine conformance cases (needs node)"
+               :task (shell "node" "test/bone-search-conformance.js")}
+
   maintenance {:doc  "Purge orphan emails: bb maintenance [--delete] [--verbose] [-n source] [--retention 90d] [--failures]"
                :task (apply shell "bb scripts/bone-maintenance.clj" *command-line-args*)}
 

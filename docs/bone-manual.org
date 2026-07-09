@@ -736,32 +736,63 @@ export time.
 ** Browsing BONE reports online
 
 The exported HTML site lets you browse a source's reports and filter
-them through a minimal search syntax:
+them with =key:value= tokens.  A space between tokens is AND, =|=
+separates OR clauses, and a comma inside a value is OR:
+=type:bug s:crash | topic:latex= keeps the bug reports whose subject
+matches "crash", plus every report with a latex topic.  A bare word
+(or an unknown key) searches the subject.  A leading =-= negates the
+whole token, comma alternatives included: =-type:patch=, =-acked:*=.
 
-| Long form                       | Short     | Explanation                                           |
-|---------------------------------+-----------+-------------------------------------------------------|
-| from:me@example.org             | f:        | Reports from me@example.org                           |
-| acked:me@example.org            | a:        | Reports acked by me@example.org                       |
-| owned:me@example.org            | o:        | Reports owned by me@example.org                       |
-| closed:me@example.org           | c:        | Reports closed by me@example.org                      |
-| urgent:me@example.org           | u:        | Reports marked urgent by me@example.org               |
-| important:me@example.org        | i:        | Reports marked important by me@example.org            |
-| subject:match                   | s:        | Reports matching subject                              |
-| topic:match                     | t:        | Reports matching topic                                |
-| priority:[0-4]                  | p:        | Reports matching priority level 0 to 4                |
-| mid:<messageid>                 | m:        | Report with message-id <messageid>                    |
-| date:3d..                       | d:        | Reports from the last 3 days                          |
-| date:2023-01-01..2023-12-31     | d:        | Reports from 2023-01-01 to 2023-12-31                 |
-| deadline:2026-09-01             | D:        | Reports with deadline on 2026-09-01                   |
-| deadline:2026-01-01..2026-06-30 | D:        | Reports with deadline in that range                   |
-| deadline:2m                     | D:        | Reports due between now and 2 months from now         |
-| expired:10d                     | e:        | Reports expired between now and 10 days from now      |
-| expired:2026-01-01..2026-03-31  | e:        | Reports expired in that date range                    |
-| match1 \vert match2                 |           | Reports matching "match1" or "match2"                 |
-| from:* acked:* …                | f:* a:* … | Wildcard for from/acked/owned/closed/urgent/important |
+Double quotes keep a value (or a bare token) together and literal:
+="preamble shuffling"= and =subject:"preamble shuffling"= match that
+phrase, spaces, commas, =|= and slashes losing their meaning inside
+the quotes.
 
-Durations are =Nd= (days), =Nw= (weeks), =Nm= (months). =date:= looks backward
-from today; =deadline:= and =expired:= look forward.
+An empty value matches nothing, whatever the key.
+
+A value in slashes is matched as a case-insensitive regexp on the
+text fields (=from:=, =subject:= and bare words, =topic:=, =source:=, =mid:=,
+and the person fields =acked:= =owned:= =closed:=): =subject:/v[0-9]+/=.
+The regexp is always the whole value -- a =,= loses its meaning
+inside, and =|= being a clause separator, regexp alternation cannot
+appear either: to OR two regexps, use two clauses (=s:/a/ | s:/b/=).
+
+| Long form                       | Short    | Matches                                    |
+|---------------------------------+----------+--------------------------------------------|
+| =from:bzg=                        | =f:=       | from address or name                       |
+| =subject:crash,latex=             | =s:=       | subject (a bare word matches subject)      |
+| =similar:a+b+c=                   |          | subjects sharing 3 of the =+=-joined words   |
+| =topic:agenda=                    | =t:= =T:=    | any of the report's topics                 |
+| =source:emacs=                    | =S:=       | source name (one char: exact)              |
+| =type:patch=                      |          | report type                                |
+| =priority:2=                      | =p:=       | exact priority (0-3)                       |
+| =mid:<...>=                       | =m:=       | message-id                                 |
+| =acked:bzg= =owned:*= =closed:*=      | =a: o: c:= | by person (or =*= for any)                   |
+| =urgent:*= =important:false=        | =u: i:=    | marks (set or not)                         |
+| =flags:AO=                        | =F:=       | Flags letters, all required (A O C R E S)  |
+| =att:~+=                          | =A:=       | Att glyphs, all required (. ~ + x @ #)     |
+| =date:3d= =date:A..B=               | =d:=       | created (durations =Nd/Nw/Nm=, ranges)       |
+| =deadline:2m=                     | =D:=       | due within / on (forward)                  |
+| =expired:10d=                     | =e:=       | expiring within (forward)                  |
+| =closed:true=                     | =c:true=   | include closed reports (transient)         |
+
+Durations: =Nd= (days), =Nw= (weeks), =Nm= (months).  A lone date is
+that exact day; open range ends stay open (=date:2026-01-01..= has no
+upper bound).  =date:= looks backward from today; =deadline:= and
+=expired:= look forward.
+
+=type:=, =flags:= and =att:= are closed sets compared literally: no =*=,
+quotes or regexps there, and =type:*= matches nothing.  =priority:= is
+exact -- =p:2,3= for "at least 2".
+
+=closed:true= bypasses the Open filter without touching the button:
+clearing the search restores it.  Any =closed:= or =flags:= token naming
+a close reason (C R E S) also loads and includes the closed reports,
+so those queries answer honestly.
+
+The same syntax drives the search of [[https://codeberg.org/bzg/gnaw.el][gnaw.el]], whose regexps use the
+Emacs dialect and whose =source:= key also matches the one-letter
+source identifiers of its local configuration.
 
 ** The =gnaw= CLI tool and Emacs clients
 

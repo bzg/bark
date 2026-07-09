@@ -69,156 +69,9 @@ function showRelated(val) {
   setSearch(val + ' closed:true');
 }
 
-function localDate(d) {
-  var y = d.getFullYear();
-  var m = String(d.getMonth() + 1).padStart(2, '0');
-  var day = String(d.getDate()).padStart(2, '0');
-  return y + '-' + m + '-' + day;
-}
-
-function resolveRelativeDate(s, sign) {
-  if (!s) return '';
-  var m = s.match(/^(\d+)([dwm])$/);
-  if (m) {
-    var n = parseInt(m[1]) * sign;
-    var d = new Date();
-    if (m[2] === 'd') d.setDate(d.getDate() + n);
-    else if (m[2] === 'w') d.setDate(d.getDate() + n * 7);
-    else d.setMonth(d.getMonth() + n);
-    return localDate(d);
-  }
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  return '';
-}
-
-function resolveDate(s)       { return resolveRelativeDate(s, -1); }
-function resolveFutureDate(s) { return resolveRelativeDate(s,  1); }
-
-function isDuration(s) { return /^\d+[dwm]$/.test(s); }
-
-function parseFutureDateRange(val) {
-  var hasDots = val.indexOf('..') !== -1;
-  var parts = val.split('..');
-  if (!hasDots && isDuration(parts[0])) {
-    return { from: localDate(new Date()), to: resolveFutureDate(parts[0]) };
-  }
-  if (!hasDots) {
-    var exact = resolveFutureDate(parts[0]);
-    return { from: exact, to: exact };
-  }
-  return {
-    from: resolveFutureDate(parts[0] || ''),
-    to:   resolveFutureDate(parts[1] || '') || localDate(new Date())
-  };
-}
-
-function matchField(fieldVal, terms) {
-  if (terms.length === 1 && terms[0] === '*') return fieldVal !== '';
-  return terms.some(function(t) { return fieldVal.indexOf(t) !== -1; });
-}
-
-function extractValue(part, lowered) {
-  return part.substring(lowered.indexOf(':') + 1);
-}
-
-function startsWithAny(lowered, prefixes) {
-  return prefixes.some(function(pfx) { return lowered.indexOf(pfx) === 0; });
-}
-
-var fieldMap = [
-  {prefixes: ['message-id:', 'mid:', 'm:'], key: 'mids',      dataAttr: 'mid'},
-  {prefixes: ['from:', 'f:'],               key: 'froms',     dataAttr: 'from'},
-  {prefixes: ['subject:', 's:'],            key: 'subjects',  dataAttr: 'subject'},
-  {prefixes: ['topic:', 't:'],              key: 'topics',    dataAttr: 'topic'},
-  {prefixes: ['acked:', 'a:'],              key: 'acked',     dataAttr: 'acked'},
-  {prefixes: ['owned:', 'o:'],              key: 'owned',     dataAttr: 'owned'},
-  {prefixes: ['closed:', 'c:'],             key: 'closed',    dataAttr: 'closedby'},
-  {prefixes: ['urgent:', 'u:'],             key: 'urgent',    dataAttr: 'urgent'},
-  {prefixes: ['important:', 'i:'],          key: 'important', dataAttr: 'important'}
-];
-
-// Prefix-table for range filters: maps the parsed prefix to the result-keys
-// to fill and the range parser to use. 'D:' is case-sensitive (the only
-// uppercase shortcut in the syntax) -- handled separately below.
-var rangeMap = [
-  {prefixes: ['deadline:'],         fromKey: 'deadlineFrom', toKey: 'deadlineTo', parse: parseFutureDateRange},
-  {prefixes: ['expired:', 'e:'],    fromKey: 'expiredFrom',  toKey: 'expiredTo',  parse: parseFutureDateRange},
-  {prefixes: ['date:', 'd:'],       fromKey: 'dateFrom',     toKey: 'dateTo',     parse: parseBackwardDateRange}
-];
-
-function parseBackwardDateRange(val) {
-  var range = val.split('..');
-  return {
-    from: resolveDate(range[0] || ''),
-    to:   resolveDate(range[1] || '') || localDate(new Date())
-  };
-}
-
-function matchingPrefix(lp, prefixes) {
-  for (var i = 0; i < prefixes.length; i++) {
-    if (lp.indexOf(prefixes[i]) === 0) return prefixes[i];
-  }
-  return null;
-}
-
-function parseClause(q) {
-  var result = { text: '', mids: [], froms: [], subjects: [],
-                 acked: [], owned: [], closed: [], topics: [],
-                 urgent: [], important: [],
-                 dateFrom: '', dateTo: '',
-                 deadlineFrom: '', deadlineTo: '',
-                 expiredFrom: '', expiredTo: '',
-                 minPriority: null,
-                 includeClosed: false };
-  var parts = q.trim().split(/\s+/).filter(Boolean);
-  for (var i = 0; i < parts.length; i++) {
-    var p = parts[i];
-    if (p.indexOf('D:') === 0) {
-      var dr = parseFutureDateRange(p.substring(2));
-      result.deadlineFrom = dr.from;
-      result.deadlineTo   = dr.to;
-      continue;
-    }
-    var lp = p.toLowerCase();
-    // closed:true / c:true bypasses the Open filter without touching
-    // the button. The marker lives in the search query, so clearing it
-    // restores the previous Open state automatically.
-    if (lp === 'closed:true' || lp === 'c:true') {
-      result.includeClosed = true;
-      continue;
-    }
-    var matched = false;
-    for (var j = 0; j < fieldMap.length; j++) {
-      if (startsWithAny(lp, fieldMap[j].prefixes)) {
-        result[fieldMap[j].key] = extractValue(p, lp).toLowerCase().split(',').filter(Boolean);
-        matched = true;
-        break;
-      }
-    }
-    if (matched) continue;
-    if (lp.indexOf('priority:') === 0 || lp.indexOf('p:') === 0) {
-      var n = parseInt(extractValue(p, lp), 10);
-      if (!isNaN(n)) result.minPriority = n;
-      continue;
-    }
-    var rangeMatched = false;
-    for (var j = 0; j < rangeMap.length; j++) {
-      var pfx = matchingPrefix(lp, rangeMap[j].prefixes);
-      if (pfx) {
-        var r = rangeMap[j].parse(p.substring(pfx.length));
-        result[rangeMap[j].fromKey] = r.from;
-        result[rangeMap[j].toKey]   = r.to;
-        rangeMatched = true;
-        break;
-      }
-    }
-    if (rangeMatched) continue;
-    result.text += (result.text ? ' ' : '') + p;
-  }
-  // Pre-lowercase text for matching (avoids repeated toLowerCase in tight loop)
-  if (result.text) result.text = result.text.toLowerCase();
-  return result;
-}
+// The query language itself (tokenizer, per-token predicate
+// compilation, searchFields) lives in bone-search.js, inlined by the
+// HTML shell right before this file and unit-tested under node.
 
 /* ── Report preparation ──────────────────────────────────────── */
 
@@ -240,43 +93,17 @@ function escAttr(s) {
   return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-function parseIsoDate(dateRaw) {
-  var ds = String(dateRaw || '').trim();
-  if (ds.length >= 10 && /^\d{4}-\d{2}-\d{2}/.test(ds)) return ds.substring(0, 10);
-  var monthMap = {Jan:'01',Feb:'02',Mar:'03',Apr:'04',May:'05',Jun:'06',
-                  Jul:'07',Aug:'08',Sep:'09',Oct:'10',Nov:'11',Dec:'12'};
-  var dm = ds.match(/^\w+ (\w+) (\d+) .* (\d{4})$/);
-  if (dm && monthMap[dm[1]]) return dm[3] + '-' + monthMap[dm[1]] + '-' + String(dm[2]).padStart(2, '0');
-  return '';
-}
-
 var _typeLabels = boneConfig.typeLabels || {};
 
 function prepareReport(r) {
-  var type = r.type || '';
-  var subject = r.subject || '';
   var from = r.from || '';
   var fromName = r['from-name'] || '';
-  var dateRaw = r['date-raw'] || r.date || '';
   var flags = r.flags || '---';
-  var priority = r.priority || 0;
   var acked = r.acked || '';
   var owned = r.owned || '';
   var ownedName = r['owned-name'] || '';
-  var closed = r.closed || '';
-  var urgent = r.urgent || '';
-  var important = r.important || '';
   var deadline = r.deadline || '';
-  var topic = r.topic || '';
-  var closeReason = r['close-reason'] || '';
-  var expiredDate = r['expired-date'] || '';
-  var awaiting = r.awaiting || false;
-  var lastActivity = r['last-activity'] || '';
-  var messageId = r['message-id'] || '';
-  var source = r.source || '';
-  var replies = r.replies || 0;
 
-  var isoDate = parseIsoDate(dateRaw);
   var closedBool = flags.length >= 3 && flags[2] !== '-';
   var author = fromName ? abbreviateName(fromName) : emailLocalPart(from);
   var ownerDisplay = ownedName ? abbreviateName(ownedName)
@@ -293,96 +120,60 @@ function prepareReport(r) {
     }
   }
 
-  var seriesId = (r.series && r.series.id) ? r.series.id : '';
-
-  return {
+  // The searchFields (bone-search.js) carry everything the compiled
+  // query predicates read; the rest is render/sort state.
+  return Object.assign(searchFields(r), {
     raw: r,
-    seriesId: seriesId,
-    // Filter/sort index (lowercase for string comparisons)
-    type: type,
+    seriesId: (r.series && r.series.id) ? r.series.id : '',
     closed: closedBool,
-    mid: messageId.toLowerCase(),
-    from: from.toLowerCase(),
-    subject: subject.toLowerCase(),
-    date: isoDate,
-    source: source,
-    acked: acked.toLowerCase(),
-    owned: owned.toLowerCase(),
-    closedby: closed.toLowerCase(),
-    urgent: urgent.toLowerCase(),
-    important: important.toLowerCase(),
-    priority: priority,
-    deadline: deadline,
-    expired: expiredDate,
-    topic: (topic || '').toLowerCase(),
-    awaiting: !!awaiting,
-    lastActivity: lastActivity,
-    search: (subject + ' ' + from + ' ' + author + ' ' + owned + ' ' + ownedName + ' ' + isoDate + ' ' + topic).toLowerCase(),
+    awaiting: !!(r.awaiting || false),
+    lastActivity: r['last-activity'] || '',
     // Render helpers (pre-computed once)
-    isoDate: isoDate,
+    isoDate: parseIsoDate(r['date-raw'] || r.date || ''),
     author: author,
     ownerDisplay: ownerDisplay,
     flagsScore: flagsScore,
     dueDays: dueDays,
-    replies: replies
-  };
+    replies: r.replies || 0
+  });
 }
 
 /* ── Matching (operates on prepared report objects, not DOM) ── */
 
-function matchReport(rpt, q) {
+// The toolbar (type buttons, Open/Acked/Owned/Awaiting) pre-filters;
+// the compiled clauses from bone-search.js do the query matching.
+// An empty query has no clause and matches everything the toolbar lets
+// through; a clause marked includeClosed bypasses the Open button.
+function matchReport(rpt, clauses) {
   if (!activeTypes[rpt.type]) return false;
-  if (onlyOpen && !q.includeClosed && rpt.closed) return false;
   if (onlyAcked  && rpt.acked === '') return false;
   if (onlyOwned  && rpt.owned === '') return false;
   if (onlyAwaiting && !rpt.awaiting) return false;
-  for (var j = 0; j < fieldMap.length; j++) {
-    var f = fieldMap[j];
-    if (q[f.key].length > 0) {
-      var val = rpt[f.dataAttr] || '';
-      if (!matchField(val, q[f.key])) return false;
-    }
-  }
-  if (q.minPriority !== null && rpt.priority < q.minPriority) return false;
-  if (q.dateFrom && rpt.date < q.dateFrom) return false;
-  if (q.dateTo   && rpt.date > q.dateTo)   return false;
-  if (q.deadlineFrom || q.deadlineTo) {
-    if (!rpt.deadline) return false;
-    if (q.deadlineFrom && rpt.deadline < q.deadlineFrom) return false;
-    if (q.deadlineTo   && rpt.deadline > q.deadlineTo)   return false;
-  }
-  if (q.expiredFrom || q.expiredTo) {
-    if (!rpt.expired) return false;
-    if (q.expiredFrom && rpt.expired < q.expiredFrom) return false;
-    if (q.expiredTo   && rpt.expired > q.expiredTo)   return false;
-  }
-  if (q.text && rpt.search.indexOf(q.text) === -1) return false;
-  return true;
-}
-
-function matchReportAny(rpt, clauses) {
-  return clauses.some(function(c) { return matchReport(rpt, c); });
+  if (clauses.length === 0) return !(onlyOpen && rpt.closed);
+  return clauses.some(function(c) {
+    if (onlyOpen && !c.includeClosed && rpt.closed) return false;
+    return clauseMatches(rpt, c);
+  });
 }
 
 function queryIncludesClosed(q) {
   if (!q) return false;
-  return q.split(/\s*\|\s*/).map(parseClause)
-          .some(function(c) { return c.includeClosed; });
+  return clausesIncludeClosed(compileQuery(q));
 }
 
 /* ── Filtering & Sorting (in-memory, no DOM access) ──────────── */
 
 function filterReports() {
   var raw = getSearchInput().value;
-  var clauses = raw.split(/\s*\|\s*/).map(parseClause);
-  if (!closedLoaded && clauses.some(function(c) { return c.includeClosed; })) {
+  var clauses = compileQuery(raw);
+  if (!closedLoaded && clausesIncludeClosed(clauses)) {
     loadClosedReports(function() { filterReports(); });
     return;
   }
   console.time('bone:filter');
   _filteredReports = [];
   for (var i = 0; i < _allReports.length; i++) {
-    if (matchReportAny(_allReports[i], clauses)) {
+    if (matchReport(_allReports[i], clauses)) {
       _filteredReports.push(_allReports[i]);
     }
   }
@@ -845,10 +636,7 @@ function buildRowElement(rpt) {
   var seenMids = {};
   var selfMid = r['message-id'] || '';
   if (selfMid) { seenMids[selfMid] = 1; allRelated.push(selfMid); }
-  ['resolves', 'resolved-by',
-   'supersedes', 'superseded-by',
-   'duplicates', 'duplicated-by',
-   'related-to'].forEach(function(kind) {
+  _relationKinds.forEach(function(kind) {
     var entries = r[kind];
     if (entries && entries.length) {
       entries.forEach(function(e) {

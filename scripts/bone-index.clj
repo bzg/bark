@@ -137,7 +137,11 @@
 ;; JS -- client-side filtering, sorting, URL state, theme toggle.
 ;; ---------------------------------------------------------------------------
 
-(def ^:private index-js (slurp "resources/bone-index.js"))
+(def ^:private index-js
+  ;; The query engine (bone-search.js, node-testable, shared syntax
+  ;; with gnaw.el) must load before the page logic that calls it.
+  (str (slurp "resources/bone-search.js") "\n"
+       (slurp "resources/bone-index.js")))
 
 ;; ---------------------------------------------------------------------------
 ;; Report-table columns (CLI: --html-columns / --html-columns-sort)
