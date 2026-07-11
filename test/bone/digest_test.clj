@@ -1695,3 +1695,75 @@
     (testing "other types are never flagged, even with an .ics attachment"
       (is (false? (has-ics :bug)))
       (is (false? (has-ics :patch))))))
+
+;; ---------------------------------------------------------------------------
+;; report-entity stores :report/patches at creation
+;; ---------------------------------------------------------------------------
+
+(def ^:private format-patch-text
+  (str "From 0123456789abcdef0123456789abcdef01234567 Mon Sep 17 00:00:00 2001\n"
+       "From: Alice <alice@test.org>\n"
+       "Date: Thu, 1 May 2026 10:00:00 +0000\n"
+       "Subject: [PATCH] Fix the parser\n"
+       "\n"
+       "---\n"
+       "diff --git a/parser.el b/parser.el\n"))
+
+(deftest report-entity-stores-patches-at-creation
+  (testing "an email with a .patch attachment yields :report/patches"
+    (let [email {:email/attachments [{:attachment/filename "0001-fix.patch"
+                                      :attachment/content-type "text/x-diff"
+                                      :attachment/data format-patch-text}]
+                 :email/author-address "alice@test.org"}
+          entity (digest/report-entity 1 "<m@test.org>" {:type :patch} nil email nil)
+          patches (:report/patches entity)]
+      (is (= 1 (count patches)))
+      (is (= "0001-fix.patch" (:patch/filename (first patches))))
+      (is (= :attachment (:patch/source (first patches))))))
+  (testing "an email without patch content has no :report/patches key"
+    (let [entity (digest/report-entity 1 "<m@test.org>" {:type :bug} nil
+                                       {:email/author-address "alice@test.org"
+                                        :email/body-text "it crashes\n"}
+                                       nil)]
+      (is (not (contains? entity :report/patches))))))
+
+;; ---------------------------------------------------------------------------
+;; Pending emails surface their patches at creation, without duplication
+;; on the TTL-flush retry (regression: patches used to wait on Phase 4,
+;; which pending emails skip)
+;; ---------------------------------------------------------------------------
+
+(deftest pending-patch-stored-at-creation
+  (testing "A [PATCH] reply whose parent is missing gets its patches immediately."
+    (let [{:keys [conn] :as ctx} (setup-db!)]
+      (try
+        (store-and-process!
+         conn
+         (assoc (mk-email {:mid "<pend-patch@test.org>"
+                           :subject "[PATCH] Fix the parser"
+                           :from "user@test.org"
+                           :date #inst "2026-05-01T10:00:00"
+                           :in-reply-to "<never-ingested@test.org>"
+                           :body "Here is the fix.\n"})
+                :email/attachments [{:attachment/filename "0001-fix.patch"
+                                     :attachment/content-type "text/x-diff"
+                                     :attachment/data format-patch-text}])
+         "direct")
+        (let [db (d/db conn)
+              r  (get-report db "<pend-patch@test.org>")]
+          (is (true? (pending? db "<pend-patch@test.org>"))
+              "Reply should be pending: its parent was never ingested")
+          (is (= ["0001-fix.patch"] (mapv :patch/filename (:report/patches r)))
+              "Patches should be stored at creation despite the pending flag"))
+
+        ;; TTL-flush retries the pending email; the :store-patches hook
+        ;; must not add duplicate patch components.
+        (digest/flush-stale-pending! conn source-map sources 0)
+        (let [db (d/db conn)
+              r  (get-report db "<pend-patch@test.org>")]
+          (is (false? (pending? db "<pend-patch@test.org>"))
+              "Flush should clear the pending flag")
+          (is (= ["0001-fix.patch"] (mapv :patch/filename (:report/patches r)))
+              "Flush retry must not duplicate the stored patches"))
+        (finally
+          (teardown! ctx))))))

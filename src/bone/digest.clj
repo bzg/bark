@@ -162,7 +162,11 @@
   (some? (d/entid db [:report/message-id message-id])))
 
 (defn report-entity
-  "Build the entity map for a new report from email data."
+  "Build the entity map for a new report from email data.
+  Patches are stored here, at creation: they depend only on the email's
+  own content, so a reply flagged :email/pending-thread? (Phase 4
+  skipped) still surfaces them immediately instead of waiting for the
+  TTL flush."
   [email-eid message-id report-info email-date email now]
   (let [attachments (:email/attachments email)
         body-text   (common/email-body-text email)
@@ -172,7 +176,8 @@
         has-ics     (and (= :announcement (:type report-info))
                          (or (common/has-ics-attachment? attachments)
                              (common/has-inline-ics? body-text)))
-        has-text    (boolean (some common/text-attachment? attachments))]
+        has-text    (boolean (some common/text-attachment? attachments))
+        patches     (detect/build-patch-entities email)]
     (into {:report/type (:type report-info) :report/email email-eid
            :report/message-id message-id
            :report/last-activity (or email-date now)}
@@ -183,7 +188,8 @@
            :report/topic (when (:topic report-info) email-eid)
            :report/topic-value (:topic report-info)
            :report/patch-seq (:patch-seq report-info) :report/patch-source (:patch-source report-info)
-           :report/has-ics has-ics :report/has-text-attachments has-text})))
+           :report/has-ics has-ics :report/has-text-attachments has-text
+           :report/patches (when (seq patches) patches)})))
 
 (defn- create-report!
   "Create a new report entity. Returns the entity id of the new report."
@@ -437,9 +443,10 @@
            (seq nearest-eids))                                (conj :close-previous-version)
       (and (= :patch rtype) (seq nearest-eids))               (conj :close-superseded-thread)
       (and (= :patch rtype) (:patch-seq report-info))         (conj :manage-series)
-      ;; Store patch entities on ANY report type carrying patch content,
-      ;; not just :patch reports.  A [BUG] with a .patch attachment
-      ;; gets the patch stored as metadata on the bug.
+      ;; Patches are normally stored at creation (see report-entity);
+      ;; this hook only heals reports created pending by versions that
+      ;; predate creation-time storage.  It applies to ANY report type
+      ;; carrying patch content, not just :patch reports.
       (seq patches)                                           (conj :store-patches)
       ;; :auto-series stays patch-only: a synthetic series only makes
       ;; sense for :patch reports (series tracking is patch-specific).
@@ -629,8 +636,14 @@
   (when (:manage-series plan)
     (series/manage-series! conn report-eid email report-info from-addr parent-eids))
   (when (:store-patches plan)
-    (d/transact! conn [{:db/id report-eid :report/patches patches}])
-    (log/info (count patches) "patch file(s) stored"))
+    ;; No-op for reports created since patches moved to creation time
+    ;; (report-entity): the guard prevents duplicate :report/patches
+    ;; components on retry, while still healing reports created pending
+    ;; by older versions whose Phase 4 never ran.
+    (when (empty? (:report/patches
+                   (d/pull (d/db conn) [{:report/patches [:db/id]}] report-eid)))
+      (d/transact! conn [{:db/id report-eid :report/patches patches}])
+      (log/info (count patches) "patch file(s) stored")))
   (when (:auto-series plan)
     (let [series-eid (series/create-series! conn (:topic report-info) from-addr 1)]
       (series/add-patch-to-series! conn series-eid report-eid email)
