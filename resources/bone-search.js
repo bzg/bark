@@ -14,7 +14,7 @@
 //   token   = [-]key:value | [-]bare-word | "quoted subject phrase"
 //   value   = alt,alt,...            (comma = OR; a "…" or /re/ value
 //                                     stays whole and may contain commas)
-//   keys    = from/f subject/s similar topic/t/T source/S type
+//   keys    = from/f subject/s similar topic/T source/S type/t
 //             priority/p mid/m acked/a owned/o closed/c urgent/u
 //             important/i flags/F att/attributes/A date/d deadline/D
 //             expired/e
@@ -263,7 +263,7 @@ function compileKey(token) {
     case 'subject': case 's':
       return fieldMatcher(val, textMatcher,
         [function(r) { return r.subject; }]);
-    case 'topic': case 't': case 'T':
+    case 'topic': case 'T':
       // Topics are whitespace-free tokens; match any of the report's.
       return (function() {
         var ms = queryVals(val).map(textMatcher);
@@ -296,7 +296,7 @@ function compileKey(token) {
         var d = v.toLowerCase();
         return function(s) { return s === d; };
       }, [function(r) { return r.source; }]);
-    case 'type':
+    case 'type': case 't':
       // A closed set compared whole: no *, regexp or quotes here, and
       // type:* matches nothing.
       return (function() {

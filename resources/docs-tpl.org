@@ -94,8 +94,8 @@ Important.
 The search box filters with =key:value= tokens: space is AND, =|= is OR
 between clauses, a comma ORs values, a leading =-= negates a token, ="…"=
 keeps a phrase literal and =/re/= matches as a regexp. Keys (alias in
-parens): =from= (=f=), =subject= (=s=), =similar=, =topic= (=t= =T=), =source= (=S=),
-=type=, =priority= (=p=), =mid= (=m=), =acked= (=a=), =owned= (=o=), =closed= (=c=), =urgent=
+parens): =from= (=f=), =subject= (=s=), =similar=, =topic= (=T=), =source= (=S=),
+=type= (=t=), =priority= (=p=), =mid= (=m=), =acked= (=a=), =owned= (=o=), =closed= (=c=), =urgent=
 (=u=), =important= (=i=), =flags= (=F=), =att= (=A=), =date= (=d=), =deadline= (=D=),
 =expired= (=e=). Durations are =Nd/Nw/Nm=; =closed:true= transiently includes
 the closed reports.

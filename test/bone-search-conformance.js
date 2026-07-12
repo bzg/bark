@@ -67,7 +67,7 @@ var cases = [
   ['"shuffling in"',           ['<req@emacs>']],
   // Clauses: | is OR, comma inside a value is OR, space is AND.
   ['latex | agenda',           ['<crash@org>', '<patch@org>', '<req@emacs>', '<done@emacs>']],
-  ['t:latex s:crash',          ['<done@emacs>']],
+  ['T:latex s:crash',          ['<done@emacs>']],
   ['topic:latex,agenda',       ['<crash@org>', '<patch@org>', '<req@emacs>', '<done@emacs>']],
   // Negation covers the whole token, alternatives included.
   ['-topic:latex,agenda',      []],
@@ -104,6 +104,7 @@ var cases = [
   ['u:whoever',                []],          // only */true/false mean anything
   // Closed sets, compared whole: no *, quotes or regexps.
   ['type:patch',               ['<patch@org>']],
+  ['t:patch',                  ['<patch@org>']],
   ['type:bug,request',         ['<crash@org>', '<req@emacs>', '<done@emacs>']],
   ['type:*',                   []],
   ['flags:AO',                 ['<crash@org>'], false],

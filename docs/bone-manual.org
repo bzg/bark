@@ -757,24 +757,24 @@ The regexp is always the whole value -- a =,= loses its meaning
 inside, and =|= being a clause separator, regexp alternation cannot
 appear either: to OR two regexps, use two clauses (=s:/a/ | s:/b/=).
 
-| Long form                       | Short    | Matches                                    |
-|---------------------------------+----------+--------------------------------------------|
-| =from:bzg=                        | =f:=       | from address or name                       |
-| =subject:crash,latex=             | =s:=       | subject (a bare word matches subject)      |
-| =similar:a+b+c=                   |          | subjects sharing 3 of the =+=-joined words   |
-| =topic:agenda=                    | =t:= =T:=    | any of the report's topics                 |
-| =source:emacs=                    | =S:=       | source name (one char: exact)              |
-| =type:patch=                      |          | report type                                |
-| =priority:2=                      | =p:=       | exact priority (0-3)                       |
-| =mid:<...>=                       | =m:=       | message-id                                 |
-| =acked:bzg= =owned:*= =closed:*=      | =a: o: c:= | by person (or =*= for any)                   |
-| =urgent:*= =important:false=        | =u: i:=    | marks (set or not)                         |
-| =flags:AO=                        | =F:=       | Flags letters, all required (A O C R E S)  |
-| =att:~+=                          | =A:=       | Att glyphs, all required (. ~ + x @ #)     |
-| =date:3d= =date:A..B=               | =d:=       | created (durations =Nd/Nw/Nm=, ranges)       |
-| =deadline:2m=                     | =D:=       | due within / on (forward)                  |
-| =expired:10d=                     | =e:=       | expiring within (forward)                  |
-| =closed:true=                     | =c:true=   | include closed reports (transient)         |
+| Long form                  | Short    | Matches                                   |
+|----------------------------+----------+-------------------------------------------|
+| =from:bzg=                   | =f:=       | from address or name                      |
+| =subject:crash,latex=        | =s:=       | subject (a bare word matches subject)     |
+| =similar:a+b+c=              |          | subjects sharing 3 of the =+=-joined words  |
+| =topic:agenda=               | =T:=       | any of the report's topics                |
+| =source:emacs=               | =S:=       | source name (one char: exact)             |
+| =type:patch=                 | =t:=       | report type                               |
+| =priority:2=                 | =p:=       | exact priority (0-3)                      |
+| =mid:<...>=                  | =m:=       | message-id                                |
+| =acked:bzg= =owned:*= =closed:*= | =a: o: c:= | by person (or =*= for any)                  |
+| =urgent:*= =important:false=   | =u: i:=    | marks (set or not)                        |
+| =flags:AO=                   | =F:=       | Flags letters, all required (A O C R E S) |
+| =att:~+=                     | =A:=       | Att glyphs, all required (. ~ + x @ #)    |
+| =date:3d= =date:A..B=          | =d:=       | created (durations =Nd/Nw/Nm=, ranges)      |
+| =deadline:2m=                | =D:=       | due within / on (forward)                 |
+| =expired:10d=                | =e:=       | expiring within (forward)                 |
+| =closed:true=                | =c:true=   | include closed reports (transient)        |
 
 Durations: =Nd= (days), =Nw= (weeks), =Nm= (months).  A lone date is
 that exact day; open range ends stay open (=date:2026-01-01..= has no
