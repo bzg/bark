@@ -699,8 +699,6 @@
         arch        (archive-url report email source-map)
         src-type    (get-in source-map [source-name :source-type])
         relations   (group-relations report src-type)
-        ;; First :supersedes outgoing (kept as a singular convenience field)
-        first-sup   (first (:supersedes relations))
         role        (sender-role from source-name source-map maintainers-map)
         awaiting?   (awaiting-reply? report source-name source-map maintainers-map)]
     (-> {:type     (name (:report/type report))
@@ -730,14 +728,6 @@
             awaiting?                       (assoc :awaiting true)
             (:report/expiry-value report)   (assoc :expiry (format-date-iso (:report/expiry-value report)))
             (:report/close-reason report)   (assoc :close-reason (name (:report/close-reason report)))
-            ;; Singular :superseded-by convenience field -- first outgoing
-            ;; :supersedes if any.  Subject is also exposed under
-            ;; :rel/to.{:report/email :email/subject}.
-            first-sup
-            (assoc :superseded-by
-                   (cond-> {:message-id (:message-id first-sup)}
-                     (get-in first-sup [:subject])
-                     (assoc :subject (:subject first-sup))))
             (and (= :expired (:report/close-reason report))
                  (:email/date-sent (:report/closed report)))
             (assoc :expired-date (format-date-iso (:email/date-sent (:report/closed report)))))
