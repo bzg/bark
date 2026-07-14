@@ -217,14 +217,18 @@
   "Recursively copy `src` into `dst`, creating `dst` if needed.
   Used to seed staging subdirectories with the previous export so an
   incremental run does not lose files it chooses not to rewrite (see
-  the call site).  Relies on `file-seq`'s pre-order traversal so each
+  the call site).  Copies file attributes so a seeded file the run
+  keeps retains its mtime -- the web server derives ETag/Last-Modified
+  from it, and conditional GETs would otherwise re-download unchanged
+  files.  Relies on `file-seq`'s pre-order traversal so each
   directory is created before its children are copied."
   [^java.io.File src ^java.io.File dst]
   (when (.exists src)
     (let [src-path (.toPath src)
           dst-path (.toPath dst)
           opts     (into-array java.nio.file.CopyOption
-                               [java.nio.file.StandardCopyOption/REPLACE_EXISTING])]
+                               [java.nio.file.StandardCopyOption/REPLACE_EXISTING
+                                java.nio.file.StandardCopyOption/COPY_ATTRIBUTES])]
       (doseq [^java.io.File f (file-seq src)
               :let            [target (.resolve dst-path (.relativize src-path (.toPath f)))]]
         (if (.isDirectory f)
@@ -834,8 +838,28 @@
 ;; Per-source export functions
 ;; ---------------------------------------------------------------------------
 
+(defn- json-unchanged?
+  "True when `file` already holds the JSON we are about to write.
+  Incremental staging is seeded from the previous export with mtimes
+  preserved, so leaving an identical file untouched keeps its mtime
+  and thus the ETag/Last-Modified the web server derives from it.
+  When `envelope` carries the per-run :generated stamp, compare the
+  parsed data without it: skipped runs already leave the stamp stale,
+  so it effectively tracks the last time the data changed."
+  [file json-str envelope]
+  (let [f (io/file file)]
+    (and (.exists f)
+         (let [prev (slurp f)]
+           (if (contains? envelope :generated)
+             (try (= (dissoc (json/parse-string prev true) :generated)
+                     (dissoc (json/parse-string json-str true) :generated))
+                  (catch Exception _ false))
+             (= prev json-str))))))
+
 (defn dump-json!
-  "Dump reports as JSON for a single source."
+  "Dump reports as JSON for a single source.
+  Leaves a file whose content did not change untouched (see
+  `json-unchanged?`)."
   ([reports out-dir source-name source-map maintainers-map]
    (dump-json! reports out-dir source-name source-map maintainers-map "all.json" nil))
   ([reports out-dir source-name source-map maintainers-map basename]
@@ -848,10 +872,13 @@
                            :reports     data}
                     (seq meta)       (merge meta)
                     (seq extra-meta) (merge extra-meta))
-         filename (str out-dir "/" basename)]
-     (spit filename (json/generate-string envelope {:pretty true}))
-     (when (seq data)
-       (log/info "Wrote" (count data) "reports to" filename)))))
+         filename (str out-dir "/" basename)
+         json-str (json/generate-string envelope {:pretty true})]
+     (if (json-unchanged? filename json-str envelope)
+       (log/info "Unchanged" filename)
+       (do (spit filename json-str)
+           (when (seq data)
+             (log/info "Wrote" (count data) "reports to" filename)))))))
 
 (def ^:private rfc822-formatter
   ;; DateTimeFormatter is immutable and thread-safe.  Pattern matches
