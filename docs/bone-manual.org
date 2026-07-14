@@ -692,7 +692,11 @@ Running =bb export all= generates, for each source:
   open/closed announcements carrying =.ics= or inline VCALENDAR
   content.
 
-RSS feeds carry up to 50 items, most recent first. Export is
+RSS feeds carry up to 50 items, most recent first. Reports posted by
+a maintainer carry a =<category>maintainer</category>= element and a
+=role:maintainer= field in the item description, so feed readers can
+filter or highlight them (e.g. distinguishing a =[ANN]= sent by a
+maintainer from one sent by a contributor). Export is
 incremental: only sources modified since the last export are
 regenerated. Use =--force= to rebuild everything, or =bb export
 {json|rss|org|html|stats|text|events}= to rebuild a single format.

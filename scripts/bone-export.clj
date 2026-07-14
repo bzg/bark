@@ -920,6 +920,7 @@
         replies (:replies m)
         desc    (xml-escape
                  (str "[" (:type m) "] flags:" flags " replies:" replies
+                      (when-let [r (:role m)]     (str " role:" r))
                       (when-let [v (:version m)]  (str " version:" v))
                       (when-let [t (:topic m)]    (str " topic:" t))
                       (when-let [d (:deadline m)] (str " deadline:" d))
@@ -935,6 +936,8 @@
              (str "      <guid isPermaLink=\"false\">" (:value guid) "</guid>\n")))
          (when date
            (str "      <pubDate>" date "</pubDate>\n"))
+         (when-let [role (:role m)]
+           (str "      <category>" (xml-escape role) "</category>\n"))
          "      <author>" author "</author>\n"
          "      <description>" desc "</description>\n"
          "    </item>")))
