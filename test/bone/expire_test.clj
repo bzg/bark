@@ -3,6 +3,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [datalevin.core :as d]
             [bone.common :as common]
+            [bone.lookup :as lookup]
             [bone.expire :as expire]
             [bone.test-helpers :as th])
   (:import [java.util Date]))
@@ -34,13 +35,14 @@
          :or   {from "user@test.org" source "test-src"
                 subject "Test" date-sent (days-ago 0)}}]
   (let [tempid -1
-        tx (d/transact! conn [{:db/id                tempid
-                                :email/message-id     mid
-                                :email/from-address   from
-                                :email/author-address from
-                                :email/source         source
-                                :email/date-sent      date-sent
-                                :email/subject        subject}])]
+        tx (d/transact! conn [{:db/id                  tempid
+                                :email/message-id       mid
+                                :email/message-id-hash  (common/mid-hash mid)
+                                :email/from-address     from
+                                :email/author-address   from
+                                :email/source           source
+                                :email/date-sent        date-sent
+                                :email/subject          subject}])]
     (get (:tempids tx) tempid)))
 
 (defn- insert-report!
@@ -49,13 +51,13 @@
   (let [email    (d/pull (d/db conn) [:email/date-sent :email/author-address] email-eid)
         activity (or date-sent (:email/date-sent email) (Date.))
         from     (:email/author-address email)]
-    (d/transact! conn [(cond-> {:report/type          type
-                                :report/email         email-eid
-                                :report/message-id    mid
-                                :report/last-activity activity}
+    (d/transact! conn [(cond-> {:report/type            type
+                                :report/email           email-eid
+                                :report/message-id      mid
+                                :report/message-id-hash (common/mid-hash mid)
+                                :report/last-activity   activity}
                          from (assoc :report/last-activity-address from))])
-    (d/q '[:find ?r . :in $ ?mid :where [?r :report/message-id ?mid]]
-         (d/db conn) mid)))
+    (lookup/report-eid (d/db conn) mid)))
 
 (defn- set-report-state!
   "Set state attributes on a report (acked, owned, urgent, important)."
@@ -81,7 +83,7 @@
   (some? (:report/closed
            (d/pull (d/db conn)
                    [:report/closed]
-                   [:report/message-id mid]))))
+                   (lookup/report-eid (d/db conn) mid)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Tests
@@ -353,5 +355,5 @@
       ;; Still closed with original reason, not overwritten to :expired
       (is (= :resolved (:report/close-reason
                           (d/pull (d/db conn) [:report/close-reason]
-                                  [:report/message-id "<closed@test>"]))))
+                                  (lookup/report-eid (d/db conn) "<closed@test>")))))
       (teardown! ctx))))

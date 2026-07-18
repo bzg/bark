@@ -27,7 +27,7 @@
          '[bone.common :refer [get-header format-date format-date-iso
                                report-priority report-status report-descendant-count
                                load-config db-path build-source-map
-                               bone-schema
+                               bone-schema mid-hash
                                failures-file-path read-failures-file
                                reason-labels]]
          '[bone.common-bb :refer [load-datalevin-pod! all-reports]])
@@ -38,13 +38,9 @@
 (require '[pod.tzzh.mail :as mail])
 
 ;; ---------------------------------------------------------------------------
-;; Per-(subscriber, source) failures-shown tracking
-;; ---------------------------------------------------------------------------
-;;
-;; We persist the timestamp of the last successful notification per
-;; (subscriber, source) pair to avoid re-sending the same failure on
-;; every run.  This is operational state, not configuration --
-;; subscribers and filters live in config.edn.
+;; Per-(subscriber, source) failures-shown tracking: timestamp of the
+;; last successful notification, so failures are not re-sent on every
+;; run.  Operational state, not configuration.
 
 (def ^:private last-failures-file "data/.last-notify-failures.edn")
 
@@ -113,15 +109,14 @@
                           false)))))))
 
 (defn- report-subject-by-mid
-  "Look up the report's email subject from its message-id."
+  "Look up the report's email subject from its message-id.  entid +
+  pull, never a d/q value seek on the hash attr (same convention as
+  the JVM-side bone.lookup ns; the pod cannot require it)."
   [db mid]
   (when (and mid (not (str/blank? mid)))
-    (d/q '[:find ?subj .
-           :in $ ?mid
-           :where [?r :report/message-id ?mid]
-                  [?r :report/email ?e]
-                  [?e :email/subject ?subj]]
-         db mid)))
+    (when-let [r (d/entid db [:report/message-id-hash (mid-hash mid)])]
+      (-> (d/pull db [{:report/email [:email/subject]}] r)
+          :report/email :email/subject))))
 
 ;; ---------------------------------------------------------------------------
 ;; Report formatting

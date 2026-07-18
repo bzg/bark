@@ -113,9 +113,12 @@
     (str/join (map #(format "%02x" (Byte/toUnsignedInt %)) bytes))))
 
 (defn mid-hash
-  "Compute a stable directory-safe hash from a message-id."
+  "Stable directory-safe hash of a message-id; also the value of the
+  :*/message-id-hash unique attrs every mid lookup goes through
+  (raw mids can exceed LMDB's key limit).  Nil-safe."
   [message-id]
-  (sha256 (str "bone:" message-id)))
+  (when message-id
+    (sha256 (str "bone:" message-id))))
 
 (defn escape-script-payload
   "Neutralize HTML-script-closing and comment sequences in a JSON payload that
@@ -291,16 +294,11 @@
               (recur (rest chars) (+ width n) (.append out c)))))))))
 
 (defn build-vcalendar
-  "Assemble a complete VCALENDAR document (CRLF-terminated) wrapping the
-  given VTIMEZONE and VEVENT blocks.  Returns nil when there is no event
-  to publish.
-
-  The calendar is always emitted with METHOD:PUBLISH: a BONE export is a
-  read-only subscription feed, not a scheduling exchange.  Any METHOD from
-  the source (REQUEST, REPLY, CANCEL...) is intentionally dropped -- those
-  belong to an interactive iTIP workflow BONE does not participate in.  A
-  cancelled occurrence is still represented faithfully when its VEVENT
-  carries STATUS:CANCELLED, which is preserved verbatim inside the block."
+  "Assemble a complete VCALENDAR document (CRLF-terminated) wrapping
+  the given VTIMEZONE and VEVENT blocks; nil when no event.  Always
+  METHOD:PUBLISH (read-only subscription feed): any iTIP METHOD from
+  the source is dropped, but STATUS:CANCELLED inside a block is
+  preserved verbatim."
   [cal-name vevents vtimezones]
   (when (seq vevents)
     (str "BEGIN:VCALENDAR\r\n"
@@ -550,21 +548,14 @@
   [headers]
   (extract-bracketed-id (get-header headers "In-Reply-To")))
 
-;; Cap mid length to stay under LMDB's 511-byte AVE key limit (the
-;; Datalevin encoding ~doubles the raw string).  Mids above this are
-;; dropped from lookups -- pathological ProtonMail mids in the wild
-;; exceed 130 chars and trigger MDB_BAD_VALSIZE on insert.
-(def ^:const max-indexable-mid-length 200)
-
-(defn indexable-mid?
-  "True iff `mid` fits in the LMDB AVE index (string ≤ 200 chars)."
-  [mid]
-  (and (string? mid) (<= (count mid) max-indexable-mid-length)))
+;; Purely defensive (identity uses the fixed-length mid-hash): a
+;; multi-KB Message-Id is hostile input, skipped cleanly at ingest so
+;; a failing transact can never block the watermark.
+(def ^:const max-mid-length 10000)
 
 (defn ancestor-mids-from
   "Ordered vector of ancestor mids (root first, parent last) from
-  References + In-Reply-To.  Mids are normalized and filtered through
-  indexable-mid?."
+  References + In-Reply-To.  Mids are normalized and deduped."
   [references in-reply-to]
   (let [refs (if (string? references)
                (mapv normalize-mid (re-seq mid-token-re references))
@@ -573,7 +564,7 @@
         all  (if (and irt (not (some #{irt} refs)))
                (conj (vec refs) irt)
                (vec refs))]
-    (into [] (comp (distinct) (filter indexable-mid?)) all)))
+    (into [] (distinct) all)))
 
 ;; ---------------------------------------------------------------------------
 ;; Source classification
@@ -737,12 +728,9 @@
 (def type->plural (into {} (map (juxt :type :plural)) report-type-spec))
 
 (def default-commands
-  ;; No bare "Reviewed" in :acked -- in loose mode a reply opener like
-  ;; "Reviewed v2 and found problems." would ack with inverse polarity
-  ;; (a review is not an approval, unlike Confirmed/Approved).  The
-  ;; kernel idiom is the full Reviewed-by: line, a syntax synonym of
-  ;; Acked-by: in the registry; sources that want the bareword can add
-  ;; it via :words.
+  ;; No bare "Reviewed" in :acked: in loose mode "Reviewed v2 and
+  ;; found problems." would ack with inverse polarity.  The kernel
+  ;; idiom is the Reviewed-by: line (syntax synonym of Acked-by:).
   {:acked     ["Acked" "Confirmed" "Approved"]
    :owned     ["Owned"]
    :closed    ["Canceled" "Cancelled" "Closed" "Expired"
@@ -833,12 +821,10 @@
 ;; Reproducible per-source config (published in docs.html + reports/config.edn)
 ;; ---------------------------------------------------------------------------
 ;;
-;; Goal: let anyone re-run BONE on their *own* copy of the same mail and
-;; obtain the same dashboard.  We publish a source's interpretation rules
-;; with the operator's global :labels/:commands/... folded in, so the entry
-;; is self-contained (independent of their global config), and we drop
-;; everything secret or operator-internal: :mailboxes (the reader supplies
-;; their own local source), :db, :logging, :notifications.
+;; Lets anyone re-run BONE on their own copy of the mail and get the
+;; same dashboard: the source's rules with global :labels/:commands/...
+;; folded in, minus everything secret or operator-internal
+;; (:mailboxes, :db, :logging, :notifications).
 
 (def reproducible-config-header
   (str ";; Minimal config.edn to reproduce this dashboard on your own copy of\n"

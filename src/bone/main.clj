@@ -10,6 +10,7 @@
   (:require [bone.ingest :as ingest]
             [bone.logging :as blog]
             [bone.common :as common]
+            [bone.lookup :as lookup]
             [bone.digest :as digest]
             [bone.expire :as expire]
             [bone.periods :as periods]
@@ -74,19 +75,12 @@
 (def ^:private watch-futures (atom nil))
 
 ;; ---------------------------------------------------------------------------
-;; Fetch parsing
-;;
-;; :fetch accepts exactly one of three disjoint map shapes -- strict,
-;; no key mixing, empty map rejected:
-;;
+;; Fetch parsing -- :fetch accepts exactly one of three disjoint map
+;; shapes (no key mixing, empty map rejected):
 ;;   {:limit N}              -- latest N messages (pos-int)
-;;   {:since "Nd"|"Nw"|...}  -- relative duration from now (duration-only)
-;;   {:start "yyyy-MM-dd"
-;;    :end   "yyyy-MM-dd"?}  -- absolute window; :start alone, :end alone,
-;;                             or both are all valid (ISO dates only).
-;;
-;; Mailseq's wire vocabulary is :since/:before; this function translates
-;; :start → :since and :end → :before at the boundary.
+;;   {:since "Nd"|"Nw"|...}  -- relative duration from now
+;;   {:start "yyyy-MM-dd" :end "yyyy-MM-dd"?} -- absolute ISO window
+;; Translated to mailseq's :since/:before at the boundary.
 ;; ---------------------------------------------------------------------------
 
 (defn- iso->date [s]
@@ -189,14 +183,10 @@
 ;; Atomic store+process
 ;; ---------------------------------------------------------------------------
 
-;; Message-ids whose digest is currently in flight on some thread.
-;; In multi-mailbox watch mode, two mailboxes that subscribe to the
-;; same list may both observe a new email and race to digest it
-;; before `:email/digested-at` lands.  `store-email!` already
-;; prevents duplicate DB entities, but a sibling thread that sees
-;; "stored but not digested" then re-enters `try-digest!` --
-;; legitimately, for crash recovery, but incorrectly here.  Mids in
-;; this set are claimed by another thread; concurrent callers skip.
+;; Message-ids whose digest is in flight on some thread.  Two
+;; mailboxes watching the same list can race between store and
+;; :email/digested-at; a mid in this set is claimed, concurrent
+;; callers skip.
 (def ^:private digesting-mids (atom #{}))
 
 (defn take-mid-ownership!
@@ -213,13 +203,11 @@
   (swap! digesting-mids disj mid))
 
 (defn- try-digest!
-  "Run process-email!, returning :ok on success, :retry on exception.
-  Concurrent callers for the same mid return :ok without re-running
-  -- a sibling thread already owns it (see `digesting-mids`).  The
-  `:ok` here means \"do not retry / watermark may advance\", not
-  \"I digested\" : the sibling thread is responsible for posting
-  :email/digested-at.  `resolved-source` (or nil) is forwarded to
-  `process-email!` to skip re-classifying a freshly stored email."
+  "Run process-email!; :ok on success, :retry on exception.
+  Concurrent callers for a mid owned by a sibling thread (see
+  `digesting-mids`) return :ok without re-running -- :ok means \"the
+  watermark may advance\", not \"I digested\".  `resolved-source`
+  skips re-classifying a freshly stored email."
   [{:keys [db-conn source-map sources]} email mid resolved-source]
   (if-not (take-mid-ownership! mid)
     (do (log/debug "Digest already in flight for" mid "-- skipping")
@@ -236,13 +224,14 @@
 
 (defn- guard-reject-reason
   "Pure pre-storage guard. nil = accept; else a reason keyword:
-  :oversized, :no-mid, or :oversized-mid (over the LMDB key limit)."
+  :oversized, :no-mid, or :oversized-mid (over the defensive
+  `common/max-mid-length` cap)."
   [msg mid max-size]
   (let [size (:size msg -1)]
     (cond
       (and max-size (pos? size) (> size max-size)) :oversized
       (nil? mid)                                   :no-mid
-      (not (common/indexable-mid? mid))            :oversized-mid)))
+      (> (count mid) common/max-mid-length)        :oversized-mid)))
 
 (defn- store-and-process!
   "Classify, store, and digest an email.  Returns :ok (advance watermark),
@@ -252,7 +241,7 @@
   [{:keys [db-conn sources ingest-opts] :as ctx} msg]
   (let [{:keys [max-size max-attachment-size]} ingest-opts
         id   (:id msg)
-        ;; Normalize like `store-email!` so :email/message-id lookups
+        ;; Normalize like `store-email!` so :email/message-id-hash lookups
         ;; resolve consistently after store (raw mid padding can drift).
         mid  (common/extract-bracketed-id (:message-id msg))]
     (if-let [reason (guard-reject-reason msg mid max-size)]
@@ -270,12 +259,11 @@
         (if-not src-name
           (do (log/debug "No matching source for id:" id "-- not stored")
               :skip)
-          (let [lookup     [:email/message-id mid]
-                store-opts (cond-> {:source src-name :message-id mid}
+          (let [store-opts (cond-> {:source src-name :message-id mid}
                              max-attachment-size (assoc :max-attachment-size
                                                         max-attachment-size))]
             (if (ingest/store-email! db-conn msg store-opts)
-              (let [eid (d/entid (d/db db-conn) lookup)]
+              (let [eid (lookup/email-eid (d/db db-conn) mid)]
                 (try-digest! ctx
                              (d/pull (d/db db-conn) digest/email-pull-pattern eid)
                              mid resolved))
@@ -284,7 +272,7 @@
               ;; the same Maildir filename -- skip).  On re-digest, pass no
               ;; :resolved-source so process-email! reads the stored
               ;; :email/source (the entity may predate a config change).
-              (if-let [eid (d/entid (d/db db-conn) lookup)]
+              (if-let [eid (lookup/email-eid (d/db db-conn) mid)]
                 (let [email (d/pull (d/db db-conn) digest/email-pull-pattern eid)]
                   (cond
                     (:email/digested-at email)
@@ -695,14 +683,11 @@
           (log/error e "Scheduled expire failed:" (blog/exception-msg e)))))))
 
 (defn- watch-all!
-  "Run watch on every configured mailbox in parallel: one future per
-  mailbox, plus a dedicated future for the daily expire scheduler.
-  The futures are published into `watch-futures` so the shutdown hook
-  can wait for them before closing the DB.  The main thread blocks on
-  `run! deref` over the watch loops until every one exits (typically
-  only on shutdown); the scheduler exits via the shared shutdown flag.
-  Uncaught throwables inside a future are logged so a dead thread
-  cannot silently disappear."
+  "Watch every configured mailbox in parallel (one future each, plus
+  the daily expire scheduler), publishing futures into
+  `watch-futures` for the shutdown hook.  The main thread blocks
+  until every loop exits; uncaught throwables are logged so a dead
+  thread cannot silently disappear."
   [mailboxes db-conn ingest-cfg cli-fetch-map config-path]
   (let [watch-futs (mapv (fn [mb]
                            (future

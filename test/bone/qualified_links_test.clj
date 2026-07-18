@@ -13,6 +13,7 @@
             [datalevin.core :as d]
             [bone.commands :as commands]
             [bone.common :as common]
+            [bone.lookup :as lookup]
             [bone.digest :as digest]
             [bone.relations :as rel]
             [bone.test-helpers :as th]))
@@ -36,23 +37,25 @@
 (defn- mk-email!
   "Insert an email and return its eid."
   [conn mid author date]
-  (d/transact! conn [{:email/id            mid
-                      :email/source        "test"
-                      :email/message-id    mid
-                      :email/subject       (str "Subject of " mid)
-                      :email/author-address author
-                      :email/from-address  author
-                      :email/date-sent     date
-                      :email/ingested-at   date}])
-  (d/entid (d/db conn) [:email/message-id mid]))
+  (d/transact! conn [{:email/id              mid
+                      :email/source          "test"
+                      :email/message-id      mid
+                      :email/message-id-hash (common/mid-hash mid)
+                      :email/subject         (str "Subject of " mid)
+                      :email/author-address  author
+                      :email/from-address    author
+                      :email/date-sent       date
+                      :email/ingested-at     date}])
+  (lookup/email-eid (d/db conn) mid))
 
 (defn- mk-report!
   "Insert a report tied to an email and return its eid."
   [conn mid email-eid type]
-  (d/transact! conn [{:report/message-id mid
-                      :report/type       type
-                      :report/email      email-eid}])
-  (d/entid (d/db conn) [:report/message-id mid]))
+  (d/transact! conn [{:report/message-id      mid
+                      :report/message-id-hash (common/mid-hash mid)
+                      :report/type            type
+                      :report/email           email-eid}])
+  (lookup/report-eid (d/db conn) mid))
 
 (defn- get-relations
   "Return all relations targeting OR sourced from the given report eid,
@@ -210,7 +213,9 @@
         (let [tgt-mid   "<patch-v2@x>"
               src-mid   "<patch-v1@x>"
               _tgt-email (mk-email! conn tgt-mid "carol@x" #inst "2026-02-02")
-              _tgt-eid  (mk-report! conn tgt-mid (d/entid (d/db conn) [:email/message-id tgt-mid]) :patch)
+              _tgt-eid  (mk-report! conn tgt-mid
+                                    (lookup/email-eid (d/db conn) tgt-mid)
+                                    :patch)
               src-email (mk-email! conn src-mid "alice@x" #inst "2026-02-01")
               src-eid   (mk-report! conn src-mid src-email :patch)
               ;; Apply Superseded-by first (alice as setter)

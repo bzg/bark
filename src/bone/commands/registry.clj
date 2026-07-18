@@ -9,38 +9,23 @@
 ;; ---------------------------------------------------------------------------
 ;; Vocabulary
 ;;
-;;   :kind :trigger    -- state-change command.  Acts only on existing
-;;                        reports; never on the carrying mail, even when
-;;                        that mail opens its thread.  Examples: Closed.,
-;;                        Acked., Owned-by:, Superseded-by:, Duplicate-of:.
+;;   :kind :trigger    -- state change; acts only on existing reports,
+;;                        never on the carrying mail (Closed., Acked.,
+;;                        Owned-by:, Superseded-by:, Duplicate-of:).
+;;   :kind :annotation -- property set; applies to the report the mail
+;;                        creates, else to the nearest in-thread report
+;;                        (Urgent., Topic:, Supersedes:, Related-to:).
 ;;
-;;   :kind :annotation -- property-set command.  When the carrying mail
-;;                        creates a new report, applies to it; otherwise
-;;                        to the nearest report in the thread.  Examples:
-;;                        Urgent., Important., Topic:, Deadline:,
-;;                        Supersedes:, Related-to:.
+;; Form is orthogonal: bareword (`:words`) or colon line (`:syntax` +
+;; optional `:param`).
 ;;
-;; The syntactic form is orthogonal: bareword (`:words` key) or colon-
-;; prefixed line (`:syntax` key + optional `:param`).
-;;
-;; :scope values:
-;;   :user                 -- anyone.  The default everywhere: updates
-;;                            are auditable (each records the email
-;;                            that posed it) and reversible, and
-;;                            sources that are not self-moderating
-;;                            channels can tighten commands via the
-;;                            per-command :scope override.  Role
-;;                            controls (Add maintainer: ...) are gated
-;;                            separately, in bone.roles.
-;;   :maintainer           -- any maintainer
-;;   :setter-or-maintainer -- the address that set the attribute, plus
-;;                            any maintainer.  Only meaningful for unset
-;;                            commands whose target has a recoverable
-;;                            setter (`setter-ref-attrs` /
-;;                            `setter-scoped-command-ids`).
-;; No default entry uses the last two anymore; they remain available to
-;; sources that tighten a command via the per-command :scope override
-;; (config.edn `:commands {<cmd-id> {:scope ...}}`).
+;; :scope: :user (anyone -- the default everywhere: updates are
+;; auditable and reversible), :maintainer, :setter-or-maintainer (the
+;; address that set the attribute, plus any maintainer; only for unset
+;; commands with a recoverable setter).  No default entry uses the last
+;; two anymore; sources can tighten per command via config.edn
+;; `:commands {<cmd-id> {:scope ...}}`.  Role controls (Add
+;; maintainer:) are gated separately, in bone.roles.
 ;; ---------------------------------------------------------------------------
 
 (def commands
@@ -52,13 +37,10 @@
     :words :owned  :report-types #{:bug :patch :request}}
    {:id :closed   :kind :trigger :action :set :attr :report/closed :scope :user :words :closed}
    ;; -by lines (credit the update to a third party)
-   ;; Reviewed-by is the kernel-style strong-review line, accepted as
-   ;; a plain syntax synonym: BONE's acked state is the strong
-   ;; approval (Confirmed, Approved, Reviewed-by:).  Any participant's
-   ;; Reviewed-by both acks the report and is collected as a review
-   ;; trailer (:report/trailers); on a source that tightens :acked-by
-   ;; via a :scope override, denied lines are still collected as
-   ;; trailers.
+   ;; Reviewed-by is a syntax synonym: acked is BONE's strong approval
+   ;; (Confirmed, Approved, Reviewed-by:).  A Reviewed-by both acks and
+   ;; is collected as a trailer (:report/trailers) -- even when a
+   ;; :scope override denies the ack.
    {:id :acked-by  :kind :trigger :action :set :attr :report/acked  :scope :user
     :syntax "Acked-by" :syntaxes ["Acked-by" "Reviewed-by"]
     :param :email-address :report-types #{:bug :patch :request}}
@@ -66,27 +48,21 @@
     :syntax "Owned-by"  :param :email-address :report-types #{:bug :patch :request}}
    {:id :closed-by :kind :trigger :action :set :attr :report/closed :scope :user
     :syntax "Closed-by" :param :email-address}
-   ;; Unset lines.  :not-words derives the accepted syntaxes from the
-   ;; state's resolved vocabulary -- every word that can set the state
-   ;; (defaults and per-source synonyms alike) gets its "Not <word>"
-   ;; negation; :syntax remains the canonical form for display.
+   ;; Unset lines.  :not-words gives every word of the state's
+   ;; resolved vocabulary its "Not <word>" negation; :syntax stays the
+   ;; canonical display form.
    {:id :unacked  :kind :trigger :action :unset :attr :report/acked  :scope :user
     :syntax "Not acked"  :not-words :acked :report-types #{:bug :patch :request}}
    {:id :unowned  :kind :trigger :action :unset :attr :report/owned  :scope :user
     :syntax "Not owned"  :not-words :owned :report-types #{:bug :patch :request}}
-   ;; Deliberately no :not-words here: closing words carry a close
-   ;; reason ("Not canceled"/"Not fixed" would not), and in loose mode
-   ;; a prose "Not fixed." would reopen reports.  "Not closed" is the
-   ;; only reopening form.
+   ;; No :not-words here: in loose mode a prose "Not fixed." would
+   ;; reopen reports.  "Not closed" is the only reopening form.
    {:id :unclosed :kind :trigger :action :unset :attr :report/closed :scope :user
     :syntax "Not closed"}
    ;; Closure relations -- backed by :rel/supersedes / :rel/duplicates;
-   ;; :attr kept for registry shape.
-   ;; The relation unsets use a direction-suffixed :attr so that
-   ;; `scope-permits?` finds the right setter in the pull map built
-   ;; by `relation-setters-as-pull` -- a chained report shares the
-   ;; `:rel/supersedes` schema kind across both directions, so the
-   ;; pull-map key must distinguish them.
+   ;; :attr kept for registry shape.  Unsets use a direction-suffixed
+   ;; :attr so `scope-permits?` finds the right setter on a chained
+   ;; report (both directions share the :rel/supersedes schema kind).
    {:id :superseded-by    :kind :trigger :action :set-superseded   :attr :rel/supersedes      :scope :user
     :syntax "Superseded-by"     :param :message-id :report-types #{:bug :patch :request}}
    {:id :unsuperseded-by  :kind :trigger :action :unset-superseded :attr :rel/supersedes-from :scope :user
@@ -136,11 +112,9 @@
 ;; Derived indexes
 ;; ---------------------------------------------------------------------------
 
-;; Syntactic groupings (derived from :words vs :syntax presence).
-;; The semantic axis (`:kind :trigger` / `:annotation`) is metadata
-;; on each entry, not surfaced as a derived index -- nothing consumes
-;; the full lists today; if you need them, write the `filterv` at
-;; the call site.
+;; Syntactic groupings (:words vs :syntax presence).  The semantic
+;; axis (:kind) stays per-entry metadata: nothing consumes full lists
+;; of triggers/annotations today.
 (def word-commands (filterv :words  commands))
 (def line-commands (filterv :syntax commands))
 
@@ -152,18 +126,11 @@
 (def attr->word-cmd
   (into {} (map (juxt :attr identity)) word-commands))
 
-;; Cross-reference annotations -- commands that pose a neutral link
-;; between reports without changing the report's state (Supersedes:,
-;; Related-to: and their unsets).  Identified by `:kind :annotation`
-;; combined with a `:rel/`-namespaced `:attr`.  Closure relations
-;; (Superseded-by:, Duplicate-of:) are excluded because they're
-;; triggers -- they DO change state and propagate through a series
-;; like any other trigger.
-;;
-;; Used by `apply-commands!` to skip these four when broadcasting
-;; cover-letter commands to the rest of a patch series: broadcasting
-;; a neutral cross-reference would pose N redundant edges to the
-;; same target.
+;; Cross-reference annotations (Supersedes:, Related-to: and unsets):
+;; neutral links, no state change -- :kind :annotation with a :rel/*
+;; :attr.  Closure relations are triggers and excluded.  Used by
+;; `apply-commands!` to skip these when broadcasting cover-letter
+;; commands (N redundant edges otherwise).
 (def cross-ref-line-ids
   (into #{}
         (comp (filter #(and (= :annotation (:kind %))
@@ -184,12 +151,10 @@
    :report/urgent    :report/urgent-address
    :report/important :report/important-address})
 
-;; Report attrs tracked as refs to the pose-email.
+;; Report attrs tracked as refs to the pose-email:
 ;;   {ref-attr paired-value-attr-or-nil}
-;; The paired attr holds the business datum (topic/deadline/expiry use
-;; `-value`).  Proxy-state attrs carry no paired value -- the credited
-;; address lives in `address-attrs`.  Supersede left the table when it
-;; migrated to :rel/supersedes (setter now in :rel/setter).
+;; topic/deadline/expiry hold their datum in `-value`; proxy-state
+;; attrs keep the credited address in `address-attrs` instead.
 (def setter-ref-attrs
   {:report/acked         nil
    :report/owned         nil

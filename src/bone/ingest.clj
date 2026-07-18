@@ -5,6 +5,7 @@
 (ns bone.ingest
   "Email ingestion: Datalevin connection, storage, and email→txdata transform."
   (:require [bone.common :as common]
+            [bone.lookup :as lookup]
             [datalevin.core :as d]
             [clojure.string :as str]
             [taoensso.timbre :as log])
@@ -20,9 +21,6 @@
   (d/get-conn db-path common/bone-schema {:wal? false}))
 
 (defn close [conn] (d/close conn))
-
-(defn- entity-exists? [conn attr v]
-  (when v (some? (d/entid (d/db conn) [attr v]))))
 
 (defn- id-collision?
   "True iff (:email/source, :email/id) is already stored.  Mailseq
@@ -242,8 +240,8 @@
         headers-edn (when (seq headers) (pr-str headers))
         in-reply-to (common/extract-in-reply-to headers)
         ;; Stored verbatim (multi-value headers joined): `ancestor-mids-from`
-        ;; re-runs normalization/dedup/indexable filtering at read time, so
-        ;; normalizing here would only duplicate that work.
+        ;; re-runs normalization/dedup at read time, so normalizing here
+        ;; would only duplicate that work.
         references  (when-let [v (get headers "References")]
                       (let [s (if (vector? v)
                                 (str/join " " (keep identity v))
@@ -252,9 +250,10 @@
         ancestor-mids (common/ancestor-mids-from references in-reply-to)
         attachments (mapv #(attachment->txdata % max-att-size)
                           (remove nil? (:attachments body)))]
-    (cond-> {:email/message-id   message-id
-             :email/subject      (clean-subject (:subject msg))
-             :email/ingested-at  (Date.)}
+    (cond-> {:email/message-id      message-id
+             :email/message-id-hash (common/mid-hash message-id)
+             :email/subject         (clean-subject (:subject msg))
+             :email/ingested-at     (Date.)}
 
       ;; Conditional like every other optional header: a nil here makes
       ;; Datalevin reject the transaction and blocks the watermark on
@@ -281,7 +280,8 @@
       (seq attachments)           (assoc :email/attachments attachments)
       in-reply-to                 (assoc :email/in-reply-to in-reply-to)
       references                  (assoc :email/references references)
-      (seq ancestor-mids)         (assoc :email/ancestor-mids ancestor-mids)
+      (seq ancestor-mids)         (assoc :email/ancestor-mid-hashes
+                                         (mapv common/mid-hash ancestor-mids))
       headers-edn                 (assoc :email/headers-edn headers-edn)))))
 
 ;; ---------------------------------------------------------------------------
@@ -308,11 +308,11 @@
       (nil? message-id)
       (do (log/warn "Skipping email with nil Message-ID, id:" id) false)
 
-      (not (common/indexable-mid? message-id))
-      (do (log/warn "Skipping email with oversized Message-ID (" (count message-id)
-                    "chars), id:" id "-- exceeds LMDB key limit") false)
+      (> (count message-id) common/max-mid-length)
+      (do (log/warn "Skipping email with oversized Message-ID ("
+                    (count message-id) "chars), id:" id) false)
 
-      (entity-exists? conn :email/message-id message-id)
+      (some? (lookup/email-eid (d/db conn) message-id))
       (do (log/debug "Skipping already stored Message-ID:" message-id) false)
 
       (id-collision? conn src-name id)
@@ -331,7 +331,7 @@
           (catch Exception e
             ;; If the message-id now exists, another process (e.g. bb digest)
             ;; inserted it between our exists? check and the transact -- harmless race.
-            (let [now-exists? (try (entity-exists? conn :email/message-id message-id)
+            (let [now-exists? (try (some? (lookup/email-eid (d/db conn) message-id))
                                   (catch Exception _ false))]
               (if now-exists?
                 (do (log/debug "Duplicate Message-ID (race):" message-id) false)

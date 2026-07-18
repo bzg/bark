@@ -1865,18 +1865,12 @@
                                         (delete-dir! (io/file staging))
                                         ;; Seed staging with the previous export so an
                                         ;; incremental run keeps the files it does not
-                                        ;; rewrite: reports/ (per-type files for
-                                        ;; unchanged types, via :changed-types) and the
-                                        ;; per-mid patches/, text/ and events/ files for
-                                        ;; reports unchanged since last-export (via
-                                        ;; :since).  Aggregate files are always rebuilt.
-                                        ;; Seed on every incremental run, not
-                                        ;; only when src-changed: :since is
-                                        ;; passed below whenever incremental?,
-                                        ;; so unseeded per-mid files would be
-                                        ;; lost in the swap (e.g. a source
-                                        ;; exported for a maintainers-only
-                                        ;; change).
+                                        ;; rewrite (per-type reports/, per-mid patches/,
+                                        ;; text/, events/); aggregates are always
+                                        ;; rebuilt.  Seed on EVERY incremental run:
+                                        ;; :since is passed whenever incremental?, so
+                                        ;; unseeded per-mid files would be lost in the
+                                        ;; swap.
                                         (when incremental?
                                           (doseq [sub ["reports" "patches" "text" "events"]]
                                             (copy-dir! (io/file final-dir sub)
@@ -1910,16 +1904,11 @@
             (when (and (#{"all" "root"} format)
                        (or (= format "root") (seq exported-srcs)))
               (dump-root-index! (mapv :name (:sources config))))
-            ;; Cron notification: a single concise stderr line when real work
-            ;; was published, so the cron mail fires iff new info was exported
-            ;; (routine "Wrote ..." progress now goes to stdout).  On an
-            ;; incremental run we name the report types changed in the DB per
-            ;; source (before per-source export filters, so a count may exceed
-            ;; what gets published); a full re-export is flagged as such.
-            ;; Incremental runs triggered solely by thread replies (re-export
-            ;; needed, but no report added or modified) stay silent: we only
-            ;; mail when a source has a genuine add/modification, or on a full
-            ;; re-export.
+            ;; Cron notification: one stderr line iff real work was
+            ;; published ("Wrote ..." progress goes to stdout).  Names
+            ;; the changed report types per source (pre-filter counts);
+            ;; full re-exports are flagged; runs triggered solely by
+            ;; thread replies stay silent.
             (let [summaries (into {}
                                   (keep (fn [s]
                                           (when-let [sm (fmt-change-summary

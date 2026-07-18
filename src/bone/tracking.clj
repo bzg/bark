@@ -11,16 +11,12 @@
 (def ^:const meta-ident "global")
 
 (defn bump-report-updated!
-  "Mark reports as changed for incremental export.
-  Always sets :report/updated-at (which drives source re-export) and the
-  global :meta/last-modified to now.  When `state-change?` is true (the
-  default), also sets :report/state-changed-at -- the timestamp of the
-  last *effective* change to the report itself (status, flags, relations,
-  expiry...).  Pass false for purely contextual changes, such as a new
-  reply threaded under the report or the report's own creation: these must
-  trigger re-export but are not modifications of the report's own state,
-  and the cron notification reports them separately (or not at all).
-  `report-eid` can be a single eid or a collection of eids."
+  "Mark reports (eid or coll) as changed for incremental export:
+  sets :report/updated-at and :meta/last-modified to now.  When
+  `state-change?` (default true), also sets :report/state-changed-at,
+  the last *effective* change to the report itself; pass false for
+  contextual changes (new reply, own creation) that must re-export
+  but are not state modifications for the cron notification."
   ([conn report-eid] (bump-report-updated! conn report-eid true))
   ([conn report-eid state-change?]
    (let [now  (Date.)

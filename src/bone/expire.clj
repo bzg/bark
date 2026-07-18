@@ -9,6 +9,7 @@
             [datalevin.core :as d]
             [taoensso.timbre :as log]
             [bone.common :as common]
+            [bone.lookup :as lookup]
             [bone.tracking :as tracking])
   (:import [java.util Date]))
 
@@ -95,18 +96,19 @@
   [conn src report-mid now]
   (let [stripped  (str/replace (or report-mid "") #"^<|>$" "")
         synth-mid (str "<bone-expired-" stripped ">")]
-    (or (d/entid (d/db conn) [:email/message-id synth-mid])
+    (or (lookup/email-eid (d/db conn) synth-mid)
         (let [tempid -1
               ;; Stamp "bone-system" on both :from-address and
               ;; :author-address so all consumers see the synthetic actor.
               tx (d/transact!
-                  conn [{:db/id                tempid
-                         :email/message-id     synth-mid
-                         :email/from-address   "bone-system"
-                         :email/author-address "bone-system"
-                         :email/source         src
-                         :email/date-sent      now
-                         :email/subject        (str "Auto-expired: " report-mid)}])]
+                  conn [{:db/id                  tempid
+                         :email/message-id       synth-mid
+                         :email/message-id-hash  (common/mid-hash synth-mid)
+                         :email/from-address     "bone-system"
+                         :email/author-address   "bone-system"
+                         :email/source           src
+                         :email/date-sent        now
+                         :email/subject          (str "Auto-expired: " report-mid)}])]
           (get (:tempids tx) tempid)))))
 
 (defn should-expire?

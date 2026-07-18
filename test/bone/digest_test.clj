@@ -11,6 +11,7 @@
             [datalevin.core :as d]
             [bone.commands :as commands]
             [bone.common :as common]
+            [bone.lookup :as lookup]
             [bone.digest :as digest]
             [bone.roles :as roles]
             [bone.test-helpers :as th])
@@ -33,7 +34,8 @@
   After the qualified-links refactor: :report/superseded-by(-target) and
   :report/related are gone -- see :rel/_from / :rel/_to instead."
   [db message-id]
-  (d/pull db
+  (when-let [eid (lookup/report-eid db message-id)]
+    (d/pull db
           '[:report/type :report/version :report/topic-value
             :report/patch-seq :report/patch-source :report/message-id
             {:report/patches [:patch/filename :patch/source :patch/author
@@ -58,7 +60,7 @@
                              {:series/cover-letter [:email/message-id]}]}
             {:report/email [:email/subject :email/author-address
                             :email/headers-edn]}]
-          [:report/message-id message-id]))
+          eid)))
 
 ;; --- Test helpers to aggregate :rel/* facts for assertion convenience ---
 
@@ -87,14 +89,12 @@
   (some-> (first (active-out-rels report-pull :supersedes)) :rel/to))
 
 (defn- report-exists? [db message-id]
-  (some? (d/q '[:find ?r . :in $ ?mid :where [?r :report/message-id ?mid]]
-              db message-id)))
+  (some? (lookup/report-eid db message-id)))
 
 (defn- get-votes
   "Return all votes for a report as a seq of {:value :voter} maps."
   [db message-id]
-  (let [rid (d/q '[:find ?r . :in $ ?mid :where [?r :report/message-id ?mid]]
-                 db message-id)]
+  (let [rid (lookup/report-eid db message-id)]
     (when rid
       (mapv (fn [[val voter]]
               {:value val :voter voter})
@@ -175,6 +175,11 @@
         (d/transact!
          conn
          [(cond-> email
+            ;; Derive the lookup hash like ingest/email->txdata does;
+            ;; fixtures only carry the raw mid.
+            (:email/message-id email)
+            (assoc :email/message-id-hash
+                   (common/mid-hash (:email/message-id email)))
             (and (:email/from-address email) (not (:email/author-address email)))
             (assoc :email/author-address (:email/from-address email))
             (and (:email/from-name email) (not (:email/author-name email)))
@@ -1142,33 +1147,32 @@
         ancestor    (vec (distinct (cond-> refs-vec
                                      (and in-reply-to (not (some #{in-reply-to} refs-vec)))
                                      (conj in-reply-to))))]
-    (cond-> {:email/message-id   mid
-             :email/subject      subject
-             :email/from-address from
-             :email/author-address from
-             :email/date-sent    date
-             :email/ingested-at  date
-             :email/body-text    (or body "")}
+    (cond-> {:email/message-id      mid
+             :email/message-id-hash (common/mid-hash mid)
+             :email/subject         subject
+             :email/from-address    from
+             :email/author-address  from
+             :email/date-sent       date
+             :email/ingested-at     date
+             :email/body-text       (or body "")}
       in-reply-to        (assoc :email/in-reply-to in-reply-to)
       (seq refs)         (assoc :email/references (str/join " " refs))
-      (seq ancestor)     (assoc :email/ancestor-mids ancestor))))
+      (seq ancestor)     (assoc :email/ancestor-mid-hashes
+                                (mapv common/mid-hash ancestor)))))
 
 (defn- store-and-process!
   "Insert an email entity, then run digest/process-email! on it."
   [conn email-map source-name]
   (let [email-with-source (assoc email-map :email/source source-name)]
     (d/transact! conn [email-with-source])
-    (let [eid (d/entid (d/db conn) [:email/message-id (:email/message-id email-map)])
+    (let [eid (lookup/email-eid (d/db conn) (:email/message-id email-map))
           email (d/pull (d/db conn) digest/email-pull-pattern eid)]
       (digest/process-email! conn source-map sources email))))
 
 (defn- pending? [db mid]
   (boolean
-   (d/q '[:find ?p . :in $ ?mid
-          :where
-          [?e :email/message-id ?mid]
-          [?e :email/pending-thread? ?p]]
-        db mid)))
+   (when-let [e (lookup/email-eid db mid)]
+     (:email/pending-thread? (d/pull db [:email/pending-thread?] e)))))
 
 (deftest pending-thread-no-irt-not-flagged
   (testing "An email with no In-Reply-To is never flagged pending."
@@ -1304,29 +1308,71 @@
         (finally
           (teardown! ctx))))))
 
-(deftest new-report-reply-without-anchorable-parent-applies-commands
-  (testing "An email that creates a new report AND replies to a
-            non-indexable In-Reply-To (so thread-anchorable? passes but
-            nearest-eids is empty) still receives its body commands."
+(deftest oversized-mid-thread-and-close
+  (testing "A report whose Message-ID far exceeds the LMDB key limit is
+            stored, threaded, and closable: every mid-keyed lookup goes
+            through the fixed-length hash (regression: MDB_BAD_VALSIZE
+            used to lose the closing reply)."
     (let [{:keys [conn] :as ctx} (setup-db!)
-          ;; IRT longer than max-indexable-mid-length (200) -- thread-
-          ;; anchorable? returns true via the non-indexable branch, but
-          ;; ancestor-mids-from filters it out so nearest-eids is empty.
-          long-irt (str "<" (apply str (repeat 220 "a")) "@x>")]
+          long-mid (str "<" (apply str (repeat 400 "a")) "@x>")]
       (try
         (store-and-process! conn
-                            (mk-email {:mid "<orphan-bug@test.org>"
-                                       :subject "[BUG] orphan reply"
+                            (mk-email {:mid long-mid
+                                       :subject "[BUG] pathological mid"
                                        :from "alice@test.org"
                                        :date #inst "2026-05-01T10:00:00"
-                                       :in-reply-to long-irt
+                                       :body "broken\n"})
+                            "direct")
+        (is (report-exists? (d/db conn) long-mid)
+            "report created under an oversized mid")
+        (store-and-process! conn
+                            (mk-email {:mid "<closer@test.org>"
+                                       :subject "Re: [BUG] pathological mid"
+                                       :from "alice@test.org"
+                                       :date #inst "2026-05-02T10:00:00"
+                                       :in-reply-to long-mid
+                                       :body "Fixed.\n"})
+                            "direct")
+        (let [r (get-report (d/db conn) long-mid)]
+          (is (some? (:report/closed r))
+              "closing reply resolved the report across the oversized mid")
+          (is (= :resolved (:report/close-reason r))))
+        (finally
+          (teardown! ctx))))))
+
+(deftest reply-to-absent-parent-defers-commands-until-rescue
+  (testing "A reply that creates a report while its (long-mid) parent is
+            absent from the DB goes pending: its body commands are
+            deferred, then applied when the parent arrives and the
+            rescue re-processes the reply."
+    (let [{:keys [conn] :as ctx} (setup-db!)
+          parent-mid (str "<" (apply str (repeat 250 "p")) "@x>")]
+      (try
+        (store-and-process! conn
+                            (mk-email {:mid "<deferred-bug@test.org>"
+                                       :subject "[BUG] deferred flags"
+                                       :from "alice@test.org"
+                                       :date #inst "2026-05-02T10:00:00"
+                                       :in-reply-to parent-mid
                                        :body "Important.\n"})
                             "direct")
-        (let [r (get-report (d/db conn) "<orphan-bug@test.org>")]
-          (is (some? r) "new report was created")
-          (is (= :bug (:report/type r)))
-          (is (some? (:report/important r))
-              "Important. trigger applied to the new report"))
+        (let [r (get-report (d/db conn) "<deferred-bug@test.org>")]
+          (is (some? r) "report is created in Phase 2 even when pending")
+          (is (nil? (:report/important r)) "commands deferred while pending"))
+        (is (true? (pending? (d/db conn) "<deferred-bug@test.org>")))
+        ;; The parent arrives late: the rescue re-processes the reply.
+        (store-and-process! conn
+                            (mk-email {:mid parent-mid
+                                       :subject "long-mid thread root"
+                                       :from "bob@test.org"
+                                       :date #inst "2026-05-01T10:00:00"
+                                       :body "root\n"})
+                            "direct")
+        (is (false? (pending? (d/db conn) "<deferred-bug@test.org>"))
+            "reply rescued once the parent is stored")
+        (is (some? (:report/important
+                    (get-report (d/db conn) "<deferred-bug@test.org>")))
+            "deferred Important. applied after the rescue")
         (finally
           (teardown! ctx))))))
 

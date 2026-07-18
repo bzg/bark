@@ -44,7 +44,8 @@
   Returns the attachment-pull-pattern projection, or nil."
   [db message-id]
   (when message-id
-    (dpull db common/attachment-pull-pattern [:report/message-id message-id])))
+    (dpull db common/attachment-pull-pattern
+           [:report/message-id-hash (common/mid-hash message-id)])))
 
 (defn get-tenures
   "Fetch all maintainer tenures (active and closed) for `source-name`.

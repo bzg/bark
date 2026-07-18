@@ -11,6 +11,7 @@
             [datalevin.core :as d]
             [taoensso.timbre :as log]
             [bone.common :as common]
+            [bone.lookup :as lookup]
             [bone.tracking :as tracking]
             [bone.detect :as detect]
             [bone.commands :as commands]
@@ -26,7 +27,7 @@
 
 (def email-pull-pattern
   '[:db/id :email/id :email/source :email/subject :email/message-id
-    :email/in-reply-to :email/references :email/ancestor-mids
+    :email/in-reply-to :email/references :email/ancestor-mid-hashes
     :email/pending-thread?
     :email/author-address :email/author-name
     :email/from-address :email/from-name
@@ -42,52 +43,32 @@
 (defn ancestor-mids
   "Ordered ancestor mids (root first, parent last) recomputed from
   :email/references + :email/in-reply-to.  The cardinality/many
-  :email/ancestor-mids attr loses ordering and is only used for the
-  unordered lookup in `retry-pending-in-shared-thread!`."
+  :email/ancestor-mid-hashes attr loses ordering and is only used for
+  the unordered lookup in `retry-pending-in-shared-thread!`."
   [email]
   (common/ancestor-mids-from (:email/references email)
                               (:email/in-reply-to email)))
 
-(defn- safe-mid-query
-  "Run a mid-keyed DB query thunk, swallowing MDB_BAD_VALSIZE (-30781)
-  raised on mids that pass `indexable-mid?` but exceed Datalevin's
-  scan-time encoding limit.  Returns `fallback` on that error."
-  [mid f fallback]
-  (try (f)
-       (catch Exception e
-         (let [msg (str (.getMessage e) " " (some-> (.getCause e) .getMessage))]
-           (if (str/includes? msg "code-30781")
-             (do (log/warn "Skipping mid lookup -- MDB_BAD_VALSIZE on" mid)
-                 fallback)
-             (throw e))))))
+(defn- reports-by-hash
+  "Report eids whose root or any descendant has the mid-hash `h`.
+  Resolution via bone.lookup, descendant join eid-bound (see the
+  bone.lookup ns docstring)."
+  [db h]
+  (let [as-root (lookup/report-eid-by-hash db h)
+        email-e (lookup/email-eid-by-hash db h)
+        as-desc (when email-e
+                  (d/q '[:find [?r ...] :in $ ?e :where [?r :report/descendants ?e]]
+                       db email-e))]
+    (cond-> (set as-desc) as-root (conj as-root))))
 
-(defn- lookup-reports-by-mid
-  "Report eids whose root or any descendant has `mid`.  Returns #{}
-  for non-indexable mids."
-  [db mid]
-  (when (common/indexable-mid? mid)
-    (safe-mid-query mid
-                    (fn []
-                      (let [as-root (d/q '[:find [?r ...] :in $ ?mid :where [?r :report/message-id ?mid]]
-                                         db mid)
-                            as-desc (d/q '[:find [?r ...] :in $ ?mid
-                                           :where [?r :report/descendants ?e] [?e :email/message-id ?mid]]
-                                         db mid)]
-                        (into (set as-root) as-desc)))
-                    #{})))
-
-(defn- email-ancestors-by-mid
-  "Ancestor mids of the stored email with `mid` (root first).  Used by
-  `thread-lookup` to splice through stored-but-pending intermediates."
-  [db mid]
-  (when (common/indexable-mid? mid)
-    (safe-mid-query mid
-                    (fn []
-                      (when-let [e (d/entid db [:email/message-id mid])]
-                        (let [pulled (d/pull db [:email/references :email/in-reply-to] e)]
-                          (common/ancestor-mids-from (:email/references pulled)
-                                                     (:email/in-reply-to pulled)))))
-                    nil)))
+(defn- email-ancestors
+  "Ancestor mids of the stored email `eid` (root first).  Used by
+  `thread-lookup` and `nearest-root-report` to splice through
+  stored-but-pending intermediates."
+  [db eid]
+  (let [pulled (d/pull db [:email/references :email/in-reply-to] eid)]
+    (common/ancestor-mids-from (:email/references pulled)
+                               (:email/in-reply-to pulled))))
 
 (def ^:private thread-lookup-max-splices
   "Upper bound on transitive ancestor splicing per `thread-lookup` call."
@@ -113,13 +94,15 @@
         (if (contains? seen mid)
           (recur stack' seen splices acc)
           (let [seen' (conj seen mid)
-                eids  (lookup-reports-by-mid db mid)
+                h     (common/mid-hash mid)
+                eids  (reports-by-hash db h)
                 acc'  (cond-> acc
                         (seq eids)                              (update :all into eids)
                         (and (seq eids) (nil? (:nearest acc))) (assoc :nearest eids))]
             (if (and (empty? eids)
                      (< splices thread-lookup-max-splices))
-              (if-let [ancestors (email-ancestors-by-mid db mid)]
+              (if-let [ancestors (some->> (lookup/email-eid-by-hash db h)
+                                          (email-ancestors db))]
                 (recur (into stack' ancestors) seen' (inc splices) acc')
                 (recur stack' seen' splices acc'))
               (recur stack' seen' splices acc'))))))))
@@ -159,7 +142,7 @@
             (log/info "New participant:" from-addr "on" source-name)))))))
 
 (defn- report-exists? [db message-id]
-  (some? (d/entid db [:report/message-id message-id])))
+  (some? (lookup/report-eid db message-id)))
 
 (defn report-entity
   "Build the entity map for a new report from email data.
@@ -180,6 +163,7 @@
         patches     (detect/build-patch-entities email)]
     (into {:report/type (:type report-info) :report/email email-eid
            :report/message-id message-id
+           :report/message-id-hash (common/mid-hash message-id)
            :report/last-activity (or email-date now)}
           (remove (comp nil? val))
           {:report/created-at now
@@ -195,7 +179,7 @@
   "Create a new report entity. Returns the entity id of the new report."
   [conn email-eid message-id report-info email-date email]
   (d/transact! conn [(report-entity email-eid message-id report-info email-date email (Date.))])
-  (d/entid (d/db conn) [:report/message-id message-id]))
+  (lookup/report-eid (d/db conn) message-id))
 
 (defn descendant-tx
   "Tx-data to add an email as descendant of a report, bumping
@@ -357,13 +341,10 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- source-from-in-reply-to
-  "Source of the email referenced by `in-reply-to`, or nil.  Skips
-  non-indexable mids; caller falls back to header-based classification."
+  "Source of the email referenced by `in-reply-to`, or nil."
   [db in-reply-to]
-  (when (common/indexable-mid? in-reply-to)
-    (d/q '[:find ?src . :in $ ?mid
-           :where [?e :email/message-id ?mid] [?e :email/source ?src]]
-         db in-reply-to)))
+  (when-let [e (lookup/email-eid db in-reply-to)]
+    (:email/source (d/pull db [:email/source] e))))
 
 (defn- classify-email-source
   "Shared source classification logic. Works on any headers (raw map or edn string).
@@ -575,13 +556,10 @@
         (into #{} (keep (fn [[_ [_t s]]] s)) info)))
 
 (defn- broadcast-cover-commands!
-  "When `rid` is a series cover letter, apply trigger and non-cross-
-  reference annotation commands to every patch of the series.  Pure
-  cross-reference annotations (Supersedes:, Related-to: and unsets)
-  are skipped via the `:no-cross-refs` filter -- broadcasting them
-  would pose N redundant edges to the same target.  Triggers like
-  Closed., Superseded-by: and Duplicate-of: propagate normally so
-  the whole series shares the cover's resulting state."
+  "When `rid` is a series cover letter, apply the email's commands to
+  every patch of the series (filter :no-cross-refs: broadcasting
+  Supersedes:/Related-to: would pose N redundant edges; triggers
+  propagate so the series shares the cover's state)."
   [conn email source-map rroles delivery rid]
   (when-let [patches (cover-letter-patches (d/db conn) rid)]
     (let [db         (d/db conn)
@@ -595,14 +573,10 @@
                                     proles delivery :no-cross-refs))))))
 
 (defn- apply-commands-on-nearest!
-  "Apply commands to the nearest reports of a reply, refreshing roles
-  per source when reports come from different sources.  Ensures the
-  author is recorded as a participant if any command matched.
-
-  Also broadcasts cover-letter commands to the rest of the series
-  for any cover in `nearest-eids` (see `broadcast-cover-commands!`).
-
-  `line-filter` is forwarded to `apply-commands!`; see its docstring."
+  "Apply commands to the nearest reports of a reply (roles refreshed
+  per source), record the author as participant on any match, and
+  broadcast cover-letter commands to their series.  `line-filter` is
+  forwarded to `apply-commands!`."
   [conn email from-addr source-name rroles source-map delivery nearest-eids line-filter]
   (let [db       (d/db conn)
         info     (rids->type+source db nearest-eids)
@@ -622,17 +596,11 @@
       (broadcast-cover-commands! conn email source-map rroles delivery rid))))
 
 (defn- nearest-root-report
-  "Walk `email`'s ancestor mids nearest-first and return the eid of the
-  first one that is a report's own message-id, or nil.  This is the
-  message the reply actually targets: unlike thread-lookup's :nearest,
-  it never resolves to the other reports whose thread the reply merely
-  crosses (a patch email is a descendant of its cover letter, so the
-  cover would otherwise match too).  Like thread-lookup, the ancestors
-  of a stored-but-reportless intermediate are spliced into the walk
-  (bounded), so a reply carrying only an In-Reply-To to a sub-reply
-  still reaches the patch.  The indexable-mid? guard is defensive:
-  ancestor-mids-from already filters, but email-ancestors-by-mid keeps
-  the same belt-and-braces, so this stays aligned."
+  "Walk `email`'s ancestor mids nearest-first; eid of the first one
+  that is a report's own message-id, or nil.  Unlike thread-lookup's
+  :nearest, never resolves to reports whose thread the reply merely
+  crosses (e.g. the cover letter of a patch).  Ancestors of
+  stored-but-reportless intermediates are spliced in (bounded)."
   [db email]
   (loop [stack   (vec (ancestor-mids email))  ; root-first; peek = nearest
          seen    #{}
@@ -641,23 +609,20 @@
       (let [stack' (pop stack)]
         (if (contains? seen mid)
           (recur stack' seen splices)
-          (or (when (common/indexable-mid? mid)
-                (safe-mid-query mid
-                                #(d/entid db [:report/message-id mid])
-                                nil))
-              (let [ancestors (when (< splices thread-lookup-max-splices)
-                                (email-ancestors-by-mid db mid))]
-                (recur (into stack' ancestors) (conj seen mid)
-                       (if ancestors (inc splices) splices)))))))))
+          (let [h (common/mid-hash mid)]
+            (or (lookup/report-eid-by-hash db h)
+                (let [ancestors (when (< splices thread-lookup-max-splices)
+                                  (some->> (lookup/email-eid-by-hash db h)
+                                           (email-ancestors db)))]
+                  (recur (into stack' ancestors) (conj seen mid)
+                         (if ancestors (inc splices) splices))))))))))
 
 (defn- collect-trailers!
   "Store the git person trailers of a pure reply on the patch report
-  it replies to, broadcasting from a series cover letter to the series
-  patches (b4 semantics).  Only replies that create no report of their
-  own contribute: a patch email would otherwise leak its own
-  Signed-off-by onto the report it threads under.  :report/trailers
-  has set semantics, so duplicate trailers and replays collapse; the
-  touched reports are bumped for re-export (no state change)."
+  it replies to, broadcasting from a cover letter to the series
+  patches (b4 semantics).  Report-creating emails are excluded (a
+  patch must not leak its own Signed-off-by upthread).  Set
+  semantics: duplicates and replays collapse."
   [conn email]
   (when-let [trailers (seq (common/extract-trailers (common/email-body-text email)))]
     (let [db     (d/db conn)
@@ -710,16 +675,14 @@
 
 (defn- thread-anchorable?
   "True when the email can be threaded now: at least one ancestor mid
-  is in the DB, or In-Reply-To is absent (root) or non-indexable.
+  is in the DB, or In-Reply-To is absent (root).
   Accepting any References ancestor (not just the immediate parent)
   approximates public-inbox: a missing intermediate doesn't orphan
   its descendants as long as some ancestor is known."
   [db email]
   (let [irt (:email/in-reply-to email)]
     (or (nil? irt)
-        (not (common/indexable-mid? irt))
-        (boolean (some #(d/entid db [:email/message-id %])
-                       (ancestor-mids email))))))
+        (boolean (some #(lookup/email-eid db %) (ancestor-mids email))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Single-email processing -- orchestrator
@@ -810,9 +773,8 @@
                     ;; run for pending emails that created a report on first
                     ;; pass but were skipped past Phase 3/4.
                     report-eid   (or report-eid
-                                     (when (and was-pending?
-                                                (report-exists? db message-id))
-                                       (d/entid db [:report/message-id message-id])))]
+                                     (when was-pending?
+                                       (lookup/report-eid db message-id)))]
 
                 ;; Channel gating: an email that did not reach the
                 ;; source's public channel is excluded from both
@@ -851,15 +813,18 @@
   reference its own mid).  Recursive `process-email!` clears the
   pending flag when threading now resolves."
   [conn email source-map sources]
-  (let [own-mid   (:email/message-id email)
-        ancestors (cond-> (set (:email/ancestor-mids email))
-                    own-mid (conj own-mid))]
-    (when (seq ancestors)
-      (let [pendings (d/q '[:find [?e ...] :in $ [?mid ...]
-                            :where
-                            [?e :email/pending-thread? true]
-                            [?e :email/ancestor-mids ?mid]]
-                          (d/db conn) (vec ancestors))]
+  (let [own-mid  (:email/message-id email)
+        hashes   (cond-> (set (:email/ancestor-mid-hashes email))
+                   own-mid (conj (common/mid-hash own-mid)))]
+    (when (seq hashes)
+      ;; In-memory filter on one snapshot: a value join on the hash
+      ;; attr is forbidden (see bone.lookup), and pendings are few.
+      (let [pendings (->> (d/q '[:find ?e (pull ?e [:email/ancestor-mid-hashes])
+                                 :where [?e :email/pending-thread? true]]
+                               (d/db conn))
+                          (keep (fn [[e pulled]]
+                                  (when (some hashes (:email/ancestor-mid-hashes pulled))
+                                    e))))]
         (doseq [pending-eid pendings
                 :let [pending-email (d/pull (d/db conn) email-pull-pattern
                                             pending-eid)]

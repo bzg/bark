@@ -12,7 +12,12 @@
  ;; schema level.
  :email/id                    {:db/valueType :db.type/string}
  :email/source                {:db/valueType :db.type/string}
- :email/message-id            {:db/valueType :db.type/string
+ ;; Raw Message-Id, kept verbatim for display/export.  NOT unique:
+ ;; identity and lookups go through the fixed-length hash below (raw
+ ;; mids can exceed LMDB's key limit).
+ :email/message-id            {:db/valueType :db.type/string}
+ ;; SHA-256 hex of the raw mid (bone.common/mid-hash).
+ :email/message-id-hash       {:db/valueType :db.type/string
                                :db/unique    :db.unique/identity}
  :email/subject               {:db/valueType :db.type/string}
  :email/from-name             {:db/valueType :db.type/string}
@@ -48,10 +53,10 @@
  :attachment/data             {:db/valueType :db.type/string}
  :email/in-reply-to           {:db/valueType :db.type/string}
  :email/references            {:db/valueType :db.type/string}
- ;; Ancestors-mids: persisted union of References + In-Reply-To,
- ;; one entry per ancestor message-id.  Indexed multi-valued so the
- ;; pending-thread retry can locate emails sharing a thread in O(hits).
- :email/ancestor-mids         {:db/valueType   :db.type/string
+ ;; Mid-hashes of References + In-Reply-To, one entry per ancestor;
+ ;; used by the pending-thread retry.  Ordered raw ancestors are
+ ;; recomputed from the headers (digest/ancestor-mids).
+ :email/ancestor-mid-hashes   {:db/valueType   :db.type/string
                                :db/cardinality :db.cardinality/many}
  ;; Set when an email is ingested while its In-Reply-To target is
  ;; absent from the DB.  Phase 3/4 of process-email! is skipped on
@@ -83,7 +88,10 @@
  ;; email's author-address when a maintainer uses the `-by` form.
  :report/type                  {:db/valueType :db.type/keyword}
  :report/email                 {:db/valueType :db.type/ref}
- :report/message-id            {:db/valueType :db.type/string
+ ;; Raw root Message-Id, kept verbatim for display/export; identity
+ ;; and lookups go through the hash (as for :email/message-id).
+ :report/message-id            {:db/valueType :db.type/string}
+ :report/message-id-hash       {:db/valueType :db.type/string
                                 :db/unique    :db.unique/identity}
  :report/version               {:db/valueType :db.type/string}
  :report/patch-seq             {:db/valueType :db.type/string}
@@ -150,7 +158,7 @@
 
  ;; --- Votes (one entity per voter per report) ---
  :vote/key    {:db/valueType :db.type/string
-               :db/unique    :db.unique/identity}  ;; "report-mid:voter-addr"
+               :db/unique    :db.unique/identity}  ;; "report-mid-hash:voter-addr"
  :vote/report {:db/valueType :db.type/ref}
  :vote/email  {:db/valueType :db.type/ref}
  :vote/value  {:db/valueType :db.type/keyword}     ;; :up :down :null

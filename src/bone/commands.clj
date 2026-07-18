@@ -9,6 +9,7 @@
             [datalevin.core :as d]
             [taoensso.timbre :as log]
             [bone.common :as common]
+            [bone.lookup :as lookup]
             [bone.commands.registry :refer [commands-by-id line-commands
                                             attr->word-cmd proxy-state-attrs
                                             address-attrs setter-ref-attrs
@@ -261,16 +262,10 @@
             (io/delete-file tmp true)))))))
 
 (defn record-failure!
-  "Append a command failure to the failures file for later notification.
-  Prunes entries older than 1 year.
-
-  :audience controls who the notifier will route the entry to:
-  - :author      -- the address that sent the command (the default,
-                     used for typo-class failures like `Superseded-by:`
-                     with an unknown target).
-  - :maintainers -- every subscriber on the source (subscribers are
-                     operator-configured; no per-subscriber maintainer
-                     check is applied)."
+  "Append a command failure to the failures file for later
+  notification; prunes entries older than 1 year.  :audience routes
+  the entry: :author = the sending address (default, typo-class
+  failures), :maintainers = every subscriber on the source."
   [{:keys [source from-addr email-date reason command report-mid audience]}]
   (let [now-ms   (System/currentTimeMillis)
         cutoff   (Date. (- now-ms max-failure-age-ms))
@@ -360,12 +355,11 @@
   (if-not (common/sent-via-source-channel? delivery source-cfg)
     (log/info "Vote ignored (private email on public source)" from-addr)
     (let [report-mid (:report/message-id (d/entity (d/db conn) report-eid))
-          ;; Lowercase so Bob@X.org and bob@x.org count as one voter.
+          ;; Lowercase so Bob@X.org and bob@x.org count as one voter;
+          ;; keyed on the mid hash (unique attr, raw mids unbounded).
           addr       (some-> from-addr str/lower-case)
-          vote-key   (str report-mid ":" addr)]
-      ;; :vote/key has :db.unique/identity -- if this voter already voted,
-      ;; the upsert overwrites silently (first vote wins in practice,
-      ;; since we only transact when key is new).
+          vote-key   (str (common/mid-hash report-mid) ":" addr)]
+      ;; :vote/key is unique identity: first vote wins.
       (when-not (d/entid (d/db conn) [:vote/key vote-key])
         (d/transact! conn [{:vote/key    vote-key
                             :vote/report report-eid
@@ -435,10 +429,9 @@
                                    close-reason (conj (str "close-reason:" (name close-reason)))))
                   (str "(by " email-mid ")"))
         ;; Propagate bareword-driven closure of a patch to the
-        ;; bugs/requests it resolves (no successor in this path).
-        ;; Sources with ":patch-triggers? false" opt out of the :resolved
-        ;; propagation; :canceled retraction still runs (no-op when no
-        ;; auto-credit was posed in the first place).
+        ;; bugs/requests it resolves (no successor here).
+        ;; :patch-triggers? false opts out of :resolved propagation;
+        ;; :canceled retraction still runs.
         (when (and (= :patch rtype) close-reason (:report/closed new-sets)
                    (or (not= :resolved close-reason)
                        (common/patch-triggers? source-cfg)))
@@ -446,12 +439,10 @@
                                         close-reason nil))))))
 
 (def ^:private line-pull-pattern
-  ;; Proxy-state attrs are pulled as bare refs (we only need :db/id
-  ;; for retractions; the setter address comes from their paired
-  ;; `-address` cache, pulled separately below).  The other ref
-  ;; attrs additionally pull :email/author-address so scope-permits?
-  ;; can derive the setter without a second query.
-  ;; Note: superseded-by lives in :rel/* now, not in attributes.
+  ;; Proxy-state attrs as bare refs (setter address comes from their
+  ;; `-address` cache); the other ref attrs pull :email/author-address
+  ;; so scope-permits? needs no second query.  Superseded-by lives in
+  ;; :rel/*, not here.
   (into proxy-state-attrs
         [:report/close-reason
          :report/type
@@ -603,20 +594,12 @@
       (:email/author-address (get current attr))))
 
 (defn- scope-permits?
-  "Check whether a command scope permits `from-addr` to act on `attr`.
-  `current-d` is a `delay` that pulls the report's current state -- it
-  is only forced in the :setter-or-maintainer branch, so emails that
-  contain only :user/:maintainer-scoped commands pay no pull cost.
-
-  - :user                 -- anyone
-  - :setter-or-maintainer -- the address that previously set `attr`, or any
-                            maintainer (maintainers retain full override).
-                            The setter comparison is case-insensitive so
-                            that historical records stored with mixed
-                            case still match.
-  - :maintainer           -- any maintainer
-  Unknown scopes are rejected with a warning (defensive fallthrough for
-  configs that bypassed the validator)."
+  "True when a command scope permits `from-addr` to act on `attr`:
+  :user = anyone, :maintainer = any maintainer,
+  :setter-or-maintainer = the address that set `attr` (compared
+  case-insensitively) or any maintainer.  `current-d` is a delay of
+  the report's current state, only forced in the setter branch.
+  Unknown scopes are rejected with a warning."
   [scope attr from-addr is-maintainer? current-d]
   (case scope
     :user                 true
@@ -651,16 +634,10 @@
       syntax)))
 
 (defn- filter-permitted-lines
-  "Return the subset of `lines` whose scope permits `from-addr` to
-  act, further filtered by `line-pred` (a predicate on the whole
-  parsed line). `current-d` is the delay passed through to
-  `scope-permits?` -- only forced when at least one line has scope
-  :setter-or-maintainer.
-
-  When `failure-ctx` is non-nil, lines that are rejected by the
-  scope check (but pass `line-pred`) are written to the failures
-  file as :insufficient-scope, audience :maintainers, so they
-  surface in the next notification round."
+  "Subset of `lines` passing `line-pred` whose scope permits
+  `from-addr` to act (`current-d` as in `scope-permits?`).  With a
+  non-nil `failure-ctx`, scope-rejected lines are recorded as
+  :insufficient-scope failures, audience :maintainers."
   [lines current-d from-addr is-maintainer? line-pred failure-ctx]
   ;; Eager realization via `filterv` so the recording side effect in
   ;; the denial branch fires deterministically, regardless of whether
@@ -678,19 +655,15 @@
            lines))
 
 (defn- report-eid-by-mid
-  "Look up a report by `target-mid`, matching either as the report's
-  root (:report/message-id) or as a descendant email
-  (:report/descendants -> :email/message-id).  Returns the report eid
-  or nil.  Aligned with `digest/lookup-reports-by-mid`: a mid that
-  points at a thread descendant should resolve to its containing
-  report, not be reported as :unknown-target.  Returns nil for
-  oversized mids -- such mids cannot have been stored."
+  "Report eid for `target-mid`, matching the root or any thread
+  descendant (parity with digest/reports-by-hash), or nil.
+  Resolution via bone.lookup, descendant join eid-bound."
   [db target-mid]
-  (when (common/indexable-mid? target-mid)
-    (or (d/entid db [:report/message-id target-mid])
-        (d/q '[:find ?r . :in $ ?mid
-               :where [?r :report/descendants ?e] [?e :email/message-id ?mid]]
-             db target-mid))))
+  (let [h (common/mid-hash target-mid)]
+    (or (lookup/report-eid-by-hash db h)
+        (when-let [e (lookup/email-eid-by-hash db h)]
+          (d/q '[:find ?r . :in $ ?e :where [?r :report/descendants ?e]]
+               db e)))))
 
 (defn- resolve-target
   "Look up the target report-eid for a relation command (Superseded-by:
@@ -746,13 +719,8 @@
   report (parity with threading)."
   [conn report-eid resolved email-eid from-addr failure-ctx]
   (let [db        (d/db conn)
-        ;; Filter mids exceeding the LMDB index limit; the lookup would
-        ;; otherwise raise MDB_BAD_VALSIZE.  Such targets cannot exist
-        ;; in the DB (we reject them at ingestion), so reporting them
-        ;; as :unknown-target is also accurate.
-        indexable (filter common/indexable-mid?)
-        to-pose   (into #{} indexable (:related-to-set resolved))
-        to-clear  (into #{} indexable (:related-to-unset resolved))
+        to-pose   (set (:related-to-set resolved))
+        to-clear  (set (:related-to-unset resolved))
         posed-at  (Date.)]
     (doseq [mid to-pose]
       (let [target-eid (report-eid-by-mid db mid)]
@@ -861,26 +829,20 @@
 ;; closure-relation-rows: row schema consumed by `apply-lines!`.
 ;;   :id            unique row id (matches the registry command :id)
 ;;   :kind          relation kind to pose
-;;   :role          :current-as-from when the current report is the
-;;                  one being closed (Superseded-by:, Duplicate-of:);
-;;                  :current-as-to when the current report is the
-;;                  replacement and the target is closed (Supersedes:).
+;;   :role          :current-as-from = current report is being closed
+;;                  (Superseded-by:, Duplicate-of:); :current-as-to =
+;;                  current report is the replacement (Supersedes:).
 ;;                  :rel/from is always the report being closed.
 ;;   :propagate     close-reason passed to propagate-patch-closure!
 ;;   :propagate-tgt true => pass the replacement eid as `successor-eid`
 ;;   :syntax        human-readable command name (failure logs)
 ;;   :mid-key       key in `resolved` holding the target message-id
 ;;   :unset-key     key in `resolved` holding the unset flag
-;;   :setter-attr   pull-map key under which the relation's :rel/setter
-;;                  is surfaced for `scope-permits?` on the open-report
-;;                  unset path.  MUST be unique per row: both :supersedes
-;;                  rows share `:rel/supersedes` as schema kind, but a
+;;   :setter-attr   pull-map key surfacing the relation's :rel/setter
+;;                  for `scope-permits?`.  MUST be unique per row: a
 ;;                  chained report (supersedes X AND superseded by Y)
-;;                  would have its from-setter overwritten by the
-;;                  to-setter if we reused the same pull key.  The
-;;                  `-from`/`-to` suffix records the row's role and is
-;;                  internal to the pull map; nothing else reads these
-;;                  as schema attrs.
+;;                  would otherwise get one setter overwritten by the
+;;                  other.  Internal to the pull map, not schema attrs.
 
 (def ^:private closure-relation-rows
   "Specs for command-driven closure relations (Superseded-by /
@@ -1156,22 +1118,11 @@
                          " (by " from-addr ")")))))))
 
 (defn- word-scope-permits?
-  "Scope check for bareword commands.
-
-  Barewords always *set* an attribute, so the scope values behave as
-  follows:
-  - :user                 -- anyone
-  - :maintainer           -- maintainer only
-  - :setter-or-maintainer -- equivalent to :user here; the sender of
-                            the bareword IS the setter.  The validator
-                            rejects this value on barewords, so this
-                            branch only fires for configs that bypass
-                            validation.  We fall back to :user silently
-                            rather than logging on every incoming
-                            bareword.
-
-  Truly unknown scopes (e.g. typos that also bypass validation) are
-  rejected with a warning so they surface in the logs."
+  "Scope check for bareword commands: :user = anyone, :maintainer =
+  maintainer only, :setter-or-maintainer = :user (the sender IS the
+  setter; the validator rejects it on barewords, so this branch only
+  covers unvalidated configs).  Unknown scopes are rejected with a
+  warning."
   [scope is-maintainer?]
   (case scope
     :user                 true
@@ -1231,31 +1182,22 @@
   #{:supersedes :related-to})
 
 (defn apply-commands!
-  "Apply commands from `email` against `report-eid`.
-  A reply shipping patch content also fires an implicit `Acked. Owned.`,
-  gated by :patch-triggers? and report-type ∈ #{:bug :request}.
-  Returns true if anything was applied.
+  "Apply commands from `email` against `report-eid`; true if anything
+  was applied.  A reply shipping patch content also fires an implicit
+  `Acked. Owned.` (gated by :patch-triggers? and report-type in
+  #{:bug :request}).
 
-  `line-filter` is one of:
-    nil           -- process every command, no filtering.
-    :carrier-only -- process ONLY lines whose id is in
-                     `carrier-eligible-ids`; skip words, votes,
-                     and implicit ack/own.  Used when this email
-                     is a reply that also creates a new report:
-                     Supersedes:/Related-to: in its body apply to
-                     the new report unambiguously, the rest goes
-                     to the thread parent via a separate call.
-    :no-carrier   -- process everything EXCEPT carrier-eligible
-                     lines.  Used for the thread-parent call in the
-                     same scenario, so carrier lines are not
-                     double-applied.
-    :no-cross-refs -- process everything EXCEPT neutral cross-
-                     reference annotations (Supersedes:, Related-to:
-                     and their unsets, i.e. `cross-ref-line-ids`).
-                     Triggers -- including the closure relations
-                     Superseded-by: and Duplicate-of: -- still go
-                     through.  Used to broadcast cover-letter
-                     commands to the rest of a patch series."
+  `line-filter`:
+    nil            -- process every command.
+    :carrier-only  -- ONLY `carrier-eligible-ids` lines (no words,
+                      votes, implicit ack/own): the report-creating
+                      reply applies Supersedes:/Related-to: to its own
+                      report, the rest goes to the thread parent.
+    :no-carrier    -- everything EXCEPT carrier lines (the matching
+                      thread-parent call; avoids double application).
+    :no-cross-refs -- everything EXCEPT `cross-ref-line-ids`
+                      (cover-letter broadcast to a patch series;
+                      closure relations still go through)."
   [conn report-eid report-type email source-map roles delivery line-filter]
   (let [carrier-only? (= :carrier-only line-filter)
         body-text     (common/email-body-text email)
