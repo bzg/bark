@@ -684,6 +684,57 @@
     (or (nil? irt)
         (boolean (some #(lookup/email-eid db %) (ancestor-mids email))))))
 
+;; In-memory pending index: ancestor-mid-hash => #{pending eids}.  A
+;; value join on the hash attr is forbidden (see bone.lookup) and
+;; scanning every pending email once per processed email is quadratic
+;; during an initial build, so the sole DB writer (this JVM daemon;
+;; bb scripts are read-only) mirrors the pending set in memory.  The
+;; index is seeded lazily from the DB and reseeded when the
+;; connection changes (tests open fresh DBs).  Entries can only go
+;; stale towards false positives (an eid whose flag was cleared);
+;; `retry-pending-in-shared-thread!` re-checks the flag on pull.
+(defonce ^:private pending-index (atom nil))  ; {:conn c :index {hash #{eid}}}
+
+(defn- seed-pending-index
+  "Index map rebuilt from the pending emails stored in `db`."
+  [db]
+  (reduce (fn [m [e pulled]]
+            (reduce #(update %1 %2 (fnil conj #{}) e)
+                    m (:email/ancestor-mid-hashes pulled)))
+          {}
+          (d/q '[:find ?e (pull ?e [:email/ancestor-mid-hashes])
+                 :where [?e :email/pending-thread? true]]
+               db)))
+
+(defn- pending-index-map!
+  "Current index map for `conn`, seeding it on first use.  `f`, when
+  given, is applied to the map in the same atomic swap (seeding is a
+  pure DB read, safe to retry)."
+  ([conn] (pending-index-map! conn identity))
+  ([conn f]
+   (:index (swap! pending-index
+                  (fn [cur]
+                    (update (if (identical? (:conn cur) conn)
+                              cur
+                              {:conn conn :index (seed-pending-index (d/db conn))})
+                            :index f))))))
+
+(defn- pending-index-add!
+  "Record `eid` as pending under each of its ancestor mid-hashes."
+  [conn eid hashes]
+  (pending-index-map!
+   conn (fn [m] (reduce #(update %1 %2 (fnil conj #{}) eid) m hashes))))
+
+(defn- pending-index-remove!
+  "Drop `eid` from the index (its pending flag was retracted)."
+  [conn eid hashes]
+  (pending-index-map!
+   conn (fn [m]
+          (reduce (fn [acc h]
+                    (let [s (disj (get acc h #{}) eid)]
+                      (if (seq s) (assoc acc h s) (dissoc acc h))))
+                  m hashes))))
+
 ;; ---------------------------------------------------------------------------
 ;; Single-email processing -- orchestrator
 ;; ---------------------------------------------------------------------------
@@ -766,6 +817,7 @@
             (do
               (when was-pending?
                 (d/transact! conn [[:db/retract eid :email/pending-thread? true]])
+                (pending-index-remove! conn eid (:email/ancestor-mid-hashes email))
                 (log/info "Cleared pending flag on" message-id))
               (let [{parent-eids :all nearest-eids :nearest} (thread-lookup email db)
                     ;; Recover the existing report-eid on retry so Phase 4
@@ -805,6 +857,7 @@
             (do (d/transact! conn [{:db/id eid
                                     :email/pending-thread? true
                                     :email/digested-at (Date.)}])
+                (pending-index-add! conn eid (:email/ancestor-mid-hashes email))
                 (log/info "Pending:" message-id "-- no ancestor mid in DB"
                           "(in-reply-to" (:email/in-reply-to email) ")")))))))))
 
@@ -817,19 +870,14 @@
         hashes   (cond-> (set (:email/ancestor-mid-hashes email))
                    own-mid (conj (common/mid-hash own-mid)))]
     (when (seq hashes)
-      ;; In-memory filter on one snapshot: a value join on the hash
-      ;; attr is forbidden (see bone.lookup), and pendings are few.
-      (let [pendings (->> (d/q '[:find ?e (pull ?e [:email/ancestor-mid-hashes])
-                                 :where [?e :email/pending-thread? true]]
-                               (d/db conn))
-                          (keep (fn [[e pulled]]
-                                  (when (some hashes (:email/ancestor-mid-hashes pulled))
-                                    e))))]
+      (let [index    (pending-index-map! conn)
+            pendings (into #{} (mapcat #(get index %)) hashes)]
         (doseq [pending-eid pendings
                 :let [pending-email (d/pull (d/db conn) email-pull-pattern
                                             pending-eid)]
                 ;; A recursive rescue triggered by an earlier iteration may
-                ;; have already processed this email and cleared its flag.
+                ;; have already processed this email and cleared its flag --
+                ;; and the index only re-checks staleness here, on pull.
                 :when (:email/pending-thread? pending-email)]
           (log/info "Retrying pending email" (:email/message-id pending-email)
                     "(triggered by" own-mid ")")
