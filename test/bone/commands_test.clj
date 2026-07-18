@@ -137,3 +137,59 @@
           [tx _ _] (commands/build-word-tx 42 word-result 999 "Alice@Example.COM" {})]
       (is (some (fn [datom] (= datom [:db/add 42 :report/acked-address "alice@example.com"]))
                 tx)))))
+
+;; ---------------------------------------------------------------------------
+;; Reviewed-by (kernel-style synonym of Acked-by) and Reviewed bareword
+;; ---------------------------------------------------------------------------
+
+(deftest reviewed-by-sets-acked
+  (testing "Reviewed-by: is a syntax synonym of Acked-by:"
+    (is (= [{:action :set :attr :report/acked :email-address "x@y.com"
+             :scope :user :id :acked-by}]
+           (vec (detect-with false "Reviewed-by: x@y.com\n"))))
+    (testing "kernel form with a display name"
+      (is (= [{:action :set :attr :report/acked :email-address "x@y.com"
+               :scope :user :id :acked-by}]
+             (vec (detect-with false "Reviewed-by: Jane Doe <x@y.com>\n")))))
+    (testing "Acked-by: keeps working"
+      (is (= [{:action :set :attr :report/acked :email-address "x@y.com"
+               :scope :user :id :acked-by}]
+             (vec (detect-with false "Acked-by: x@y.com\n")))))
+    (testing "strict mode still requires the ! prefix"
+      (is (empty? (detect-with true "Reviewed-by: x@y.com\n")))
+      (is (seq (detect-with true "!Reviewed-by: x@y.com\n"))))))
+
+(deftest reviewed-bareword-is-not-a-default-acked-word
+  ;; In loose mode a reply opener like "Reviewed v2 and found
+  ;; problems." would ack with inverse polarity, so only the full
+  ;; Reviewed-by: line is recognized by default; sources can add the
+  ;; bareword via :words.
+  (let [sc (src-cmds false)]
+    (is (nil? (commands/detect-words :patch "Reviewed.\n" sc)))
+    (is (nil? (commands/detect-words :patch "Reviewed v2 and found problems.\n" sc)))
+    (testing "a source can opt in via :words"
+      (let [sc (commands/build-source-commands
+                {:command-syntax :loose
+                 :commands {:acked {:words ["Acked" "Reviewed"]}}})]
+        (is (some? (commands/detect-words :patch "Reviewed.\n" sc)))))))
+
+(deftest not-word-negations-follow-the-vocabulary
+  (testing "every default acked word has its Not form"
+    (doseq [line ["Not acked.\n" "Not confirmed.\n" "Not approved.\n"]]
+      (is (= [{:action :unset :attr :report/acked
+               :scope :user :id :unacked}]
+             (vec (detect-with false line)))
+          line)))
+  (testing "per-source synonyms gain their negation"
+    (let [sc (commands/build-source-commands
+              {:command-syntax :loose
+               :commands {:owned {:words ["Owned" "Handled"]}}})]
+      (is (= [{:action :unset :attr :report/owned
+               :scope :user :id :unowned}]
+             (vec (commands/detect-lines :bug "Not handled.\n" nil nil
+                                         (:line-patterns sc)))))))
+  (testing "strict mode still requires the ! prefix"
+    (is (empty? (detect-with true "Not confirmed.\n")))
+    (is (seq (detect-with true "!Not confirmed.\n"))))
+  (testing "prose lines with trailing text do not match"
+    (is (empty? (detect-with false "Not confirmed yet, will retest tomorrow.\n")))))

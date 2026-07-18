@@ -530,3 +530,60 @@
             {:from-address "alice@example.org"
              :from-name    "Alice via \"L\""
              :reply-to     [{:address "alice@example.org"}]})))))
+
+;; ---------------------------------------------------------------------------
+;; extract-trailers
+;; ---------------------------------------------------------------------------
+
+(deftest extract-trailers-test
+  (testing "collects person trailers with canonical capitalization"
+    (is (= ["Reviewed-by: Jane Doe <jane@example.org>"]
+           (common/extract-trailers
+            "Looks good to me.\n\nReviewed-by: Jane Doe <jane@example.org>\n")))
+    (is (= ["Acked-by: Jo <jo@x.org>" "Tested-by: Sam <sam@y.org>"]
+           (common/extract-trailers
+            "acked-by: Jo <jo@x.org>\nTESTED-BY: Sam <sam@y.org>\n"))))
+
+  (testing "quoted and indented lines are ignored"
+    (is (empty? (common/extract-trailers
+                 "> Reviewed-by: Jane <jane@example.org>\n"))
+        "quoted trailer from the patch under review")
+    (is (empty? (common/extract-trailers
+                 "  Signed-off-by: Jane <jane@example.org>\n"))
+        "indented lines are diff/quote context, not trailers"))
+
+  (testing "values without an address are skipped"
+    (is (empty? (common/extract-trailers "Tested-by: nobody yet\n"))))
+
+  (testing "unknown keys are skipped"
+    (is (empty? (common/extract-trailers "Fixed-by: Jane <jane@example.org>\n"))))
+
+  (testing "scanning stops at a pasted patch (inline fixup leak)"
+    (is (= ["Reviewed-by: R <r@x>"]
+           (common/extract-trailers
+            (str "Nice, but squash this fixup:\n\n"
+                 "Reviewed-by: R <r@x>\n\n"
+                 "From 0123456789abcdef0123456789abcdef01234567"
+                 " Mon Sep 17 00:00:00 2001\n"
+                 "From: U <u@x>\n"
+                 "Subject: [PATCH] fixup\n\n"
+                 "Signed-off-by: U <u@x>\n---\n"
+                 "diff --git a/f b/f\n")))
+        "the pasted patch's own Signed-off-by is not collected")
+    (is (empty? (common/extract-trailers
+                 "diff --git a/f b/f\nSigned-off-by: U <u@x>\n"))
+        "a bare pasted diff truncates from its first line"))
+
+  (testing "duplicates collapse, order of first appearance is kept"
+    (is (= ["Reviewed-by: A <a@x>" "Acked-by: B <b@x>"]
+           (common/extract-trailers
+            "Reviewed-by: A <a@x>\nAcked-by: B <b@x>\nReviewed-by: A <a@x>\n"))))
+
+  (testing "signature block is not scanned (stripped upstream by email-body-text)"
+    (is (= ["Reviewed-by: A <a@x>"]
+           (common/extract-trailers
+            (common/strip-signature
+             "Reviewed-by: A <a@x>\n-- \nSigned-off-by: Sig <sig@x>\n")))))
+
+  (testing "nil body is safe"
+    (is (nil? (common/extract-trailers nil)))))

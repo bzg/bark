@@ -24,13 +24,23 @@
 ;; prefixed line (`:syntax` key + optional `:param`).
 ;;
 ;; :scope values:
-;;   :user                 -- anyone
+;;   :user                 -- anyone.  The default everywhere: updates
+;;                            are auditable (each records the email
+;;                            that posed it) and reversible, and
+;;                            sources that are not self-moderating
+;;                            channels can tighten commands via the
+;;                            per-command :scope override.  Role
+;;                            controls (Add maintainer: ...) are gated
+;;                            separately, in bone.roles.
 ;;   :maintainer           -- any maintainer
 ;;   :setter-or-maintainer -- the address that set the attribute, plus
 ;;                            any maintainer.  Only meaningful for unset
 ;;                            commands whose target has a recoverable
 ;;                            setter (`setter-ref-attrs` /
 ;;                            `setter-scoped-command-ids`).
+;; No default entry uses the last two anymore; they remain available to
+;; sources that tighten a command via the per-command :scope override
+;; (config.edn `:commands {<cmd-id> {:scope ...}}`).
 ;; ---------------------------------------------------------------------------
 
 (def commands
@@ -41,19 +51,34 @@
    {:id :owned    :kind :trigger :action :set :attr :report/owned  :scope :user
     :words :owned  :report-types #{:bug :patch :request}}
    {:id :closed   :kind :trigger :action :set :attr :report/closed :scope :user :words :closed}
-   ;; -by lines (maintainer credits a third party)
-   {:id :acked-by  :kind :trigger :action :set :attr :report/acked  :scope :maintainer
-    :syntax "Acked-by"  :param :email-address :report-types #{:bug :patch :request}}
-   {:id :owned-by  :kind :trigger :action :set :attr :report/owned  :scope :maintainer
+   ;; -by lines (credit the update to a third party)
+   ;; Reviewed-by is the kernel-style strong-review line, accepted as
+   ;; a plain syntax synonym: BONE's acked state is the strong
+   ;; approval (Confirmed, Approved, Reviewed-by:).  Any participant's
+   ;; Reviewed-by both acks the report and is collected as a review
+   ;; trailer (:report/trailers); on a source that tightens :acked-by
+   ;; via a :scope override, denied lines are still collected as
+   ;; trailers.
+   {:id :acked-by  :kind :trigger :action :set :attr :report/acked  :scope :user
+    :syntax "Acked-by" :syntaxes ["Acked-by" "Reviewed-by"]
+    :param :email-address :report-types #{:bug :patch :request}}
+   {:id :owned-by  :kind :trigger :action :set :attr :report/owned  :scope :user
     :syntax "Owned-by"  :param :email-address :report-types #{:bug :patch :request}}
-   {:id :closed-by :kind :trigger :action :set :attr :report/closed :scope :maintainer
+   {:id :closed-by :kind :trigger :action :set :attr :report/closed :scope :user
     :syntax "Closed-by" :param :email-address}
-   ;; Unset lines
-   {:id :unacked  :kind :trigger :action :unset :attr :report/acked  :scope :setter-or-maintainer
-    :syntax "Not acked"  :report-types #{:bug :patch :request}}
-   {:id :unowned  :kind :trigger :action :unset :attr :report/owned  :scope :setter-or-maintainer
-    :syntax "Not owned"  :report-types #{:bug :patch :request}}
-   {:id :unclosed :kind :trigger :action :unset :attr :report/closed :scope :setter-or-maintainer
+   ;; Unset lines.  :not-words derives the accepted syntaxes from the
+   ;; state's resolved vocabulary -- every word that can set the state
+   ;; (defaults and per-source synonyms alike) gets its "Not <word>"
+   ;; negation; :syntax remains the canonical form for display.
+   {:id :unacked  :kind :trigger :action :unset :attr :report/acked  :scope :user
+    :syntax "Not acked"  :not-words :acked :report-types #{:bug :patch :request}}
+   {:id :unowned  :kind :trigger :action :unset :attr :report/owned  :scope :user
+    :syntax "Not owned"  :not-words :owned :report-types #{:bug :patch :request}}
+   ;; Deliberately no :not-words here: closing words carry a close
+   ;; reason ("Not canceled"/"Not fixed" would not), and in loose mode
+   ;; a prose "Not fixed." would reopen reports.  "Not closed" is the
+   ;; only reopening form.
+   {:id :unclosed :kind :trigger :action :unset :attr :report/closed :scope :user
     :syntax "Not closed"}
    ;; Closure relations -- backed by :rel/supersedes / :rel/duplicates;
    ;; :attr kept for registry shape.
@@ -64,11 +89,11 @@
    ;; pull-map key must distinguish them.
    {:id :superseded-by    :kind :trigger :action :set-superseded   :attr :rel/supersedes      :scope :user
     :syntax "Superseded-by"     :param :message-id :report-types #{:bug :patch :request}}
-   {:id :unsuperseded-by  :kind :trigger :action :unset-superseded :attr :rel/supersedes-from :scope :setter-or-maintainer
+   {:id :unsuperseded-by  :kind :trigger :action :unset-superseded :attr :rel/supersedes-from :scope :user
     :syntax "Not superseded-by" :param :message-id :report-types #{:bug :patch :request}}
    {:id :duplicate-of    :kind :trigger :action :set-duplicate   :attr :rel/duplicates      :scope :user
     :syntax "Duplicate-of"     :param :message-id :report-types #{:bug :patch :request}}
-   {:id :unduplicate-of  :kind :trigger :action :unset-duplicate :attr :rel/duplicates-from :scope :setter-or-maintainer
+   {:id :unduplicate-of  :kind :trigger :action :unset-duplicate :attr :rel/duplicates-from :scope :user
     :syntax "Not duplicate-of" :param :message-id :report-types #{:bug :patch :request}}
 
    ;; --- Annotations: property-set -------------------------------------------
@@ -76,28 +101,28 @@
    {:id :urgent    :kind :annotation :action :set :attr :report/urgent    :scope :user :words :urgent}
    {:id :important :kind :annotation :action :set :attr :report/important :scope :user :words :important}
    ;; Unset lines for bareword annotations
-   {:id :unurgent    :kind :annotation :action :unset :attr :report/urgent    :scope :setter-or-maintainer
-    :syntax "Not urgent"}
-   {:id :unimportant :kind :annotation :action :unset :attr :report/important :scope :setter-or-maintainer
-    :syntax "Not important"}
+   {:id :unurgent    :kind :annotation :action :unset :attr :report/urgent    :scope :user
+    :syntax "Not urgent" :not-words :urgent}
+   {:id :unimportant :kind :annotation :action :unset :attr :report/important :scope :user
+    :syntax "Not important" :not-words :important}
    ;; Deadline / expiry / topic
    {:id :deadline    :kind :annotation :action :set-deadline   :attr :report/deadline :scope :user
     :syntax "Deadline" :param :date-or-duration :report-types #{:bug :patch :request}}
-   {:id :undeadline  :kind :annotation :action :unset-deadline :attr :report/deadline :scope :setter-or-maintainer
+   {:id :undeadline  :kind :annotation :action :unset-deadline :attr :report/deadline :scope :user
     :syntax "No deadline" :report-types #{:bug :patch :request}}
    {:id :expiry      :kind :annotation :action :set-expiry   :attr :report/expiry :scope :user
     :syntax "Expiry" :param :date-or-duration}
-   {:id :unexpiry    :kind :annotation :action :unset-expiry :attr :report/expiry :scope :setter-or-maintainer
+   {:id :unexpiry    :kind :annotation :action :unset-expiry :attr :report/expiry :scope :user
     :syntax "No expiry"}
    {:id :topic       :kind :annotation :action :set-topic   :attr :report/topic :scope :user
     :syntax "Topic" :param :word}
-   {:id :untopic     :kind :annotation :action :unset-topic :attr :report/topic :scope :setter-or-maintainer
+   {:id :untopic     :kind :annotation :action :unset-topic :attr :report/topic :scope :user
     :syntax "No topic"}
    ;; Supersedes -- inverse role of Superseded-by (posed on the replacement;
    ;; current = :rel/to, target = :rel/from = the closed report).
    {:id :supersedes   :kind :annotation :action :set-supersedes   :attr :rel/supersedes    :scope :user
     :syntax "Supersedes"     :param :message-id :report-types #{:bug :patch :request}}
-   {:id :unsupersedes :kind :annotation :action :unset-supersedes :attr :rel/supersedes-to :scope :setter-or-maintainer
+   {:id :unsupersedes :kind :annotation :action :unset-supersedes :attr :rel/supersedes-to :scope :user
     :syntax "Not supersedes" :param :message-id :report-types #{:bug :patch :request}}
    ;; Related-to -- neutral cross-reference (no closure, multi-target,
    ;; symmetric canonicalised by :rel/id).  Multi-target makes a clean
@@ -175,10 +200,12 @@
    :report/deadline      :report/deadline-value
    :report/expiry        :report/expiry-value})
 
-;; Commands accepting :scope :setter-or-maintainer:
+;; Commands that support a :setter-or-maintainer scope override:
 ;; - unset lines keyed on a setter-ref attribute, plus
 ;; - explicit relation-backed unsets (:unsuperseded-by, :unsupersedes,
 ;;   :unduplicate-of).
+;; All of them default to :scope :user; this set only matters when a
+;; source tightens one back via config.
 (def setter-scoped-command-ids
   (into #{:unsuperseded-by :unsupersedes :unduplicate-of}
         (comp (filter #(str/starts-with? (name (:action %)) "unset"))

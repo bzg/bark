@@ -124,6 +124,12 @@
  :report/last-activity-address {:db/valueType :db.type/string}
  :report/has-ics               {:db/valueType :db.type/boolean}
  :report/has-text-attachments  {:db/valueType :db.type/boolean}
+ ;; Git person trailers (Acked-by:, Reviewed-by:, ...) collected from
+ ;; replies to a patch report, verbatim "Key: Name <addr>" strings.
+ ;; Clients applying the patch fold them into the commit message
+ ;; (b4-style).  Set semantics: duplicates and replays collapse.
+ :report/trailers              {:db/valueType   :db.type/string
+                                :db/cardinality :db.cardinality/many}
  :report/updated-at            {:db/valueType :db.type/instant}
  ;; Wall-clock instant the report was first created (ingested), as opposed
  ;; to the originating email's date (`:report/email` -> :email/date-sent),

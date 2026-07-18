@@ -42,8 +42,13 @@
         "(" (str/join "|" (map #(java.util.regex.Pattern/quote %) words))
         ")(?:" trailing-punct (when-not strict-punct? "|\\s") "|$)")))
 
-(defn- line-pattern [strict-syntax? {:keys [syntax param]}]
-  (let [qs       (java.util.regex.Pattern/quote syntax)
+(defn- line-pattern [strict-syntax? {:keys [syntax param]} syntaxes]
+  (let [qs       (if (seq syntaxes)
+                   (str "(?:"
+                        (str/join "|" (map #(java.util.regex.Pattern/quote %)
+                                           syntaxes))
+                        ")")
+                   (java.util.regex.Pattern/quote syntax))
         prefix   (common/bang-prefix strict-syntax?)
         addr     "[^@<>\\s]+@[^@<>\\s]+\\.[^@<>\\s]+"   ; email address (dot required)
         mid      "[^<>\\s]+@[^<>\\s]+"                  ; bracketed message-id
@@ -69,11 +74,24 @@
                             words)]))
            action-map))))
 
+(defn- command-syntaxes
+  "Alternative syntaxes of a line command, nil for the single default.
+  Explicit :syntaxes win; unset commands carrying :not-words accept
+  the \"Not <word>\" negation of every word in the state's resolved
+  vocabulary."
+  [cmd commands-map]
+  (or (:syntaxes cmd)
+      (when-let [words (some->> (:not-words cmd) (get commands-map) seq)]
+        (mapv #(str "Not " (str/lower-case %)) words))))
+
 (def ^:private compile-line-patterns
   "Compile colon-line command patterns for a syntax mode."
   (memoize
-   (fn [strict-syntax?]
-     (mapv (fn [cmd] [cmd (line-pattern strict-syntax? cmd)]) line-commands))))
+   (fn [strict-syntax? commands-map]
+     (mapv (fn [cmd]
+             [cmd (line-pattern strict-syntax? cmd
+                                (command-syntaxes cmd commands-map))])
+           line-commands))))
 
 (defn build-source-commands
   "Return a source-commands descriptor with keys:
@@ -87,7 +105,7 @@
         strict-syntax? (= :strict (common/resolve-command-syntax source-cfg))]
     {:commands       commands
      :word-patterns  (compile-word-patterns strict-syntax? commands)
-     :line-patterns  (compile-line-patterns strict-syntax?)
+     :line-patterns  (compile-line-patterns strict-syntax? commands)
      :strict-syntax? strict-syntax?
      :overrides      (common/resolve-command-overrides source-cfg)}))
 
@@ -150,7 +168,8 @@
                      (assoc :report/close-reason reason))]
       (when (seq result) result))))
 
-(def ^:private compiled-lines-loose (compile-line-patterns false))
+(def ^:private compiled-lines-loose
+  (compile-line-patterns false common/default-commands))
 
 (defn detect-lines
   "Detect colon-line commands in `body-text`. The optional `compiled`

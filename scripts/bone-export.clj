@@ -449,15 +449,23 @@
    [:report/urgent    :urgent    :urgent-proxy]
    [:report/important :important :important-proxy]])
 
-(defn- assoc-owned-name
-  "Attach :owned-name when the owner's display name is known (looked up
-  via the global author-names map built once per export)."
-  [m author-names]
-  (if-let [owned (:owned m)]
-    (if-let [nm (get author-names (str/lower-case owned))]
-      (assoc m :owned-name nm)
+(defn- assoc-state-name
+  "Attach `name-k` when the display name of the address under `addr-k`
+  is known (looked up via the global author-names map built once per
+  export)."
+  [m addr-k name-k author-names]
+  (if-let [addr (get m addr-k)]
+    (if-let [nm (get author-names (str/lower-case addr))]
+      (assoc m name-k nm)
       m)
     m))
+
+(defn- assoc-state-names
+  "Attach :owned-name and :acked-name when known."
+  [m author-names]
+  (-> m
+      (assoc-state-name :owned :owned-name author-names)
+      (assoc-state-name :acked :acked-name author-names)))
 
 (defn- assoc-from-addresses
   "Extract addresses from report: direct string attrs and author-address of ref attrs.
@@ -717,7 +725,7 @@
          :priority (report-priority report)
          :replies  (report-descendant-count report)}
         (assoc-from-addresses report)
-        (assoc-owned-name (ctx-author-names))
+        (assoc-state-names (ctx-author-names))
         (cond->
             from-name                       (assoc :from-name from-name)
             role                            (assoc :role role)
@@ -726,6 +734,8 @@
             (:report/topic-value report)    (assoc :topic (:report/topic-value report))
             (:report/patch-seq report)      (assoc :patch-seq (:report/patch-seq report))
             (:report/patch-source report)   (assoc :patch-source (mapv name (sort (:report/patch-source report))))
+            ;; Sorted for reproducible exports (cardinality-many = set).
+            (seq (:report/trailers report)) (assoc :trailers (vec (sort (:report/trailers report))))
             arch                            (assoc :archived-at arch)
             (:report/deadline-value report) (assoc :deadline (format-date-iso (:report/deadline-value report)))
             (:report/last-activity report)  (assoc :last-activity (format-date-iso (:report/last-activity report)))

@@ -42,6 +42,7 @@
             :report/close-reason
             :report/urgent :report/important
             :report/deadline-value :report/expiry-value
+            :report/trailers
             :report/acked-address :report/owned-address
             :report/closed-address :report/urgent-address
             :report/important-address
@@ -626,35 +627,35 @@
 
         ;; --- Directive unit tests ---
         (testing "detect-lines"
-          (is (= [{:action :set :attr :report/acked :email-address "a@b.com" :scope :maintainer :id :acked-by}]
+          (is (= [{:action :set :attr :report/acked :email-address "a@b.com" :scope :user :id :acked-by}]
                  (commands/detect-lines :bug "Acked-by: a@b.com\n")))
-          (is (= [{:action :set :attr :report/owned :email-address "x@y.com" :scope :maintainer :id :owned-by}]
+          (is (= [{:action :set :attr :report/owned :email-address "x@y.com" :scope :user :id :owned-by}]
                  (commands/detect-lines :bug "Owned-by: x@y.com\nIgnore this line\n")))
-          (is (= [{:action :unset :attr :report/acked :scope :setter-or-maintainer :id :unacked}]
+          (is (= [{:action :unset :attr :report/acked :scope :user :id :unacked}]
                  (commands/detect-lines :bug "Not acked\n")))
-          (is (= [{:action :unset :attr :report/urgent :scope :setter-or-maintainer :id :unurgent}]
+          (is (= [{:action :unset :attr :report/urgent :scope :user :id :unurgent}]
                  (commands/detect-lines :bug "Not urgent\n")))
-          (is (= [{:action :unset :attr :report/important :scope :setter-or-maintainer :id :unimportant}]
+          (is (= [{:action :unset :attr :report/important :scope :user :id :unimportant}]
                  (commands/detect-lines :bug "Not important\n")))
           (is (= [{:action :set-deadline :date (parse-date-iso "2026-06-15") :scope :user :id :deadline}]
                  (commands/detect-lines :bug "Deadline: 2026-06-15\n")))
-          (is (= [{:action :unset-deadline :scope :setter-or-maintainer :id :undeadline}]
+          (is (= [{:action :unset-deadline :scope :user :id :undeadline}]
                  (commands/detect-lines :bug "No deadline\n")))
-          (is (= [{:action :unset-topic :scope :setter-or-maintainer :id :untopic}]
+          (is (= [{:action :unset-topic :scope :user :id :untopic}]
                  (commands/detect-lines :bug "No topic\n")))
           (is (= [{:action :set-topic :topic "my-topic" :scope :user :id :topic}]
                  (commands/detect-lines :bug "Topic: my-topic\n")))
-          (is (= [{:action :set :attr :report/acked :email-address "a@b.com" :scope :maintainer :id :acked-by}
+          (is (= [{:action :set :attr :report/acked :email-address "a@b.com" :scope :user :id :acked-by}
                   {:action :set-deadline :date (parse-date-iso "2026-07-01") :scope :user :id :deadline}
                   {:action :set-topic :topic "urgent-fix" :scope :user :id :topic}]
                  (commands/detect-lines :bug "Acked-by: a@b.com\nDeadline: 2026-07-01\nTopic: urgent-fix\n")))
-          (is (= [{:action :set :attr :report/owned :email-address "x@y.com" :scope :maintainer :id :owned-by}]
+          (is (= [{:action :set :attr :report/owned :email-address "x@y.com" :scope :user :id :owned-by}]
                  (commands/detect-lines :bug "Thanks for the report.\nOwned-by: x@y.com\nWill look into it.\n")))
           ;; RFC 5322 "Display Name <addr>" format
-          (is (= [{:action :set :attr :report/owned :email-address "x@y.com" :scope :maintainer :id :owned-by}]
+          (is (= [{:action :set :attr :report/owned :email-address "x@y.com" :scope :user :id :owned-by}]
                  (commands/detect-lines :bug "Owned-by: Some User <x@y.com>\n")))
           ;; Bracketed address without display name: angle brackets must be stripped
-          (is (= [{:action :set :attr :report/owned :email-address "x@y.com" :scope :maintainer :id :owned-by}]
+          (is (= [{:action :set :attr :report/owned :email-address "x@y.com" :scope :user :id :owned-by}]
                  (commands/detect-lines :bug "Owned-by: <x@y.com>\n")))
           ;; Address must contain a dot in the domain part
           (is (= [] (commands/detect-lines :bug "Owned-by: alice@localhost\n")))
@@ -665,7 +666,7 @@
           ;; Expiry directive
           (is (= [{:action :set-expiry :date (parse-date-iso "2026-09-01") :scope :user :id :expiry}]
                  (commands/detect-lines :bug "Expiry: 2026-09-01\n")))
-          (is (= [{:action :unset-expiry :scope :setter-or-maintainer :id :unexpiry}]
+          (is (= [{:action :unset-expiry :scope :user :id :unexpiry}]
                  (commands/detect-lines :bug "No expiry\n")))
           ;; "Expiry: deadline" is no longer a valid command (use :inactive-after :deadline in config)
           (is (= [] (commands/detect-lines :bug "Expiry: deadline\n")))
@@ -721,16 +722,21 @@
                                              {:action :unset-topic}]))))
 
         ;; --- Bug 81 directives ---
-        (testing "Bug 81 Acked-by"
+        (testing "Bug 81 Acked-by / Owned-by credit third parties"
           (let [r (get-report db "<81@test.org>")]
-            (is (nil? (:report/acked r)))
-            (is (nil? (:report/acked-address r)))
+            (is (some? (:report/acked r)))
+            (is (= "reviewer@test.org" (:report/acked-address r)))
             (is (some? (:report/owned r)))
             (is (= "fixer@test.org" (:report/owned-address r)))))
 
-        ;; --- Bug 81 user directive denied ---
-        (testing "Bug 81 user directive denied"
-          (is (nil? (:report/closed (get-report db "<81@test.org>")))))
+        ;; --- Bug 81: -by lines are open to any user; the later
+        ;; "Not acked" (mail 85) lands on a report already closed by
+        ;; mail 84, where only closure commands apply (try-unclosed!),
+        ;; so the ack above survives. ---
+        (testing "Bug 81 user Closed-by applies"
+          (let [r (get-report db "<81@test.org>")]
+            (is (some? (:report/closed r)))
+            (is (= "someone@test.org" (:report/closed-address r)))))
 
         ;; --- Bug 86 last-one-wins ---
         (testing "Bug 86 last-one-wins"
@@ -876,7 +882,7 @@
           (is (= [] (commands/detect-lines :bug "Superseded-by: https://example.com/foo@bar/baz.html\n"))))
 
         (testing "detect-lines: Not superseded-by"
-          (is (= [{:action :unset-superseded :attr :rel/supersedes-from :scope :setter-or-maintainer :id :unsuperseded-by :target-message-id "<msg@example.com>"}]
+          (is (= [{:action :unset-superseded :attr :rel/supersedes-from :scope :user :id :unsuperseded-by :target-message-id "<msg@example.com>"}]
                  (commands/detect-lines :bug "Not superseded-by: <msg@example.com>\n"))))
 
         (testing "detect-lines: Supersedes (symmetric of Superseded-by)"
@@ -884,7 +890,7 @@
                  (commands/detect-lines :bug "Supersedes: <msg@example.com>\n"))))
 
         (testing "detect-lines: Not supersedes"
-          (is (= [{:action :unset-supersedes :attr :rel/supersedes-to :scope :setter-or-maintainer :id :unsupersedes :target-message-id "<msg@example.com>"}]
+          (is (= [{:action :unset-supersedes :attr :rel/supersedes-to :scope :user :id :unsupersedes :target-message-id "<msg@example.com>"}]
                  (commands/detect-lines :bug "Not supersedes: <msg@example.com>\n"))))
 
         (testing "resolve-commands: superseded-by"
@@ -1765,5 +1771,124 @@
               "Flush should clear the pending flag")
           (is (= ["0001-fix.patch"] (mapv :patch/filename (:report/patches r)))
               "Flush retry must not duplicate the stored patches"))
+        (finally
+          (teardown! ctx))))))
+
+(deftest trailer-collection
+  (testing "Git person trailers in replies are collected on patch reports."
+    (let [{:keys [conn] :as ctx} (setup-db!)]
+      (try
+        ;; A standalone bug: trailers must never land on non-patch reports.
+        (store-and-process! conn
+                            (mk-email {:mid "<tr-bug@test.org>"
+                                       :subject "[BUG] something"
+                                       :from "user@test.org"
+                                       :date #inst "2026-06-01T09:00:00"
+                                       :body "it is broken\n"})
+                            "direct")
+        ;; Cover letter (0/2) + 2 patches.  The patch emails carry their
+        ;; own Signed-off-by, which must NOT leak onto the cover.
+        (store-and-process! conn
+                            (mk-email {:mid "<tr-cov@test.org>"
+                                       :subject "[PATCH tr 0/2] Refactor Y"
+                                       :from "user@test.org"
+                                       :date #inst "2026-06-01T10:00:00"
+                                       :body "Series intro.\n"})
+                            "direct")
+        (doseq [i [1 2]]
+          (store-and-process! conn
+                              (mk-email {:mid (str "<tr-p" i "@test.org>")
+                                         :subject (str "[PATCH tr " i "/2] step " i)
+                                         :from "user@test.org"
+                                         :date #inst "2026-06-01T10:01:00"
+                                         :in-reply-to "<tr-cov@test.org>"
+                                         :body (str "step " i "\n\n"
+                                                    "Signed-off-by: User <user@test.org>\n"
+                                                    "diff --git a/y.clj b/y.clj\n"
+                                                    "--- a/y.clj\n+++ b/y.clj\n"
+                                                    "@@ -1,1 +1,1 @@\n-a\n+b\n")})
+                              "direct"))
+        ;; Review of patch 1/2 only: trailer stays on that patch.
+        (store-and-process! conn
+                            (mk-email {:mid "<tr-rev1@test.org>"
+                                       :subject "Re: [PATCH tr 1/2] step 1"
+                                       :from "rev@test.org"
+                                       :date #inst "2026-06-02T09:00:00"
+                                       :in-reply-to "<tr-p1@test.org>"
+                                       :body (str "Nice.\n\n"
+                                                  "> Signed-off-by: User <user@test.org>\n\n"
+                                                  "Reviewed-by: Rev One <rev@test.org>\n")})
+                            "direct")
+        ;; Ack on the cover: broadcast to every patch of the series.
+        (store-and-process! conn
+                            (mk-email {:mid "<tr-rev2@test.org>"
+                                       :subject "Re: [PATCH tr 0/2] Refactor Y"
+                                       :from "admin@test.org"
+                                       :date #inst "2026-06-02T10:00:00"
+                                       :in-reply-to "<tr-cov@test.org>"
+                                       :body "Acked-by: Admin <admin@test.org>\n"})
+                            "direct")
+        ;; Trailer on the bug report: ignored (non-patch).
+        (store-and-process! conn
+                            (mk-email {:mid "<tr-rev3@test.org>"
+                                       :subject "Re: [BUG] something"
+                                       :from "rev@test.org"
+                                       :date #inst "2026-06-02T11:00:00"
+                                       :in-reply-to "<tr-bug@test.org>"
+                                       :body "Reviewed-by: Rev One <rev@test.org>\n"})
+                            "direct")
+
+        (let [db    (d/db conn)
+              bug   (get-report db "<tr-bug@test.org>")
+              cover (get-report db "<tr-cov@test.org>")
+              p1    (get-report db "<tr-p1@test.org>")
+              p2    (get-report db "<tr-p2@test.org>")
+              trailers #(set (:report/trailers %))]
+          (testing "a review of one patch stays on that patch"
+            (is (contains? (trailers p1) "Reviewed-by: Rev One <rev@test.org>"))
+            (is (not (contains? (trailers p2) "Reviewed-by: Rev One <rev@test.org>"))))
+          (testing "a trailer on the cover broadcasts to the series"
+            (is (contains? (trailers cover) "Acked-by: Admin <admin@test.org>"))
+            (is (contains? (trailers p1) "Acked-by: Admin <admin@test.org>"))
+            (is (contains? (trailers p2) "Acked-by: Admin <admin@test.org>")))
+          (testing "patch emails do not leak their Signed-off-by onto parents"
+            (is (not-any? #(str/starts-with? % "Signed-off-by:") (trailers cover))))
+          (testing "quoted trailers in reviews are not collected"
+            (is (not-any? #(str/starts-with? % "Signed-off-by:") (trailers p1))))
+          (testing "non-patch reports collect nothing"
+            (is (empty? (trailers bug)))))
+        (finally
+          (teardown! ctx))))))
+
+(deftest trailer-collection-edges
+  (testing "Standalone patch (no series) and pending-reply rescue."
+    (let [{:keys [conn] :as ctx} (setup-db!)]
+      (try
+        ;; The review arrives BEFORE its patch: flagged pending, then
+        ;; rescued by retry-pending-in-shared-thread! when the patch
+        ;; shows up.
+        (store-and-process! conn
+                            (mk-email {:mid "<te-rev@test.org>"
+                                       :subject "Re: [PATCH] solo fix"
+                                       :from "rev@test.org"
+                                       :date #inst "2026-06-02T09:00:00"
+                                       :in-reply-to "<te-p@test.org>"
+                                       :body "Reviewed-by: Rev One <rev@test.org>\n"})
+                            "direct")
+        (is (pending? (d/db conn) "<te-rev@test.org>")
+            "review of an unknown patch is deferred")
+        (store-and-process! conn
+                            (mk-email {:mid "<te-p@test.org>"
+                                       :subject "[PATCH] solo fix"
+                                       :from "user@test.org"
+                                       :date #inst "2026-06-01T10:00:00"
+                                       :body (str "fix\n\n"
+                                                  "diff --git a/x b/x\n"
+                                                  "--- a/x\n+++ b/x\n"
+                                                  "@@ -1,1 +1,1 @@\n-a\n+b\n")})
+                            "direct")
+        (is (= #{"Reviewed-by: Rev One <rev@test.org>"}
+               (set (:report/trailers (get-report (d/db conn) "<te-p@test.org>"))))
+            "rescued review lands on the standalone patch (no cover to broadcast)")
         (finally
           (teardown! ctx))))))

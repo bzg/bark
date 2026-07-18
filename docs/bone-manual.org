@@ -122,19 +122,47 @@ adding =Urgent.= in a new bug report increases its priority.
 
 See the [[#all-commands][complete list of commands]] for the full registry.
 
-** Retracting your own updates
+** Retracting updates
 
-To retract a state you previously set with =Acked.=, =Owned.=, =Closed.=,
-=Urgent.= or =Important.=, reply with the matching "Not" command:
+To retract a state or clear a property, reply with the matching "Not"
+or "No" command:
 
 : Not acked.
 : Not owned.
 : Not closed.
 : Not urgent.
 : Not important.
+: No deadline.
+: No expiry.
+: No topic.
+: Not superseded-by: <new-message-id@example.com>
+: Not supersedes: <old-message-id@example.com>
+: Not duplicate-of: <target-message-id@example.com>
+: Not related-to: <other-message-id@example.com>
 
-Each retraction applies only to your own earlier action. Maintainers
-have broader retraction rights, described in [[#undoing-updates][Undoing updates]].
+Like the commands themselves, retraction is open to everyone by
+default: every update -- retraction included -- keeps a reference to
+the email that posed it, so a wrong call is auditable and one reply
+away from being fixed.  Sources that need stricter control can
+tighten individual commands back with the per-command =:scope=
+overrides described under [[#commands][Commands]].
+
+** Crediting a third party
+
+Anyone can update a report on behalf of someone else by writing to
+the BONE inbox with a =-by= line:
+
+: Acked-by: a-user@example.com
+: Owned-by: a-user@example.com
+: Closed-by: a-user@example.com
+
+The =Name <addr>= form is also accepted:
+
+: Owned-by: A User <a-user@example.com>
+
+This mirrors the kernel workflow, where submitters carry forward the
+review trailers received in replies.  The credited address becomes
+the state holder; the email that posed the line is kept for audit.
 
 ** Setting a topic
 
@@ -326,22 +354,13 @@ announcements feed dedicated event feeds:
 Use =[ANN event]= to set the topic to "event" for easier filtering, but
 any announcement with ICS content is included regardless of topic.
 
-** Acting as an update proxy
-
-A maintainer can update a report on behalf of another user by writing
-directly to the BONE inbox with a =-by= line:
-
-: Acked-by: a-user@example.com
-: Owned-by: a-user@example.com
-: Closed-by: a-user@example.com
-
-The =Name <addr>= form is also accepted:
-
-: Owned-by: A User <a-user@example.com>
-
 ** Managing roles and permissions
 
-Permissions follow three rules:
+Report commands need no permission -- anyone can set, credit or
+retract a state (see [[#commands][Commands]]); a source can tighten individual
+commands back through per-command =:scope= overrides in =config.edn=.
+The only gated commands are the role controls, which follow three
+rules:
 
 - Each source has exactly one lead maintainer.
 - Any maintainer can promote another user to maintainer.
@@ -365,40 +384,18 @@ through the source's public channel -- the mailing list or alias.
 Every instance of BONE running on the same source then sees the same
 state.
 
-** Undoing updates
-
-A maintainer can undo any update with the same "Not" or "No" commands
-available to regular users:
-
-: Not acked.
-: Not owned.
-: Not closed.
-: Not urgent.
-: Not important.
-: No deadline.
-: No expiry.
-: No topic.
-: Not superseded-by: <new-message-id@example.com>
-: Not supersedes: <old-message-id@example.com>
-: Not duplicate-of: <target-message-id@example.com>
-: Not related-to: <other-message-id@example.com>
-
-A regular user can retract only their own actions (see [[#retracting-your-own-updates][Retracting your
-own updates]]); a maintainer applies the same commands without that
-restriction.
-
 * Report types
 
 BONE detects a report's type from its subject label:
 
-| Tag                               | Type         |
-|-----------------------------------+--------------|
-| =[BUG <topic>]=                     | bug          |
-| =[PATCH <topic> <version> <n/m>]=   | patch        |
-| =[POLL <topic>]= or =[TODO <topic>]=  | request      |
-| =[ANN <topic>]=                     | announcement |
-| =[REL <topic> <version>]=           | release      |
-| =[CHG <topic> <version>]=           | change       |
+| Tag                                  | Type         |
+|--------------------------------------+--------------|
+| =[BUG <topic>]=                      | bug          |
+| =[PATCH <topic> <version> <n/m>]=    | patch        |
+| =[POLL <topic>]= or =[TODO <topic>]= | request      |
+| =[ANN <topic>]=                      | announcement |
+| =[REL <topic> <version>]=            | release      |
+| =[CHG <topic> <version>]=            | change       |
 
 BONE also accepts the long-form aliases =[ANNOUNCEMENT]=, =[RELEASE]= and
 =[CHANGE]=. Labels are case-sensitive and require whitespace (or end of
@@ -431,6 +428,25 @@ just to the cover. So =Closed.= closes the whole series and
 
 The exceptions are =Supersedes:= and =Related-to:= (with their =Not=
 variants), which name a specific target and stay on the cover only.
+
+*** Review trailers
+
+Independently of commands, BONE collects the git /person trailers/
+found in replies to a patch: =Acked-by:=, =Reviewed-by:=, =Tested-by:=,
+=Reported-by:=, =Suggested-by:=, =Signed-off-by:= and =Co-developed-by:=
+lines carrying an email address, unquoted and starting at the
+beginning of a line.  They are exported verbatim in the =trailers=
+field of the report JSON, so clients applying the patch (such as
+gnaw.el) can fold them into the commit message, the way [[https://b4.docs.kernel.org][b4]] does.
+
+Trailers in a reply to the cover letter apply to every patch of the
+series.  A =Reviewed-by:= or =Acked-by:= line is both a /command/ and a
+/trailer/: it acks the report, crediting the named address, and it is
+collected verbatim for the commit message.  The two effects have
+different reach on a series: the ack follows the series semantics
+above, while the trailer stays on the patch the reply answers.  The
+other trailer keys (=Tested-by:=, =Reported-by:=...) never change the
+report's status.
 
 ** Customising subject labels
 
@@ -484,12 +500,12 @@ silently ignored.
 
 ** Status commands
 
-| Command keyword                         | Effect on report  |
-|-----------------------------------------+-------------------|
-| =Acked= =Confirmed= =Approved=                | acked             |
-| =Owned=                                   | owned             |
-| =Canceled= =Cancelled=                      | closed (canceled) |
-| =Expired=                                 | closed (expired)  |
+| Command keyword                                   | Effect on report  |
+|---------------------------------------------------+-------------------|
+| =Acked= =Confirmed= =Approved=                    | acked             |
+| =Owned=                                           | owned             |
+| =Canceled= =Cancelled=                            | closed (canceled) |
+| =Expired=                                         | closed (expired)  |
 | =Resolved= =Applied= =Fixed= =Closed= =Completed= | closed (resolved) |
 
 A report carries a combination of three states:
@@ -515,8 +531,8 @@ still be closed.
 
 | Command keyword | Effect on report  |
 |-----------------+-------------------|
-| =Urgent.=         | Mark as urgent    |
-| =Important.=      | Mark as important |
+| =Urgent.=       | Mark as urgent    |
+| =Important.=    | Mark as important |
 
 =Urgent= and =Important= require punctuation (=.= =,= =;= =:= =?= =!=) or end of line.
 A bare space is rejected: words like "Important" appear too often in
@@ -563,10 +579,14 @@ propagates them through the threading and series graphs:
 
 ** All commands
 
-A /command/ is a keyword sent in a public reply, by a user or a
-maintainer. In the "Permission" column, "setter or maintainer" denotes
-the user who previously set the attribute; a maintainer retains a full
-override in every case.
+A /command/ is a keyword sent in a public reply.  Report commands are
+open to everyone by default: every update is auditable (it keeps a
+reference to the email that posed it) and reversible with the
+matching "Not"/"No" command.  When a source is not a public,
+self-moderating channel, per-command =:scope= overrides in =config.edn=
+restore stricter permissions (=:maintainer=, or =:setter-or-maintainer=
+on the retraction commands); the role controls are gated in every
+case.
 
 Triggers act on existing reports only. Annotations also apply to the
 carrying mail when that mail itself becomes a new report.
@@ -575,17 +595,23 @@ carrying mail when that mail itself becomes a new report.
 
 Here are the six possible command patterns:
 
-| Shape                   | Meaning                        | Example                                 |
-|-------------------------+--------------------------------+-----------------------------------------|
-| =X.=                      | set a state                    | =Acked.=, =Closed.=, =Urgent.=                |
-| =Not X.=                  | retract a state                | =Not acked.=, =Not urgent.=                 |
-| =X: <value>=              | set an annotation              | =Topic: parser=, =Deadline: 30d=            |
-| =No X.=                   | clear an annotation            | =No deadline.=, =No topic.=                 |
-| =X-by: <addr>=            | maintainer acts on behalf of X | =Acked-by: a@x=, =Closed-by: a@x=           |
-| =X: <mid>= / =Not X: <mid>= | pose or retract a relation     | =Superseded-by: <m@x>=, =Related-to: <m@x>= |
+| Shape                       | Meaning                    | Example                                     |
+|-----------------------------+----------------------------+---------------------------------------------|
+| =X.=                        | set a state                | =Acked.=, =Closed.=, =Urgent.=              |
+| =Not X.=                    | retract a state            | =Not acked.=, =Not urgent.=                 |
+| =X: <value>=                | set an annotation          | =Topic: parser=, =Deadline: 30d=            |
+| =No X.=                     | clear an annotation        | =No deadline.=, =No topic.=                 |
+| =X-by: <addr>=              | credit the update to X     | =Acked-by: a@x=, =Closed-by: a@x=           |
+| =X: <mid>= / =Not X: <mid>= | pose or retract a relation | =Superseded-by: <m@x>=, =Related-to: <m@x>= |
 
 The "Not" form negates a state; the "No" form removes a property
-(deadline, expiry, topic).
+(deadline, expiry, topic).  The negation follows the state's
+vocabulary: every word that can set a state -- built-in defaults and
+per-source =:words= synonyms alike -- is accepted in its =Not <word>=
+form, so =Confirmed.= is undone by =Not confirmed.= and a source
+declaring =Handled= as an owned word gets =Not handled.= for free.
+(=Not closed.= is the only reopening form: closing words carry a
+close reason, which their negations would not.)
 
 *** Triggers
 
@@ -593,26 +619,26 @@ Listed in the order they typically appear in a report's life: a
 contributor acks it, then someone owns it, then it is closed. Vote and
 relation triggers come last.
 
-| ID                 | Syntax / Words                              | Permission           | Report types        |
-|--------------------+---------------------------------------------+----------------------+---------------------|
-| =:acked=             | =Acked=, =Confirmed=, =Approved=                  | any user             | bug, patch, request |
-| =:acked-by=          | =Acked-by: addr@host=                         | maintainer           | bug, patch, request |
-| =:unacked=           | =Not acked=                                   | setter or maintainer | bug, patch, request |
-| =:owned=             | =Owned=                                       | any user             | bug, patch, request |
-| =:owned-by=          | =Owned-by: addr@host=                         | maintainer           | bug, patch, request |
-| =:unowned=           | =Not owned=                                   | setter or maintainer | bug, patch, request |
-| =:closed= (resolved) | =Closed=, =Resolved=, =Applied=, =Fixed=, =Completed= | any user             | all                 |
-| =:closed= (canceled) | =Canceled=, =Cancelled=                         | any user             | all                 |
-| =:closed= (expired)  | =Expired=                                     | any user             | all                 |
-| =:closed-by=         | =Closed-by: addr@host=                        | maintainer           | all                 |
-| =:unclosed=          | =Not closed=                                  | setter or maintainer | all                 |
-| vote up            | =+1= or =1+=                                    | any user (once)      | request             |
-| vote down          | =-1= or =1-=                                    | any user (once)      | request             |
-| vote null          | =+0= / =0+= / =-0= / =0-=                           | any user (once)      | request             |
-| =:superseded-by=     | =Superseded-by: <msg-id>=                     | any user             | all                 |
-| =:unsuperseded-by=   | =Not superseded-by: <msg-id>=                 | setter or maintainer | all                 |
-| =:duplicate-of=      | =Duplicate-of: <msg-id>=                      | any user             | all                 |
-| =:unduplicate-of=    | =Not duplicate-of: <msg-id>=                  | setter or maintainer | all                 |
+| ID                   | Syntax / Words                                        | Permission      | Report types        |
+|----------------------+-------------------------------------------------------+-----------------+---------------------|
+| =:acked=             | =Acked=, =Confirmed=, =Approved=                      | any user        | bug, patch, request |
+| =:acked-by=          | =Acked-by: addr@host=, =Reviewed-by: addr@host=       | any user        | bug, patch, request |
+| =:unacked=           | =Not acked=, =Not confirmed=, =Not approved=          | any user        | bug, patch, request |
+| =:owned=             | =Owned=                                               | any user        | bug, patch, request |
+| =:owned-by=          | =Owned-by: addr@host=                                 | any user        | bug, patch, request |
+| =:unowned=           | =Not owned=                                           | any user        | bug, patch, request |
+| =:closed= (resolved) | =Closed=, =Resolved=, =Applied=, =Fixed=, =Completed= | any user        | all                 |
+| =:closed= (canceled) | =Canceled=, =Cancelled=                               | any user        | all                 |
+| =:closed= (expired)  | =Expired=                                             | any user        | all                 |
+| =:closed-by=         | =Closed-by: addr@host=                                | any user        | all                 |
+| =:unclosed=          | =Not closed=                                          | any user        | all                 |
+| vote up              | =+1= or =1+=                                          | any user (once) | request             |
+| vote down            | =-1= or =1-=                                          | any user (once) | request             |
+| vote null            | =+0= / =0+= / =-0= / =0-=                             | any user (once) | request             |
+| =:superseded-by=     | =Superseded-by: <msg-id>=                             | any user        | all                 |
+| =:unsuperseded-by=   | =Not superseded-by: <msg-id>=                         | any user        | all                 |
+| =:duplicate-of=      | =Duplicate-of: <msg-id>=                              | any user        | all                 |
+| =:unduplicate-of=    | =Not duplicate-of: <msg-id>=                          | any user        | all                 |
 
 *** Annotations
 
@@ -621,37 +647,37 @@ and inter-report links.
 
 **** Priority
 
-| ID           | Syntax / Words | Permission           | Report types |
-|--------------+----------------+----------------------+--------------|
-| =:urgent=      | =Urgent.=        | any user             | all          |
-| =:unurgent=    | =Not urgent=     | setter or maintainer | all          |
-| =:important=   | =Important.=     | any user             | all          |
-| =:unimportant= | =Not important=  | setter or maintainer | all          |
+| ID             | Syntax / Words  | Permission | Report types |
+|----------------+-----------------+------------+--------------|
+| =:urgent=      | =Urgent.=       | any user   | all          |
+| =:unurgent=    | =Not urgent=    | any user   | all          |
+| =:important=   | =Important.=    | any user   | all          |
+| =:unimportant= | =Not important= | any user   | all          |
 
 **** Classification
 
-| ID       | Syntax / Words | Permission           | Report types |
-|----------+----------------+----------------------+--------------|
-| =:topic=   | =Topic: word=    | any user             | all          |
-| =:untopic= | =No topic=       | setter or maintainer | all          |
+| ID         | Syntax / Words | Permission | Report types |
+|------------+----------------+------------+--------------|
+| =:topic=   | =Topic: word=  | any user   | all          |
+| =:untopic= | =No topic=     | any user   | all          |
 
 **** Scheduling
 
-| ID          | Syntax / Words                        | Permission           | Report types        |
-|-------------+---------------------------------------+----------------------+---------------------|
-| =:deadline=   | =Deadline: 2025-03-19= or =Deadline: 30d= | any user             | bug, patch, request |
-| =:undeadline= | =No deadline=                           | setter or maintainer | bug, patch, request |
-| =:expiry=     | =Expiry: 2025-06-15= or =Expiry: 30d=     | any user             | all types           |
-| =:unexpiry=   | =No expiry=                             | setter or maintainer | all types           |
+| ID            | Syntax / Words                            | Permission | Report types        |
+|---------------+-------------------------------------------+------------+---------------------|
+| =:deadline=   | =Deadline: 2025-03-19= or =Deadline: 30d= | any user   | bug, patch, request |
+| =:undeadline= | =No deadline=                             | any user   | bug, patch, request |
+| =:expiry=     | =Expiry: 2025-06-15= or =Expiry: 30d=     | any user   | all types           |
+| =:unexpiry=   | =No expiry=                               | any user   | all types           |
 
 **** Relations
 
-| ID            | Syntax / Words           | Permission           | Report types |
-|---------------+--------------------------+----------------------+--------------|
-| =:supersedes=   | =Supersedes: <msg-id>=     | any user             | all          |
-| =:unsupersedes= | =Not supersedes: <msg-id>= | setter or maintainer | all          |
-| =:related-to=   | =Related-to: <msg-id>=     | any user             | all          |
-| =:unrelated-to= | =Not related-to: <msg-id>= | any user             | all          |
+| ID              | Syntax / Words             | Permission | Report types |
+|-----------------+----------------------------+------------+--------------|
+| =:supersedes=   | =Supersedes: <msg-id>=     | any user   | all          |
+| =:unsupersedes= | =Not supersedes: <msg-id>= | any user   | all          |
+| =:related-to=   | =Related-to: <msg-id>=     | any user   | all          |
+| =:unrelated-to= | =Not related-to: <msg-id>= | any user   | all          |
 
 =:supersedes= and =:related-to= are the only relations that stay on
 the cover when sent through a patch-series cover letter -- see
@@ -662,8 +688,8 @@ the cover when sent through a patch-series cover letter -- see
 A /control/ manages a role. Role controls must be sent through the
 source's public channel.
 
-| ID   | Syntax / Words               | Permission      | Channel |
-|------+------------------------------+-----------------+---------|
+| ID   | Syntax / Words                 | Permission      | Channel |
+|------+--------------------------------+-----------------+---------|
 | role | =Add maintainer: addr@host=    | maintainer      | public  |
 | role | =Remove maintainer: addr@host= | lead maintainer | public  |
 
@@ -701,17 +727,17 @@ incremental: only sources modified since the last export are
 regenerated. Use =--force= to rebuild everything, or =bb export
 {json|rss|org|html|stats|text|events}= to rebuild a single format.
 
-| Flag               | Purpose                                                  | Configurable |
-|--------------------+----------------------------------------------------------+--------------|
-| =-n <source>=        | restrict to one source                                   | --           |
-| =-p <N>=             | filter by minimum priority                               | --           |
-| =-s <N>=             | filter by minimum status                                 | --           |
-| =--html-page-size <N>= | paginate HTML report table (client-side rendering)     | CLI only     |
-| =--html-columns <C>=   | HTML table columns to show (CSV subset; default: all)  | CLI only     |
-| =--html-columns-sort=  | default sort column for the HTML table (default: date) | CLI only     |
-| =--closed-retention= | exclude reports closed before given ISO date or duration | CLI only     |
-| =--topics-filter=    | restrict to topics (comma-separated, case-insensitive)   | CLI only     |
-| =--force=            | force a full re-export                                   | CLI only     |
+| Flag                   | Purpose                                                  | Configurable |
+|------------------------+----------------------------------------------------------+--------------|
+| =-n <source>=          | restrict to one source                                   | --           |
+| =-p <N>=               | filter by minimum priority                               | --           |
+| =-s <N>=               | filter by minimum status                                 | --           |
+| =--html-page-size <N>= | paginate HTML report table (client-side rendering)       | CLI only     |
+| =--html-columns <C>=   | HTML table columns to show (CSV subset; default: all)    | CLI only     |
+| =--html-columns-sort=  | default sort column for the HTML table (default: date)   | CLI only     |
+| =--closed-retention=   | exclude reports closed before given ISO date or duration | CLI only     |
+| =--topics-filter=      | restrict to topics (comma-separated, case-insensitive)   | CLI only     |
+| =--force=              | force a full re-export                                   | CLI only     |
 
 Durations accept =Nd=, =Nw=, =Nm=, =Ny= (e.g. =--closed-retention 1y= keeps
 reports closed within the last 12 months).
@@ -761,24 +787,24 @@ The regexp is always the whole value -- a =,= loses its meaning
 inside, and =|= being a clause separator, regexp alternation cannot
 appear either: to OR two regexps, use two clauses (=s:/a/ | s:/b/=).
 
-| Long form                  | Short    | Matches                                   |
-|----------------------------+----------+-------------------------------------------|
-| =from:bzg=                   | =f:=       | from address or name                      |
-| =subject:crash,latex=        | =s:=       | subject (a bare word matches subject)     |
-| =similar:a+b+c=              |          | subjects sharing 3 of the =+=-joined words  |
-| =topic:agenda=               | =T:=       | any of the report's topics                |
-| =source:emacs=               | =S:=       | source name (one char: exact)             |
-| =type:patch=                 | =t:=       | report type                               |
-| =priority:2=                 | =p:=       | exact priority (0-3)                      |
-| =mid:<...>=                  | =m:=       | message-id                                |
-| =acked:bzg= =owned:*= =closed:*= | =a: o: c:= | by person (or =*= for any)                  |
-| =urgent:*= =important:false=   | =u: i:=    | marks (set or not)                        |
-| =flags:AO=                   | =F:=       | Flags letters, all required (A O C R E S) |
-| =att:~+=                     | =A:=       | Att glyphs, all required (. ~ + x @ #)    |
-| =date:3d= =date:A..B=          | =d:=       | created (durations =Nd/Nw/Nm=, ranges)      |
-| =deadline:2m=                | =D:=       | due within / on (forward)                 |
-| =expired:10d=                | =e:=       | expiring within (forward)                 |
-| =closed:true=                | =c:true=   | include closed reports (transient)        |
+| Long form                        | Short      | Matches                                    |
+|----------------------------------+------------+--------------------------------------------|
+| =from:bzg=                       | =f:=       | from address or name                       |
+| =subject:crash,latex=            | =s:=       | subject (a bare word matches subject)      |
+| =similar:a+b+c=                  |            | subjects sharing 3 of the =+=-joined words |
+| =topic:agenda=                   | =T:=       | any of the report's topics                 |
+| =source:emacs=                   | =S:=       | source name (one char: exact)              |
+| =type:patch=                     | =t:=       | report type                                |
+| =priority:2=                     | =p:=       | exact priority (0-3)                       |
+| =mid:<...>=                      | =m:=       | message-id                                 |
+| =acked:bzg= =owned:*= =closed:*= | =a: o: c:= | by person (or =*= for any)                 |
+| =urgent:*= =important:false=     | =u: i:=    | marks (set or not)                         |
+| =flags:AO=                       | =F:=       | Flags letters, all required (A O C R E S)  |
+| =att:~+=                         | =A:=       | Att glyphs, all required (. ~ + x @ #)     |
+| =date:3d= =date:A..B=            | =d:=       | created (durations =Nd/Nw/Nm=, ranges)     |
+| =deadline:2m=                    | =D:=       | due within / on (forward)                  |
+| =expired:10d=                    | =e:=       | expiring within (forward)                  |
+| =closed:true=                    | =c:true=   | include closed reports (transient)         |
 
 Durations: =Nd= (days), =Nw= (weeks), =Nm= (months).  A lone date is
 that exact day; open range ends stay open (=date:2026-01-01..= has no
@@ -1061,25 +1087,25 @@ Emails that match no source are discarded at ingestion.
 
 ** Source options
 
-| Key                    | Description                                                                                 |
-|------------------------+---------------------------------------------------------------------------------------------|
-| =:name=                  | Source identifier (required)                                                                |
-| =:list= / =:alias= / =:to=   | Exactly one (determines source type and header to match)                                    |
-| =:maintainers=           | Initial maintainers as a vector of email strings, e.g. =["dev@example.org"]=                  |
-|                        | The first entry is the lead maintainer (see [[#managing-roles-and-permissions][Managing roles and permissions]])                 |
-| =:list-archive=          | URL of the list archive (shown in HTML reports)                                             |
-| =:archive-format-string= | URL template for message-ids (=%s= is replaced), used when the                                |
-|                        | =Archived-At= header is absent                                                                |
-| =:base-url=              | Base URL where this source's public directory is served                                     |
-| =:labels=                | Per-source label overrides (see [[#customising-subject-labels][customising subject labels]])                                 |
-| =:commands=              | Per-source command overrides (see [[#customising-commands][customising commands]])                                     |
-| =:report-types=          | Restrict detected and exported types, e.g. =#{:bug :patch}=                                   |
-| =:restricted-types=      | Types that require maintainer status to create (default: =#{:announcement :release :change}=) |
-| =:export-formats=        | Output formats, e.g. =["json" "rss"]=  (default: =["json" "org" "rss"]=)                        |
-| =:expiry=                | Auto-close rules per report type (see below)                                                |
-| =:notifications=         | ={:enabled false}= to silence notifications for this source (default: enabled)                |
-| =:awaiting-delay=        | Duration before flagging "awaiting reply", e.g. ="14d"= (default: 14 days)                    |
-| =:periods=               | Time-windowed overrides for maintainers/commands (see [[#source-periods][Source periods]])                       |
+| Key                        | Description                                                                                   |
+|----------------------------+-----------------------------------------------------------------------------------------------|
+| =:name=                    | Source identifier (required)                                                                  |
+| =:list= / =:alias= / =:to= | Exactly one (determines source type and header to match)                                      |
+| =:maintainers=             | Initial maintainers as a vector of email strings, e.g. =["dev@example.org"]=                  |
+|                            | The first entry is the lead maintainer (see [[#managing-roles-and-permissions][Managing roles and permissions]])                   |
+| =:list-archive=            | URL of the list archive (shown in HTML reports)                                               |
+| =:archive-format-string=   | URL template for message-ids (=%s= is replaced), used when the                                |
+|                            | =Archived-At= header is absent                                                                |
+| =:base-url=                | Base URL where this source's public directory is served                                       |
+| =:labels=                  | Per-source label overrides (see [[#customising-subject-labels][customising subject labels]])                                   |
+| =:commands=                | Per-source command overrides (see [[#customising-commands][customising commands]])                                       |
+| =:report-types=            | Restrict detected and exported types, e.g. =#{:bug :patch}=                                   |
+| =:restricted-types=        | Types that require maintainer status to create (default: =#{:announcement :release :change}=) |
+| =:export-formats=          | Output formats, e.g. =["json" "rss"]=  (default: =["json" "org" "rss"]=)                      |
+| =:expiry=                  | Auto-close rules per report type (see below)                                                  |
+| =:notifications=           | ={:enabled false}= to silence notifications for this source (default: enabled)                |
+| =:awaiting-delay=          | Duration before flagging "awaiting reply", e.g. ="14d"= (default: 14 days)                    |
+| =:periods=                 | Time-windowed overrides for maintainers/commands (see [[#source-periods][Source periods]])                         |
 
 ** Source periods
 
@@ -1127,20 +1153,20 @@ match configured rules. It sets the close reason to "expired".
 
 Each entry under =:expiry= maps a report type keyword to a rule map:
 
-| Rule key        | Type                      | Description                                             |
-|-----------------+---------------------------+---------------------------------------------------------|
+| Rule key          | Type                        | Description                                               |
+|-------------------+-----------------------------+-----------------------------------------------------------|
 | =:inactive-after= | string / date / =:deadline= | Duration ("30d"), ISO date ("2026-06-01"), or =:deadline= |
-| =:max-status=     | integer                   | Don't expire if activity score > this value (0--3)      |
-| =:max-priority=   | integer                   | Don't expire if priority > this value (0--3)            |
+| =:max-status=     | integer                     | Don't expire if activity score > this value (0--3)        |
+| =:max-priority=   | integer                     | Don't expire if priority > this value (0--3)              |
 
 All rules are conjunctive: a report expires only when *all* conditions
 are met. Only =:inactive-after= is required; the others are optional
 filters.
 
 | =:inactive-after= value | Trigger                                                                |
-|-----------------------+------------------------------------------------------------------------|
+|-------------------------+------------------------------------------------------------------------|
 | Duration (e.g. =30d=)   | Last email in the thread is older than the duration (any reply resets) |
-| ISO date              | The fixed date has passed, regardless of activity                      |
+| ISO date                | The fixed date has passed, regardless of activity                      |
 | =:deadline=             | The report's deadline is in the past (no deadline => never expires)    |
 
 The =:max-status= value uses an activity score that only counts acked
@@ -1223,8 +1249,8 @@ the other recipients (standard SMTP semantics).
 
 Optional per-subscription filters:
 
-| Key            | Description                                                  |
-|----------------+--------------------------------------------------------------|
+| Key              | Description                                                  |
+|------------------+--------------------------------------------------------------|
 | =:min-priority=  | Min priority for the "unacked & unowned" section (default 1) |
 | =:min-status=    | Min activity score for the "unacked & unowned" section       |
 | =:subject-match= | Substring match on the report subject (all sections)         |
@@ -1329,16 +1355,16 @@ prefixed with =!=. The default is =:loose=; =:strict= requires the prefix on
 every command, removing false positives on common English words
 ("Done.", "Closed.", "Applied.") that occur in ordinary prose.
 
-| Form             | Loose                  | Strict                 |
-|------------------+------------------------+------------------------|
-| Bareword         | =Closed.= / =!Closed.=     | =!Closed.=               |
-| Negative bareword| =Not acked= / =!Not acked= | =!Not acked=             |
-| =-by= line       | =Acked-by: a@b.c=        | =!Acked-by: a@b.c=       |
-| Date line        | =Deadline: 2026-06-01=   | =!Deadline: 2026-06-01=  |
-| Topic            | =Topic: event=           | =!Topic: event=          |
-| Supersede        | =Superseded-by: <mid>=   | =!Superseded-by: <mid>=  |
-| Supersede (sym.) | =Supersedes: <mid>=      | =!Supersedes: <mid>=     |
-| Role control     | =Add maintainer: a@b.c=  | =!Add maintainer: a@b.c= |
+| Form              | Loose                      | Strict                   |
+|-------------------+----------------------------+--------------------------|
+| Bareword          | =Closed.= / =!Closed.=     | =!Closed.=               |
+| Negative bareword | =Not acked= / =!Not acked= | =!Not acked=             |
+| =-by= line        | =Acked-by: a@b.c=          | =!Acked-by: a@b.c=       |
+| Date line         | =Deadline: 2026-06-01=     | =!Deadline: 2026-06-01=  |
+| Topic             | =Topic: event=             | =!Topic: event=          |
+| Supersede         | =Superseded-by: <mid>=     | =!Superseded-by: <mid>=  |
+| Supersede (sym.)  | =Supersedes: <mid>=        | =!Supersedes: <mid>=     |
+| Role control      | =Add maintainer: a@b.c=    | =!Add maintainer: a@b.c= |
 
 Set globally or per source (per-source wins):
 
@@ -1399,27 +1425,27 @@ format, =:start= strictly before =:end=.
 The export, notification and maintenance tasks are run through
 [[https://babashka.org/][Babashka]]. Each task and its main flags:
 
-| Task                                              | Description                                             |
-|---------------------------------------------------+---------------------------------------------------------|
-| =bb export=                                         | Incremental export of all formats (skip if unchanged)   |
-| =bb export --force=                                 | Full rebuild, ignore timestamps                         |
-| =bb export root=                                    | Regenerate top-level =index.html= only                    |
-| =bb export --html-page-size 100=                    | Paginate HTML table (100 reports/page)                  |
-| =bb export html --html-columns "type,subject,date"= | Show only those HTML table columns                      |
-| =bb export --closed-retention 1y=                   | Keep only reports closed within the last 12 months      |
-| =bb export --topics-filter "a,b"=                   | Only export reports with a topic in the list            |
-| =bb export --only-open=                             | Also export =-open= files (all-open.json, etc.)           |
-| =bb export FORMAT=                                  | Single format: json, rss, org, html, stats, patches,    |
-|                                                   | text, events, root, all                                 |
-| =bb notify=                                         | Send notification emails                                |
-| =bb notify --dry-run=                               | Preview notifications without sending                   |
-| =bb notify --debug=                                 | Verbose filtering diagnostics                           |
-| =bb maintenance=                                    | Show orphan emails (add =--delete= to purge)              |
-| =bb maintenance --retention 6m=                     | Override orphan retention (default 90d)                 |
-| =bb maintenance --failures=                         | List recent command failures                            |
-| =bb clean=                                          | Remove all files in =public/=                             |
+| Task                                                | Description                                                 |
+|-----------------------------------------------------+-------------------------------------------------------------|
+| =bb export=                                         | Incremental export of all formats (skip if unchanged)       |
+| =bb export --force=                                 | Full rebuild, ignore timestamps                             |
+| =bb export root=                                    | Regenerate top-level =index.html= only                      |
+| =bb export --html-page-size 100=                    | Paginate HTML table (100 reports/page)                      |
+| =bb export html --html-columns "type,subject,date"= | Show only those HTML table columns                          |
+| =bb export --closed-retention 1y=                   | Keep only reports closed within the last 12 months          |
+| =bb export --topics-filter "a,b"=                   | Only export reports with a topic in the list                |
+| =bb export --only-open=                             | Also export =-open= files (all-open.json, etc.)             |
+| =bb export FORMAT=                                  | Single format: json, rss, org, html, stats, patches,        |
+|                                                     | text, events, root, all                                     |
+| =bb notify=                                         | Send notification emails                                    |
+| =bb notify --dry-run=                               | Preview notifications without sending                       |
+| =bb notify --debug=                                 | Verbose filtering diagnostics                               |
+| =bb maintenance=                                    | Show orphan emails (add =--delete= to purge)                |
+| =bb maintenance --retention 6m=                     | Override orphan retention (default 90d)                     |
+| =bb maintenance --failures=                         | List recent command failures                                |
+| =bb clean=                                          | Remove all files in =public/=                               |
 | =bb build-jar=                                      | Build =target/bone.jar= + =bin/bone= wrapper                |
-| =bb test-config=                                    | Validate =config.edn=                                     |
+| =bb test-config=                                    | Validate =config.edn=                                       |
 | =bb test-smtp=                                      | Test SMTP config (=--to addr=, =--send=; default = dry-run) |
 
 Export accepts =-n <source>= (restrict to one source), =-p <N>= (minimum

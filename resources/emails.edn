@@ -1093,7 +1093,7 @@
   :email/body-text  "Owned-by: fixer@test.org\n"}
 
  ;; =========================================================================
- ;; 84 -- Regular user tries Closed-by directive (should be denied)
+ ;; 84 -- Regular user uses Closed-by directive (open to any user)
  ;; =========================================================================
  {
   :email/id        "84"

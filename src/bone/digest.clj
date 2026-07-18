@@ -621,6 +621,59 @@
     (doseq [rid nearest-eids]
       (broadcast-cover-commands! conn email source-map rroles delivery rid))))
 
+(defn- nearest-root-report
+  "Walk `email`'s ancestor mids nearest-first and return the eid of the
+  first one that is a report's own message-id, or nil.  This is the
+  message the reply actually targets: unlike thread-lookup's :nearest,
+  it never resolves to the other reports whose thread the reply merely
+  crosses (a patch email is a descendant of its cover letter, so the
+  cover would otherwise match too).  Like thread-lookup, the ancestors
+  of a stored-but-reportless intermediate are spliced into the walk
+  (bounded), so a reply carrying only an In-Reply-To to a sub-reply
+  still reaches the patch.  The indexable-mid? guard is defensive:
+  ancestor-mids-from already filters, but email-ancestors-by-mid keeps
+  the same belt-and-braces, so this stays aligned."
+  [db email]
+  (loop [stack   (vec (ancestor-mids email))  ; root-first; peek = nearest
+         seen    #{}
+         splices 0]
+    (when-let [mid (peek stack)]
+      (let [stack' (pop stack)]
+        (if (contains? seen mid)
+          (recur stack' seen splices)
+          (or (when (common/indexable-mid? mid)
+                (safe-mid-query mid
+                                #(d/entid db [:report/message-id mid])
+                                nil))
+              (let [ancestors (when (< splices thread-lookup-max-splices)
+                                (email-ancestors-by-mid db mid))]
+                (recur (into stack' ancestors) (conj seen mid)
+                       (if ancestors (inc splices) splices)))))))))
+
+(defn- collect-trailers!
+  "Store the git person trailers of a pure reply on the patch report
+  it replies to, broadcasting from a series cover letter to the series
+  patches (b4 semantics).  Only replies that create no report of their
+  own contribute: a patch email would otherwise leak its own
+  Signed-off-by onto the report it threads under.  :report/trailers
+  has set semantics, so duplicate trailers and replays collapse; the
+  touched reports are bumped for re-export (no state change)."
+  [conn email]
+  (when-let [trailers (seq (common/extract-trailers (common/email-body-text email)))]
+    (let [db     (d/db conn)
+          target (nearest-root-report db email)
+          rids   (when target (into [target] (cover-letter-patches db target)))
+          patch-rids (when (seq rids)
+                       (d/q '[:find [?r ...] :in $ [?r ...]
+                              :where [?r :report/type :patch]]
+                            db rids))]
+      (when (seq patch-rids)
+        (d/transact! conn (vec (for [rid patch-rids, tr trailers]
+                                 [:db/add rid :report/trailers tr])))
+        (tracking/bump-report-updated! conn patch-rids false)
+        (log/info "Collected" (count trailers) "trailer(s) on"
+                  (count patch-rids) "patch report(s)")))))
+
 (defn- run-post-creation-hooks!
   "Execute post-creation side effects driven by the plan."
   [conn report-eid eid email from-addr report-info
@@ -770,7 +823,12 @@
                     (attach-as-descendant! conn eid email from-addr parent-eids))
                   (dispatch-commands! conn email report-eid (:type report-info)
                                       nearest-eids from-addr source-name source-map
-                                      rroles delivery))
+                                      rroles delivery)
+                  ;; Pure replies only: an email that created a report
+                  ;; (e.g. a patch) must not leak its own trailers onto
+                  ;; its thread parents.
+                  (when (nil? report-eid)
+                    (collect-trailers! conn email)))
 
                 ;; Phase 4: post-creation hooks (plan is pure, execution is effectful)
                 (when report-eid

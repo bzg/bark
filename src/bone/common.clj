@@ -24,7 +24,7 @@
 
 (def bone-format
   "BONE export format version. Bump when the JSON/Org export shape changes."
-  "0.9.4")
+  "0.9.5")
 
 (def bone-schema
   (edn/read-string (slurp (io/resource "bone-schema.edn"))))
@@ -328,6 +328,47 @@
   [email]
   (some-> (or (:email/body-text email) (:email/body-text-from-html email))
           strip-signature))
+
+(def trailer-keys
+  "Person trailers collected from replies to a patch, b4-style:
+  lowercase key -> canonical capitalization.  Distinct from the BONE
+  command layer (`Acked-by:` as a maintainer proxy command): trailers
+  are collected verbatim from anyone, for clients to fold into the
+  commit message when applying the patch."
+  {"acked-by"        "Acked-by"
+   "reviewed-by"     "Reviewed-by"
+   "tested-by"       "Tested-by"
+   "reported-by"     "Reported-by"
+   "suggested-by"    "Suggested-by"
+   "signed-off-by"   "Signed-off-by"
+   "co-developed-by" "Co-developed-by"})
+
+(def ^:private patch-start-line-re
+  "First line of a patch pasted inline in a reply (mirrors detect's
+  inline-patch-start-patterns, which bone.detect cannot share without
+  inverting the dependency).  extract-trailers stops there, so a fixup
+  pasted below the reply text cannot leak its own Signed-off-by."
+  #"^(?:From [0-9a-f]{40} |diff --git |--- a/)")
+
+(defn extract-trailers
+  "Collect git person trailers from a reply body.
+  Returns a distinct vector of \"Key: Name <addr>\" strings for the
+  lines whose key starts at column 0 and is in `trailer-keys`, and
+  whose value contains an @ (so prose like \"Tested-by: nobody yet\"
+  is skipped).  Quoted lines never match, their key sitting behind
+  \">\".  Scanning stops at the first line of a pasted patch, the way
+  b4 does.  Keys are canonicalized, values trimmed.  Nil-safe on body."
+  [body]
+  (when body
+    (->> (str/split-lines body)
+         (take-while #(not (re-find patch-start-line-re %)))
+         (keep (fn [line]
+                 (when-let [[_ k v] (re-matches #"([A-Za-z][A-Za-z-]*):\s*(\S.*?)\s*" line)]
+                   (when-let [ck (get trailer-keys (str/lower-case k))]
+                     (when (str/includes? v "@")
+                       (str ck ": " v))))))
+         distinct
+         vec)))
 
 ;; ---------------------------------------------------------------------------
 ;; Date formatting
@@ -696,6 +737,12 @@
 (def type->plural (into {} (map (juxt :type :plural)) report-type-spec))
 
 (def default-commands
+  ;; No bare "Reviewed" in :acked -- in loose mode a reply opener like
+  ;; "Reviewed v2 and found problems." would ack with inverse polarity
+  ;; (a review is not an approval, unlike Confirmed/Approved).  The
+  ;; kernel idiom is the full Reviewed-by: line, a syntax synonym of
+  ;; Acked-by: in the registry; sources that want the bareword can add
+  ;; it via :words.
   {:acked     ["Acked" "Confirmed" "Approved"]
    :owned     ["Owned"]
    :closed    ["Canceled" "Cancelled" "Closed" "Expired"
@@ -1104,6 +1151,7 @@
     {:report/expiry [:email/author-address :email/date-sent]}
     :report/expiry-value
     :report/has-ics :report/has-text-attachments
+    :report/trailers
     :report/last-activity :report/last-activity-address :report/descendants :report/updated-at
     {:rel/_from [:rel/kind :rel/active? :rel/setter :rel/posed-at :rel/value
                  {:rel/to [:db/id :report/type :report/message-id
