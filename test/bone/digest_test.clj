@@ -1731,6 +1731,372 @@
         (finally
           (teardown! ctx))))))
 
+(deftest supersede-reaches-sibling-branch-revision
+  (testing "v3 replying to a reviewer's comment (not to v2 directly) still
+            closes v2 as :superseded.  Regression: v2 replied straight to
+            v1, but the reviewer's comment -- and so v3 -- branched off v1
+            on a different reply path that never mentions v2.  Walking only
+            the immediate ancestor chain (`nearest-report-eids`) missed this
+            still-open sibling; `open-patch-eids-by-sender` closes the gap."
+    (let [{:keys [conn] :as ctx} (setup-db!)]
+      (try
+        (store-and-process! conn
+                            (mk-email {:mid "<v1@test.org>"
+                                       :subject "[PATCH] widget: fix the thing"
+                                       :from "user@test.org"
+                                       :date #inst "2026-06-08T19:15:00"
+                                       :body "Initial patch.\n"})
+                            "direct")
+        (store-and-process! conn
+                            (assoc (mk-email {:mid "<v2@test.org>"
+                                              :subject "Re: [PATCH v2] widget: fix the thing"
+                                              :from "user@test.org"
+                                              :date #inst "2026-06-12T14:59:00"
+                                              :in-reply-to "<v1@test.org>"
+                                              :body "Updated version of the patch.\n"})
+                                   :email/attachments [{:attachment/filename "0002-fix.patch"}])
+                            "direct")
+        ;; A reviewer's plain-discussion reply to v1 -- no [PATCH] label,
+        ;; no attachment, so it never becomes a report of its own, but it
+        ;; still threads (and its mid must be stored for the ancestor walk
+        ;; to splice through it).
+        (store-and-process! conn
+                            (mk-email {:mid "<review@test.org>"
+                                       :subject "Re: [PATCH] widget: fix the thing"
+                                       :from "reviewer@test.org"
+                                       :date #inst "2026-06-15T10:00:00"
+                                       :in-reply-to "<v1@test.org>"
+                                       :body "Some review comments, no patch attached.\n"})
+                            "direct")
+        ;; v3 replies to the reviewer's comment, not to v2.
+        (store-and-process! conn
+                            (assoc (mk-email {:mid "<v3@test.org>"
+                                              :subject "Re: [PATCH v3] widget: fix the thing"
+                                              :from "user@test.org"
+                                              :date #inst "2026-06-17T06:37:00"
+                                              :in-reply-to "<review@test.org>"
+                                              :body "Third version, addressing review.\n"})
+                                   :email/attachments [{:attachment/filename "0003-fix.patch"}])
+                            "direct")
+        (let [db (d/db conn)
+              v1 (get-report db "<v1@test.org>")
+              v2 (get-report db "<v2@test.org>")
+              v3 (get-report db "<v3@test.org>")]
+          (is (some? v3) "v3 report was created")
+          (is (some? (:report/closed v1)) "v1 was closed (superseded by v2)")
+          (is (some? (:report/closed v2))
+              "v2 was closed (superseded by v3) despite not being on v3's reply chain")
+          (is (= :superseded (:report/close-reason v2)))
+          (is (nil? (:report/closed v3)) "v3 itself stays open"))
+        (finally
+          (teardown! ctx))))))
+
+(deftest supersede-does-not-cross-unrelated-threads
+  (testing "Two patches from the same sender with the same (generic,
+            recycled) subject, but that never share any common
+            ancestor, must not be conflated: same sender is not enough
+            -- `open-patch-eids-by-sender` candidates must also pass
+            `shares-common-ancestor?`."
+    (let [{:keys [conn] :as ctx} (setup-db!)]
+      (try
+        ;; An unrelated earlier patch, same sender, same recycled
+        ;; subject text as the one below -- but a wholly separate topic.
+        (store-and-process! conn
+                            (mk-email {:mid "<typo-fix-1@test.org>"
+                                       :subject "[PATCH] ox-html: fix typo in docstring"
+                                       :from "user@test.org"
+                                       :date #inst "2026-05-01T09:00:00"
+                                       :body "Fix a typo in ox-html's docstring.\n"})
+                            "direct")
+        ;; A different, unrelated thread by the same sender -- e.g. they
+        ;; hit "reply" on the wrong old email to start this new topic.
+        (store-and-process! conn
+                            (mk-email {:mid "<other-root@test.org>"
+                                       :subject "[PATCH] ob-python: unrelated fix"
+                                       :from "user@test.org"
+                                       :date #inst "2026-05-10T09:00:00"
+                                       :body "Some unrelated patch.\n"})
+                            "direct")
+        ;; "v2" of the *docstring* subject, but threaded under the
+        ;; *unrelated* root above -- no ancestor in common with
+        ;; <typo-fix-1@test.org>.
+        (store-and-process! conn
+                            (assoc (mk-email {:mid "<typo-fix-2@test.org>"
+                                              :subject "Re: [PATCH v2] ox-html: fix typo in docstring"
+                                              :from "user@test.org"
+                                              :date #inst "2026-05-10T10:00:00"
+                                              :in-reply-to "<other-root@test.org>"
+                                              :body "A second, unrelated typo fix.\n"})
+                                   :email/attachments [{:attachment/filename "0002-fix.patch"}])
+                            "direct")
+        (let [db     (d/db conn)
+              typo1  (get-report db "<typo-fix-1@test.org>")
+              other  (get-report db "<other-root@test.org>")
+              typo2  (get-report db "<typo-fix-2@test.org>")]
+          (is (some? typo2) "typo-fix-2 report was created")
+          (is (nil? (:report/closed typo1))
+              "typo-fix-1 stays open: same sender/subject but no common ancestor with typo-fix-2")
+          (is (nil? (:report/closed other))
+              "other-root stays open: different subject entirely"))
+        (finally
+          (teardown! ctx))))))
+
+(deftest version-supersede-does-not-cross-series-siblings
+  (testing "Two DIFFERENT patches in the same versioned series must not
+            supersede each other just because they share a version and a
+            colon-topic prefix (e.g. both '[PATCH vN k/m] ox-texinfo: ...'
+            parse topic 'ox-texinfo').  Auto-supersession must key on the
+            full normalized content subject, not the module prefix."
+    (let [{:keys [conn] :as ctx} (setup-db!)]
+      (try
+        (store-and-process! conn
+                            (mk-email {:mid "<cover@test.org>"
+                                       :subject "[PATCH] ox-texinfo series"
+                                       :from "user@test.org"
+                                       :date #inst "2026-01-01T09:00:00"
+                                       :body "Cover letter.\n"})
+                            "direct")
+        ;; Two distinct v1 patches sharing the colon-topic "ox-texinfo".
+        (store-and-process! conn
+                            (mk-email {:mid "<a1@test.org>"
+                                       :subject "[PATCH v1 1/2] ox-texinfo: Add function for kbd macro"
+                                       :from "user@test.org"
+                                       :date #inst "2026-01-01T09:01:00"
+                                       :in-reply-to "<cover@test.org>"
+                                       :body "Patch A, v1.\n"})
+                            "direct")
+        (store-and-process! conn
+                            (mk-email {:mid "<b1@test.org>"
+                                       :subject "[PATCH v1 2/2] ox-texinfo: Define definition commands"
+                                       :from "user@test.org"
+                                       :date #inst "2026-01-01T09:02:00"
+                                       :in-reply-to "<cover@test.org>"
+                                       :body "Patch B, v1.\n"})
+                            "direct")
+        ;; Only A is resent as v2 -- B's v1 (different content, same topic
+        ;; prefix and same version family) must survive untouched.
+        (store-and-process! conn
+                            (mk-email {:mid "<a2@test.org>"
+                                       :subject "[PATCH v2 1/2] ox-texinfo: Add function for kbd macro"
+                                       :from "user@test.org"
+                                       :date #inst "2026-01-05T09:00:00"
+                                       :in-reply-to "<cover@test.org>"
+                                       :body "Patch A, v2.\n"})
+                            "direct")
+        (let [db (d/db conn)
+              a1 (get-report db "<a1@test.org>")
+              b1 (get-report db "<b1@test.org>")]
+          (is (some? (:report/closed a1)) "A's v1 was superseded by A's v2 (same content)")
+          (is (nil? (:report/closed b1))
+              "B's v1 stays open: different content title, despite shared 'ox-texinfo' topic and matching version family"))
+        ;; B is now resent as v2 too -- its v1 must close this time.
+        (store-and-process! conn
+                            (mk-email {:mid "<b2@test.org>"
+                                       :subject "[PATCH v2 2/2] ox-texinfo: Define definition commands"
+                                       :from "user@test.org"
+                                       :date #inst "2026-01-06T09:00:00"
+                                       :in-reply-to "<cover@test.org>"
+                                       :body "Patch B, v2.\n"})
+                            "direct")
+        (let [db (d/db conn)
+              b1 (get-report db "<b1@test.org>")]
+          (is (some? (:report/closed b1)) "B's v1 was superseded by B's v2 (same content)"))
+        (finally
+          (teardown! ctx))))))
+
+(defn- fp-attachment
+  "A `git format-patch` attachment map with FILENAME and an internal
+  Subject: line, so build-patch-entities stores :patch/filename +
+  :patch/subject."
+  [filename internal-subject]
+  {:attachment/filename filename
+   :attachment/data
+   (str "From " (apply str (repeat 40 "0")) " Mon Sep 17 00:00:00 2001\n"
+        "From: User <user@test.org>\n"
+        "Subject: " internal-subject "\n"
+        "\n"
+        "diff --git a/x.el b/x.el\n--- a/x.el\n+++ b/x.el\n@@ -1 +1 @@\n-a\n+b\n")})
+
+(deftest supersede-vetoed-when-patch-content-differs
+  (testing "Two DIFFERENT patches from the same sender that share the
+            email (thread) subject and a common ancestor must NOT
+            supersede each other -- the attached patch's filename /
+            internal Subject reveals they are distinct patches (real
+            case: ob-screen 'respect custom screen location' vs 'support
+            :var header parameter').  A genuine re-send of the SAME patch
+            (matching filename) still supersedes."
+    (let [{:keys [conn] :as ctx} (setup-db!)]
+      (try
+        ;; A: an open patch under a shared thread subject.
+        (store-and-process! conn
+                            (assoc (mk-email {:mid "<a@test.org>"
+                                              :subject "[PATCH] ob-screen: babel improvements"
+                                              :from "user@test.org"
+                                              :date #inst "2023-03-19T00:00:00"
+                                              :body "Patch A.\n"})
+                                   :email/attachments
+                                   [(fp-attachment "0001-ob-screen-respect-custom-screen-location.patch"
+                                                   "[PATCH] ob-screen.el: respect custom screen location")])
+                            "direct")
+        ;; A reviewer reply (no patch) -- gives a cousin branch off A.
+        (store-and-process! conn
+                            (mk-email {:mid "<review@test.org>"
+                                       :subject "Re: [PATCH] ob-screen: babel improvements"
+                                       :from "reviewer@test.org"
+                                       :date #inst "2023-03-20T00:00:00"
+                                       :in-reply-to "<a@test.org>"
+                                       :body "Looks interesting.\n"})
+                            "direct")
+        ;; B: a DIFFERENT patch, same thread subject, cousin branch.
+        (store-and-process! conn
+                            (assoc (mk-email {:mid "<b@test.org>"
+                                              :subject "Re: [PATCH] ob-screen: babel improvements"
+                                              :from "user@test.org"
+                                              :date #inst "2025-07-21T00:00:00"
+                                              :in-reply-to "<review@test.org>"
+                                              :body "Patch B, unrelated change.\n"})
+                                   :email/attachments
+                                   [(fp-attachment "0001-ob-screen-support-var-header-parameter.patch"
+                                                   "[PATCH] ob-screen.el: support :var header parameter")])
+                            "direct")
+        (let [db (d/db conn)
+              a  (get-report db "<a@test.org>")]
+          (is (nil? (:report/closed a))
+              "A stays OPEN: B is a different patch (distinct filename/Subject) despite the shared thread subject"))
+        ;; C: a genuine re-send of the SAME patch as A -- must supersede A.
+        (store-and-process! conn
+                            (assoc (mk-email {:mid "<c@test.org>"
+                                              :subject "Re: [PATCH] ob-screen: babel improvements"
+                                              :from "user@test.org"
+                                              :date #inst "2025-08-01T00:00:00"
+                                              :in-reply-to "<review@test.org>"
+                                              :body "Patch A, resent.\n"})
+                                   :email/attachments
+                                   [(fp-attachment "0001-ob-screen-respect-custom-screen-location.patch"
+                                                   "[PATCH] ob-screen.el: respect custom screen location")])
+                            "direct")
+        (let [db (d/db conn)
+              a  (get-report db "<a@test.org>")]
+          (is (some? (:report/closed a))
+              "A is now closed: C carries the SAME patch (matching filename/Subject), a real re-send"))
+        (finally
+          (teardown! ctx))))))
+
+(defn- fp-inline-body
+  "An email body carrying an inline `git format-patch`, so
+  build-patch-entities stores an \"inline.patch\" entry whose parsed
+  :patch/subject is INTERNAL-SUBJECT."
+  [internal-subject]
+  (str "Hi,\n\nPatch below.\n\n"
+       "From " (apply str (repeat 40 "0")) " Mon Sep 17 00:00:00 2001\n"
+       "From: User <user@test.org>\n"
+       "Subject: " internal-subject "\n"
+       "\n"
+       "diff --git a/x.el b/x.el\n--- a/x.el\n+++ b/x.el\n@@ -1 +1 @@\n-a\n+b\n"))
+
+(deftest supersede-vetoed-for-inline-patches-too
+  (testing "The content veto also protects inline-patch reports: the
+            generic \"inline.patch\" filename carries no signal, but the
+            parsed internal Subject does, so a reply attaching a
+            DIFFERENT patch must not supersede an inline-patch original
+            under the same thread subject -- while a re-send of the same
+            patch (as attachment) still does."
+    (let [{:keys [conn] :as ctx} (setup-db!)]
+      (try
+        ;; A: original submission, patch inline in the body only.
+        (store-and-process! conn
+                            (mk-email {:mid "<a@test.org>"
+                                       :subject "[PATCH] tools: assorted improvements"
+                                       :from "user@test.org"
+                                       :date #inst "2026-01-05T00:00:00"
+                                       :body (fp-inline-body "[PATCH] tools: add frobnicator")})
+                            "direct")
+        ;; B: DIFFERENT patch attached, same thread subject.
+        (store-and-process! conn
+                            (assoc (mk-email {:mid "<b@test.org>"
+                                              :subject "Re: [PATCH] tools: assorted improvements"
+                                              :from "user@test.org"
+                                              :date #inst "2026-01-06T00:00:00"
+                                              :in-reply-to "<a@test.org>"
+                                              :body "Here is another one.\n"})
+                                   :email/attachments
+                                   [(fp-attachment "0001-tools-rewrite-defrobulator.patch"
+                                                   "[PATCH] tools: rewrite defrobulator")])
+                            "direct")
+        (let [db (d/db conn)
+              a  (get-report db "<a@test.org>")]
+          (is (nil? (:report/closed a))
+              "A stays OPEN: its inline internal Subject differs from B's patch"))
+        ;; C: the SAME patch as A's inline one, re-sent as attachment.
+        (store-and-process! conn
+                            (assoc (mk-email {:mid "<c@test.org>"
+                                              :subject "Re: [PATCH] tools: assorted improvements"
+                                              :from "user@test.org"
+                                              :date #inst "2026-01-07T00:00:00"
+                                              :in-reply-to "<a@test.org>"
+                                              :body "Rebased.\n"})
+                                   :email/attachments
+                                   [(fp-attachment "0001-tools-add-frobnicator.patch"
+                                                   "[PATCH] tools: add frobnicator")])
+                            "direct")
+        (let [db (d/db conn)
+              a  (get-report db "<a@test.org>")]
+          (is (some? (:report/closed a))
+              "A closed: C carries the same patch as A's inline one"))
+        (finally
+          (teardown! ctx))))))
+
+(deftest supersede-sender-match-is-case-insensitive
+  (testing "the sender-wide candidate search matches the author address
+            case-insensitively: a sibling-branch v2 stored with a
+            differently-cased From is still found and closed by v3"
+    (let [{:keys [conn] :as ctx} (setup-db!)]
+      (try
+        (store-and-process! conn
+                            (mk-email {:mid "<v1@test.org>"
+                                       :subject "[PATCH] widget: fix the thing"
+                                       :from "user@test.org"
+                                       :date #inst "2026-06-08T19:15:00"
+                                       :body "Initial patch.\n"})
+                            "direct")
+        ;; v2's From is cased differently than v1/v3's.
+        (store-and-process! conn
+                            (assoc (mk-email {:mid "<v2@test.org>"
+                                              :subject "Re: [PATCH v2] widget: fix the thing"
+                                              :from "User@Test.org"
+                                              :date #inst "2026-06-12T14:59:00"
+                                              :in-reply-to "<v1@test.org>"
+                                              :body "Updated version of the patch.\n"})
+                                   :email/attachments [{:attachment/filename "0002-fix.patch"}])
+                            "direct")
+        (store-and-process! conn
+                            (mk-email {:mid "<review@test.org>"
+                                       :subject "Re: [PATCH] widget: fix the thing"
+                                       :from "reviewer@test.org"
+                                       :date #inst "2026-06-15T10:00:00"
+                                       :in-reply-to "<v1@test.org>"
+                                       :body "Some review comments, no patch attached.\n"})
+                            "direct")
+        ;; v3 replies to the reviewer's comment: v2 is only reachable
+        ;; through the sender-wide search, which must ignore the case
+        ;; difference.
+        (store-and-process! conn
+                            (assoc (mk-email {:mid "<v3@test.org>"
+                                              :subject "Re: [PATCH v3] widget: fix the thing"
+                                              :from "user@test.org"
+                                              :date #inst "2026-06-17T06:37:00"
+                                              :in-reply-to "<review@test.org>"
+                                              :body "Third version, addressing review.\n"})
+                                   :email/attachments [{:attachment/filename "0003-fix.patch"}])
+                            "direct")
+        (let [db (d/db conn)
+              v2 (get-report db "<v2@test.org>")]
+          (is (some? (:report/closed v2))
+              "v2 closed despite its differently-cased author address")
+          (is (= :superseded (:report/close-reason v2))))
+        (finally
+          (teardown! ctx))))))
+
 ;; ---------------------------------------------------------------------------
 ;; report-entity :report/has-ics is scoped to announcements
 ;; ---------------------------------------------------------------------------
