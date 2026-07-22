@@ -7,7 +7,7 @@
   Ported from test/bone-digest-test.clj (bb version)."
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is testing use-fixtures]]
+            [clojure.test :refer [are deftest is testing use-fixtures]]
             [datalevin.core :as d]
             [bone.commands :as commands]
             [bone.common :as common]
@@ -2094,6 +2094,117 @@
           (is (some? (:report/closed v2))
               "v2 closed despite its differently-cased author address")
           (is (= :superseded (:report/close-reason v2))))
+        (finally
+          (teardown! ctx))))))
+
+(deftest normalize-subject-widening
+  (testing "parenthesized version markers and punctuation don't split
+            otherwise-identical subjects (real corpus cases), but
+            distinct wording still does"
+    (let [norm #'digest/normalize-subject]
+      (are [a b] (= (norm a) (norm b))
+        "Re: [PATCH] (v3) New LaTeX code export option: engraved"
+        "[PATCH] New LaTeX code export option: engraved"
+        "[PATCH v1] org-agenda-clock-goto: Jump to closest entry and respect, filtering"
+        "[PATCH v2] org-agenda-clock-goto: Jump to closest entry and respect filtering"
+        "[PATCH] ox-md.el export code blocks using grave accents."
+        "Re: [PATCH] ox-md.el export code blocks using grave accents"
+        "Re: [PATCH] org-protocol: decode \"+\" in query part as space (v2)"
+        "[PATCH] org-protocol: decode \"+\" in query part as space")
+      (are [a b] (not= (norm a) (norm b))
+        "[PATCH] Speed up tangling" "[PATCH] Improve tangling"
+        ;; parenthesized text that is NOT a version marker is kept
+        "add tests for ob-haskell (ghci)" "add tests for ob-haskell"
+        ;; bare numbers are significant (series positions, counts)
+        "[PATCH] Fix part 2" "[PATCH] Fix part 3")
+      (is (nil? (norm "[PATCH]"))
+          "a subject with nothing but tags normalizes to nil, never to a matchable empty string"))))
+
+(deftest supersede-tolerates-version-marker-and-punctuation
+  (testing "an unnumbered re-send whose subject differs only by a
+            parenthesized version marker and punctuation still
+            supersedes the original (real cases: '(v3) New LaTeX code
+            export option' / 'respect, filtering')"
+    (let [{:keys [conn] :as ctx} (setup-db!)]
+      (try
+        (store-and-process! conn
+                            (mk-email {:mid "<v1@test.org>"
+                                       :subject "[PATCH] widget: fix the thing, properly"
+                                       :from "user@test.org"
+                                       :date #inst "2026-06-08T19:15:00"
+                                       :body "Initial patch.\n"})
+                            "direct")
+        (store-and-process! conn
+                            (assoc (mk-email {:mid "<v2@test.org>"
+                                              :subject "Re: [PATCH] (v2) widget: fix the thing properly"
+                                              :from "user@test.org"
+                                              :date #inst "2026-06-12T14:59:00"
+                                              :in-reply-to "<v1@test.org>"
+                                              :body "Updated version of the patch.\n"})
+                                   :email/attachments [{:attachment/filename "0001-fix.patch"}])
+                            "direct")
+        (let [db (d/db conn)
+              v1 (get-report db "<v1@test.org>")
+              v2 (get-report db "<v2@test.org>")]
+          (is (some? v2) "v2 report was created")
+          (is (some? (:report/closed v1))
+              "v1 closed despite the (v2) marker and comma in one subject")
+          (is (= :superseded (:report/close-reason v1)))
+          (is (nil? (:report/closed v2)) "v2 itself stays open"))
+        (finally
+          (teardown! ctx))))))
+
+(deftest supersede-bare-patch-subject-falls-back-to-idents
+  (testing "a bare '[PATCH]' subject normalizes to nil, so it can't
+            subject-match anything (no more \"\" == \"\" collisions);
+            instead, matching patch identifiers on both sides stand in
+            for the subject (real case: 87fstreec8, tecosaur's
+            proportional image widths patch resent as 'Re: [PATCH]')"
+    (let [{:keys [conn] :as ctx} (setup-db!)]
+      (try
+        (store-and-process! conn
+                            (assoc (mk-email {:mid "<a@test.org>"
+                                              :subject "[PATCH]"
+                                              :from "user@test.org"
+                                              :date #inst "2021-05-01T00:00:00"
+                                              :body "Patch A.\n"})
+                                   :email/attachments
+                                   [(fp-attachment "0001-org-Display-proportional-image-widths.patch"
+                                                   "[PATCH] org: Display proportional image widths")])
+                            "direct")
+        ;; B: also subject-less, direct reply, but a DIFFERENT patch.
+        (store-and-process! conn
+                            (assoc (mk-email {:mid "<b@test.org>"
+                                              :subject "Re: [PATCH]"
+                                              :from "user@test.org"
+                                              :date #inst "2021-05-02T00:00:00"
+                                              :in-reply-to "<a@test.org>"
+                                              :body "Patch B, unrelated.\n"})
+                                   :email/attachments
+                                   [(fp-attachment "0001-ox-html.el-remove-CDATA-strings.patch"
+                                                   "[PATCH] ox-html.el: remove CDATA strings")])
+                            "direct")
+        (let [db (d/db conn)
+              a  (get-report db "<a@test.org>")]
+          (is (nil? (:report/closed a))
+              "A stays OPEN: no subject signal and B's idents differ"))
+        ;; C: subject-less re-send of the SAME patch -- idents stand in.
+        (store-and-process! conn
+                            (assoc (mk-email {:mid "<c@test.org>"
+                                              :subject "Re: [PATCH]"
+                                              :from "user@test.org"
+                                              :date #inst "2021-05-03T00:00:00"
+                                              :in-reply-to "<a@test.org>"
+                                              :body "Patch A, updated.\n"})
+                                   :email/attachments
+                                   [(fp-attachment "0001-org-Display-proportional-image-widths.patch"
+                                                   "[PATCH] org: Display proportional image widths")])
+                            "direct")
+        (let [db (d/db conn)
+              a  (get-report db "<a@test.org>")]
+          (is (some? (:report/closed a))
+              "A closed: C carries the same patch, idents replace the missing subject")
+          (is (= :superseded (:report/close-reason a))))
         (finally
           (teardown! ctx))))))
 

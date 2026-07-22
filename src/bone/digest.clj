@@ -333,14 +333,19 @@
     (log/info "Auto-closed patch" log-msg)))
 
 (defn- normalize-subject
-  "Strip Re:/Fwd: prefixes and bracketed tags to get the base subject."
+  "Base subject as space-joined tokens: strip Re:/Fwd: prefixes,
+  bracketed tags and parenthesized version markers (\"(v3)\"), then keep
+  alphanumeric tokens only, so punctuation differences don't count.
+  Nil when nothing distinctive remains."
   [subject]
-  (when subject
-    (-> subject
-        (str/replace #"(?i)^(\s*(Re|Fwd)\s*:\s*)+" "")
-        (str/replace #"\[[^\]]*\]\s*" "")
-        str/trim
-        str/lower-case)))
+  (some->> (some-> subject
+                   (str/replace #"(?i)^(\s*(Re|Fwd)\s*:\s*)+" "")
+                   (str/replace #"\[[^\]]*\]\s*" "")
+                   (str/replace #"(?i)\(\s*v(er|ersion)?\.?\s*\d+\s*\)" "")
+                   str/lower-case)
+           (re-seq #"[a-z0-9]+")
+           seq
+           (str/join " ")))
 
 (def ^:private patch-pull [:patch/filename :patch/subject])
 
@@ -459,13 +464,26 @@
   "Close open patch reports (thread-adjacent, or from the same sender
   and tracing back to a common ancestor -- see `supersede-candidate-eids`)
   sharing the new patch's base subject (Re:/[TAG] stripped).  Handles
-  unnumbered re-sends, including ones posted on a different thread branch."
+  unnumbered re-sends, including ones posted on a different thread branch.
+  When the subject normalizes to nothing (a bare \"[PATCH]\"), matching
+  patch identifiers on both sides stand in for it."
   [conn report-eid email candidate-eids]
   (let [new-subj   (normalize-subject (:email/subject email))
         db         (d/db conn)
         new-idents (patch-idents
-                    (d/pull db [{:report/patches patch-pull}] report-eid))]
-    (when (and new-subj (seq candidate-eids))
+                    (d/pull db [{:report/patches patch-pull}] report-eid))
+        match?     (fn [r]
+                     (let [r-idents (patch-idents r)]
+                       (if new-subj
+                         (and (= new-subj
+                                 (normalize-subject
+                                  (get-in r [:report/email :email/subject])))
+                              ;; ... but veto plainly different patches.
+                              (not (patch-idents-conflict? new-idents r-idents)))
+                         ;; No subject signal: require identical idents.
+                         (and (seq new-idents) (seq r-idents)
+                              (not (patch-idents-conflict? new-idents r-idents))))))]
+    (when (seq candidate-eids)
       (doseq [rid candidate-eids
               :when (not= rid report-eid)]
         (let [r (d/pull db [:report/type :report/closed :report/message-id
@@ -473,9 +491,7 @@
                             {:report/patches patch-pull}] rid)]
           (when (and (= :patch (:report/type r))
                      (not (:report/closed r))
-                     (= new-subj (normalize-subject (get-in r [:report/email :email/subject])))
-                     ;; ... but veto plainly different patches.
-                     (not (patch-idents-conflict? new-idents (patch-idents r))))
+                     (match? r))
             (auto-supersede-patch!
              conn rid report-eid email
              (str (:report/message-id r) " (superseded by same-subject thread patch)"))))))))
