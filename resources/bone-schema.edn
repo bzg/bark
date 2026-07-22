@@ -31,6 +31,9 @@
  ;; (Mailman/DMARC munging style).  All downstream code (participants,
  ;; commands, roles, reports, exports) reads author-address.
  :email/author-name           {:db/valueType :db.type/string}
+ ;; Not indexed: stored verbatim, so value lookups must be
+ ;; case-insensitive (bone.digest/open-patch-eids-by-sender compares
+ ;; lowercased in a predicate, anchored on the :report/type index).
  :email/author-address        {:db/valueType :db.type/string}
  :email/to                    {:db/valueType   :db.type/string
                                :db/cardinality :db.cardinality/many}
@@ -86,7 +89,10 @@
  ;; to :email/author-address) or, for proxy-capable state attrs, via
  ;; the cached `-address` attr below -- which may diverge from the
  ;; email's author-address when a maintainer uses the `-by` form.
- :report/type                  {:db/valueType :db.type/keyword}
+ ;; Indexed: every "open reports of type X" query (auto-supersede,
+ ;; series, release :change closing, ...) filters by exact value.
+ :report/type                  {:db/valueType :db.type/keyword
+                                :db/index     true}
  :report/email                 {:db/valueType :db.type/ref}
  ;; Raw root Message-Id, kept verbatim for display/export; identity
  ;; and lookups go through the hash (as for :email/message-id).
@@ -184,7 +190,12 @@
                     :db/unique    :db.unique/identity}
  :rel/from         {:db/valueType :db.type/ref}
  :rel/to           {:db/valueType :db.type/ref}
- :rel/kind         {:db/valueType :db.type/keyword}
+ ;; Indexed: :rel is the highest-cardinality entity, and nearly every
+ ;; bone.relations query filters by a bound :rel/kind.  (Not :rel/active?:
+ ;; a boolean is barely more selective than a scan -- :rel/kind carries
+ ;; the selectivity, :rel/active? is a cheap post-filter.)
+ :rel/kind         {:db/valueType :db.type/keyword
+                    :db/index     true}
  :rel/setter       {:db/valueType :db.type/string}
  :rel/email        {:db/valueType :db.type/ref}
  :rel/posed-at     {:db/valueType :db.type/instant}
@@ -203,8 +214,12 @@
  ;; --- Patch series ---
  :series/id           {:db/valueType :db.type/string
                        :db/unique    :db.unique/identity}
- :series/topic        {:db/valueType :db.type/string}
- :series/sender       {:db/valueType :db.type/string}
+ ;; Two independent AVET indexes (not a composite): every series
+ ;; lookup binds both values, either index narrows the scan.
+ :series/topic        {:db/valueType :db.type/string
+                       :db/index     true}
+ :series/sender       {:db/valueType :db.type/string
+                       :db/index     true}
  :series/expected     {:db/valueType :db.type/long}
  :series/cover-letter {:db/valueType :db.type/ref}
  :series/patches      {:db/valueType   :db.type/ref
