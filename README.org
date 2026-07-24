@@ -7,10 +7,10 @@
 
 BONE is an email-driven report tracker -- see the [[docs/bone-manual.org#principles][principles]].
 
-BONE monitors a single IMAP mailbox or Maildir, classifies incoming
-emails into sources by header matching, detects report types from
-subject tags, applies commands from email bodies, and manages roles
-per source.
+BONE monitors IMAP mailboxes and Maildirs, classifies incoming emails
+into sources by header matching, detects report types from subject
+tags, applies commands from email bodies, and manages roles per
+source.
 
 BONE reports can be read with other tools:
 
@@ -138,7 +138,7 @@ By default BONE reads =./config.edn=.  To override:
 Precedence: =-c= > =BONE_CONFIG= > =./config.edn=.
 
 The =BONE_DB= env var is honored as a fallback when no
-=:db {:path …}= entry is set.
+=:db {:path ...}= entry is set.
 
 ** Mail sources (=:mailboxes=)
 
@@ -158,16 +158,16 @@ keyed per =:name=, so IMAP UID state never mixes between mailboxes.
 | =:path=         | Maildir only | Root path of the Maildir                     |
 | =:folder=       | no           | Folder name (default: ="INBOX"=)               |
 
-See the manual ([[file:docs/bone-manual.org][docs/bone-manual.org]] § Multiple mailboxes) for the
-behaviour of batch and watch modes with several mailboxes.
+See "Multiple mailboxes" in the [[file:docs/bone-manual.org][manual]] for the behaviour of batch
+and watch modes with several mailboxes.
 
 ** Ingest settings (=:ingest=)
 
-| Field                | Default     | Description                                                            |
-|----------------------+-------------+------------------------------------------------------------------------|
-| =:fetch=               | ={:limit 50}= | First-run fetch: ={:limit N}= or ={:since "30d"}= or ={:start "…" :end "…"}= |
-| =:max-size=            | none        | Skip emails larger than N bytes (e.g. =1048576=)                         |
-| =:max-attachment-size= | =1048576=     | Max bytes extracted from attachments (.patch, .ics, etc.)              |
+| Field                | Default     | Description                                                                |
+|----------------------+-------------+----------------------------------------------------------------------------|
+| =:fetch=               | ={:limit 50}= | First-run fetch: ={:limit N}= or ={:since "30d"}= or ={:start "..." :end "..."}= |
+| =:max-size=            | none        | Skip emails larger than N bytes (e.g. =1048576=)                             |
+| =:max-attachment-size= | =1048576=     | Max bytes extracted from attachments (.patch, .ics, etc.)                  |
 
 ** Sources (=:sources=)
 
@@ -231,8 +231,8 @@ to maintainers, authors, and owners.  Unlisted emails keep their
 last observed =From:= name.
 
 For sources whose maintainer list or vocabulary evolved over time,
-declare the history inline via =:periods= on the source (see
-=docs/bone-manual.org §Source periods=).
+declare the history inline via =:periods= on the source (see "Source
+periods" in the [[file:docs/bone-manual.org][manual]]).
 
 ** Example config
 
