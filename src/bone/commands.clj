@@ -304,8 +304,12 @@
               :unset-topic    (-> acc (dissoc :topic) (assoc :untopic? true))
               ;; All relation actions carry a mid (the `:param :message-id`
               ;; in the registry guarantees the parser captured one).
+              ;; Superseded-by: and Duplicate-of: both close this report,
+              ;; so they are mutually exclusive: the last line wins (same
+              ;; rule as repeated lines of one command).
               :set-superseded   (-> acc (assoc  :superseded-by target-message-id)
-                                       (dissoc :unsuperseded-by? :unsuperseded-by-mid))
+                                       (dissoc :unsuperseded-by? :unsuperseded-by-mid
+                                               :duplicate-of))
               :unset-superseded (-> acc (dissoc :superseded-by)
                                        (assoc  :unsuperseded-by? true
                                                :unsuperseded-by-mid target-message-id))
@@ -315,7 +319,8 @@
                                        (assoc  :unsupersedes? true
                                                :unsupersedes-mid target-message-id))
               :set-duplicate    (-> acc (assoc  :duplicate-of target-message-id)
-                                       (dissoc :unduplicate-of? :unduplicate-of-mid))
+                                       (dissoc :unduplicate-of? :unduplicate-of-mid
+                                               :superseded-by))
               :unset-duplicate  (-> acc (dissoc :duplicate-of)
                                        (assoc  :unduplicate-of? true
                                                :unduplicate-of-mid target-message-id))
@@ -354,20 +359,32 @@
   [conn report-eid from-addr vote email delivery source-cfg]
   (if-not (common/sent-via-source-channel? delivery source-cfg)
     (log/info "Vote ignored (private email on public source)" from-addr)
-    (let [report-mid (:report/message-id (d/entity (d/db conn) report-eid))
+    (let [db         (d/db conn)
+          report-mid (:report/message-id (d/entity db report-eid))
           ;; Lowercase so Bob@X.org and bob@x.org count as one voter;
           ;; keyed on the mid hash (unique attr, raw mids unbounded).
           addr       (some-> from-addr str/lower-case)
-          vote-key   (str (common/mid-hash report-mid) ":" addr)]
-      ;; :vote/key is unique identity: first vote wins.
-      (when-not (d/entid (d/db conn) [:vote/key vote-key])
-        (d/transact! conn [{:vote/key    vote-key
-                            :vote/report report-eid
-                            :vote/email  (:db/id email)
-                            :vote/value  vote
-                            :vote/voter  addr}])
+          vote-key   (str (common/mid-hash report-mid) ":" addr)
+          ;; One entity per voter per report; a new vote replaces the
+          ;; previous one (last vote wins).  Explicit :db/id on revote
+          ;; -- no upsert through the unique attr at transact time.
+          existing   (d/entid db [:vote/key vote-key])
+          current    (when existing
+                       (:vote/value (d/pull db [:vote/value] existing)))]
+      (when (not= current vote)
+        (d/transact! conn [(if existing
+                             {:db/id       existing
+                              :vote/email  (:db/id email)
+                              :vote/value  vote}
+                             {:vote/key    vote-key
+                              :vote/report report-eid
+                              :vote/email  (:db/id email)
+                              :vote/value  vote
+                              :vote/voter  addr})])
         (tracking/bump-report-updated! conn report-eid)
-        (log/info "Vote" (case vote :up "+1" :down "-1" "0") "by" from-addr)))))
+        (log/info (cond-> (str "Vote " (case vote :up "+1" :down "-1" "0")
+                               " by " from-addr)
+                    existing (str " (replaces previous vote)")))))))
 
 (defn- build-unset-tx
   "Build retraction datoms for unsetting attributes and their address attrs."
@@ -863,6 +880,12 @@
     :mid-key :duplicate-of :unset-key :unduplicate-of? :unset-mid-key :unduplicate-of-mid
     :setter-attr :rel/duplicates-from}])
 
+(def ^:private closure-kinds
+  "Relation kinds that drive a report closure.  Derived from
+  `closure-relation-rows` so replacement (`apply-closure-set-row!`)
+  and undo (`try-unclosed!`) stay in lockstep when a kind is added."
+  (into [] (comp (map :kind) (distinct)) closure-relation-rows))
+
 (defn- compute-closure-rows
   "Enrich `closure-relation-rows` with per-row decisions derived from
   `resolved` and current DB state.  Each row gains:
@@ -914,9 +937,13 @@
      companion is symmetric and stays active -- the two reports remain
      related either way) and reopen pose-to (which was the :rel/from
      of the inverse, hence previously closed).
-  2. Close pose-from with the row's propagate close-reason.
-  3. Pose the new closure relation + :related-to companion.
-  4. Propagate the patch closure when pose-from is a patch."
+  2. Replacement: retract any other active closure relation going out
+     of pose-from (a report has one superseder or duplicate target at
+     a time; a new pose on an already-closed report replaces it).  The
+     old :related-to companion stays active.
+  3. Close pose-from with the row's propagate close-reason.
+  4. Pose the new closure relation + :related-to companion.
+  5. Propagate the patch closure when pose-from is a patch."
   [conn {:keys [kind target-mid pose-from pose-to
                 propagate propagate-tgt]}
    email-eid from-addr posed-at source-type]
@@ -924,6 +951,13 @@
     (rel/retract-pair! conn pose-to kind pose-from email-eid)
     (reopen-report! conn pose-to)
     (tracking/bump-report-updated! conn pose-to))
+  (doseq [k     closure-kinds
+          :let  [stale (->> (rel/active-targets (d/db conn) pose-from k)
+                            (remove #(and (= k kind) (= % pose-to))))]
+          :when (seq stale)]
+    (rel/retract-by-from! conn pose-from k email-eid)
+    (doseq [prev stale]
+      (tracking/bump-report-updated! conn prev)))
   (d/transact! conn (close-with-reason-tx pose-from email-eid from-addr propagate))
   (let [opts {:from-eid pose-from :to-eid pose-to
               :setter from-addr :email-eid email-eid
@@ -975,15 +1009,6 @@
     (when (seq permitted)
       (let [current     @current-d
             resolved    (resolve-commands permitted)
-            ;; Superseded-by: and Duplicate-of: in one email contradict
-            ;; each other -- both close this report, and the winning
-            ;; close-reason would be arbitrated by closure-relation-rows
-            ;; order, not by the email.  Apply neither.
-            resolved    (if (and (:superseded-by resolved) (:duplicate-of resolved))
-                          (do (log/warn "Superseded-by: and Duplicate-of: in the same"
-                                        "email -- contradictory, neither applied")
-                              (dissoc resolved :superseded-by :duplicate-of))
-                          resolved)
             source-type (:report/type current)
             rows        (compute-closure-rows db report-eid source-type resolved)
             valid-rows  (filterv (comp :valid? :resolved) rows)
@@ -1027,95 +1052,51 @@
                         source-type "vs target" (:target-type resolved)))))
         (apply-related-to! conn report-eid resolved email-eid from-addr failure-ctx)))))
 
-(def ^:private unclose-relation-rows
-  "Subset of `closure-relation-rows` used by `try-unclosed!` to retract
-  a closure relation on a closed report.  Filters to :current-as-from
-  rows only (rows where current can ever be the closed party).
-  Derived to keep both row sets in lockstep when a new kind is added."
-  (into []
-        (comp (filter #(= :current-as-from (:role %)))
-              (map #(select-keys % [:id :kind :role :unset-key :unset-mid-key
-                                    :setter-attr])))
-        closure-relation-rows))
-
 (defn- try-unclosed!
   "If a closed report has a Not closed / Not superseded-by / Not duplicate-of
-  line, retract the closure (and the relation if any).  Explicit unsets
-  must name the exact mid of the currently-active relation; a mismatch
-  is a no-op (so an unrelated relation of the same kind is not collateral
-  damage).  `Not closed.` retracts whatever closure relation drove the
-  closure, regardless of mid."
+  line, retract the closure (and the relation if any).  `Not closed.`
+  retracts whatever closure relation drove the closure, regardless of
+  mid.  Closure-relation commands (sets and explicit unsets) go through
+  `apply-lines!` on closed reports too -- see `apply-commands!`."
   [conn report-eid lines email-eid is-maintainer? from-addr failure-ctx]
   (let [db          (d/db conn)
-        current-d   (delay (merge (d/pull db close-state-pull-pattern report-eid)
-                                  (relation-setters-as-pull
-                                   db report-eid unclose-relation-rows)))
+        current-d   (delay (d/pull db close-state-pull-pattern report-eid))
         permitted   (filter-permitted-lines
                      lines current-d from-addr is-maintainer?
-                     ;; On a closed report only closure commands apply;
+                     ;; On a closed report only reopening applies here;
                      ;; other :unset lines (Not urgent., ...) would be
                      ;; no-ops -- don't scope-check them into noisy
                      ;; :insufficient-scope failures.
                      (fn [{:keys [action attr]}]
                        (case action
                          :unset (= attr :report/closed)
-                         (:unset-superseded :unset-duplicate
-                          :set-related :unset-related) true
+                         (:set-related :unset-related) true
                          false))
                      failure-ctx)
         resolved    (resolve-commands permitted)
-        unset       (:unset resolved)
-        unset-closed? (contains? unset :report/closed)]
+        unset-closed? (contains? (:unset resolved) :report/closed)]
     (apply-related-to! conn report-eid resolved email-eid from-addr failure-ctx)
-    (when (or unset-closed? (:unsuperseded-by? resolved) (:unduplicate-of? resolved))
-      (let [current  @current-d
-            ;; For each row: target-eid + whether to clear this relation.
-            ;; Explicit `Not X-by: <mid>` requires the mid to match the
-            ;; active counterparty.  Implicit `Not closed` retracts whatever
-            ;; is active (the closure was driven by exactly that relation).
-            rows     (mapv (fn [{:keys [kind unset-key unset-mid-key] :as row}]
-                             (let [target (relation-target-eid db report-eid kind)
-                                   explicit-unset? (boolean (get resolved unset-key))
-                                   unset-mid       (get resolved unset-mid-key)
-                                   unset-eid       (when unset-mid
-                                                     (report-eid-by-mid db unset-mid))]
-                               (assoc row
-                                      :target target
-                                      :unset-target-mid unset-mid
-                                      :unset-target-eid unset-eid
-                                      :clear? (or (and explicit-unset?
-                                                       target
-                                                       (= unset-eid target))
-                                                  (and unset-closed? target)))))
-                           unclose-relation-rows)
-            any-clear?     (some :clear? rows)
-            ;; Reopen only when we will actually retract a relation OR when
-            ;; the email said "Not closed." outright.  An explicit unset whose
-            ;; mid does not match any active relation is a no-op -- the
-            ;; report stays closed.
-            should-reopen? (or unset-closed? any-clear?)
-            attr-tx        (when should-reopen?
-                             (-> []
-                                 (into (build-unset-tx report-eid current #{:report/closed}))
-                                 (cond-> (:report/close-reason current)
-                                   (conj [:db/retract report-eid :report/close-reason
-                                          (:report/close-reason current)]))))]
+    (when unset-closed?
+      (let [current @current-d
+            attr-tx (-> []
+                        (into (build-unset-tx report-eid current #{:report/closed}))
+                        (cond-> (:report/close-reason current)
+                          (conj [:db/retract report-eid :report/close-reason
+                                 (:report/close-reason current)])))]
         (when (seq attr-tx)
           (d/transact! conn attr-tx))
-        (doseq [{:keys [kind target clear?]} rows :when clear?]
+        ;; Retract whatever closure relation drove the closure (the
+        ;; supersede/duplicate pose also added a :related-to audit
+        ;; link; clear it so undo restores the prior state).
+        (doseq [kind closure-kinds
+                :let [targets (rel/active-targets db report-eid kind)]
+                :when (seq targets)]
           (rel/retract-by-from! conn report-eid kind email-eid)
-          (when target
-            ;; The supersede/duplicate pose also added a :related-to
-            ;; (audit link); clear it so undo restores the prior state.
+          (doseq [target targets]
             (rel/retract-pair! conn report-eid :related-to target email-eid)
             (tracking/bump-report-updated! conn target)))
-        (when (or (seq attr-tx) any-clear?)
-          (tracking/bump-report-updated! conn report-eid)
-          (log/info (str "Commands: "
-                         (cond (:unsuperseded-by? resolved) "not superseded-by"
-                               (:unduplicate-of?  resolved) "not duplicate-of"
-                               :else                        "not closed")
-                         " (by " from-addr ")")))))))
+        (tracking/bump-report-updated! conn report-eid)
+        (log/info (str "Commands: not closed (by " from-addr ")"))))))
 
 (defn- word-scope-permits?
   "Scope check for bareword commands: :user = anyone, :maintainer =
@@ -1180,6 +1161,15 @@
 (def carrier-eligible-ids
   "Command ids that carry to a new report instead of the thread parent."
   #{:supersedes :related-to})
+
+(def ^:private closure-command-ids
+  "Ids of the closure-relation commands (sets and unsets).  They work
+  on closed reports too -- a new closure replaces the previous one --
+  so `apply-commands!` routes them through the regular `apply-lines!`
+  path while the rest of a closed report's lines go to `try-unclosed!`."
+  #{:superseded-by :unsuperseded-by
+    :supersedes    :unsupersedes
+    :duplicate-of  :unduplicate-of})
 
 (defn apply-commands!
   "Apply commands from `email` against `report-eid`; true if anything
@@ -1259,9 +1249,14 @@
                              vec))
         closed?       (some? (:report/closed (d/pull db [:report/closed] report-eid)))]
     (if closed?
-      (do (when (seq lines)
-            (try-unclosed! conn report-eid lines eid is-maint? from-addr fail-ctx))
-          (boolean (seq lines)))
+      (let [{rel-lines true, other-lines false}
+            (group-by #(contains? closure-command-ids (:id %)) lines)]
+        (when (seq other-lines)
+          (try-unclosed! conn report-eid other-lines eid is-maint? from-addr fail-ctx))
+        (when (seq rel-lines)
+          (apply-lines! conn report-eid rel-lines eid from-addr is-maint? fail-ctx
+                        source-cfg))
+        (boolean (seq lines)))
       (let [voted? (when (and (not carrier-only?) body-text)
                      (when-let [vote (and (= :request report-type) from-addr
                                           (detect-vote body-text))]

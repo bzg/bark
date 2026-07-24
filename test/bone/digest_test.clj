@@ -736,8 +736,8 @@
 
         ;; --- Bug 81: -by lines are open to any user; the later
         ;; "Not acked" (mail 85) lands on a report already closed by
-        ;; mail 84, where only closure commands apply (try-unclosed!),
-        ;; so the ack above survives. ---
+        ;; mail 84, where state unsets do not apply (only reopening
+        ;; and closure relations do), so the ack above survives. ---
         (testing "Bug 81 user Closed-by applies"
           (let [r (get-report db "<81@test.org>")]
             (is (some? (:report/closed r)))

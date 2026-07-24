@@ -334,36 +334,182 @@
               (is (= (str "Superseded-by: " bug-mid) (:command entry))))))
         (finally (close-and-cleanup! setup))))))
 
-(deftest conflicting-closure-commands-apply-neither
-  (testing "Superseded-by: and Duplicate-of: in one email contradict
-            each other: neither applies (the winning close-reason would
-            otherwise be arbitrated by closure-relation-rows order, an
-            implementation detail the email does not control)."
+(deftest conflicting-closure-commands-last-wins
+  (testing "Superseded-by: and Duplicate-of: in one email both close the
+            report, so they are mutually exclusive: the last line wins
+            (same arbitration as repeated lines of one command)."
+    (doseq [[body expected-reason expected-kind]
+            [[(fn [sup dup] (str "Superseded-by: " sup "\n"
+                                 "Duplicate-of: "  dup "\n"))
+              :canceled   :duplicates]
+             [(fn [sup dup] (str "Duplicate-of: "  dup "\n"
+                                 "Superseded-by: " sup "\n"))
+              :superseded :supersedes]]]
+      (let [{:keys [conn] :as setup} (fresh-conn)]
+        (try
+          (let [old-mid   "<patch-old-c@x>"
+                sup-mid   "<patch-sup@x>"
+                dup-mid   "<patch-dup-c@x>"
+                old-email (mk-email! conn old-mid "alice@x" #inst "2026-04-01")
+                old-eid   (mk-report! conn old-mid old-email :patch)
+                sup-email (mk-email! conn sup-mid "alice@x" #inst "2026-04-02")
+                _sup-eid  (mk-report! conn sup-mid sup-email :patch)
+                dup-email (mk-email! conn dup-mid "alice@x" #inst "2026-04-03")
+                _dup-eid  (mk-report! conn dup-mid dup-email :patch)
+                cmd-eid   (mk-email! conn "<cmd-conflict@x>" "alice@x" #inst "2026-04-04")
+                cmd-email {:db/id cmd-eid
+                           :email/author-address "alice@x"
+                           :email/date-sent #inst "2026-04-04"
+                           :email/body-text (body sup-mid dup-mid)}]
+            (commands/apply-commands! conn old-eid :patch cmd-email
+                                      {} {} :direct nil)
+            (let [after (d/pull (d/db conn)
+                                [:report/closed :report/close-reason] old-eid)
+                  kinds (set (map :kind (get-relations (d/db conn) old-eid)))]
+              (is (some? (:report/closed after)) "report is closed")
+              (is (= expected-reason (:report/close-reason after))
+                  "close-reason follows the last line")
+              (is (contains? kinds expected-kind)
+                  "only the last line's relation is posed")
+              (is (not (contains? kinds (case expected-kind
+                                          :duplicates :supersedes
+                                          :supersedes :duplicates)))
+                  "the overridden line posed nothing")))
+          (finally (close-and-cleanup! setup)))))))
+
+(deftest closure-commands-on-closed-report-replace-closure
+  (testing "Posing a closure relation on an already-closed report
+            replaces the previous closure: reason, credit and relation
+            follow the last command received, and the report keeps at
+            most one active closure relation."
     (let [{:keys [conn] :as setup} (fresh-conn)]
       (try
-        (let [old-mid   "<patch-old-c@x>"
-              sup-mid   "<patch-sup@x>"
-              dup-mid   "<patch-dup-c@x>"
-              old-email (mk-email! conn old-mid "alice@x" #inst "2026-04-01")
-              old-eid   (mk-report! conn old-mid old-email :patch)
-              sup-email (mk-email! conn sup-mid "alice@x" #inst "2026-04-02")
-              _sup-eid  (mk-report! conn sup-mid sup-email :patch)
-              dup-email (mk-email! conn dup-mid "alice@x" #inst "2026-04-03")
-              _dup-eid  (mk-report! conn dup-mid dup-email :patch)
-              cmd-eid   (mk-email! conn "<cmd-conflict@x>" "alice@x" #inst "2026-04-04")
-              cmd-email {:db/id cmd-eid
-                         :email/author-address "alice@x"
-                         :email/date-sent #inst "2026-04-04"
-                         :email/body-text (str "Superseded-by: " sup-mid "\n"
-                                               "Duplicate-of: " dup-mid "\n")}]
-          (commands/apply-commands! conn old-eid :patch cmd-email
-                                    {} {} :direct nil)
-          (let [after (d/pull (d/db conn)
-                              [:report/closed :report/close-reason] old-eid)
-                rels  (get-relations (d/db conn) old-eid)]
-            (is (nil? (:report/closed after)) "report stays open")
-            (is (nil? (:report/close-reason after)) "no close-reason")
-            (is (empty? rels) "no relation posed")))
+        (let [mk-bug  (fn [mid author date]
+                        (mk-report! conn mid (mk-email! conn mid author date) :bug))
+              r-eid   (mk-bug "<bug-r@x>" "alice@x" #inst "2026-05-01")
+              x-eid   (mk-bug "<bug-x@x>" "bob@x"   #inst "2026-05-02")
+              y-eid   (mk-bug "<bug-y@x>" "carol@x" #inst "2026-05-03")
+              d-eid   (mk-bug "<bug-d@x>" "dave@x"  #inst "2026-05-04")
+              send!   (fn [mid date body]
+                        (commands/apply-commands!
+                         conn r-eid :bug
+                         {:db/id (mk-email! conn mid "alice@x" date)
+                          :email/author-address "alice@x"
+                          :email/date-sent date
+                          :email/body-text body}
+                         {} {} :direct nil))
+              active  (fn [kind]
+                        (into #{} (comp (filter #(and (:active? %)
+                                                      (= kind (:kind %))
+                                                      (= r-eid (:from %))))
+                                        (map :to))
+                              (get-relations (d/db conn) r-eid)))
+              state   (fn [] (d/pull (d/db conn)
+                                     [:report/closed :report/close-reason] r-eid))]
+          (send! "<c1@x>" #inst "2026-05-05" "Superseded-by: <bug-x@x>\n")
+          (is (= :superseded (:report/close-reason (state))))
+          (is (= #{x-eid} (active :supersedes)))
+
+          (send! "<c2@x>" #inst "2026-05-06" "Superseded-by: <bug-y@x>\n")
+          (is (some? (:report/closed (state))) "report stays closed")
+          (is (= :superseded (:report/close-reason (state))))
+          (is (= #{y-eid} (active :supersedes))
+              "the new superseder replaces the old one")
+          (is (= #{x-eid y-eid} (active :related-to))
+              "the old :related-to companion stays")
+
+          (send! "<c3@x>" #inst "2026-05-07" "Duplicate-of: <bug-d@x>\n")
+          (is (= :canceled (:report/close-reason (state)))
+              "close-reason follows the new relation kind")
+          (is (= #{d-eid} (active :duplicates)))
+          (is (empty? (active :supersedes))
+              "the previous closure relation is retracted"))
+        (finally (close-and-cleanup! setup))))))
+
+(deftest not-closed-and-closure-pose-in-one-mail
+  (testing "Not closed. combined with a closure pose in the same mail:
+            the closure wins, whatever the line order."
+    (doseq [body ["Not closed.\nSuperseded-by: <bug-yy@x>\n"
+                  "Superseded-by: <bug-yy@x>\nNot closed.\n"]]
+      (let [{:keys [conn] :as setup} (fresh-conn)]
+        (try
+          (let [mk-bug (fn [mid author date]
+                         (mk-report! conn mid (mk-email! conn mid author date) :bug))
+                r-eid  (mk-bug "<bug-rr@x>" "alice@x" #inst "2026-05-01")
+                x-eid  (mk-bug "<bug-xx@x>" "bob@x"   #inst "2026-05-02")
+                y-eid  (mk-bug "<bug-yy@x>" "carol@x" #inst "2026-05-03")
+                send!  (fn [mid date text]
+                         (commands/apply-commands!
+                          conn r-eid :bug
+                          {:db/id (mk-email! conn mid "alice@x" date)
+                           :email/author-address "alice@x"
+                           :email/date-sent date
+                           :email/body-text text}
+                          {} {} :direct nil))]
+            (send! "<cc1@x>" #inst "2026-05-04" "Superseded-by: <bug-xx@x>\n")
+            (send! "<cc2@x>" #inst "2026-05-05" body)
+            (let [after  (d/pull (d/db conn)
+                                 [:report/closed :report/close-reason] r-eid)
+                  active (into #{} (comp (filter #(and (:active? %)
+                                                       (= :supersedes (:kind %))
+                                                       (= r-eid (:from %))))
+                                         (map :to))
+                               (get-relations (d/db conn) r-eid))]
+              (is (some? (:report/closed after)) "report ends up closed")
+              (is (= :superseded (:report/close-reason after)))
+              (is (= #{y-eid} active)
+                  "the closure relation follows the pose, not the reopen")
+              (is (some? x-eid) "_")))
+          (finally (close-and-cleanup! setup)))))))
+
+;; ---------------------------------------------------------------------------
+;; Votes: one entity per voter per report, last vote wins
+;; ---------------------------------------------------------------------------
+
+(deftest revote-replaces-previous-vote
+  (testing "A voter's new vote replaces the previous one; an identical
+            re-vote is a no-op; voters stay independent."
+    (let [{:keys [conn] :as setup} (fresh-conn)]
+      (try
+        (let [req-mid "<req-vote@x>"
+              r-eid   (mk-report! conn req-mid
+                                  (mk-email! conn req-mid "alice@x"
+                                             #inst "2026-06-01")
+                                  :request)
+              vote!   (fn [mid author date text]
+                        (let [eid (mk-email! conn mid author date)]
+                          (commands/apply-commands!
+                           conn r-eid :request
+                           {:db/id eid
+                            :email/author-address author
+                            :email/date-sent date
+                            :email/body-text text}
+                           {"test" {:source-type :mailbox}} {} :direct nil)
+                          eid))
+              votes   (fn []
+                        (d/q '[:find ?voter ?val ?e
+                               :in $ ?r
+                               :where
+                               [?v :vote/report ?r]
+                               [?v :vote/voter ?voter]
+                               [?v :vote/value ?val]
+                               [?v :vote/email ?e]]
+                             (d/db conn) r-eid))]
+          (vote! "<v1@x>" "bob@x" #inst "2026-06-02" "+1\n")
+          (is (= #{["bob@x" :up]} (into #{} (map (juxt first second)) (votes))))
+
+          (let [m2 (vote! "<v2@x>" "bob@x" #inst "2026-06-03" "-1\n")]
+            (is (= #{["bob@x" :down m2]} (votes))
+                "one entity per voter, value and email follow the last vote")
+
+            (vote! "<v3@x>" "bob@x" #inst "2026-06-04" "-1\n")
+            (is (= #{["bob@x" :down m2]} (votes))
+                "an identical re-vote changes nothing"))
+
+          (vote! "<v4@x>" "carol@x" #inst "2026-06-05" "+1\n")
+          (is (= #{["bob@x" :down] ["carol@x" :up]}
+                 (into #{} (map (juxt first second)) (votes)))
+              "each voter keeps their own vote"))
         (finally (close-and-cleanup! setup))))))
 
 ;; ---------------------------------------------------------------------------

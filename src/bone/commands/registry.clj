@@ -83,9 +83,9 @@
     :syntax "Not important" :not-words :important}
    ;; Deadline / expiry / topic
    {:id :deadline    :kind :annotation :action :set-deadline   :attr :report/deadline :scope :user
-    :syntax "Deadline" :param :date-or-duration :report-types #{:bug :patch :request}}
+    :syntax "Deadline" :param :date-or-duration}
    {:id :undeadline  :kind :annotation :action :unset-deadline :attr :report/deadline :scope :user
-    :syntax "No deadline" :report-types #{:bug :patch :request}}
+    :syntax "No deadline"}
    {:id :expiry      :kind :annotation :action :set-expiry   :attr :report/expiry :scope :user
     :syntax "Expiry" :param :date-or-duration}
    {:id :unexpiry    :kind :annotation :action :unset-expiry :attr :report/expiry :scope :user
