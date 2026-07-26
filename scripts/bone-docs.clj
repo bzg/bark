@@ -189,6 +189,22 @@
     (str/replace org-text "[version]" version)
     (str/replace org-text " [version]" "")))
 
+(defn- substitute-source-links
+  "Replace the [source-links] placeholder with the per-source contact
+  paragraph: the posting address (:post-address, falling back to :to
+  for mailbox sources) and the :contribute-url page.  Dropped when the
+  source configures neither."
+  [org-text {:keys [post-address to contribute-url]}]
+  (let [addr  (or post-address to)
+        parts (cond-> []
+                addr
+                (conj (str "Reports are created and updated by emailing "
+                           "[[mailto:" addr "][" addr "]]."))
+                contribute-url
+                (conj (str "New to the project? See [["
+                           contribute-url "][how to contribute]].")))]
+    (str/replace org-text "[source-links]" (str/join "  " parts))))
+
 ;; ---------------------------------------------------------------------------
 ;; Minimal org -> HTML conversion
 ;; ---------------------------------------------------------------------------
@@ -291,8 +307,8 @@
   .meta { font-size: 0.78rem; color: var(--pico-muted-color); margin-bottom: 2rem; }
 " footer-css))
 
-(defn docs-page [body-html {:keys [ical]}]
-  (let [title        "BONE -- Docs"
+(defn docs-page [body-html {:keys [ical website contribute-url]}]
+  (let [title        "BONE - Docs"
         generated-at (str (java.util.Date.))]
     (str
      "<!DOCTYPE html>\n"
@@ -319,7 +335,9 @@
          [:p.meta (str "Generated " generated-at)]
          (h/raw body-html)
          [:script (h/raw (wrap-js theme-toggle-js))]]
-        (bone-footer {:ical ical})]]))))
+        (bone-footer {:ical ical
+                      :website website
+                      :contribute-url contribute-url})]]))))
 
 ;; ---------------------------------------------------------------------------
 ;; Filter feed links in "Getting the data" table
@@ -488,6 +506,7 @@
                           config-html (build-configuration-html config source-name)
                           org-text    (-> (slurp "resources/docs-tpl.org")
                                           (substitute-version (bone-version))
+                                          (substitute-source-links source-cfg)
                                           (substitute-template labels cmds prefix)
                                           (filter-feed-links effective-dir))
                           body-html   (cond-> (org->html org-text)
@@ -495,7 +514,9 @@
                                         config-html (str "\n" config-html))
                           has-ical?   (.exists (io/file effective-dir "events"
                                                         "announcements.ics"))]
-                      (docs-page body-html {:ical has-ical?}))
+                      (docs-page body-html {:ical has-ical?
+                                            :website (:website source-cfg)
+                                            :contribute-url (:contribute-url source-cfg)}))
                     (finally
                       ((resolve 'pod.huahaiy.datalevin/close) conn)))]
   (io/make-parents out-file)

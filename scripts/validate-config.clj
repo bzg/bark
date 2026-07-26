@@ -81,6 +81,10 @@
 (s/def :source/list-archive (s/and ::non-blank-string #(re-find #"^https?://" %)))
 (s/def :source/base-url ::non-blank-string)
 (s/def :source/archive-format-string (s/and ::non-blank-string #(str/includes? % "%s")))
+;; Project links surfaced on the exported pages (all optional).
+(s/def :source/website (s/and ::non-blank-string #(re-find #"^https?://" %)))
+(s/def :source/contribute-url (s/and ::non-blank-string #(re-find #"^https?://" %)))
+(s/def :source/post-address ::email)
 
 ;; Per-source export overrides
 (s/def ::export-format #{"json" "rss" "org" "html" "stats" "patches" "text" "events"})
@@ -102,6 +106,8 @@
                  :opt-un [:source/list :source/alias :source/to
                           :source/list-archive :source/base-url
                           :source/archive-format-string
+                          :source/website :source/contribute-url
+                          :source/post-address
                           :source/commands :source/labels
                           :source/report-types :source/restricted-types
                           :source/maintainers :source/notifications

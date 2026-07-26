@@ -55,6 +55,17 @@
             :list-archive          "https://list.example.org"
             :archive-format-string "https://list.example.org/%s"
             ;;
+            ;; Project links surfaced on the exported pages (all
+            ;; optional): :website links the source name in the page
+            ;; titles and the footer; :contribute-url drives the
+            ;; "Create new" button on the reports page and a footer
+            ;; link; :post-address is the address shown on docs.html
+            ;; for creating reports (mailbox sources fall back to :to).
+            ;;
+            ;; :website        "https://project.example.org"
+            ;; :contribute-url "https://project.example.org/contribute.html"
+            ;; :post-address   "bugs@example.org"
+            ;;
             ;; Maintainers seed initial tenures (plain list of email
             ;; strings). The FIRST entry is the lead (can remove others,
             ;; cannot self-remove). After startup, "Add/Remove maintainer:"

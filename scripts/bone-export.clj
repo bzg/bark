@@ -801,7 +801,9 @@
       (:to cfg)           (assoc :to            (:to cfg))
       (:list-archive cfg) (assoc :list-archive  (:list-archive cfg))
       (:archive-format-string cfg) (assoc :archive-format-string (:archive-format-string cfg))
-      (:base-url cfg)     (assoc :base-url      (:base-url cfg)))))
+      (:base-url cfg)     (assoc :base-url      (:base-url cfg))
+      (:website cfg)        (assoc :website        (:website cfg))
+      (:contribute-url cfg) (assoc :contribute-url (:contribute-url cfg)))))
 
 ;; ---------------------------------------------------------------------------
 ;; XML helpers
@@ -1596,7 +1598,7 @@
         page
         (str
          "<!DOCTYPE html>\n<html lang=\"en\">\n"
-         (html-head {:title "BONE -- Sources"
+         (html-head {:title "BONE - Sources"
                      :css   (str "table{margin-top:1.5rem}"
                                "td.num,th.num{text-align:right}"
                                "a.archive{font-size:0.82rem;margin-left:0.4rem;opacity:0.7}"
@@ -1605,7 +1607,7 @@
                                footer-css)})
          "<body>\n<main class=\"container\">\n"
          (h/html (nav-bar "BONE" nil))
-         "\n<table role=\"grid\">\n"
+         "\n<table>\n"
          "<thead><tr>"
          "<th>Source</th>"
          "<th class=\"num\">Open</th>"

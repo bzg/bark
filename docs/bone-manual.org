@@ -896,7 +896,8 @@ copy of the list, download it, replace the placeholder =:mailboxes= with
 account), and run =bb export=.
 
 The companion =reports/meta.json= carries the source /identity/ -- =:list= /
-=:alias= / =:to=, =:list-archive=, =:archive-format-string= and =:base-url=.
+=:alias= / =:to=, =:list-archive=, =:archive-format-string= and =:base-url= --
+plus the project links (=:website=, =:contribute-url=) when configured.
 Tools such as [[https://codeberg.org/bzg/gnaw][gnaw]] use it to bind a published source to a local
 mailbox: the path lives in your local tool config, =meta.json=
 supplies the stable key (the =List-Id=) to match against.
@@ -1048,6 +1049,9 @@ Emails that match no source are discarded at ingestion.
 | =:archive-format-string= | URL template for message-ids (=%s= is replaced), used when the                                |
 |                        | =Archived-At= header is absent                                                                |
 | =:base-url=              | Base URL where this source's public directory is served                                     |
+| =:website=               | Project website: links the source name in page titles and the footer                        |
+| =:contribute-url=        | Contribution guide: "Create new" button on the reports page, plus a footer link             |
+| =:post-address=          | Posting address shown on =docs.html= (mailbox sources fall back to =:to=)                       |
 | =:labels=                | Per-source label overrides (see [[#customising-subject-labels][customising subject labels]])                                 |
 | =:commands=              | Per-source command overrides (see [[#customising-commands][customising commands]])                                     |
 | =:report-types=          | Restrict detected and exported types, e.g. =#{:bug :patch}=                                   |

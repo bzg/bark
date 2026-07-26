@@ -171,27 +171,38 @@
   "Render a <nav> with title and Reports/Docs/Data links.
   `current` is the id of the active page (bolded).  When `current` is
   nil, the per-source page links are omitted -- useful on the root
-  index where those paths live one directory deeper."
-  [title current]
-  [:nav
-   [:ul [:li [:a {:href "index.html" :style "text-decoration:none;color:inherit"}
-              [:strong title]]]]
-   [:ul
-    (when current
-      (for [[id label href] nav-pages]
-        [:li (if (= id current)
-               [:a {:href href} [:strong label]]
-               [:a {:href href} label])]))
-    [:li (theme-toggle-btn)]]])
+  index where those paths live one directory deeper.  Options:
+    :source       source name appended to the title (\" - <source>\")
+    :source-href  when set, the source name links there (the project
+                  website) instead of staying plain text."
+  ([title current] (nav-bar title current nil))
+  ([title current {:keys [source source-href]}]
+   [:nav
+    [:ul [:li [:a {:href "index.html" :style "text-decoration:none;color:inherit"}
+               [:strong title]]
+          (when source
+            (list " - "
+                  (if source-href
+                    [:a {:href source-href
+                         :style "text-decoration:none;color:inherit"}
+                     [:strong source]]
+                    [:strong source])))]]
+    [:ul
+     (when current
+       (for [[id label href] nav-pages]
+         [:li (if (= id current)
+                [:a {:href href} [:strong label]]
+                [:a {:href href} label])]))
+     [:li (theme-toggle-btn)]]]))
 
 ;; ---------------------------------------------------------------------------
 ;; Shared page title
 ;; ---------------------------------------------------------------------------
 
 (defn page-title
-  "Build a 'BONE -- <kind>' page title, appending the source name when set."
+  "Build a 'BONE - <kind>' page title, appending the source name when set."
   [kind source-name]
-  (str "BONE -- " kind (when source-name (str " -- " source-name))))
+  (str "BONE - " kind (when source-name (str " - " source-name))))
 
 ;; ---------------------------------------------------------------------------
 ;; JS-less fallback: <noscript> banner + script-template injection
@@ -242,9 +253,11 @@
   Options:
     :feeds  when true (default), appends per-source RSS/JSON/Org links.
             Set to false on the root index where those paths don't exist.
-    :ical   when true (default) and :feeds is on, appends an iCal link."
+    :ical   when true (default) and :feeds is on, appends an iCal link.
+    :website / :contribute-url  when set, append links to the tracked
+            project's website and contribution page."
   ([] (bone-footer {}))
-  ([{:keys [ical feeds] :or {ical true feeds true}}]
+  ([{:keys [ical feeds website contribute-url] :or {ical true feeds true}}]
    [:footer.bone-footer
     [:a {:href bone-repo-url} "BONE"]
     " is "
@@ -258,7 +271,11 @@
             " -- "
             [:a {:href "reports/all.org"} "Org"]
             (when ical
-              (list " -- " [:a {:href "events/announcements.ics"} "iCal"]))))]))
+              (list " -- " [:a {:href "events/announcements.ics"} "iCal"]))))
+    (when website
+      (list " -- " [:a {:href website} "Website"]))
+    (when contribute-url
+      (list " -- " [:a {:href contribute-url} "Contribute"]))]))
 
 ;; ---------------------------------------------------------------------------
 ;; Org-mode inline link conversion (shared by bone-docs, bone-stats)

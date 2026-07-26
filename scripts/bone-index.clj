@@ -49,6 +49,7 @@
   mark { font-size: 0.75rem; font-weight: 600; text-transform: uppercase;
          letter-spacing: 0.05em; padding: 0.15rem 0.4rem; border-radius: 2px; }
   .toolbar { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; margin-bottom: 1rem; }
+  .toolbar .create-new { margin-left: auto; padding: 0.3rem 0.7rem; font-size: 0.8rem; white-space: nowrap; }
   .filters { display: flex; gap: 0.4rem; flex-wrap: wrap; }
   .filters button { padding: 0.3rem 0.7rem; font-size: 0.8rem; }
   .filters button.outline { opacity: 0.5; }
@@ -225,30 +226,47 @@
   (let [mask-css     (columns-mask-css columns)
         source-type  (get envelope "source-type")
         source-name  (get envelope "source")
+        website      (get envelope "website")
+        contribute   (get envelope "contribute-url")
         title        (page-title "Reports" source-name)
         has-rss?     (.exists (clojure.java.io/file reports-dir "all.xml"))
         ;; ICS lives one level up from reports-dir, in events/
         base-dir     (.getParent (clojure.java.io/file reports-dir))
         has-ical?    (and base-dir (.exists (clojure.java.io/file base-dir "events" "announcements.ics")))
         rss-href     "reports/all.xml"
-        cols         [[:th {:data-sort "type"     :onclick "sortTable(0,'type')"     :title "Sort by type"}     "Type"]
-                      [:th {:data-sort "priority" :onclick "sortTable(1,'priority')" :title "Sort by priority"} "Prio"]
-                      [:th {:data-sort "due"      :onclick "sortTable(2,'due')"      :title "Sort by deadline"} "Due"]
-                      [:th {:data-sort "flags"    :onclick "sortTable(3,'flags')"    :title "Sort by flags"}    "Flags"]
-                      [:th {:data-sort "replies"  :onclick "sortTable(4,'replies')"  :title "Sort by number of replies"} "↩"]
-                      [:th {:data-sort "owner"    :onclick "sortTable(5,'owner')"    :title "Sort by owner"}    "Owner"]
-                      [:th {:data-sort "from"     :onclick "sortTable(6,'from')"     :title "Sort by author"}   "Author"]
-                      [:th {:data-sort "subject"  :onclick "sortTable(7,'subject')"  :title "Sort by last activity"} "Subject"]
-                      [:th {:data-sort "date"     :onclick "sortTable(8,'date')"     :title "Sort by date"}     "Date"]]
+        ;; Sortable column headers: focusable (tabindex) with an Enter/
+        ;; Space handler (thSortKey in bone-index.js) so keyboard users
+        ;; can sort; aria-sort is maintained by the JS.  The ↩ glyph
+        ;; gets an :aria-label so screen readers hear "Replies".
+        cols         (mapv (fn [[k i label tip aria]]
+                             [:th (cond-> {:data-sort k
+                                           :scope     "col"
+                                           :tabindex  "0"
+                                           :onclick   (str "sortTable(" i ",'" k "')")
+                                           :onkeydown "thSortKey(event)"
+                                           :title     tip}
+                                    aria (assoc :aria-label aria))
+                              label])
+                           [["type"     0 "Type"    "Sort by type"              nil]
+                            ["priority" 1 "Prio"    "Sort by priority"          "Priority"]
+                            ["due"      2 "Due"     "Sort by deadline"          nil]
+                            ["flags"    3 "Flags"   "Sort by flags"             nil]
+                            ["replies"  4 "↩"       "Sort by number of replies" "Replies"]
+                            ["owner"    5 "Owner"   "Sort by owner"             nil]
+                            ["from"     6 "Author"  "Sort by author"            nil]
+                            ["subject"  7 "Subject" "Sort by last activity"     nil]
+                            ["date"     8 "Date"    "Sort by date"              nil]])
         tpl-body     (str
                       (h/html
                        [:main.container
-                        (nav-bar title "reports")
+                        (nav-bar (page-title "Reports" nil) "reports"
+                                 {:source source-name :source-href website})
                         [:p.generated-at
                          {:id "generated-at"
                           :style "font-size:0.78rem;color:var(--pico-muted-color);margin-bottom:1rem"}]
                         [:div.toolbar
                          [:input#si {:type        "search"
+                                     :aria-label  "Search reports"
                                      :placeholder "Press / to search -- see Docs for syntax"
                                      :oninput     "onSearchInput()"}]
                          ;; Filled client-side from the fetched reports
@@ -256,19 +274,27 @@
                          [:div.filters {:id "type-filters"}]
                          [:div.filters.status-filters
                           [:button#btn-open.open-btn
-                           {:onclick "toggleOpen(this)" :title "Toggle visibility of open reports only"}
+                           {:onclick "toggleOpen(this)" :title "Toggle visibility of open reports only"
+                            :aria-pressed "true"}
                            "Open"]
                           [:button#btn-acked.acked-btn.outline
-                           {:onclick "toggleAcked(this)" :title "Toggle visibility of acked reports"}
+                           {:onclick "toggleAcked(this)" :title "Toggle visibility of acked reports"
+                            :aria-pressed "false"}
                            "Acked"]
                           [:button#btn-owned.owned-btn.outline
-                           {:onclick "toggleOwned(this)" :title "Toggle visibility of owned reports"}
+                           {:onclick "toggleOwned(this)" :title "Toggle visibility of owned reports"
+                            :aria-pressed "false"}
                            "Owned"]
                           [:button#btn-awaiting.awaiting-btn.outline
                            {:onclick "toggleAwaiting(this)" :title "Show only reports awaiting reply"
+                            :aria-pressed "false"
                             :style "margin-left:auto"}
-                           "⌚ Awaiting"]]]
-                        [:div#status]
+                           [:span {:aria-hidden "true"} "⌚ "] "Awaiting"]]
+                         (when contribute
+                           [:a.create-new {:href contribute :role "button"
+                                           :title "Create a new report"}
+                            "Create new"])]
+                        [:div#status {:role "status"}]
                         [:figure {:id "reports-table" :style "overflow-x:auto"}
                          [:table
                           [:thead [:tr (seq cols)]]
@@ -281,7 +307,9 @@
                           [:li [:a {:href "?types=request&sort=replies&dir=desc"} "Answer active requests"]]
                           [:li [:a {:href "?acked=1&awaiting=1&sort=date&dir=asc"} "Revive reports awaiting reporter input"]]]]
                         [:div#pagination]])
-                      (h/html (bone-footer {:ical has-ical?})))]
+                      (h/html (bone-footer {:ical has-ical?
+                                            :website website
+                                            :contribute-url contribute})))]
     (str
      "<!DOCTYPE html>\n"
      (h/html

@@ -582,7 +582,7 @@
   \"Available data\" table, and the scripts.  Carries no report data --
   bone-stats.js fetches stats.json (via meta.json) and fills it in, so the
   file stays byte-stable across data-only changes."
-  [out-dir source-name]
+  [out-dir source-name {:keys [website contribute-url]}]
   (let [title        (page-title "Data" source-name)
         has-ical?    (.exists (io/file out-dir "events" "announcements.ics"))
         data-section (render-data-section out-dir)
@@ -594,14 +594,18 @@
         ;; Injected only when JS runs (wrap-template).  JS-less browsers skip
         ;; <script> bodies, so the page reduces to <noscript><h1></h1></noscript>
         ;; + the Available-data table.
-        tpl-nav      (str (h/html (nav-bar title "data"))
+        tpl-nav      (str (h/html (nav-bar (page-title "Data" nil) "data"
+                                           {:source source-name
+                                            :source-href website}))
                           "\n<p class=\"meta\" id=\"generated-at\"></p>\n")
         tpl-stats    (str "<section class=\"stats-section\">\n"
                           "<h3>Statistics</h3>\n"
                           "<div id=\"kpi-area\" class=\"kpis\"></div>\n"
                           "<div id=\"chart-grid\" class=\"grid\"></div>\n"
                           "</section>\n")
-        tpl-footer   (str (h/html (bone-footer {:ical has-ical?})))]
+        tpl-footer   (str (h/html (bone-footer {:ical has-ical?
+                                                :website website
+                                                :contribute-url contribute-url})))]
     (str
      "<!DOCTYPE html>\n"
      "<html lang=\"en\" data-theme=\"light\">\n"
@@ -664,7 +668,10 @@
 (defn- generate-html! [out-file out-dir source-name]
   ;; A static shell: no stats are read here.  bone-stats.js fetches
   ;; stats.json (discovered via meta.json) and fills the page in.
-  (spit-html out-file (render-shell out-dir source-name))
+  (let [src (some #(when (= source-name (:name %)) %)
+                  (:sources (load-config)))]
+    (spit-html out-file (render-shell out-dir source-name
+                                      (select-keys src [:website :contribute-url]))))
   (log/info "Wrote shell" out-file))
 
 (defn -main [& args]

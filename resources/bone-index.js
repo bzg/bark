@@ -877,9 +877,31 @@ function replaceURL() { history.replaceState(null, '', buildURL()); }
 
 /* ── Button handlers ─────────────────────────────────────────── */
 
+// Mirror the visual 'outline' (inactive) class into aria-pressed so
+// the toggle buttons expose their state to assistive tech.
+function syncPressed(btn) {
+  btn.setAttribute('aria-pressed', String(!btn.classList.contains('outline')));
+}
+
+// Set a toolbar toggle's active state (visual class + ARIA) by id.
+function setToggleState(id, active) {
+  var btn = document.getElementById(id);
+  btn.classList.toggle('outline', !active);
+  syncPressed(btn);
+}
+
+// Keyboard activation for the sortable column headers (tabindex=0).
+function thSortKey(e) {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    e.currentTarget.click();
+  }
+}
+
 function toggleType(type, btn) {
   activeTypes[type] = !activeTypes[type];
   btn.classList.toggle('outline');
+  syncPressed(btn);
   currentPage = 1;
   filterReports();
   pushURL();
@@ -888,6 +910,7 @@ function toggleType(type, btn) {
 function syncToolbarButtons() {
   document.querySelectorAll('.filters button[data-type]').forEach(function(btn) {
     btn.classList.toggle('outline', !activeTypes[btn.getAttribute('data-type')]);
+    syncPressed(btn);
   });
 }
 
@@ -903,6 +926,7 @@ function buildTypeFilters() {
     btn.setAttribute('data-type', t);
     btn.textContent = _typeLabels[t] || t;
     btn.addEventListener('click', function() { toggleType(t, btn); });
+    syncPressed(btn);
     container.appendChild(btn);
   });
 }
@@ -923,6 +947,7 @@ function isolateType(type) {
 function toggleAcked(btn) {
   onlyAcked = !onlyAcked;
   btn.classList.toggle('outline');
+  syncPressed(btn);
   currentPage = 1;
   filterReports();
   pushURL();
@@ -931,6 +956,7 @@ function toggleAcked(btn) {
 function toggleOwned(btn) {
   onlyOwned = !onlyOwned;
   btn.classList.toggle('outline');
+  syncPressed(btn);
   currentPage = 1;
   filterReports();
   pushURL();
@@ -939,6 +965,7 @@ function toggleOwned(btn) {
 function toggleAwaiting(btn) {
   onlyAwaiting = !onlyAwaiting;
   btn.classList.toggle('outline');
+  syncPressed(btn);
   currentPage = 1;
   filterReports();
   pushURL();
@@ -947,6 +974,7 @@ function toggleAwaiting(btn) {
 function toggleOpen(btn) {
   onlyOpen = !onlyOpen;
   btn.classList.toggle('outline');
+  syncPressed(btn);
   currentPage = 1;
   if (!onlyOpen && !closedLoaded) {
     loadClosedReports(function() { filterReports(); pushURL(); });
@@ -994,8 +1022,11 @@ function sortTable(colIdx, key) {
   sortState[key] = dir;
   document.querySelectorAll('th[data-sort]').forEach(function(th) {
     th.classList.remove('asc', 'desc');
+    th.removeAttribute('aria-sort');
   });
-  document.querySelector('th[data-sort="' + key + '"]').classList.add(dir);
+  var th = document.querySelector('th[data-sort="' + key + '"]');
+  th.classList.add(dir);
+  th.setAttribute('aria-sort', dir === 'asc' ? 'ascending' : 'descending');
   sortReports(key, dir);
   buildDisplayList();
   currentPage = 1;
@@ -1034,6 +1065,7 @@ function restoreFromURL() {
   }
   document.querySelectorAll('.filters button[data-type]').forEach(function(btn) {
     btn.classList.toggle('outline', !activeTypes[btn.dataset.type]);
+    syncPressed(btn);
   });
 
   // If the search query bypasses the Open filter via 'closed:true', any
@@ -1042,19 +1074,20 @@ function restoreFromURL() {
   // Open-only filtering automatically.
   var queryHasClosed = queryIncludesClosed(qVal);
   onlyOpen = queryHasClosed ? true : (params.get('open') !== '0');
-  document.getElementById('btn-open').classList.toggle('outline', !onlyOpen);
+  setToggleState('btn-open', onlyOpen);
 
   onlyAcked = params.get('acked') === '1';
-  document.getElementById('btn-acked').classList.toggle('outline', !onlyAcked);
+  setToggleState('btn-acked', onlyAcked);
 
   onlyOwned = params.get('owned') === '1';
-  document.getElementById('btn-owned').classList.toggle('outline', !onlyOwned);
+  setToggleState('btn-owned', onlyOwned);
 
   onlyAwaiting = params.get('awaiting') === '1';
-  document.getElementById('btn-awaiting').classList.toggle('outline', !onlyAwaiting);
+  setToggleState('btn-awaiting', onlyAwaiting);
 
   document.querySelectorAll('th[data-sort]').forEach(function(th) {
     th.classList.remove('asc', 'desc');
+    th.removeAttribute('aria-sort');
   });
   sortState = {};
   if (params.has('sort') && params.has('dir')) {
@@ -1064,6 +1097,7 @@ function restoreFromURL() {
     if (th && (dir === 'asc' || dir === 'desc')) {
       sortState[key] = dir;
       th.classList.add(dir);
+      th.setAttribute('aria-sort', dir === 'asc' ? 'ascending' : 'descending');
     }
   } else if (boneConfig.columnsSort) {
     // Default sort from --html-columns-sort (date -> desc, else asc).
@@ -1073,6 +1107,7 @@ function restoreFromURL() {
     if (dth) {
       sortState[dkey] = ddir;
       dth.classList.add(ddir);
+      dth.setAttribute('aria-sort', ddir === 'asc' ? 'ascending' : 'descending');
     }
   }
 
@@ -1108,6 +1143,10 @@ var _setupToggles, _showTogglesIfNeeded;
       toggle.className = 'unfold';
       toggle.textContent = '\u2026';
       toggle.style.display = 'none';
+      // Focusable and key-activatable: the ellipsis acts as a button.
+      toggle.setAttribute('role', 'button');
+      toggle.setAttribute('tabindex', '0');
+      toggle.setAttribute('aria-label', 'Show full subject');
       toggle.onmousedown = function(e) {
         e.preventDefault();
         e.stopPropagation();
@@ -1117,6 +1156,9 @@ var _setupToggles, _showTogglesIfNeeded;
         e.stopPropagation();
         td.classList.add('expanded');
         toggle.remove();
+      };
+      toggle.onkeydown = function(e) {
+        if (e.key === 'Enter' || e.key === ' ') toggle.onclick(e);
       };
       td.appendChild(toggle);
     });
