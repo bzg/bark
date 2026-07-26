@@ -21,23 +21,28 @@
 (defn series-id [topic sender total]
   (str (or topic "") "|" sender "|" total))
 
-(defn- next-series-id [db topic sender total]
-  (let [base     (series-id topic sender total)
-        existing (d/q '[:find [?sid ...]
-                        :in $ ?prefix
-                        :where [?s :series/id ?sid]
-                        [(clojure.string/starts-with? ?sid ?prefix)]]
-                      db base)
-        ;; "base" itself counts as suffix 1; "base#N" yields N.  The
-        ;; starts-with? query prefix also matches longer totals
-        ;; ("t|s|5" matches "t|s|55#3"), so re-check the boundary here.
-        suffix-n (fn [sid]
+(defn next-sid
+  "Pure: the next unused series id for `base` given the `existing`
+  ids -- `base` itself when free, else \"base#N\" one past the highest
+  suffix.  \"base\" counts as suffix 1; only exact-base or base#N ids
+  count: the caller's starts-with? prefetch also matches longer totals
+  (\"t|s|5\" matches \"t|s|55#3\"), so the boundary is re-checked here."
+  [base existing]
+  (let [suffix-n (fn [sid]
                    (cond
                      (= sid base) 1
                      (str/starts-with? sid (str base "#"))
                      (some-> (re-find #"#(\d+)$" sid) second parse-long)))
         max-n    (reduce max 0 (keep suffix-n existing))]
     (if (zero? max-n) base (str base "#" (inc max-n)))))
+
+(defn- next-series-id [db topic sender total]
+  (let [base (series-id topic sender total)]
+    (next-sid base (d/q '[:find [?sid ...]
+                          :in $ ?prefix
+                          :where [?s :series/id ?sid]
+                          [(clojure.string/starts-with? ?sid ?prefix)]]
+                        db base))))
 
 (defn find-open-series [db topic sender total]
   (d/q '[:find ?s .
@@ -126,17 +131,48 @@
 (defn set-cover-letter! [conn series-eid email-eid]
   (d/transact! conn [{:db/id series-eid :series/cover-letter email-eid}]))
 
-(defn- awaiting-cover-series?
-  "True when `series-eid` has no patches yet and its cover letter is
-  one of `parent-mids`: the series the current patch is about to join
-  via its own cover, not an old revision to supersede."
-  [db series-eid parent-mids]
+(defn- series-restart-info
+  "DB read feeding `series-restart-plan`: describe the open series
+  `series-eid` as {:eid :seqs :mids :cover-mid :empty?}."
+  [db series-eid]
   (let [{patches :series/patches cover :series/cover-letter}
-        (d/pull db [{:series/patches [:db/id]}
+        (d/pull db [{:series/patches [:report/patch-seq :report/message-id]}
                     {:series/cover-letter [:email/message-id]}]
                 series-eid)]
-    (and (empty? patches)
-         (contains? parent-mids (:email/message-id cover)))))
+    {:eid       series-eid
+     :seqs      (into #{} (keep :report/patch-seq) patches)
+     :mids      (into #{} (keep :report/message-id) patches)
+     :cover-mid (:email/message-id cover)
+     :empty?    (empty? patches)}))
+
+(defn series-restart-plan
+  "Pure: the series eids a numbered patch closes as an implicit
+  restart, or nil when it closes none.  `n` is the patch's sequence
+  number, `existing` the sender's open same-topic series as
+  `series-restart-info` maps, `parent-mids` the mids of the reports
+  the patch replies to.  A restart is a cover (0/N), or a 1/N when
+  some existing series already holds a 1/…; it must thread back to an
+  old series (a patch or cover mid among `parent-mids`).  A numbered
+  patch never closes the empty series its own cover letter just
+  opened: that series is the one it is joining, not an old revision
+  to supersede."
+  [n existing parent-mids]
+  (let [restart? (or (zero? n)
+                     (and (= 1 n)
+                          (some (fn [s]
+                                  (some #(str/starts-with? % "1/") (:seqs s)))
+                                existing)))
+        old-mids (into (set (mapcat :mids existing))
+                       (keep :cover-mid)
+                       existing)]
+    (when (and (seq existing) restart? (some old-mids parent-mids))
+      (into []
+            (comp (remove (fn [s]
+                            (and (pos? n)
+                                 (:empty? s)
+                                 (contains? parent-mids (:cover-mid s)))))
+                  (map :eid))
+            existing))))
 
 (defn manage-series!
   "After creating a patch report, manage its series membership."
@@ -147,47 +183,23 @@
           db     (d/db conn)
           existing-series (when topic
                             (find-open-series-by-topic-sender db topic from-addr))
-          restart? (and (seq existing-series)
-                        (or (zero? n)
-                            (and (= 1 n)
-                                 (let [existing-seqs
-                                       (d/q '[:find [?seq ...]
-                                              :in $ [?s ...]
-                                              :where [?s :series/patches ?r]
-                                              [?r :report/patch-seq ?seq]]
-                                            db existing-series)]
-                                   (some #(str/starts-with? % "1/") existing-seqs)))))
-          parent-mids (when (and restart? (seq parent-report-eids))
+          parent-mids (when (and (seq existing-series) (seq parent-report-eids))
                         (set (d/q '[:find [?mid ...]
                                     :in $ [?r ...]
                                     :where [?r :report/message-id ?mid]]
                                   db parent-report-eids)))
-          ancestor? (when restart?
-                      (let [old-mids (into
-                                      (set (d/q '[:find [?mid ...]
-                                                  :in $ [?s ...]
-                                                  :where [?s :series/patches ?r]
-                                                  [?r :report/message-id ?mid]]
-                                                db existing-series))
-                                      (d/q '[:find [?mid ...]
-                                             :in $ [?s ...]
-                                             :where [?s :series/cover-letter ?e]
-                                             [?e :email/message-id ?mid]]
-                                           db existing-series))]
-                        (some old-mids parent-mids)))]
-      (when (and restart? ancestor?)
-        ;; A numbered patch must not close the empty series its own
-        ;; cover letter just opened: that series is the one it is
-        ;; joining, not an old revision to supersede.
-        (doseq [sid existing-series
-                :when (not (and (pos? n)
-                                (awaiting-cover-series? db sid parent-mids)))]
-          (close-series! conn sid email-eid)
-          (when (:version report-info)
-            (supersede-series-reports! conn sid email-eid))
-          (log/info "Auto-closed series"
-                    (pr-str (:series/id (d/pull (d/db conn) [:series/id] sid)))
-                    "(superseded)")))
+          to-close (when (seq existing-series)
+                     (series-restart-plan
+                      n
+                      (mapv #(series-restart-info db %) existing-series)
+                      (or parent-mids #{})))]
+      (doseq [sid to-close]
+        (close-series! conn sid email-eid)
+        (when (:version report-info)
+          (supersede-series-reports! conn sid email-eid))
+        (log/info "Auto-closed series"
+                  (pr-str (:series/id (d/pull (d/db conn) [:series/id] sid)))
+                  "(superseded)"))
       (let [series-eid (or (when (pos? n)
                              (find-open-series-via-parents
                               (d/db conn) parent-report-eids from-addr m))

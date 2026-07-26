@@ -1808,6 +1808,69 @@
         (finally
           (teardown! ctx))))))
 
+(deftest patch-close-stays-scoped-to-the-patch
+  (testing "Applied. in reply to one patch closes only that patch: the
+            series-wide close belongs to the cover letter alone, with
+            or without a cover in the series."
+    (let [{:keys [conn] :as ctx} (setup-db!)]
+      (try
+        ;; Series WITH a cover letter.
+        (store-and-process! conn
+                            (mk-email {:mid "<pcs-cov@test.org>"
+                                       :subject "[PATCH pcs 0/2] with cover"
+                                       :from "user@test.org"
+                                       :date #inst "2026-07-01T10:00:00"
+                                       :body "Cover letter.\n"})
+                            "direct")
+        (doseq [i [1 2]]
+          (store-and-process! conn
+                              (mk-email {:mid (str "<pcs-p" i "@test.org>")
+                                         :subject (str "[PATCH pcs " i "/2] step " i)
+                                         :from "user@test.org"
+                                         :date #inst "2026-07-01T10:01:00"
+                                         :in-reply-to "<pcs-cov@test.org>"
+                                         :body (str "step " i "\n")})
+                              "direct"))
+        (store-and-process! conn
+                            (mk-email {:mid "<pcs-applied@test.org>"
+                                       :subject "Re: [PATCH pcs 1/2] step 1"
+                                       :from "admin@test.org"
+                                       :date #inst "2026-07-02T09:00:00"
+                                       :in-reply-to "<pcs-p1@test.org>"
+                                       :body "Applied.\n"})
+                            "direct")
+        (let [db (d/db conn)]
+          (is (some? (:report/closed (get-report db "<pcs-p1@test.org>")))
+              "the patch replied to is closed")
+          (is (nil? (:report/closed (get-report db "<pcs-p2@test.org>")))
+              "its sibling stays open")
+          (is (nil? (:report/closed (get-report db "<pcs-cov@test.org>")))
+              "the cover stays open"))
+        ;; Series WITHOUT a cover letter.
+        (doseq [i [1 2]]
+          (store-and-process! conn
+                              (mk-email {:mid (str "<pns-p" i "@test.org>")
+                                         :subject (str "[PATCH pns " i "/2] step " i)
+                                         :from "user@test.org"
+                                         :date #inst "2026-07-03T10:00:00"
+                                         :body (str "step " i "\n")})
+                              "direct"))
+        (store-and-process! conn
+                            (mk-email {:mid "<pns-applied@test.org>"
+                                       :subject "Re: [PATCH pns 1/2] step 1"
+                                       :from "admin@test.org"
+                                       :date #inst "2026-07-04T09:00:00"
+                                       :in-reply-to "<pns-p1@test.org>"
+                                       :body "Applied.\n"})
+                            "direct")
+        (let [db (d/db conn)]
+          (is (some? (:report/closed (get-report db "<pns-p1@test.org>")))
+              "the patch replied to is closed")
+          (is (nil? (:report/closed (get-report db "<pns-p2@test.org>")))
+              "its sibling stays open even without a cover letter"))
+        (finally
+          (teardown! ctx))))))
+
 (deftest supersede-reaches-sibling-branch-revision
   (testing "v3 replying to a reviewer's comment (not to v2 directly) still
             closes v2 as :superseded.  Regression: v2 replied straight to
@@ -2558,3 +2621,37 @@
             "rescued review lands on the standalone patch (no cover to broadcast)")
         (finally
           (teardown! ctx))))))
+
+;; ---------------------------------------------------------------------------
+;; thread-lookup arbitration (pure)
+;; ---------------------------------------------------------------------------
+
+(deftest thread-step-arbitration
+  (let [s0 {:all #{} :nearest nil :cand nil}]
+    (testing "a root at the closest mid decides alone (patch shadows cover)"
+      (is (= {:all #{1 2} :nearest #{1} :cand nil}
+             (digest/thread-step s0 {:root 1 :encl #{2}}))))
+    (testing "an enclosing-only hit stays undecided"
+      (is (= {:all #{2 3} :nearest nil :cand #{2 3}}
+             (digest/thread-step s0 {:root nil :encl #{2 3}}))))
+    (testing "a later root inside the candidates is the closest container"
+      (is (= #{2} (:nearest (digest/thread-step
+                             {:all #{2 3} :nearest nil :cand #{2 3}}
+                             {:root 2 :encl #{}})))))
+    (testing "a later root outside the candidates settles on them"
+      (is (= #{2 3} (:nearest (digest/thread-step
+                               {:all #{2 3} :nearest nil :cand #{2 3}}
+                               {:root 9 :encl #{}})))))
+    (testing "a decided :nearest never moves, :all keeps growing"
+      (is (= {:all #{1 7 9} :nearest #{1} :cand nil}
+             (digest/thread-step {:all #{1} :nearest #{1} :cand nil}
+                                 {:root 9 :encl #{7}}))))
+    (testing "a mid with no report changes nothing"
+      (is (= s0 (digest/thread-step s0 {:root nil :encl #{}}))))
+    (testing "finalize settles an undecided walk on the candidates"
+      (is (= {:all #{2 3} :nearest #{2 3}}
+             (digest/finalize-thread-lookup
+              {:all #{2 3} :nearest nil :cand #{2 3}}))))
+    (testing "finalize with nothing found leaves :nearest nil"
+      (is (= {:all #{} :nearest nil}
+             (digest/finalize-thread-lookup s0))))))

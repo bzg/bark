@@ -348,6 +348,23 @@
       (re-find vote-down-pattern body-text) :down
       (re-find vote-null-pattern body-text) :null)))
 
+(defn vote-tx
+  "Pure: the transaction map recording `vote` for the voter, or nil
+  when it matches `current` (a no-op revote).  One entity per voter
+  per report: a revote carries the `existing` entity id explicitly --
+  no upsert through the unique attr at transact time."
+  [{:keys [vote-key report-eid email-eid voter-addr existing current vote]}]
+  (when (not= current vote)
+    (if existing
+      {:db/id       existing
+       :vote/email  email-eid
+       :vote/value  vote}
+      {:vote/key    vote-key
+       :vote/report report-eid
+       :vote/email  email-eid
+       :vote/value  vote
+       :vote/voter  voter-addr})))
+
 ;; ---------------------------------------------------------------------------
 ;; Command application (effectful)
 ;; ---------------------------------------------------------------------------
@@ -355,7 +372,8 @@
 (defn- ref-eid [v] (if (map? v) (:db/id v) v))
 
 (defn- apply-vote!
-  "Record a pre-detected `vote` (caller runs `detect-vote`)."
+  "Record a pre-detected `vote` (caller runs `detect-vote`); the tx
+  itself is built by the pure `vote-tx` (last vote wins)."
   [conn report-eid from-addr vote email delivery source-cfg]
   (if-not (common/sent-via-source-channel? delivery source-cfg)
     (log/info "Vote ignored (private email on public source)" from-addr)
@@ -365,22 +383,17 @@
           ;; keyed on the mid hash (unique attr, raw mids unbounded).
           addr       (some-> from-addr str/lower-case)
           vote-key   (str (common/mid-hash report-mid) ":" addr)
-          ;; One entity per voter per report; a new vote replaces the
-          ;; previous one (last vote wins).  Explicit :db/id on revote
-          ;; -- no upsert through the unique attr at transact time.
           existing   (d/entid db [:vote/key vote-key])
           current    (when existing
                        (:vote/value (d/pull db [:vote/value] existing)))]
-      (when (not= current vote)
-        (d/transact! conn [(if existing
-                             {:db/id       existing
-                              :vote/email  (:db/id email)
-                              :vote/value  vote}
-                             {:vote/key    vote-key
-                              :vote/report report-eid
-                              :vote/email  (:db/id email)
-                              :vote/value  vote
-                              :vote/voter  addr})])
+      (when-let [tx (vote-tx {:vote-key   vote-key
+                              :report-eid report-eid
+                              :email-eid  (:db/id email)
+                              :voter-addr addr
+                              :existing   existing
+                              :current    current
+                              :vote       vote})]
+        (d/transact! conn [tx])
         (tracking/bump-report-updated! conn report-eid)
         (log/info (cond-> (str "Vote " (case vote :up "+1" :down "-1" "0")
                                " by " from-addr)
@@ -650,26 +663,36 @@
       :unset-related    (str syntax ": " target-message-id)
       syntax)))
 
+(defn partition-lines-by-scope
+  "Pure decision behind `filter-permitted-lines`: split the `line-pred`
+  subset of `lines` into {:allowed [...] :denied [...]} by whether the
+  effective scope permits `from-addr` to act (`current-d` as in
+  `scope-permits?` -- a realized snapshot makes this side-effect
+  free)."
+  [lines current-d from-addr is-maintainer? line-pred]
+  (let [{allowed true denied false}
+        (group-by (fn [{:keys [scope attr]}]
+                    (boolean (scope-permits? scope attr from-addr
+                                             is-maintainer? current-d)))
+                  (filterv line-pred lines))]
+    {:allowed (vec allowed) :denied (vec denied)}))
+
 (defn- filter-permitted-lines
-  "Subset of `lines` passing `line-pred` whose scope permits
-  `from-addr` to act (`current-d` as in `scope-permits?`).  With a
-  non-nil `failure-ctx`, scope-rejected lines are recorded as
-  :insufficient-scope failures, audience :maintainers."
+  "Effectful shell over `partition-lines-by-scope`: with a non-nil
+  `failure-ctx`, each denied line is recorded as an
+  :insufficient-scope failure (audience :maintainers); the allowed
+  lines are returned."
   [lines current-d from-addr is-maintainer? line-pred failure-ctx]
-  ;; Eager realization via `filterv` so the recording side effect in
-  ;; the denial branch fires deterministically, regardless of whether
-  ;; callers seq or reduce over the result.
-  (filterv (fn [{:keys [scope attr] :as line}]
-             (and (line-pred line)
-                  (or (scope-permits? scope attr from-addr is-maintainer? current-d)
-                      (do (when failure-ctx
-                            (record-failure!
-                             (assoc failure-ctx
-                                    :reason    :insufficient-scope
-                                    :audience  :maintainers
-                                    :command   (describe-denied-line line))))
-                          false))))
-           lines))
+  (let [{:keys [allowed denied]}
+        (partition-lines-by-scope lines current-d from-addr
+                                  is-maintainer? line-pred)]
+    (when failure-ctx
+      (doseq [line denied]
+        (record-failure! (assoc failure-ctx
+                                :reason    :insufficient-scope
+                                :audience  :maintainers
+                                :command   (describe-denied-line line)))))
+    allowed))
 
 (defn- report-eid-by-mid
   "Report eid for `target-mid`, matching the root or any thread
@@ -1121,32 +1144,43 @@
   [attr]
   (some-> (attr->word-cmd attr) :id name str/capitalize (str ".")))
 
+(defn partition-words-by-scope
+  "Pure decision behind `filter-words-by-scope`: split `word-result`
+  into {:allowed <word-map-or-nil> :denied [attr ...]} by each
+  bareword's effective scope.  :report/close-reason is no bareword:
+  it rides back onto a non-empty allowed map (build-word-tx only
+  consumes it when :report/closed is set)."
+  [word-result overrides is-maintainer?]
+  (let [{allowed true denied false}
+        (group-by (fn [[attr _]]
+                    (let [cmd   (attr->word-cmd attr)
+                          scope (or (:scope (get overrides (:id cmd))) (:scope cmd))]
+                      (word-scope-permits? scope is-maintainer?)))
+                  (dissoc word-result :report/close-reason))
+        allowed-map (into {} allowed)]
+    {:allowed (when (seq allowed-map)
+                (cond-> allowed-map
+                  (:report/close-reason word-result)
+                  (assoc :report/close-reason (:report/close-reason word-result))))
+     :denied  (mapv key denied)}))
+
 (defn- filter-words-by-scope
-  "Filter `word-result` to the subset allowed by the effective scope
-  for each bareword.  When `failure-ctx` is non-nil, barewords that fail
-  the scope check are recorded as :insufficient-scope failures with
-  \":audience :maintainers\", so denied attempts surface to maintainer
-  subscribers via the notification loop."
+  "Effectful shell over `partition-words-by-scope`: with a non-nil
+  `failure-ctx`, each denied bareword is recorded as an
+  :insufficient-scope failure (audience :maintainers, so denied
+  attempts surface to maintainer subscribers via the notification
+  loop); the allowed map is returned."
   [word-result overrides is-maintainer? failure-ctx]
   (when word-result
-    (let [filtered (into {}
-                         (keep (fn [[attr :as entry]]
-                                 (let [cmd   (attr->word-cmd attr)
-                                       scope (or (:scope (get overrides (:id cmd))) (:scope cmd))]
-                                   (if (word-scope-permits? scope is-maintainer?)
-                                     entry
-                                     (do (when failure-ctx
-                                           (record-failure!
-                                            (assoc failure-ctx
-                                                   :reason   :insufficient-scope
-                                                   :audience :maintainers
-                                                   :command  (describe-denied-word attr))))
-                                         nil)))))
-                         (dissoc word-result :report/close-reason))]
-      (when (seq filtered)
-        (cond-> filtered
-          (:report/close-reason word-result) (assoc :report/close-reason
-                                                    (:report/close-reason word-result)))))))
+    (let [{:keys [allowed denied]}
+          (partition-words-by-scope word-result overrides is-maintainer?)]
+      (when failure-ctx
+        (doseq [attr denied]
+          (record-failure! (assoc failure-ctx
+                                  :reason   :insufficient-scope
+                                  :audience :maintainers
+                                  :command  (describe-denied-word attr)))))
+      allowed)))
 
 ;; Carrier-eligible commands: when a mail simultaneously creates a new
 ;; report AND carries one of these annotations, the annotation applies

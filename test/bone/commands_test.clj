@@ -193,3 +193,60 @@
     (is (seq (detect-with true "!Not confirmed.\n"))))
   (testing "prose lines with trailing text do not match"
     (is (empty? (detect-with false "Not confirmed yet, will retest tomorrow.\n")))))
+
+;; ---------------------------------------------------------------------------
+;; Pure scope partitions and vote tx (decision layer of the ! functions)
+;; ---------------------------------------------------------------------------
+
+(deftest partition-words-by-scope-pure
+  (let [wr {:report/closed true :report/acked true
+            :report/close-reason :resolved}]
+    (testing "default :user scope allows everything"
+      (is (= {:allowed wr :denied []}
+             (commands/partition-words-by-scope wr {} false))))
+    (testing "a :maintainer override denies non-maintainers only"
+      (let [{:keys [allowed denied]}
+            (commands/partition-words-by-scope
+             wr {:closed {:scope :maintainer}} false)]
+        (is (= [:report/closed] denied))
+        ;; close-reason is no bareword: it rides back onto the allowed
+        ;; map and is only consumed when :report/closed is set.
+        (is (= {:report/acked true :report/close-reason :resolved} allowed))))
+    (testing "maintainers pass the same override"
+      (is (= {:allowed wr :denied []}
+             (commands/partition-words-by-scope
+              wr {:closed {:scope :maintainer}} true))))
+    (testing "everything denied yields a nil allowed map"
+      (is (nil? (:allowed (commands/partition-words-by-scope
+                           {:report/closed true}
+                           {:closed {:scope :maintainer}} false)))))))
+
+(deftest partition-lines-by-scope-pure
+  (let [lines [{:id :closed-by :action :set :attr :report/closed
+                :scope :maintainer :email-address "a@b.c"}
+               {:id :acked-by :action :set :attr :report/acked
+                :scope :user :email-address "a@b.c"}]
+        {:keys [allowed denied]}
+        (commands/partition-lines-by-scope lines (delay {}) "x@y.z" false
+                                           (constantly true))]
+    (is (= [:acked-by] (mapv :id allowed)))
+    (is (= [:closed-by] (mapv :id denied)))
+    (testing "line-pred applies before the scope split"
+      (is (= {:allowed [] :denied []}
+             (commands/partition-lines-by-scope lines (delay {}) "x@y.z" false
+                                                (constantly false)))))))
+
+(deftest vote-tx-pure
+  (testing "first vote creates the voter's entity"
+    (is (= {:vote/key "k" :vote/report 1 :vote/email 2
+            :vote/value :up :vote/voter "a@b.c"}
+           (commands/vote-tx {:vote-key "k" :report-eid 1 :email-eid 2
+                              :voter-addr "a@b.c" :existing nil
+                              :current nil :vote :up}))))
+  (testing "a revote targets the existing entity by :db/id"
+    (is (= {:db/id 7 :vote/email 2 :vote/value :down}
+           (commands/vote-tx {:vote-key "k" :report-eid 1 :email-eid 2
+                              :voter-addr "a@b.c" :existing 7
+                              :current :up :vote :down}))))
+  (testing "an unchanged revote is a no-op"
+    (is (nil? (commands/vote-tx {:existing 7 :current :up :vote :up})))))

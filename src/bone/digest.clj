@@ -50,7 +50,9 @@
                               (:email/in-reply-to email)))
 
 (defn- reports-by-hash
-  "Report eids whose root or any descendant has the mid-hash `h`.
+  "Reports matched by the mid-hash `h`: {:root report-eid-or-nil
+  :encl #{eids}} -- :root when `h` is a report's own message-id,
+  :encl the reports counting that email among their descendants.
   Resolution via bone.lookup, descendant join eid-bound (see the
   bone.lookup ns docstring)."
   [db h]
@@ -59,7 +61,7 @@
         as-desc (when email-e
                   (d/q '[:find [?r ...] :in $ ?e :where [?r :report/descendants ?e]]
                        db email-e))]
-    (cond-> (set as-desc) as-root (conj as-root))))
+    {:root as-root :encl (set as-desc)}))
 
 (defn- email-ancestors
   "Ancestor mids of the stored email `eid` (root first).  Used by
@@ -74,10 +76,42 @@
   "Upper bound on transitive ancestor splicing per `thread-lookup` call."
   32)
 
+(defn thread-step
+  "Pure arbitration of one ancestor mid during `thread-lookup`, walked
+  nearest-first.  `state` is {:all #{eids} :nearest nil-or-#{eids}
+  :cand nil-or-#{eids}} -- :cand holds the enclosing reports of the
+  closest hit while no root has decided.  `hit` is `reports-by-hash`'s
+  {:root :encl}.  A root decides :nearest: the root itself when the
+  undecided set contains it (or there is none) -- a reply to a patch
+  targets the patch, never the cover letter (or bug) whose thread
+  merely encloses it -- else the undecided set, which belongs to a
+  closer thread.  Returns the next state."
+  [{:keys [nearest cand] :as state} {:keys [root encl]}]
+  (let [eids     (cond-> (or encl #{}) root (conj root))
+        nearest' (or nearest
+                     (cond
+                       (and root (or (nil? cand) (contains? cand root))) #{root}
+                       root cand
+                       :else nil))
+        cand'    (if (and (nil? nearest') (nil? cand) (seq encl)) encl cand)]
+    (-> state
+        (update :all into eids)
+        (assoc :nearest nearest' :cand cand'))))
+
+(defn finalize-thread-lookup
+  "Pure: end of the walk -- an undecided candidate set becomes the
+  :nearest (no ancestor ever resolved as a root), and the working
+  :cand key is dropped."
+  [{:keys [nearest cand] :as state}]
+  (-> state
+      (assoc :nearest (or nearest cand))
+      (dissoc :cand)))
+
 (defn thread-lookup
   "Walk `email`'s ancestor mids nearest-first.  Returns
   `{:all #{eids} :nearest #{eids}}` -- :all is every report matched
-  by any ancestor, :nearest is the closest match (nil if none).
+  by any ancestor, :nearest is the closest match (nil if none), both
+  arbitrated by the pure `thread-step`/`finalize-thread-lookup`.
   When an ancestor mid matches a stored email with no report, that
   email's own ancestors are spliced into the walk (bounded by
   `thread-lookup-max-splices`) so pending intermediates don't orphan
@@ -86,26 +120,24 @@
   (loop [stack   (vec (ancestor-mids email))  ; root-first; peek = nearest
          seen    #{}
          splices 0
-         acc     {:all #{} :nearest nil}]
+         state   {:all #{} :nearest nil :cand nil}]
     (if (empty? stack)
-      acc
+      (finalize-thread-lookup state)
       (let [mid    (peek stack)
             stack' (pop stack)]
         (if (contains? seen mid)
-          (recur stack' seen splices acc)
-          (let [seen' (conj seen mid)
-                h     (common/mid-hash mid)
-                eids  (reports-by-hash db h)
-                acc'  (cond-> acc
-                        (seq eids)                              (update :all into eids)
-                        (and (seq eids) (nil? (:nearest acc))) (assoc :nearest eids))]
-            (if (and (empty? eids)
+          (recur stack' seen splices state)
+          (let [seen'  (conj seen mid)
+                h      (common/mid-hash mid)
+                {:keys [root encl] :as hit} (reports-by-hash db h)
+                state' (thread-step state hit)]
+            (if (and (nil? root) (empty? encl)
                      (< splices thread-lookup-max-splices))
               (if-let [ancestors (some->> (lookup/email-eid-by-hash db h)
                                           (email-ancestors db))]
-                (recur (into stack' ancestors) seen' (inc splices) acc')
-                (recur stack' seen' splices acc'))
-              (recur stack' seen' splices acc'))))))))
+                (recur (into stack' ancestors) seen' (inc splices) state')
+                (recur stack' seen' splices state'))
+              (recur stack' seen' splices state'))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; DB operations
