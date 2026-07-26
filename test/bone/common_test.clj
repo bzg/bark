@@ -206,6 +206,18 @@
       (is (= #{} (get-in sm ["source" :restricted-types])))
       (is (true? (get-in sm ["source" :patch-triggers?]))))))
 
+(deftest build-source-map-keeps-project-links
+  (testing "the project-link keys survive the source-map whitelist --
+            they feed the JSON envelope and the exported pages"
+    (let [sm (common/build-source-map
+              {:sources [{:name "s" :list "l.example.org"
+                          :website        "https://p.example.org"
+                          :contribute-url "https://p.example.org/contribute"
+                          :post-address   "bugs@example.org"}]})]
+      (is (= "https://p.example.org" (get-in sm ["s" :website])))
+      (is (= "https://p.example.org/contribute" (get-in sm ["s" :contribute-url])))
+      (is (= "bugs@example.org" (get-in sm ["s" :post-address]))))))
+
 ;; ---------------------------------------------------------------------------
 ;; slugify
 ;; ---------------------------------------------------------------------------
