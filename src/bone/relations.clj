@@ -10,7 +10,8 @@
   by ascending eid order.  See bone-schema.edn for the :rel/* attrs."
   (:require [clojure.string :as str]
             [datalevin.core :as d]
-            [bone.tracking :as tracking]))
+            [bone.tracking :as tracking]
+            [taoensso.timbre :as log]))
 
 (def all-kinds
   #{:resolves :resolved-by
@@ -321,13 +322,38 @@
     attr new-email-eid
     addr-attr (some-> new-addr str/lower-case)}])
 
+(defn- open-patch-thread-ancestors
+  "Open :patch reports counting `patch-eid`'s root email among their
+  descendants -- the stale revisions upthread of a patch posted as a
+  reply.  Cross-sender by construction, unlike the arrival-time
+  auto-supersession which only reaches the same sender's patches.
+  Ancestors sharing the patch's series are excluded: applying one
+  member must not retire the series' cover letter."
+  [db patch-eid]
+  (when-let [root-email (:db/id (:report/email
+                                 (d/pull db [{:report/email [:db/id]}]
+                                         patch-eid)))]
+    (d/q '[:find [?r ...]
+           :in $ ?e ?self
+           :where
+           [?r :report/descendants ?e]
+           [?r :report/type :patch]
+           [(not= ?r ?self)]
+           (not [?r :report/closed _])
+           (not-join [?r ?self]
+                     [?r :report/series ?s]
+                     [?self :report/series ?s])]
+         db root-email patch-eid)))
+
 (defn propagate-patch-closure!
   "Propagate a patch's closure to the bugs/requests it :resolves:
   :resolved closes them; :canceled retracts auto-credits; :superseded
   transfers :owned to `successor-eid` (acked stays with the original
-  acker -- a historical act, not transferable).  Bumps every modified
-  target so the incremental export and notifications pick them up.
-  No-op if `patch-type` ≠ :patch."
+  acker -- a historical act, not transferable).  A :resolved closure
+  also supersedes the still-open patch reports upthread: applying the
+  head of a revision chain retires the revisions it replaced.  Bumps
+  every modified target so the incremental export and notifications
+  pick them up.  No-op if `patch-type` ≠ :patch."
   [conn patch-eid patch-type email-eid close-reason successor-eid]
   (when (= :patch patch-type)
     (let [db   (d/db conn)
@@ -347,7 +373,32 @@
                                 :report/closed email-eid
                                 :report/close-reason :resolved}]))
           (when (seq to-close)
-            (tracking/bump-report-updated! conn to-close)))
+            (tracking/bump-report-updated! conn to-close))
+          ;; Applying this patch retires its stale upthread revisions:
+          ;; close them as :superseded, pose the audit relations, and
+          ;; transfer their auto-credits, exactly like an arrival-time
+          ;; auto-supersession would have.
+          (let [ancestors (open-patch-thread-ancestors db patch-eid)
+                closer    (when (seq ancestors)
+                            (d/pull db [:db/id :email/author-address
+                                        :email/date-sent]
+                                    email-eid))]
+            (doseq [anc ancestors]
+              (d/transact! conn [{:db/id anc
+                                  :report/closed email-eid
+                                  :report/close-reason :superseded}])
+              (pose-from-email! conn closer {:from-eid anc :to-eid patch-eid
+                                             :kind :supersedes})
+              (pose-from-email! conn closer {:from-eid anc :to-eid patch-eid
+                                             :kind :related-to})
+              (propagate-patch-closure! conn anc :patch email-eid
+                                        :superseded patch-eid)
+              (log/info "Auto-closed patch"
+                        (pr-str (:report/message-id
+                                 (d/pull (d/db conn) [:report/message-id] anc)))
+                        "(superseded by applied downthread revision)"))
+            (when (seq ancestors)
+              (tracking/bump-report-updated! conn ancestors))))
 
         :canceled
         (let [touched (reduce

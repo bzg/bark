@@ -2623,6 +2623,99 @@
           (teardown! ctx))))))
 
 ;; ---------------------------------------------------------------------------
+;; Applying a patch supersedes its stale upthread revisions
+;; ---------------------------------------------------------------------------
+
+(deftest applied-revision-supersedes-upthread-patches
+  (testing "Closing a patch as :resolved supersedes the still-open patch
+            reports upthread -- the cross-sender revision case that
+            arrival-time auto-supersession (same-sender) misses."
+    (let [{:keys [conn] :as ctx} (setup-db!)]
+      (try
+        (store-and-process! conn
+                            (mk-email {:mid "<ar-v1@test.org>"
+                                       :subject "[PATCH] widget: fix the thing"
+                                       :from "user@test.org"
+                                       :date #inst "2026-07-01T10:00:00"
+                                       :body "Initial patch.\n"})
+                            "direct")
+        ;; The maintainer posts an improved version in the same thread:
+        ;; different sender and base subject, so arrival-time
+        ;; supersession stays out of the picture.
+        (store-and-process! conn
+                            (assoc (mk-email {:mid "<ar-v2@test.org>"
+                                              :subject "Re: [PATCH] widget: improved fix"
+                                              :from "maint@test.org"
+                                              :date #inst "2026-07-02T10:00:00"
+                                              :in-reply-to "<ar-v1@test.org>"
+                                              :body "Improved version attached.\n"})
+                                   :email/attachments
+                                   [{:attachment/filename "0001-improved.patch"}])
+                            "direct")
+        (is (nil? (:report/closed (get-report (d/db conn) "<ar-v1@test.org>")))
+            "v1 still open after the cross-sender v2 arrives")
+        (store-and-process! conn
+                            (mk-email {:mid "<ar-applied@test.org>"
+                                       :subject "Re: [PATCH] widget: improved fix"
+                                       :from "admin@test.org"
+                                       :date #inst "2026-07-03T09:00:00"
+                                       :in-reply-to "<ar-v2@test.org>"
+                                       :refs ["<ar-v1@test.org>" "<ar-v2@test.org>"]
+                                       :body "Applied.\n"})
+                            "direct")
+        (let [db (d/db conn)
+              v1 (get-report db "<ar-v1@test.org>")
+              v2 (get-report db "<ar-v2@test.org>")]
+          (is (some? (:report/closed v2)) "applied v2 is closed")
+          (is (= :resolved (:report/close-reason v2)))
+          (is (some? (:report/closed v1))
+              "stale v1 closed by the application of v2")
+          (is (= :superseded (:report/close-reason v1)))
+          (is (= "<ar-v2@test.org>"
+                 (some-> (superseded-by-target v1) :report/message-id))
+              "v1 records being superseded by v2"))
+        (finally
+          (teardown! ctx))))))
+
+(deftest applied-revision-respects-patch-triggers-opt-out
+  (testing "Sources with :patch-triggers? false skip the upthread
+            supersession, like every other :resolved propagation."
+    (let [{:keys [conn] :as ctx} (setup-db!)]
+      (try
+        (store-and-process! conn
+                            (mk-email {:mid "<nt-v1@test.org>"
+                                       :subject "[PATCH] gadget: fix"
+                                       :from "user@test.org"
+                                       :date #inst "2026-07-01T10:00:00"
+                                       :body "Initial patch.\n"})
+                            "no-triggers")
+        (store-and-process! conn
+                            (assoc (mk-email {:mid "<nt-v2@test.org>"
+                                              :subject "Re: [PATCH] gadget: better fix"
+                                              :from "maint@test.org"
+                                              :date #inst "2026-07-02T10:00:00"
+                                              :in-reply-to "<nt-v1@test.org>"
+                                              :body "Better version attached.\n"})
+                                   :email/attachments
+                                   [{:attachment/filename "0001-better.patch"}])
+                            "no-triggers")
+        (store-and-process! conn
+                            (mk-email {:mid "<nt-applied@test.org>"
+                                       :subject "Re: [PATCH] gadget: better fix"
+                                       :from "admin@test.org"
+                                       :date #inst "2026-07-03T09:00:00"
+                                       :in-reply-to "<nt-v2@test.org>"
+                                       :refs ["<nt-v1@test.org>" "<nt-v2@test.org>"]
+                                       :body "Applied.\n"})
+                            "no-triggers")
+        (let [db (d/db conn)]
+          (is (some? (:report/closed (get-report db "<nt-v2@test.org>"))))
+          (is (nil? (:report/closed (get-report db "<nt-v1@test.org>")))
+              "opt-out source: v1 stays open"))
+        (finally
+          (teardown! ctx))))))
+
+;; ---------------------------------------------------------------------------
 ;; thread-lookup arbitration (pure)
 ;; ---------------------------------------------------------------------------
 
