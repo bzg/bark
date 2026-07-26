@@ -1050,7 +1050,7 @@ Emails that match no source are discarded at ingestion.
 |                        | =Archived-At= header is absent                                                                |
 | =:base-url=              | Base URL where this source's public directory is served                                     |
 | =:website=               | Project website: links the source name in page titles and the footer                        |
-| =:contribute-url=        | Contribution guide: "Create new" button on the reports page, plus a footer link             |
+| =:contribute-url=        | Contribution guide: drives the "Create new" button on the reports page                      |
 | =:post-address=          | Posting address shown on =docs.html= (mailbox sources fall back to =:to=)                       |
 | =:labels=                | Per-source label overrides (see [[#customising-subject-labels][customising subject labels]])                                 |
 | =:commands=              | Per-source command overrides (see [[#customising-commands][customising commands]])                                     |

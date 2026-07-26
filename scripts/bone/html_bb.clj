@@ -178,12 +178,14 @@
   ([title current] (nav-bar title current nil))
   ([title current {:keys [source source-href]}]
    [:nav
-    [:ul [:li [:a {:href "index.html" :style "text-decoration:none;color:inherit"}
+    [:ul [:li [:a {:href "index.html" :title "Back to BONE homepage"
+                   :style "text-decoration:none;color:inherit"}
                [:strong title]]
           (when source
             (list " - "
                   (if source-href
                     [:a {:href source-href
+                         :title (str "Visit " source " website")
                          :style "text-decoration:none;color:inherit"}
                      [:strong source]]
                     [:strong source])))]]
@@ -251,13 +253,13 @@
 (defn bone-footer
   "Footer with BONE repo + license link.
   Options:
-    :feeds  when true (default), appends per-source RSS/JSON/Org links.
-            Set to false on the root index where those paths don't exist.
-    :ical   when true (default) and :feeds is on, appends an iCal link.
-    :website / :contribute-url  when set, append links to the tracked
-            project's website and contribution page."
+    :feeds    when true (default), appends per-source RSS/JSON/Org links.
+              Set to false on the root index where those paths don't exist.
+    :ical     when true (default) and :feeds is on, appends an iCal link.
+    :website  when set, appends a link to the tracked project's website,
+              labeled with :source (the source name) when available."
   ([] (bone-footer {}))
-  ([{:keys [ical feeds website contribute-url] :or {ical true feeds true}}]
+  ([{:keys [ical feeds website source] :or {ical true feeds true}}]
    [:footer.bone-footer
     [:a {:href bone-repo-url} "BONE"]
     " is "
@@ -273,9 +275,7 @@
             (when ical
               (list " -- " [:a {:href "events/announcements.ics"} "iCal"]))))
     (when website
-      (list " -- " [:a {:href website} "Website"]))
-    (when contribute-url
-      (list " -- " [:a {:href contribute-url} "Contribute"]))]))
+      (list " -- " [:a {:href website} (or source "Website")]))]))
 
 ;; ---------------------------------------------------------------------------
 ;; Org-mode inline link conversion (shared by bone-docs, bone-stats)

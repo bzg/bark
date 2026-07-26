@@ -307,7 +307,7 @@
   .meta { font-size: 0.78rem; color: var(--pico-muted-color); margin-bottom: 2rem; }
 " footer-css))
 
-(defn docs-page [body-html {:keys [ical website contribute-url]}]
+(defn docs-page [body-html {:keys [ical website source]}]
   (let [title        "BONE - Docs"
         generated-at (str (java.util.Date.))]
     (str
@@ -337,7 +337,7 @@
          [:script (h/raw (wrap-js theme-toggle-js))]]
         (bone-footer {:ical ical
                       :website website
-                      :contribute-url contribute-url})]]))))
+                      :source source})]]))))
 
 ;; ---------------------------------------------------------------------------
 ;; Filter feed links in "Getting the data" table
@@ -516,7 +516,7 @@
                                                         "announcements.ics"))]
                       (docs-page body-html {:ical has-ical?
                                             :website (:website source-cfg)
-                                            :contribute-url (:contribute-url source-cfg)}))
+                                            :source source-name}))
                     (finally
                       ((resolve 'pod.huahaiy.datalevin/close) conn)))]
   (io/make-parents out-file)

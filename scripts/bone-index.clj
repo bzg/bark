@@ -309,7 +309,7 @@
                         [:div#pagination]])
                       (h/html (bone-footer {:ical has-ical?
                                             :website website
-                                            :contribute-url contribute})))]
+                                            :source source-name})))]
     (str
      "<!DOCTYPE html>\n"
      (h/html

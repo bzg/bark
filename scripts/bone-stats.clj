@@ -582,7 +582,7 @@
   \"Available data\" table, and the scripts.  Carries no report data --
   bone-stats.js fetches stats.json (via meta.json) and fills it in, so the
   file stays byte-stable across data-only changes."
-  [out-dir source-name {:keys [website contribute-url]}]
+  [out-dir source-name {:keys [website]}]
   (let [title        (page-title "Data" source-name)
         has-ical?    (.exists (io/file out-dir "events" "announcements.ics"))
         data-section (render-data-section out-dir)
@@ -605,7 +605,7 @@
                           "</section>\n")
         tpl-footer   (str (h/html (bone-footer {:ical has-ical?
                                                 :website website
-                                                :contribute-url contribute-url})))]
+                                                :source source-name})))]
     (str
      "<!DOCTYPE html>\n"
      "<html lang=\"en\" data-theme=\"light\">\n"
@@ -671,7 +671,7 @@
   (let [src (some #(when (= source-name (:name %)) %)
                   (:sources (load-config)))]
     (spit-html out-file (render-shell out-dir source-name
-                                      (select-keys src [:website :contribute-url]))))
+                                      (select-keys src [:website]))))
   (log/info "Wrote shell" out-file))
 
 (defn -main [& args]
