@@ -126,6 +126,18 @@
 (defn set-cover-letter! [conn series-eid email-eid]
   (d/transact! conn [{:db/id series-eid :series/cover-letter email-eid}]))
 
+(defn- awaiting-cover-series?
+  "True when `series-eid` has no patches yet and its cover letter is
+  one of `parent-mids`: the series the current patch is about to join
+  via its own cover, not an old revision to supersede."
+  [db series-eid parent-mids]
+  (let [{patches :series/patches cover :series/cover-letter}
+        (d/pull db [{:series/patches [:db/id]}
+                    {:series/cover-letter [:email/message-id]}]
+                series-eid)]
+    (and (empty? patches)
+         (contains? parent-mids (:email/message-id cover)))))
+
 (defn manage-series!
   "After creating a patch report, manage its series membership."
   [conn report-eid email report-info from-addr parent-report-eids]
@@ -145,6 +157,11 @@
                                               [?r :report/patch-seq ?seq]]
                                             db existing-series)]
                                    (some #(str/starts-with? % "1/") existing-seqs)))))
+          parent-mids (when (and restart? (seq parent-report-eids))
+                        (set (d/q '[:find [?mid ...]
+                                    :in $ [?r ...]
+                                    :where [?r :report/message-id ?mid]]
+                                  db parent-report-eids)))
           ancestor? (when restart?
                       (let [old-mids (into
                                       (set (d/q '[:find [?mid ...]
@@ -156,15 +173,15 @@
                                              :in $ [?s ...]
                                              :where [?s :series/cover-letter ?e]
                                              [?e :email/message-id ?mid]]
-                                           db existing-series))
-                            parent-mids (when (seq parent-report-eids)
-                                          (set (d/q '[:find [?mid ...]
-                                                      :in $ [?r ...]
-                                                      :where [?r :report/message-id ?mid]]
-                                                    db parent-report-eids)))]
+                                           db existing-series))]
                         (some old-mids parent-mids)))]
       (when (and restart? ancestor?)
-        (doseq [sid existing-series]
+        ;; A numbered patch must not close the empty series its own
+        ;; cover letter just opened: that series is the one it is
+        ;; joining, not an old revision to supersede.
+        (doseq [sid existing-series
+                :when (not (and (pos? n)
+                                (awaiting-cover-series? db sid parent-mids)))]
           (close-series! conn sid email-eid)
           (when (:version report-info)
             (supersede-series-reports! conn sid email-eid))

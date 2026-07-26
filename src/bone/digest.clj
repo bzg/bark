@@ -732,13 +732,53 @@
           (commands/apply-commands! conn patch-rid ptype email source-map
                                     proles delivery :no-cross-refs))))))
 
+(defn- supersession-heads
+  "Open successors of a report closed as :superseded, following the
+  active :supersedes chain forward (:rel/from = old, :rel/to = new).
+  Empty when `rid` is open, closed for another reason, or every
+  successor is closed.  Cycle-safe.  Series restarts close reports
+  without posing :supersedes relations, so those closures are not
+  traversable here."
+  [db rid]
+  (loop [stack [rid], seen #{}, heads []]
+    (if-let [r (peek stack)]
+      (let [stack' (pop stack)]
+        (if (seen r)
+          (recur stack' seen heads)
+          (let [{closed :report/closed reason :report/close-reason}
+                (d/pull db [:report/closed :report/close-reason] r)]
+            (cond
+              (and closed (= :superseded reason))
+              (recur (into stack'
+                           (d/q '[:find [?to ...]
+                                  :in $ ?from
+                                  :where
+                                  [?rel :rel/kind :supersedes]
+                                  [?rel :rel/from ?from]
+                                  [?rel :rel/active? true]
+                                  [?rel :rel/to ?to]]
+                                db r))
+                     (conj seen r) heads)
+              (and (nil? closed) (not= r rid))
+              (recur stack' (conj seen r) (conj heads r))
+              :else (recur stack' (conj seen r) heads)))))
+      heads)))
+
 (defn- apply-commands-on-nearest!
   "Apply commands to the nearest reports of a reply (roles refreshed
   per source), record the author as participant on any match, and
   broadcast cover-letter commands to their series.  `line-filter` is
-  forwarded to `apply-commands!`."
+  forwarded to `apply-commands!`.  Reports auto-superseded since the
+  reply's branch forked (a revision may live on a sibling branch) are
+  expanded with the open heads of their supersession chain, so the
+  commands also reach the live submission."
   [conn email from-addr source-name rroles source-map delivery nearest-eids line-filter]
   (let [db       (d/db conn)
+        nearest-eids (into (vec nearest-eids)
+                           (comp (mapcat #(supersession-heads db %))
+                                 (distinct)
+                                 (remove (set nearest-eids)))
+                           nearest-eids)
         info     (rids->type+source db nearest-eids)
         src->roles (roles-by-source db info)
         any-cmd? (reduce (fn [acc rid]

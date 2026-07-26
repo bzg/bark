@@ -1670,6 +1670,83 @@
         (finally
           (teardown! ctx))))))
 
+(deftest series-restart-keeps-own-cover-series
+  (testing "A re-roll posted with a fresh cover letter supersedes the
+            old series WITHOUT closing the series its own cover just
+            created: the numbered patches join the cover's series, and
+            a close command on the cover reaches them."
+    (let [{:keys [conn] :as ctx} (setup-db!)]
+      (try
+        ;; v1 series without a cover: 1/3 root, 2/3 reply (aborted).
+        (store-and-process! conn
+                            (mk-email {:mid "<sr-v1-1@test.org>"
+                                       :subject "[PATCH t 1/3] step a"
+                                       :from "user@test.org"
+                                       :date #inst "2026-06-10T10:00:00"
+                                       :body (str "step a\n\n"
+                                                  "diff --git a/z.clj b/z.clj\n"
+                                                  "--- a/z.clj\n+++ b/z.clj\n"
+                                                  "@@ -1,1 +1,1 @@\n-a\n+b\n")})
+                            "direct")
+        (store-and-process! conn
+                            (mk-email {:mid "<sr-v1-2@test.org>"
+                                       :subject "[PATCH t 2/3] step b"
+                                       :from "user@test.org"
+                                       :date #inst "2026-06-10T10:01:00"
+                                       :in-reply-to "<sr-v1-1@test.org>"
+                                       :body (str "step b\n\n"
+                                                  "diff --git a/z.clj b/z.clj\n"
+                                                  "--- a/z.clj\n+++ b/z.clj\n"
+                                                  "@@ -1,1 +1,1 @@\n-b\n+c\n")})
+                            "direct")
+        ;; v2 re-roll: new thread with a cover, patches reply to it.
+        (store-and-process! conn
+                            (mk-email {:mid "<sr-cov@test.org>"
+                                       :subject "[PATCH t v2 0/2] revamp"
+                                       :from "user@test.org"
+                                       :date #inst "2026-06-11T10:00:00"
+                                       :body "Series v2\n"})
+                            "direct")
+        (doseq [i [1 2]]
+          (store-and-process! conn
+                              (mk-email {:mid (str "<sr-v2-" i "@test.org>")
+                                         :subject (str "[PATCH t v2 " i "/2] step " i)
+                                         :from "user@test.org"
+                                         :date #inst "2026-06-11T10:01:00"
+                                         :in-reply-to "<sr-cov@test.org>"
+                                         :body (str "step " i "\n\n"
+                                                    "diff --git a/z.clj b/z.clj\n"
+                                                    "--- a/z.clj\n+++ b/z.clj\n"
+                                                    "@@ -1,1 +1,1 @@\n-a\n+b\n")})
+                              "direct"))
+        (let [db (d/db conn)
+              v2 (get-series-by-id db "t|user@test.org|2")]
+          (testing "old v1 series is closed by the restart"
+            (is (some? (:series/closed (get-series-by-id db "t|user@test.org|3")))))
+          (testing "v2 patches join their own cover's series, still open"
+            (is (nil? (:series/closed v2)))
+            (is (= "<sr-cov@test.org>"
+                   (get-in v2 [:series/cover-letter :email/message-id])))
+            (is (= 2 (series-patch-count db "t|user@test.org|2")))
+            (is (nil? (get-series-by-id db "t|user@test.org|2#2"))
+                "no orphan series is created for the numbered patches")))
+        ;; Applied. on the cover must now reach both patches.
+        (store-and-process! conn
+                            (mk-email {:mid "<sr-applied@test.org>"
+                                       :subject "Re: [PATCH t v2 0/2] revamp"
+                                       :from "admin@test.org"
+                                       :date #inst "2026-06-12T09:00:00"
+                                       :in-reply-to "<sr-cov@test.org>"
+                                       :body "Applied. Thanks!\n"})
+                            "direct")
+        (let [db (d/db conn)]
+          (is (some? (:report/closed (get-report db "<sr-v2-1@test.org>")))
+              "patch 1/2 closed via cover broadcast")
+          (is (some? (:report/closed (get-report db "<sr-v2-2@test.org>")))
+              "patch 2/2 closed via cover broadcast"))
+        (finally
+          (teardown! ctx))))))
+
 (deftest cover-letter-broadcast-supersede
   (testing "Superseded-by: on a cover letter supersedes every patch:
             each report closes with reason :superseded and points to
@@ -1788,6 +1865,72 @@
               "v2 was closed (superseded by v3) despite not being on v3's reply chain")
           (is (= :superseded (:report/close-reason v2)))
           (is (nil? (:report/closed v3)) "v3 itself stays open"))
+        (finally
+          (teardown! ctx))))))
+
+(deftest close-command-follows-supersession-chain
+  (testing "Applied. in reply to a superseded revision's branch closes
+            the live head of the supersession chain, even when that head
+            lives on a sibling thread branch never mentioned by the reply."
+    (let [{:keys [conn] :as ctx} (setup-db!)]
+      (try
+        (store-and-process! conn
+                            (mk-email {:mid "<sc-v1@test.org>"
+                                       :subject "[PATCH] table: speed up align"
+                                       :from "user@test.org"
+                                       :date #inst "2026-06-20T10:00:00"
+                                       :body "Initial patch.\n"})
+                            "direct")
+        ;; v2 supersedes v1.
+        (store-and-process! conn
+                            (assoc (mk-email {:mid "<sc-v2@test.org>"
+                                              :subject "Re: [PATCH v2] table: speed up align"
+                                              :from "user@test.org"
+                                              :date #inst "2026-06-21T10:00:00"
+                                              :in-reply-to "<sc-v1@test.org>"
+                                              :body "Updated patch.\n"})
+                                   :email/attachments [{:attachment/filename "0002-align.patch"}])
+                            "direct")
+        ;; Review comment under v2: the branch the closer will reply to.
+        (store-and-process! conn
+                            (mk-email {:mid "<sc-review@test.org>"
+                                       :subject "Re: [PATCH v2] table: speed up align"
+                                       :from "reviewer@test.org"
+                                       :date #inst "2026-06-22T10:00:00"
+                                       :in-reply-to "<sc-v2@test.org>"
+                                       :body "Looks good to me.\n"})
+                            "direct")
+        ;; v3 posted on its own branch supersedes v2 (sibling-branch
+        ;; auto-supersession); the closer's branch never mentions it.
+        (store-and-process! conn
+                            (assoc (mk-email {:mid "<sc-v3@test.org>"
+                                              :subject "Re: [PATCH v3] table: speed up align"
+                                              :from "user@test.org"
+                                              :date #inst "2026-06-23T10:00:00"
+                                              :in-reply-to "<sc-v1@test.org>"
+                                              :body "Third version.\n"})
+                                   :email/attachments [{:attachment/filename "0003-align.patch"}])
+                            "direct")
+        ;; The maintainer replies on the review branch: nearest report
+        ;; ancestor is v2, closed :superseded by then.
+        (store-and-process! conn
+                            (mk-email {:mid "<sc-applied@test.org>"
+                                       :subject "Re: [PATCH v2] table: speed up align"
+                                       :from "admin@test.org"
+                                       :date #inst "2026-06-24T10:00:00"
+                                       :in-reply-to "<sc-review@test.org>"
+                                       :body "Applied, onto main.\n"})
+                            "direct")
+        (let [db (d/db conn)
+              v1 (get-report db "<sc-v1@test.org>")
+              v2 (get-report db "<sc-v2@test.org>")
+              v3 (get-report db "<sc-v3@test.org>")]
+          (is (= :superseded (:report/close-reason v1)) "v1 stays superseded")
+          (is (= :superseded (:report/close-reason v2)) "v2 stays superseded")
+          (is (some? (:report/closed v3))
+              "the open head v3 is closed by the forwarded command")
+          (is (= :resolved (:report/close-reason v3)))
+          (is (= "admin@test.org" (:report/closed-address v3))))
         (finally
           (teardown! ctx))))))
 
