@@ -573,7 +573,7 @@ function buildRowElement(rpt) {
   var closeReason = r['close-reason'] || '';
   var role = r.role || '';
   var archivedAt = r['archived-at'] || '';
-  var supersededBy = r['superseded-by'] || null;
+  var supersededBy = (r['superseded-by'] || [])[0] || null;
   var awaitingFlag = rpt.awaiting;
   var expiry = r.expiry || '';
   var isoDate = rpt.isoDate;

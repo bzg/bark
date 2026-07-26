@@ -662,6 +662,16 @@
               elapsed-days             (/ elapsed-ms (* 24 60 60 1000))]
           (>= elapsed-days delay-days))))))
 
+(def ^:private export-rel-key
+  "Public names for relation kinds.  The supersedes pair is stored from
+  the closed report's side (closure-relation-rows: :rel/from = the
+  report being closed, :rel/kind :supersedes), so read literally the
+  closed report would export \"supersedes\" and its replacement
+  \"superseded-by\" -- backwards for any reader.  Flip the pair at the
+  export boundary; :resolves and :duplicates already read correctly."
+  {:supersedes    :superseded-by
+   :superseded-by :supersedes})
+
 (defn- group-relations
   "Build the per-kind relation summary for a pulled report.
   Outgoing relations (:rel/_from) cover all kinds; incoming :related-to
@@ -695,7 +705,8 @@
                                    (map (juxt :rel/kind #(format-rel false %))))
                              (:rel/_to report))]
     (reduce-kv (fn [m k entries]
-                 (assoc m (keyword (name k)) (mapv second entries)))
+                 (let [k' (keyword (name k))]
+                   (assoc m (export-rel-key k' k') (mapv second entries))))
                {}
                (group-by first (concat out in-related)))))
 
