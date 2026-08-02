@@ -106,10 +106,17 @@
                        (common/format-date-iso from) ")"))))))
 
 (defn sync-source-tenures!
-  "Walk `source` periods chronologically, syncing tenures at each."
+  "Walk `source` periods chronologically, syncing tenures at each.
+  Future periods are skipped -- a future :to reads as \"inactive\" to
+  every consumer, so a planned handover must not preempt the current
+  tenures.  The boundary applies once it arrives (sync runs on every
+  load-context)."
   [conn source]
-  (doseq [period (periods/source-periods source)]
-    (sync-period-boundary! conn (:name source) period)))
+  (let [now (Date.)]
+    (doseq [period (periods/source-periods source)
+            :when  (let [^Date from (:from period)]
+                     (or (nil? from) (not (.after from now))))]
+      (sync-period-boundary! conn (:name source) period))))
 
 (defn sync-all-sources!
   "Sync tenures for every source in `config`."
@@ -192,9 +199,13 @@
                      :else
                      ;; Per-iteration DB refresh: closing one tenure
                      ;; mutates state that later lookups must see.
-                     (when-let [eid (active-tenure-eid (d/db conn) source-name a)]
-                       (d/transact! conn [[:db/add eid :maint-tenure/to email-date]])
-                       a)))))
+                     (if-let [eid (active-tenure-eid (d/db conn) source-name a)]
+                       (do (d/transact! conn [[:db/add eid :maint-tenure/to email-date]])
+                           a)
+                       ;; Typo'd or unknown address: make the no-op visible.
+                       (do (log/warn "Remove maintainer: no active tenure for" a
+                                     "(for" source-name ")")
+                           nil))))))
          vec)))
 
 (defn apply-role-controls!

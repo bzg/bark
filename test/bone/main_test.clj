@@ -7,6 +7,8 @@
 (def cli-fetch->map (var-get #'main/cli-fetch->map))
 (def run-opts (var-get #'main/run-opts))
 (def load-context (var-get #'main/load-context))
+(def parse-main-args (var-get #'main/parse-main-args))
+(def max-contiguous-safe-uid (var-get #'main/max-contiguous-safe-uid))
 
 (deftest parse-fetch-limit
   (testing "{:limit N} with positive integer"
@@ -70,12 +72,12 @@
     (is (thrown? Exception (parse-fetch {})))))
 
 (deftest cli-fetch->map-lifts
-  (testing "bare integer → :limit"
+  (testing "bare integer => :limit"
     (is (= {:limit 50} (cli-fetch->map "50"))))
-  (testing "duration → :since"
+  (testing "duration => :since"
     (is (= {:since "30d"} (cli-fetch->map "30d")))
     (is (= {:since "6w"}  (cli-fetch->map "6w"))))
-  (testing "ISO date → :start"
+  (testing "ISO date => :start"
     (is (= {:start "2020-01-01"} (cli-fetch->map "2020-01-01"))))
   (testing "invalid rejected"
     (is (thrown? Exception (cli-fetch->map "foo")))
@@ -90,6 +92,59 @@
     (let [{:keys [since before]} (parse-fetch (cli-fetch->map "2020-01-01"))]
       (is (instance? Date since))
       (is (nil? before)))))
+
+;; ---------------------------------------------------------------------------
+;; CLI argument parsing
+;; ---------------------------------------------------------------------------
+
+(deftest parse-main-args-nominal
+  (testing "no args: batch mode, no CLI fetch"
+    (let [{:keys [watch? fresh? cli-fetch]} (parse-main-args [])]
+      (is (not watch?))
+      (is (not fresh?))
+      (is (nil? cli-fetch))))
+  (testing "--watch flag"
+    (is (:watch? (parse-main-args ["--watch"]))))
+  (testing "--fresh flag"
+    (is (:fresh? (parse-main-args ["--fresh"]))))
+  (testing "-c takes the next arg as config path"
+    (is (= "custom.edn" (:config-path (parse-main-args ["-c" "custom.edn"])))))
+  (testing "--fetch takes the next arg verbatim"
+    (is (= "50" (:cli-fetch (parse-main-args ["--fetch" "50"])))))
+  (testing "flags combine regardless of order"
+    (let [{:keys [watch? cli-fetch config-path]}
+          (parse-main-args ["--watch" "--fetch" "30d" "-c" "x.edn"])]
+      (is watch?)
+      (is (= "30d" cli-fetch))
+      (is (= "x.edn" config-path)))))
+
+(deftest parse-main-args-rejects-dangling-valued-flags
+  (testing "--fetch in last position with no value"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"--fetch requires a value"
+                          (parse-main-args ["--fetch"])))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"--fetch requires a value"
+                          (parse-main-args ["--watch" "--fetch"]))))
+  (testing "-c in last position with no value"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"-c requires a value"
+                          (parse-main-args ["-c"])))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"-c requires a value"
+                          (parse-main-args ["--fetch" "50" "-c"])))))
+
+;; ---------------------------------------------------------------------------
+;; IMAP watermark advance -- pure prefix computation
+;; ---------------------------------------------------------------------------
+
+(deftest max-contiguous-safe-uid-prefix
+  (testing "all UIDs safe: watermark reaches the last one"
+    (is (= 3 (max-contiguous-safe-uid [1 2 3] #{1 2 3}))))
+  (testing "gap in the middle: watermark stops just before it"
+    (is (= 2 (max-contiguous-safe-uid [1 2 3 4] #{1 2 4}))))
+  (testing "first UID unsafe: watermark cannot advance at all"
+    (is (nil? (max-contiguous-safe-uid [1 2 3] #{2 3}))))
+  (testing "empty batch: nil"
+    (is (nil? (max-contiguous-safe-uid [] #{}))))
+  (testing "single safe UID"
+    (is (= 7 (max-contiguous-safe-uid [7] #{7})))))
 
 (def ^:private imap-mb
   {:name "primary" :type :imap :host "imap.example.com"

@@ -106,3 +106,9 @@
     (is (= 42 (:db/id (first tx))))
     (is (false? (:rel/active? (first tx))))
     (is (= 99 (:rel/retracted-by (first tx))))))
+
+(deftest retract-by-direction-asymmetric-only-test
+  ;; Symmetric kinds are canonicalized by ascending eid order, so a
+  ;; one-sided :rel/from (or :rel/to) scan would miss half of them --
+  ;; the guard fires before any DB access.
+  (is (thrown? AssertionError (r/retract-by-from! nil 1 :related-to 99))))

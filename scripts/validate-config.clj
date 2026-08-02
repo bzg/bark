@@ -79,7 +79,7 @@
 (s/def :source/alias :match/alias)
 (s/def :source/to :match/to)
 (s/def :source/list-archive (s/and ::non-blank-string #(re-find #"^https?://" %)))
-(s/def :source/base-url ::non-blank-string)
+(s/def :source/base-url (s/and ::non-blank-string #(re-find #"^https?://" %)))
 (s/def :source/archive-format-string (s/and ::non-blank-string #(str/includes? % "%s")))
 ;; Project links surfaced on the exported pages (all optional).
 (s/def :source/website (s/and ::non-blank-string #(re-find #"^https?://" %)))
@@ -265,7 +265,11 @@
 ;; Expiry rules (optional)
 ;; Each report type maps to a rule map with :inactive-after and optional conditions.
 (s/def :expiry/inactive-after (s/or :deadline #{:deadline}
-                                    :date (s/and ::non-blank-string #(re-matches #"\d{4}-\d{2}-\d{2}" %))
+                                    ;; parse-iso-date checks the shape AND the
+                                    ;; calendar: "2026-02-30" would pass a bare
+                                    ;; regex, then silently disable the rule.
+                                    :date (s/and ::non-blank-string
+                                                 #(some? (common/parse-iso-date %)))
                                     ;; Full match, not re-seq: "30 days" must be
                                     ;; rejected here, parse-duration-str throws on it.
                                     :string (s/and ::non-blank-string #(re-matches #"(?:\d+\s*[ydwm]\s*)+" %))

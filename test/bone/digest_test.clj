@@ -412,8 +412,8 @@
             (is (= 1 (count (:report/descendants r))))
             (is (= "<112@test.org>"
                     (:email/message-id (first (:report/descendants r)))))
-            ;; Only public commands apply: 112 → acked (Confirmed.)
-            ;; Private commands (113 → Owned.) are now blocked.
+            ;; Only public commands apply: 112 => acked (Confirmed.)
+            ;; Private commands (113 => Owned.) are now blocked.
             (is (some? (:report/acked r)))
             (is (nil? (:report/owned r)))))
 
@@ -1194,7 +1194,7 @@
           (teardown! ctx))))))
 
 (deftest pending-thread-in-order-typical
-  (testing "In-order : reply arrives after parent → no pending flag, command applied."
+  (testing "In-order : reply arrives after parent => no pending flag, command applied."
     (let [{:keys [conn] :as ctx} (setup-db!)]
       (try
         (store-and-process! conn
@@ -1221,10 +1221,10 @@
           (teardown! ctx))))))
 
 (deftest pending-thread-out-of-order-rescue
-  (testing "Out-of-order : reply ingested before parent → pending, then retried."
+  (testing "Out-of-order : reply ingested before parent => pending, then retried."
     (let [{:keys [conn] :as ctx} (setup-db!)]
       (try
-        ;; 1. Reply arrives first, parent missing → flagged pending,
+        ;; 1. Reply arrives first, parent missing => flagged pending,
         ;;    command not applied yet.
         (store-and-process! conn
                             (mk-email {:mid "<ooo-reply@test.org>"
@@ -1240,7 +1240,7 @@
           (is (not (report-exists? db "<ooo-bug@test.org>"))
               "No report yet for the missing parent"))
 
-        ;; 2. Parent arrives → its post-process retry hook should re-process
+        ;; 2. Parent arrives => its post-process retry hook should re-process
         ;;    the pending reply and apply the command.
         (store-and-process! conn
                             (mk-email {:mid "<ooo-bug@test.org>"
@@ -1380,7 +1380,7 @@
   (testing "Reply with missing IRT but a known References ancestor is threaded immediately."
     (let [{:keys [conn] :as ctx} (setup-db!)]
       (try
-        ;; 1. Root bug, ingested first → creates a report.
+        ;; 1. Root bug, ingested first => creates a report.
         (store-and-process! conn
                             (mk-email {:mid "<shared-bug@test.org>"
                                        :subject "[BUG] flaky"
@@ -1389,7 +1389,7 @@
                                        :body "broken\n"})
                             "direct")
         ;; 2. Reply whose IRT points to a missing intermediate, but
-        ;;    References include the root → no longer pending: the
+        ;;    References include the root => no longer pending: the
         ;;    References ancestor anchors the thread.
         (store-and-process! conn
                             (mk-email {:mid "<shared-reply@test.org>"
@@ -1413,7 +1413,7 @@
   (testing "thread-lookup splices through a stored pending intermediate to reach the report."
     (let [{:keys [conn] :as ctx} (setup-db!)]
       (try
-        ;; 1. Root bug → report exists.
+        ;; 1. Root bug => report exists.
         (store-and-process! conn
                             (mk-email {:mid "<spl-bug@test.org>"
                                        :subject "[BUG] flaky"
@@ -1422,7 +1422,7 @@
                                        :body "broken\n"})
                             "direct")
         ;; 2. An intermediate reply arrives BUT its own IRT points to
-        ;;    a missing message (and no References) → flagged pending,
+        ;;    a missing message (and no References) => flagged pending,
         ;;    *not* attached as a descendant of the bug report.
         (store-and-process! conn
                             (mk-email {:mid "<spl-mid@test.org>"
@@ -2411,6 +2411,174 @@
           (is (some? (:report/closed a))
               "A closed: C carries the same patch, idents replace the missing subject")
           (is (= :superseded (:report/close-reason a))))
+        (finally
+          (teardown! ctx))))))
+
+(deftest stale-old-version-does-not-close-newer
+  (testing "A re-ingested old v2 (cross-post, resend, out-of-order
+            ingestion) must not close the live v3: the version-order
+            guard spares candidates newer than the new patch."
+    (let [{:keys [conn] :as ctx} (setup-db!)]
+      (try
+        (store-and-process! conn
+                            (mk-email {:mid "<sv-v1@test.org>"
+                                       :subject "[PATCH] widget: fix the frobnicator"
+                                       :from "user@test.org"
+                                       :date #inst "2026-06-01T10:00:00"
+                                       :body "Initial patch.\n"})
+                            "direct")
+        (store-and-process! conn
+                            (assoc (mk-email {:mid "<sv-v2@test.org>"
+                                              :subject "Re: [PATCH v2] widget: fix the frobnicator"
+                                              :from "user@test.org"
+                                              :date #inst "2026-06-02T10:00:00"
+                                              :in-reply-to "<sv-v1@test.org>"
+                                              :body "Second version.\n"})
+                                   :email/attachments [{:attachment/filename "0002-fix.patch"}])
+                            "direct")
+        (store-and-process! conn
+                            (assoc (mk-email {:mid "<sv-v3@test.org>"
+                                              :subject "Re: [PATCH v3] widget: fix the frobnicator"
+                                              :from "user@test.org"
+                                              :date #inst "2026-06-03T10:00:00"
+                                              :in-reply-to "<sv-v2@test.org>"
+                                              :body "Third version.\n"})
+                                   :email/attachments [{:attachment/filename "0003-fix.patch"}])
+                            "direct")
+        ;; A copy of v2 arrives late (new mid, same subject and version),
+        ;; threaded under v1 -- a cross-post or resend delivered out of
+        ;; order.
+        (store-and-process! conn
+                            (assoc (mk-email {:mid "<sv-v2-copy@test.org>"
+                                              :subject "Re: [PATCH v2] widget: fix the frobnicator"
+                                              :from "user@test.org"
+                                              :date #inst "2026-06-02T11:00:00"
+                                              :in-reply-to "<sv-v1@test.org>"
+                                              :body "Second version (copy).\n"})
+                                   :email/attachments [{:attachment/filename "0002-fix.patch"}])
+                            "direct")
+        (let [db (d/db conn)
+              v2 (get-report db "<sv-v2@test.org>")
+              v3 (get-report db "<sv-v3@test.org>")]
+          (is (some? (get-report db "<sv-v2-copy@test.org>"))
+              "the re-ingested v2 copy still creates its own report")
+          (is (= :superseded (:report/close-reason v2)) "v2 stays superseded by v3")
+          (is (nil? (:report/closed v3))
+              "the live v3 must NOT be closed by the re-ingested old v2"))
+        (finally
+          (teardown! ctx))))))
+
+(deftest supersede-reaches-sender-patches-without-nearest-report
+  (testing "v1 posted in reply to a non-report mail is still superseded
+            by a v2 posted on another branch of the same thread, even
+            though no thread ancestor of v2 is a report (`nearest-eids`
+            is empty): the sender-wide candidate pool must not be gated
+            on nearest thread reports."
+    (let [{:keys [conn] :as ctx} (setup-db!)]
+      (try
+        ;; A plain discussion mail: stored, but no report.
+        (store-and-process! conn
+                            (mk-email {:mid "<nn-root@test.org>"
+                                       :subject "Some discussion"
+                                       :from "someone@test.org"
+                                       :date #inst "2026-07-01T10:00:00"
+                                       :body "Just talking.\n"})
+                            "direct")
+        ;; v1 posted as a reply to the discussion.
+        (store-and-process! conn
+                            (mk-email {:mid "<nn-v1@test.org>"
+                                       :subject "[PATCH] widget: fix frob"
+                                       :from "user@test.org"
+                                       :date #inst "2026-07-02T10:00:00"
+                                       :in-reply-to "<nn-root@test.org>"
+                                       :body "Initial patch.\n"})
+                            "direct")
+        ;; Another non-report reply on a sibling branch.
+        (store-and-process! conn
+                            (mk-email {:mid "<nn-branch@test.org>"
+                                       :subject "Re: Some discussion"
+                                       :from "reviewer@test.org"
+                                       :date #inst "2026-07-03T10:00:00"
+                                       :in-reply-to "<nn-root@test.org>"
+                                       :body "Interesting.\n"})
+                            "direct")
+        ;; v2 on that sibling branch: none of its thread ancestors is a
+        ;; report, but v1 shares the thread root with it.
+        (store-and-process! conn
+                            (assoc (mk-email {:mid "<nn-v2@test.org>"
+                                              :subject "Re: [PATCH v2] widget: fix frob"
+                                              :from "user@test.org"
+                                              :date #inst "2026-07-04T10:00:00"
+                                              :in-reply-to "<nn-branch@test.org>"
+                                              :body "Second version.\n"})
+                                   :email/attachments [{:attachment/filename "0002-frob.patch"}])
+                            "direct")
+        (let [db (d/db conn)
+              v1 (get-report db "<nn-v1@test.org>")
+              v2 (get-report db "<nn-v2@test.org>")]
+          (is (some? v2) "v2 report was created")
+          (is (some? (:report/closed v1))
+              "v1 closed despite no report among v2's thread ancestors")
+          (is (= :superseded (:report/close-reason v1)))
+          (is (nil? (:report/closed v2)) "v2 stays open"))
+        (finally
+          (teardown! ctx))))))
+
+(deftest topic-less-series-do-not-conflate
+  (testing "Two topic-less series (no bracket topic, no colon topic)
+            from the same sender on unrelated threads stay distinct,
+            and the second cover letter must not overwrite the first
+            series' cover: without a topic there is no safe fallback
+            key, so threading is the only grouping mechanism."
+    (let [{:keys [conn] :as ctx} (setup-db!)]
+      (try
+        ;; March thread: cover + one patch.
+        (store-and-process! conn
+                            (mk-email {:mid "<tl-cover-a@test.org>"
+                                       :subject "[PATCH 0/2] Adding more tests"
+                                       :from "user@test.org"
+                                       :date #inst "2026-03-01T10:00:00"
+                                       :body "Cover letter A.\n"})
+                            "direct")
+        (store-and-process! conn
+                            (mk-email {:mid "<tl-a1@test.org>"
+                                       :subject "[PATCH 1/2] Add tests"
+                                       :from "user@test.org"
+                                       :date #inst "2026-03-01T10:01:00"
+                                       :in-reply-to "<tl-cover-a@test.org>"
+                                       :body "Patch A1.\n"})
+                            "direct")
+        ;; June thread: unrelated cover + patch, same sender, same total.
+        (store-and-process! conn
+                            (mk-email {:mid "<tl-cover-b@test.org>"
+                                       :subject "[PATCH 0/2] Removing old cruft"
+                                       :from "user@test.org"
+                                       :date #inst "2026-06-01T10:00:00"
+                                       :body "Cover letter B.\n"})
+                            "direct")
+        (store-and-process! conn
+                            (mk-email {:mid "<tl-b1@test.org>"
+                                       :subject "[PATCH 1/2] Remove cruft"
+                                       :from "user@test.org"
+                                       :date #inst "2026-06-01T10:01:00"
+                                       :in-reply-to "<tl-cover-b@test.org>"
+                                       :body "Patch B1.\n"})
+                            "direct")
+        (let [db (d/db conn)
+              a1 (get-report db "<tl-a1@test.org>")
+              b1 (get-report db "<tl-b1@test.org>")
+              series-a (:report/series a1)
+              series-b (:report/series b1)]
+          (is (some? series-a) "A1 joined a series")
+          (is (some? series-b) "B1 joined a series")
+          (is (not= (:series/id series-a) (:series/id series-b))
+              "the two topic-less threads must not share a series")
+          (is (= "<tl-cover-a@test.org>"
+                 (get-in series-a [:series/cover-letter :email/message-id]))
+              "series A keeps its own cover letter")
+          (is (= "<tl-cover-b@test.org>"
+                 (get-in series-b [:series/cover-letter :email/message-id]))
+              "series B's cover letter did not overwrite series A's"))
         (finally
           (teardown! ctx))))))
 

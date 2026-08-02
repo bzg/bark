@@ -236,6 +236,17 @@
              (commands/partition-lines-by-scope lines (delay {}) "x@y.z" false
                                                 (constantly false)))))))
 
+(deftest detect-vote-ignores-quoted-lines
+  (testing "a vote appearing only in quoted text does not count"
+    (is (nil? (commands/detect-vote "> +1")))
+    (is (nil? (commands/detect-vote "Bob wrote:\n> +1\n\nAgreed, but no vote here."))))
+  (testing "a quoted vote cannot invert the sender's actual vote"
+    (is (= :down (commands/detect-vote "> +1\n-1 from me")))
+    (is (= :down (commands/detect-vote "Bob wrote:\n> +1\n\n-1 from me."))))
+  (testing "unquoted votes still detect"
+    (is (= :up (commands/detect-vote "+1")))
+    (is (= :up (commands/detect-vote "I agree\n+1\nthanks")))))
+
 (deftest vote-tx-pure
   (testing "first vote creates the voter's entity"
     (is (= {:vote/key "k" :vote/report 1 :vote/email 2

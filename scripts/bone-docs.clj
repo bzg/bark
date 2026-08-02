@@ -443,7 +443,7 @@
                                escaped (html-escape display)
                                range   (cond
                                          (and from to)
-                                         (str " <small>(" (format-date-iso from) " → " (format-date-iso to) ")</small>")
+                                         (str " <small>(" (format-date-iso from) " -- " (format-date-iso to) ")</small>")
                                          from
                                          (str " <small>(since " (format-date-iso from) ")</small>")
                                          to

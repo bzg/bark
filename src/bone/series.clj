@@ -151,7 +151,7 @@
   number, `existing` the sender's open same-topic series as
   `series-restart-info` maps, `parent-mids` the mids of the reports
   the patch replies to.  A restart is a cover (0/N), or a 1/N when
-  some existing series already holds a 1/…; it must thread back to an
+  some existing series already holds a 1/...; it must thread back to an
   old series (a patch or cover mid among `parent-mids`).  A numbered
   patch never closes the empty series its own cover letter just
   opened: that series is the one it is joining, not an old revision
@@ -203,10 +203,18 @@
       (let [series-eid (or (when (pos? n)
                              (find-open-series-via-parents
                               (d/db conn) parent-report-eids from-addr m))
-                           (find-open-series (d/db conn) topic from-addr m)
+                           ;; No fallback on the "" topic key: it would
+                           ;; merge unrelated threads from the same sender.
+                           ;; Threading (above) is the grouping mechanism;
+                           ;; without a topic, create a fresh series.
+                           (when topic
+                             (find-open-series (d/db conn) topic from-addr m))
                            (let [sid (create-series! conn topic from-addr m)]
+                             ;; Log the allocated :series/id, not the base
+                             ;; id: next-series-id may have suffixed #N.
                              (log/info "New series:"
-                                       (pr-str (series-id topic from-addr m))
+                                       (pr-str (:series/id
+                                                (d/pull (d/db conn) [:series/id] sid)))
                                        "(expecting" m "patches)")
                              sid))]
         ;; Series supersession is implicit: the old series carries

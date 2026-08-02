@@ -21,6 +21,11 @@
  ;;
  ;; Both raise a clear error at startup if the file/var is missing,
  ;; rather than silently using nil.  Mutually exclusive with :password.
+ ;;
+ ;; For IMAP servers authenticating via OAuth2 (XOAUTH2), set
+ ;; :oauth2-token instead of :password (one of the two is required):
+ ;;
+ ;;   :oauth2-token "ya29...."               ; OAuth2 access token
  :mailboxes [{:name     "primary"
               :type     :imap
               :host     "imap.example.com"
@@ -245,18 +250,39 @@
 
  ;; Optional -- notifications disabled if absent.
  ;; The :smtp map accepts :password-file or #bone/env exactly like the
- ;; mailbox section above.
+ ;; mailbox section above.  :reply-to (optional) sets the Reply-To
+ ;; header on every outgoing notification.
  ;; :notifications {:enabled false
  ;;                 :smtp {:host     "smtp.example.com"
  ;;                        :port     587
  ;;                        :tls      true
  ;;                        :user     "notify@example.com"
  ;;                        :password "secret"
- ;;                        :from     "bone@example.com"}
+ ;;                        :from     "bone@example.com"
+ ;;                        :reply-to "maintainers@example.com"}
  ;;                 ;; Optional -- copy this address (or vector of
  ;;                 ;; addresses) on every notification (subscriber
  ;;                 ;; digest and direct-to-author failure mail).
- ;;                 :admin-bcc "ops@example.com"}
+ ;;                 :admin-bcc "ops@example.com"
+ ;;                 ;; Who receives the digests sent by `bb notify`:
+ ;;                 ;; a map of subscriber email => vector of
+ ;;                 ;; subscriptions, one per watched source.  Each
+ ;;                 ;; subscription map:
+ ;;                 ;;   :source        source :name to watch  [required]
+ ;;                 ;;   :min-priority  0..3 -- only filters the "unacked
+ ;;                 ;;                  & unowned" section (default 1)
+ ;;                 ;;   :min-status    0..7 -- same section (default 0)
+ ;;                 ;;   :subject-match case-insensitive substring on the
+ ;;                 ;;                  report subject      [optional]
+ ;;                 ;;   :topic         case-insensitive substring on the
+ ;;                 ;;                  report topic        [optional]
+ ;;                 :subscribers
+ ;;                 {"maint@example.com" [{:source "public-list"
+ ;;                                        :min-priority 1}
+ ;;                                       {:source "team-alias"
+ ;;                                        :topic  "release"}]
+ ;;                  "dev@example.com"   [{:source "public-list"
+ ;;                                        :subject-match "parser"}]}}
 
  ;; ---- Logging -------------------------------------------------------------
 

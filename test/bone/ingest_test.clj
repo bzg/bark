@@ -233,6 +233,31 @@
         (finally (cleanup! setup))))))
 
 ;; ---------------------------------------------------------------------------
+;; Undigested email ids -- Maildir catch-up re-presents these so a
+;; failed digest (:retry) is not lost behind the seen/known baseline.
+;; ---------------------------------------------------------------------------
+
+(deftest undigested-email-ids-tracks-digested-at
+  (testing "stored emails without :email/digested-at are reported"
+    (let [{:keys [conn] :as setup} (fresh-conn)]
+      (try
+        (is (= #{} (ingest/undigested-email-ids conn)) "empty DB => empty set")
+        (is (true? (ingest/store-email! conn
+                                        (minimal-msg {:id "u1" :mid "<u1@x>"})
+                                        {:source "src-a"})))
+        (is (true? (ingest/store-email! conn
+                                        (minimal-msg {:id "u2" :mid "<u2@x>"})
+                                        {:source "src-a"})))
+        (is (= #{"u1" "u2"} (ingest/undigested-email-ids conn)))
+        ;; Stamping one as digested drops it from the set.
+        (let [eid (d/q '[:find ?e . :in $ ?id :where [?e :email/id ?id]]
+                       (d/db conn) "u1")]
+          (d/transact! conn [{:db/id eid
+                              :email/digested-at (java.util.Date.)}]))
+        (is (= #{"u2"} (ingest/undigested-email-ids conn)))
+        (finally (cleanup! setup))))))
+
+;; ---------------------------------------------------------------------------
 ;; Per-mailbox watermarks -- multi-mailbox isolation
 ;; ---------------------------------------------------------------------------
 

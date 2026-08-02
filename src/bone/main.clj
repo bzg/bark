@@ -34,12 +34,22 @@
               ["org.eclipse.angus.*"  :warn]
               ["*"                    :info]]})
 
+;; javax.mail's default connect/read/write timeouts are infinite: a
+;; dropping SMTP server would wedge whichever thread logged (including
+;; the watch callback).  Postal forwards extra keyword keys in the
+;; connection map as "mail.smtp(s).*" session properties.
+(def ^:private smtp-log-timeout-ms 10000)
+
 (defn configure-email-logging!
   [smtp-cfg {:keys [to level] :or {level :error}}]
   (when (and smtp-cfg to)
     (let [{:keys [host port tls user password from]} smtp-cfg
+          timeout (str smtp-log-timeout-ms)
           conn {:host host :port (or port 587) :tls (boolean tls)
-                :user user :pass password}]
+                :user user :pass password
+                :connectiontimeout timeout
+                :timeout           timeout
+                :writetimeout      timeout}]
       (log/merge-config!
        {:appenders
         {:email
@@ -47,19 +57,27 @@
           :min-level  level
           :rate-limit [[5 (* 5 60 1000)]]
           :fn         (fn [data]
-                        (try
-                          (let [level-str (str/upper-case (name (:level data)))
-                                msg       (force (:msg_ data))]
-                            (postal/send-message
-                             conn
-                             {:from    from
-                              :to      [to]
-                              :subject (str "[BONE] " level-str " -- " (:?ns-str data))
-                              :body    (str (force (:timestamp_ data)) " " level-str " "
-                                            (:?ns-str data) " -- " msg)}))
-                          (catch Exception e
-                            (.println System/err
-                                      (str "Failed to send log email: " (.getMessage e))))))}}}))))
+                        ;; Send off the logging thread: even with
+                        ;; timeouts, a slow SMTP server must not stall
+                        ;; mailbox processing.  The rate-limit above
+                        ;; bounds how many futures can pile up.
+                        (let [level-str (str/upper-case (name (:level data)))
+                              msg       (force (:msg_ data))
+                              stamp     (force (:timestamp_ data))
+                              ns-str    (:?ns-str data)]
+                          (future
+                            (try
+                              (postal/send-message
+                               conn
+                               {:from    from
+                                :to      [to]
+                                :subject (str "[BONE] " level-str " -- " ns-str)
+                                :body    (str stamp " " level-str " "
+                                              ns-str " -- " msg)})
+                              (catch Exception e
+                                (.println System/err
+                                          (str "Failed to send log email: "
+                                               (.getMessage e))))))))}}}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Shutdown coordination
@@ -79,13 +97,14 @@
 ;; shapes (no key mixing, empty map rejected):
 ;;   {:limit N}              -- latest N messages (pos-int)
 ;;   {:since "Nd"|"Nw"|...}  -- relative duration from now
-;;   {:start "yyyy-MM-dd" :end "yyyy-MM-dd"?} -- absolute ISO window
+;;   {:start "yyyy-MM-dd"? :end "yyyy-MM-dd"?} -- absolute ISO window
+;;     (at least one of :start/:end; :end alone is accepted)
 ;; Translated to mailseq's :since/:before at the boundary.
 ;; ---------------------------------------------------------------------------
 
 (defn- iso->date [s]
   (when (and (string? s) (re-matches #"\d{4}-\d{2}-\d{2}" s))
-    ;; "2026-02-30" matches the regex but fails to parse: nil → fetch-err.
+    ;; "2026-02-30" matches the regex but fails to parse: nil => fetch-err.
     (try (Date/from (Instant/parse (str s "T00:00:00Z")))
          (catch Exception _ nil))))
 
@@ -140,9 +159,9 @@
 
 (defn- cli-fetch->map
   "Convert a scalar --fetch CLI arg into the canonical map form.
-   \"50\"           → {:limit 50}
-   \"30d\" etc.     → {:since \"30d\"}
-   \"2020-01-01\"   → {:start \"2020-01-01\"}"
+   \"50\"           => {:limit 50}
+   \"30d\" etc.     => {:since \"30d\"}
+   \"2020-01-01\"   => {:start \"2020-01-01\"}"
   [s]
   (cond
     (re-matches #"\d+" s)          {:limit (Long/parseLong s)}
@@ -345,11 +364,18 @@
 
 (defn- process-each!
   "Ingest each message in order; per-message exceptions are logged and
-  don't abort the loop.  Stops early on shutdown."
+  don't abort the loop.  Stops early on shutdown.  Returns the set of
+  message :id values whose processing needs a retry (:retry) -- a
+  failure before store leaves no trace in the DB, so callers sealing a
+  Maildir baseline must exclude these ids or they would be lost."
   [ctx msgs]
-  (doseq [msg msgs
-          :while (not (shutting-down?))]
-    (safe-store-and-process! ctx msg)))
+  (reduce (fn [failed msg]
+            (if (shutting-down?)
+              (reduced failed)
+              (if (= :retry (safe-store-and-process! ctx msg))
+                (conj failed (:id msg))
+                failed)))
+          #{} msgs))
 
 (defn- catch-up-imap!
   "IMAP incremental fetch via UID watermark; falls back to first-run
@@ -375,14 +401,21 @@
 (defn- catch-up-maildir!
   "Maildir incremental fetch: diff list-ids against known :email/id.
   First run honours fetch-opts then seals pre-existing ids as seen;
-  the init flag is set last so a crash retries safely."
+  the init flag is set last so a crash retries safely.  A shutdown
+  mid-first-run skips the seal entirely -- the next run redoes the
+  initial fetch (message-id dedup makes the re-run safe)."
   [{:keys [db-conn mailbox-name] :as ctx} src folder fetch-opts]
   (let [init-done? (ingest/maildir-init-done? db-conn mailbox-name)
         all-ids    (mailseq/list-ids src folder)]
     (if init-done?
-      ;; Incremental run: diff against stored emails + seen baseline
-      (let [known   (into (ingest/known-email-ids db-conn)
-                          (ingest/seen-maildir-ids db-conn mailbox-name))
+      ;; Incremental run: diff against stored emails + seen baseline.
+      ;; Stored-but-undigested emails (digest hit :retry) are removed
+      ;; from the baseline so store-and-process! re-digests them --
+      ;; unlike IMAP there is no frozen watermark to re-present them.
+      (let [known   (reduce disj
+                            (into (ingest/known-email-ids db-conn)
+                                  (ingest/seen-maildir-ids db-conn mailbox-name))
+                            (ingest/undigested-email-ids db-conn))
             new-ids (remove known all-ids)]
         (if (empty? new-ids)
           (log/info "No new messages in Maildir")
@@ -391,24 +424,32 @@
             (log/info "Fetched" (count msgs) "new messages from Maildir")
             (process-each! ctx msgs))))
       ;; First run (or retry after crash): fetch limited set, then seal baseline
-      (let [msgs (sort-chronologically (first-run-messages src folder fetch-opts))]
-        (cond
-          (and (empty? msgs) (seq all-ids))
-          (log/warn "First-run filter matched 0 of" (count all-ids)
-                    "Maildir files -- verify :fetch and :folder"
-                    "(all" (count all-ids) "ids will be sealed as seen)")
-          (empty? msgs)
-          (log/info "No new messages in Maildir")
-          :else
-          (do (log/info "Fetched" (count msgs) "messages from Maildir (first run)")
-              (process-each! ctx msgs)))
-        ;; Seal pre-existing ids as seen, then flag init done.
-        (let [stored (ingest/known-email-ids db-conn)
-              unseen (remove stored all-ids)]
-          (when (seq unseen)
-            (log/info "Marking" (count unseen) "pre-existing Maildir ids as seen")
-            (ingest/mark-ids-seen! db-conn mailbox-name unseen)))
-        (ingest/set-maildir-init-done! db-conn mailbox-name)))))
+      (let [msgs   (sort-chronologically (first-run-messages src folder fetch-opts))
+            failed (cond
+                     (and (empty? msgs) (seq all-ids))
+                     (do (log/warn "First-run filter matched 0 of" (count all-ids)
+                                   "Maildir files -- verify :fetch and :folder"
+                                   "(all" (count all-ids) "ids will be sealed as seen)")
+                         #{})
+                     (empty? msgs)
+                     (do (log/info "No new messages in Maildir")
+                         #{})
+                     :else
+                     (do (log/info "Fetched" (count msgs) "messages from Maildir (first run)")
+                         (process-each! ctx msgs)))]
+        ;; Seal pre-existing ids as seen, then flag init done.  Never
+        ;; seal on shutdown: ids interrupted mid-loop are neither stored
+        ;; nor failed, and sealing them would lose them for good.  Ids
+        ;; that failed before store (:retry) are excluded too --
+        ;; unsealed, they show up as new on the next incremental run.
+        (when-not (shutting-down?)
+          (let [stored (ingest/known-email-ids db-conn)
+                unseen (remove #(or (contains? stored %) (contains? failed %))
+                               all-ids)]
+            (when (seq unseen)
+              (log/info "Marking" (count unseen) "pre-existing Maildir ids as seen")
+              (ingest/mark-ids-seen! db-conn mailbox-name unseen)))
+          (ingest/set-maildir-init-done! db-conn mailbox-name))))))
 
 (defn catch-up-fetch!
   "Fetch messages missed while the process was down.
@@ -720,22 +761,26 @@
   true on success, false on connection failure or fetch error (so
   the caller can decide whether at least one mailbox advanced)."
   [mailbox-cfg db-conn ingest-cfg cli-fetch-map source-map sources]
-  (let [{:keys [mailbox-name folder mailbox-type fetch-opts ingest-opts]}
-        (run-opts mailbox-cfg ingest-cfg cli-fetch-map)
-        ctx (make-run-ctx db-conn mailbox-name source-map sources ingest-opts)]
+  (let [mailbox-name (:name mailbox-cfg)]
     (log/info "Mailbox" (pr-str mailbox-name) "-- batch fetch starting")
-    (if-let [src (open-mailbox mailbox-cfg)]
-      (try
-        (catch-up-fetch! ctx src folder fetch-opts mailbox-type)
-        (log/info "Mailbox" (pr-str mailbox-name) "-- batch fetch done")
-        true
-        (catch Exception e
-          (log/error e "Mailbox" (pr-str mailbox-name)
-                     "-- batch fetch failed:" (blog/exception-msg e))
-          false)
-        (finally (close-mailbox! src)))
-      (do (log/error "Mailbox" (pr-str mailbox-name) "-- connection failed, skipping")
-          false))))
+    ;; run-opts is inside the try: an invalid :fetch in this mailbox's
+    ;; config must count as this mailbox failing, not kill the batch.
+    (try
+      (let [{:keys [folder mailbox-type fetch-opts ingest-opts]}
+            (run-opts mailbox-cfg ingest-cfg cli-fetch-map)
+            ctx (make-run-ctx db-conn mailbox-name source-map sources ingest-opts)]
+        (if-let [src (open-mailbox mailbox-cfg)]
+          (try
+            (catch-up-fetch! ctx src folder fetch-opts mailbox-type)
+            (log/info "Mailbox" (pr-str mailbox-name) "-- batch fetch done")
+            true
+            (finally (close-mailbox! src)))
+          (do (log/error "Mailbox" (pr-str mailbox-name) "-- connection failed, skipping")
+              false)))
+      (catch Exception e
+        (log/error e "Mailbox" (pr-str mailbox-name)
+                   "-- batch fetch failed:" (blog/exception-msg e))
+        false))))
 
 (defn- batch-run!
   "Single-pass mode (default): for each configured mailbox, connect,
@@ -759,7 +804,14 @@
       (digest/flush-stale-pending! db-conn source-map sources
                                    pending-flush-max-age-days))))
 
-(defn- parse-main-args [args]
+(defn- parse-main-args
+  "Parse CLI args into an options map.  Throws ex-info when a valued
+  flag (--fetch, -c) is last with no value -- silently ignoring it
+  would run with defaults the user did not ask for.  Pure (no exit):
+  -main catches and turns the error into a message + exit 1."
+  [args]
+  (when-let [flag (#{"--fetch" "-c"} (last args))]
+    (throw (ex-info (str flag " requires a value") {:args (vec args)})))
   (let [arg-set (set args)
         ;; Sliding pairs: non-overlapping (partition 2) drops valued flags
         ;; depending on position (e.g. --watch --fetch 50 loses the 50).
@@ -779,6 +831,34 @@
   (when (.isDirectory f)
     (doseq [child (.listFiles f)] (delete-recursively! child)))
   (.delete f))
+
+;; Held for the life of the process (also keeps the FileChannel
+;; reachable so the lock cannot be GC-released).  Nil until -main
+;; acquires it.
+(def ^:private instance-lock (atom nil))
+
+(defn- acquire-instance-lock!
+  "Take an exclusive advisory lock on <db-path>.lock so a watch daemon
+  and a cron batch run never digest the same DB concurrently.  The
+  lock file sits NEXT TO the DB directory, not inside it, so a --fresh
+  wipe cannot delete it out from under the holder.  Returns the
+  FileLock, or nil when another process already holds it.  Released by
+  the OS on process exit -- no explicit unlock needed."
+  [db-path]
+  (let [f (java.io.File. (str db-path ".lock"))]
+    (some-> (.getParentFile f) .mkdirs)
+    (let [ch (java.nio.channels.FileChannel/open
+              (.toPath f)
+              (into-array java.nio.file.OpenOption
+                          [java.nio.file.StandardOpenOption/CREATE
+                           java.nio.file.StandardOpenOption/WRITE]))]
+      (try
+        (or (.tryLock ch)
+            (do (.close ch) nil))
+        (catch java.nio.channels.OverlappingFileLockException _
+          ;; Same JVM already holds it (should not happen from -main,
+          ;; but treat it like any other holder).
+          (.close ch) nil)))))
 
 (defn- maybe-wipe-db! [db-path]
   (let [f (java.io.File. ^String db-path)]
@@ -866,7 +946,11 @@
       (log/info "Goodbye.")))))
 
 (defn -main [& args]
-  (let [{:keys [watch? fresh? cli-fetch config-path]} (parse-main-args args)
+  (let [{:keys [watch? fresh? cli-fetch config-path]}
+        (try (parse-main-args args)
+             (catch clojure.lang.ExceptionInfo e
+               (log/error (.getMessage e))
+               (System/exit 1)))
         config (common/load-config config-path)]
     (when (nil? config)
       (log/error "Config file not found:" config-path)
@@ -876,6 +960,13 @@
           ingest-cfg    (or (:ingest config) {})
           cli-fetch-map (some-> cli-fetch cli-fetch->map)
           db-path       (common/expand-home (common/db-path config))]
+      ;; Single-instance guard: taken before the --fresh wipe so a
+      ;; running daemon cannot have its DB wiped out from under it.
+      (if-let [lock (acquire-instance-lock! db-path)]
+        (reset! instance-lock lock)
+        (do (log/error "Another BONE process is already running on DB" db-path
+                       "(lock" (str db-path ".lock") "is held) -- exiting.")
+            (System/exit 1)))
       (when fresh? (maybe-wipe-db! db-path))
       (let [db-conn (ingest/connect db-path)]
         (log/info "Datalevin connected.")

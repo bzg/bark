@@ -141,28 +141,35 @@
 (defn parse-format-patch-headers
   "Parse `git format-patch` headers (`From`, `Subject`, `Date`) from
   patch `text`.  Returns nil when `text` lacks the `^From <sha40>`
-  signature, else a map with the headers found (possibly empty)."
+  signature, else a map with the headers found (possibly empty).
+  Headers are parsed from the lines FOLLOWING the matched `From` line:
+  a preamble above it (quoted text, cover notes) that happens to
+  contain \"Subject:\" must not pollute the result."
   [text]
-  (when (and text (re-find format-patch-start text))
+  (when text
     (let [lines (str/split-lines text)
-          header-lines (rest lines)
-          headers (loop [hs {} last-k nil [line & more] header-lines]
-                    (cond
-                      (nil? line)          hs
-                      (str/blank? line)    hs
-                      (re-matches #"^\s+.*" line)
-                      (recur (if last-k (update hs last-k str " " (str/trim line)) hs)
-                             last-k more)
-                      :else
-                      (let [[_ k v] (re-find #"^([^:]+):\s*(.*)" line)]
-                        (if k
-                          (let [lk (str/lower-case k)]
-                            (recur (assoc hs lk (str/trim v)) lk more))
-                          (recur hs last-k more)))))]
-      (cond-> {}
-        (get headers "from")    (assoc :author  (get headers "from"))
-        (get headers "subject") (assoc :subject (get headers "subject"))
-        (get headers "date")    (assoc :date    (get headers "date"))))))
+          start (some (fn [[i line]]
+                        (when (re-find format-patch-start line) i))
+                      (map-indexed vector lines))]
+      (when start
+        (let [header-lines (drop (inc start) lines)
+              headers (loop [hs {} last-k nil [line & more] header-lines]
+                        (cond
+                          (nil? line)          hs
+                          (str/blank? line)    hs
+                          (re-matches #"^\s+.*" line)
+                          (recur (if last-k (update hs last-k str " " (str/trim line)) hs)
+                                 last-k more)
+                          :else
+                          (let [[_ k v] (re-find #"^([^:]+):\s*(.*)" line)]
+                            (if k
+                              (let [lk (str/lower-case k)]
+                                (recur (assoc hs lk (str/trim v)) lk more))
+                              (recur hs last-k more)))))]
+          (cond-> {}
+            (get headers "from")    (assoc :author  (get headers "from"))
+            (get headers "subject") (assoc :subject (get headers "subject"))
+            (get headers "date")    (assoc :date    (get headers "date"))))))))
 
 (defn format-patch-submission?
   "True when the email ships an attachment whose contents look like a

@@ -336,9 +336,16 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- attachment-basename
-  "Return the basename of an attachment filename (handles absolute paths)."
+  "Return the basename of an attachment filename (handles absolute paths).
+  Hostile or degenerate filenames (nil, \"\", \".\", \"..\") fall back to
+  a stable name derived from a hash of the raw filename, so a crafted
+  attachment can neither crash the export nor escape its directory."
   [att]
-  (.getName (io/file (:attachment/filename att))))
+  (let [filename (:attachment/filename att)
+        base     (some-> filename io/file .getName)]
+    (if (or (nil? base) (#{"" "." ".."} base))
+      (str "attachment-" (mid-hash (str filename)) ".txt")
+      base)))
 
 (defn- close-flag [report]
   (if (:report/closed report)
@@ -677,11 +684,14 @@
   Outgoing relations (:rel/_from) cover all kinds; incoming :related-to
   (:rel/_to) is added because the symmetric kind canonicalises to the
   smaller-eid side, so the other report only sees it via incoming."
-  [report src-type]
+  [report source-map]
   (let [self-eid        (:db/id report)
+        ;; Go through archive-url so linked reports get the same
+        ;; treatment as the report itself: https-only validation of the
+        ;; sender-controlled Archived-At header and :archive-format-string
+        ;; substitution, keyed on the linked report's own source.
         archive         (fn [other-r]
-                     (when-not (#{:alias :mailbox} src-type)
-                       (archived-at (:report/email other-r))))
+                          (archive-url other-r (:report/email other-r) source-map))
         format-rel      (fn [from-side? rel]
                           (let [other (if from-side? (:rel/to rel) (:rel/from rel))
                                 a     (archive other)
@@ -720,8 +730,7 @@
         from-name   (or (get (ctx-author-names) (str/lower-case from))
                         (:email/author-name email))
         arch        (archive-url report email source-map)
-        src-type    (get-in source-map [source-name :source-type])
-        relations   (group-relations report src-type)
+        relations   (group-relations report source-map)
         role        (sender-role from source-name source-map maintainers-map)
         awaiting?   (awaiting-reply? report source-name source-map maintainers-map)]
     (-> {:type     (name (:report/type report))
@@ -1566,8 +1575,10 @@
 
 (defn dump-root-index!
   "Generate public/index.html listing all exported sources.
-  Reads each source's reports/meta.json for summary counts."
-  [source-names]
+  Reads each source's reports/meta.json for summary counts.
+  Feed links honor each source's effective :export-formats so the
+  index never points at files the export does not produce."
+  [source-names source-map]
   (let [rows (for [src-name source-names
                    :let     [slug     (slugify src-name)
                          base-dir (str "public/" slug)
@@ -1575,26 +1586,29 @@
                    :when    meta]
                {:name         src-name
                 :slug         slug
+                :formats      (resolve-export-formats src-name source-map)
                 :total        (or (:total meta) 0)
                 :open         (or (:open-count meta) 0)
                 :closed       (or (:closed-count meta) 0)
                 :list-archive (:list-archive meta)})
         row-html
-        (fn [{:keys [name slug total open closed list-archive]}]
-          (str "<tr>"
-               "<td><a href=\"" slug "/index.html\">" (xml-escape name) "</a>"
-               (when list-archive
-                 (str " <a class=\"archive\" href=\"" (xml-escape list-archive)
-                      "\" title=\"List archive\">↗</a>"))
-               "</td>"
-               "<td class=\"num\">" open "</td>"
-               "<td class=\"num\">" closed "</td>"
-               "<td class=\"num\">" total "</td>"
-               "<td class=\"num feeds\">"
-               "<a href=\"" slug "/reports/all.xml\">RSS</a> · "
-               "<a href=\"" slug "/reports/all.json\">JSON</a>"
-               "</td>"
-               "</tr>\n"))
+        (fn [{:keys [name slug formats total open closed list-archive]}]
+          (let [feeds (cond-> []
+                        (formats "rss")
+                        (conj (str "<a href=\"" slug "/reports/all.xml\">RSS</a>"))
+                        (formats "json")
+                        (conj (str "<a href=\"" slug "/reports/all.json\">JSON</a>")))]
+            (str "<tr>"
+                 "<td><a href=\"" slug "/index.html\">" (xml-escape name) "</a>"
+                 (when list-archive
+                   (str " <a class=\"archive\" href=\"" (xml-escape list-archive)
+                        "\" title=\"List archive\">↗</a>"))
+                 "</td>"
+                 "<td class=\"num\">" open "</td>"
+                 "<td class=\"num\">" closed "</td>"
+                 "<td class=\"num\">" total "</td>"
+                 "<td class=\"num feeds\">" (str/join " · " feeds) "</td>"
+                 "</tr>\n")))
         page
         (str
          "<!DOCTYPE html>\n<html lang=\"en\">\n"
@@ -1713,7 +1727,7 @@
       (log/error "Invalid --min-priority:" min-priority "(must be 1, 2, or 3)")
       (System/exit 1))
     (when (and min-status (not (<= 1 min-status 7)))
-      (log/error "Invalid --min-status:" min-status "(must be 1–7)")
+      (log/error "Invalid --min-status:" min-status "(must be 1-7)")
       (System/exit 1))
     (let [;; Watermark for save-last-export!: taken *before* the DB snapshot,
           ;; otherwise daemon transactions racing with this export would fall
@@ -1876,18 +1890,18 @@
                                                      (if incremental? " (incremental)" "")))
                                       (try
                                         (delete-dir! (io/file staging))
-                                        ;; Seed staging with the previous export so an
-                                        ;; incremental run keeps the files it does not
-                                        ;; rewrite (per-type reports/, per-mid patches/,
-                                        ;; text/, events/); aggregates are always
-                                        ;; rebuilt.  Seed on EVERY incremental run:
-                                        ;; :since is passed whenever incremental?, so
-                                        ;; unseeded per-mid files would be lost in the
-                                        ;; swap.
-                                        (when incremental?
-                                          (doseq [sub ["reports" "patches" "text" "events"]]
-                                            (copy-dir! (io/file final-dir sub)
-                                                       (io/file staging sub))))
+                                        ;; Single-format runs: FULL copy of final-dir,
+                                        ;; or the swap would wipe the other formats.
+                                        ;; "all": incremental seeds only the subdirs it
+                                        ;; does not rewrite; a full run starts from an
+                                        ;; empty staging so stale files are purged.
+                                        (if (not= format "all")
+                                          (copy-dir! (io/file final-dir)
+                                                     (io/file staging))
+                                          (when incremental?
+                                            (doseq [sub ["reports" "patches" "text" "events"]]
+                                              (copy-dir! (io/file final-dir sub)
+                                                         (io/file staging sub)))))
                                         ;; Preserve the previous HTML shells when not
                                         ;; regenerating them: they are top-level files
                                         ;; not covered by the subdir seed above, and
@@ -1916,7 +1930,7 @@
             ;; (the :when meta filter drops never-exported sources anyway).
             (when (and (#{"all" "root"} format)
                        (or (= format "root") (seq exported-srcs)))
-              (dump-root-index! (mapv :name (:sources config))))
+              (dump-root-index! (mapv :name (:sources config)) source-map))
             ;; Cron notification: one stderr line iff real work was
             ;; published ("Wrote ..." progress goes to stdout).  Names
             ;; the changed report types per source (pre-filter counts);
@@ -1940,6 +1954,18 @@
                                            s))
                                        exported-srcs))
                         (when-not incremental? " [full re-export]")))))))
-          (save-last-export! run-started))))
+          ;; Advance the incremental watermark only after a full,
+          ;; unfiltered run: a partial run (single format, -n, or a
+          ;; priority/status/topics filter) does not publish everything,
+          ;; so moving the watermark would hide those changes from the
+          ;; next incremental export.  --closed-retention is fine: it
+          ;; only drops old closed reports, and day-crossed? forces a
+          ;; daily full run to keep retention output converged.
+          (when (and (= format "all")
+                     (nil? source-name)
+                     (nil? min-priority)
+                     (nil? min-status)
+                     (nil? topics-filter))
+            (save-last-export! run-started)))))
     (finally
       (d/close conn))))

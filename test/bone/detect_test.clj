@@ -315,6 +315,24 @@
                   :email/in-reply-to "<parent@test.org>"
                   :email/attachments att-diff}))))))
 
+(deftest format-patch-headers-follow-matched-from-line-test
+  (testing "headers are parsed after the matched From <sha> line, not
+            from line 2: a preamble containing 'Subject:' must not
+            pollute the result"
+    (let [text (str "Quoted context follows.\n"
+                    "Subject: wrong subject from the preamble\n"
+                    "\n"
+                    "From 0123456789abcdef0123456789abcdef01234567 Mon Sep 17 00:00:00 2026\n"
+                    "From: Alice <alice@test.org>\n"
+                    "Subject: [PATCH] Real subject\n\n"
+                    "diff --git a/foo b/foo\n")]
+      (is (= "[PATCH] Real subject"
+             (:subject (detect/parse-format-patch-headers text))))
+      (is (= "Alice <alice@test.org>"
+             (:author (detect/parse-format-patch-headers text))))))
+  (testing "nil when the From <sha> signature is absent"
+    (is (nil? (detect/parse-format-patch-headers "Subject: [PATCH] x\n")))))
+
 ;; ---------------------------------------------------------------------------
 ;; Colon-based topic extraction (bone.detect)
 ;; ---------------------------------------------------------------------------

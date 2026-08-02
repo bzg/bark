@@ -11,7 +11,8 @@
             [bone.common :as common]
             [bone.lookup :as lookup]
             [bone.commands.registry :refer [commands-by-id line-commands
-                                            attr->word-cmd proxy-state-attrs
+                                            attr->word-cmd word-id->attr
+                                            proxy-state-attrs
                                             address-attrs setter-ref-attrs
                                             cross-ref-line-ids]]
             [bone.detect :as detect]
@@ -57,7 +58,6 @@
     (re-pattern
      (case param
        :email-address    (str "^" prefix qs ":\\s+(?:.*<(" addr ")>|(" addr "))" trailing-punct "?\\s*$")
-       :date             (str "^" prefix qs ":\\s+(\\d{4}-\\d{2}-\\d{2})" trailing-punct "?\\s*$")
        :date-or-duration (str "^" prefix qs ":\\s+(\\d{4}-\\d{2}-\\d{2}|\\d+[dwmy](?:\\s+\\d+[dwmy])*)" trailing-punct "?\\s*$")
        :word             (str "^" prefix qs ":\\s+([a-zA-Z0-9_-]+)" trailing-punct "?\\s*$")
        :message-id       (str "^" prefix qs ":\\s+(?:.*<(" mid ")>|.*/(" mid-path ")/?|(" mid-path "))" trailing-punct "?\\s*$")
@@ -137,14 +137,18 @@
     (parse-date-iso s)
     (if-let [days (common/parse-delay s)]
       (let [base (if as-of
-                   (-> as-of ^Date .toInstant (LocalDate/ofInstant ZoneOffset/UTC))
+                   (LocalDate/ofInstant (.toInstant ^Date as-of) ZoneOffset/UTC)
                    (LocalDate/now ZoneOffset/UTC))]
         (-> base (.plusDays days) (.atStartOfDay ZoneOffset/UTC) .toInstant Date/from))
       (do (log/warn "Unparseable date/duration in command:" s)
           nil))))
 
 (defn- match-words [patterns body-text]
-  (into {} (keep (fn [[k p]] (when (re-find p body-text) [(keyword "report" (name k)) true]))) patterns))
+  (into {}
+        (keep (fn [[k p]]
+                (when-let [attr (word-id->attr k)]
+                  (when (re-find p body-text) [attr true]))))
+        patterns))
 
 (defn detect-words
   "Detect bareword command matches in `body-text` for a given
@@ -341,12 +345,23 @@
 (def vote-down-pattern #"(?m)(?:^|\s)(?:-1|1-)(?![a-zA-Z0-9])")
 (def vote-null-pattern #"(?m)(?:^|\s)(?:\+0|0\+|-0|0-)(?![a-zA-Z0-9])")
 
+(defn- unquoted
+  "Body text with quoted lines (starting with \">\") removed.  Vote
+  patterns accept a whitespace anchor, so without this a quoted
+  \"> +1\" would count -- and, tested before :down, could even invert
+  the polarity of the sender's actual vote."
+  [s]
+  (->> (str/split-lines s)
+       (remove #(str/starts-with? % ">"))
+       (str/join "\n")))
+
 (defn detect-vote [body-text]
   (when body-text
-    (cond
-      (re-find vote-up-pattern body-text)   :up
-      (re-find vote-down-pattern body-text) :down
-      (re-find vote-null-pattern body-text) :null)))
+    (let [text (unquoted body-text)]
+      (cond
+        (re-find vote-up-pattern text)   :up
+        (re-find vote-down-pattern text) :down
+        (re-find vote-null-pattern text) :null))))
 
 (defn vote-tx
   "Pure: the transaction map recording `vote` for the voter, or nil
@@ -789,44 +804,30 @@
               (log/info "Related-to:" mid "(by" from-addr ")")))))
     (doseq [mid to-clear]
       (let [target-eid (report-eid-by-mid db mid)]
-        (when target-eid
+        (if (nil? target-eid)
+          ;; Same failure as the set path: an unknown target on the
+          ;; unset must not be silently dropped.
+          (when failure-ctx
+            (record-failure! (assoc failure-ctx
+                                    :reason   :unknown-target
+                                    :audience :author
+                                    :command  (str "Not related-to: " mid))))
           (when (rel/retract-pair! conn report-eid :related-to
-                                    target-eid email-eid)
+                                   target-eid email-eid)
             (tracking/bump-report-updated! conn target-eid)
             (log/info "Not related-to:" mid "(by" from-addr ")")))))))
 
-(defn- relation-target-eid
-  "Eid of the target report of the active outgoing relation of `kind`
-  on `report-eid`, or nil."
-  [db report-eid kind]
-  (d/q '[:find ?to . :in $ ?from ?kind
-         :where
-         [?e :rel/from ?from]
-         [?e :rel/kind ?kind]
-         [?e :rel/active? true]
-         [?e :rel/to ?to]]
-       db report-eid kind))
-
-(defn- relation-source-eid
-  "Eid of the source report of an active incoming relation of `kind`
-  pointing at `report-eid`, or nil.  Mirror of `relation-target-eid`."
-  [db report-eid kind]
-  (d/q '[:find ?from . :in $ ?to ?kind
-         :where
-         [?e :rel/from ?from]
-         [?e :rel/kind ?kind]
-         [?e :rel/active? true]
-         [?e :rel/to ?to]]
-       db report-eid kind))
-
-(defn- relation-counterparty-eid
-  "Eid of the other endpoint of an active `kind` relation involving
-  `report-eid`.  For :current-as-from, returns the relation's :rel/to;
-  for :current-as-to, returns the relation's :rel/from."
-  [db report-eid kind role]
-  (case role
-    :current-as-from (relation-target-eid db report-eid kind)
-    :current-as-to   (relation-source-eid db report-eid kind)))
+(defn- active-pair?
+  "True when an active relation of `kind` exists from `from-eid` to
+  `to-eid`.  Resolution goes through :rel/id via entid/pull -- the
+  same path as `rel/retract-pair!` -- so a positive answer here
+  guarantees the retract will find its target."
+  [db from-eid kind to-eid]
+  (boolean
+   (some (fn [rid]
+           (when-let [e (d/entid db [:rel/id rid])]
+             (:rel/active? (d/pull db [:rel/active?] e))))
+         (rel/paired-relation-ids kind from-eid to-eid))))
 
 (defn- relation-setters-as-pull
   "Build a partial pull map exposing relation setters under :setter-attr
@@ -918,15 +919,15 @@
                          report being closed; either current or target
                          depending on role)
     :pose-to          -- eid that becomes :rel/to on the pose (the replacement)
-    :counterparty     -- eid of the other endpoint of the currently-active
-                         relation involving the current report (or nil)
     :unset-target-mid -- string from `resolved`'s unset-mid-key (or nil)
     :unset-target-eid -- eid the unset's mid resolves to (or nil)
-    :clear-now?       -- true when an explicit unset command targets the
-                         exact mid of the currently-active relation.
-                         A mismatch (or absent active relation) is a
-                         no-op so other relations of the same kind
-                         posed from elsewhere are not collateral damage."
+    :clear-now?       -- true when an explicit unset command names a
+                         report holding an active `kind` relation with
+                         the current one, in the role's direction.  A
+                         mismatch (or absent active relation) is a
+                         no-op so other relations of the same kind --
+                         including siblings sharing this endpoint --
+                         are not collateral damage."
   [db report-eid source-type resolved]
   (mapv (fn [{:keys [kind role unset-key unset-mid-key mid-key] :as row}]
           (let [target-mid (get resolved mid-key)
@@ -936,21 +937,24 @@
                 [pose-from pose-to] (case role
                                       :current-as-from [report-eid tgt]
                                       :current-as-to   [tgt report-eid])
-                counterparty     (relation-counterparty-eid db report-eid kind role)
                 unset-target-mid (get resolved unset-mid-key)
                 unset-target-eid (when unset-target-mid
-                                   (report-eid-by-mid db unset-target-mid))]
+                                   (report-eid-by-mid db unset-target-mid))
+                ;; :rel/from is always the closed report: current for
+                ;; :current-as-from, the unset target for :current-as-to.
+                [clear-from clear-to] (case role
+                                        :current-as-from [report-eid unset-target-eid]
+                                        :current-as-to   [unset-target-eid report-eid])]
             (assoc row
                    :target-mid       target-mid
                    :resolved         r
                    :pose-from        pose-from
                    :pose-to          pose-to
-                   :counterparty     counterparty
                    :unset-target-mid unset-target-mid
                    :unset-target-eid unset-target-eid
                    :clear-now?       (and (boolean (get resolved unset-key))
-                                          (some? counterparty)
-                                          (= unset-target-eid counterparty)))))
+                                          (some? unset-target-eid)
+                                          (active-pair? db clear-from kind clear-to)))))
         closure-relation-rows))
 
 (defn- apply-closure-set-row!
@@ -996,25 +1000,21 @@
 
 (defn- apply-closure-clear-row!
   "Process one closure-relation unset command that has a matching
-  active relation.  Retracts the :supersedes pair AND the :related-to
-  companion, then reopens the previously-closed party.  Which side is
-  current vs counterparty depends on :role."
-  [conn report-eid {:keys [kind role counterparty]} email-eid]
-  (case role
-    :current-as-from
-    (do (rel/retract-by-from! conn report-eid kind email-eid)
-        (when counterparty
-          (rel/retract-pair! conn report-eid :related-to counterparty email-eid))
-        (reopen-report! conn report-eid)
-        (tracking/bump-report-updated! conn report-eid)
-        (when counterparty (tracking/bump-report-updated! conn counterparty)))
-    :current-as-to
-    (do (rel/retract-by-to! conn report-eid kind email-eid)
-        (when counterparty
-          (rel/retract-pair! conn counterparty :related-to report-eid email-eid)
-          (reopen-report! conn counterparty)
-          (tracking/bump-report-updated! conn counterparty))
-        (tracking/bump-report-updated! conn report-eid))))
+  active relation (:clear-now?).  Retracts exactly the named pair --
+  the `kind` relation between the current report and the unset target
+  -- plus its :related-to companion, then reopens the previously
+  closed side (:rel/from).  Targeted on purpose: several reports may
+  hold a `kind` relation with the same endpoint (e.g. B and C both
+  superseded by A), and clearing one must not touch the others."
+  [conn report-eid {:keys [kind role unset-target-eid]} email-eid]
+  (let [[closed-eid other-eid] (case role
+                                 :current-as-from [report-eid unset-target-eid]
+                                 :current-as-to   [unset-target-eid report-eid])]
+    (rel/retract-pair! conn closed-eid kind other-eid email-eid)
+    (rel/retract-pair! conn closed-eid :related-to other-eid email-eid)
+    (reopen-report! conn closed-eid)
+    (tracking/bump-report-updated! conn closed-eid)
+    (tracking/bump-report-updated! conn other-eid)))
 
 (defn apply-lines! [conn report-eid lines email-eid from-addr is-maintainer?
                     failure-ctx source-cfg]
@@ -1063,10 +1063,16 @@
           (log/info "Commands:"
                     (describe-lines resolved)
                     (str "(by " from-addr ")")))
-        (doseq [{:keys [resolved syntax target-mid]} rows
+        (doseq [{:keys [resolved syntax target-mid unset-target-mid
+                        unset-target-eid]} rows
                 :let [tgt-eid (:target-eid resolved)
                       valid?  (:valid? resolved)]]
           (record-target-failures! failure-ctx syntax target-mid tgt-eid valid? report-eid)
+          ;; Unset naming an unknown mid: report :unknown-target like
+          ;; the set side, instead of a silent no-op.
+          (when (and unset-target-mid (nil? unset-target-eid))
+            (record-target-failures! failure-ctx (str "Not " (str/lower-case syntax))
+                                     unset-target-mid nil nil report-eid))
           (when (and tgt-eid (not valid?))
             (if (= tgt-eid report-eid)
               (log/warn (str syntax ": " target-mid
@@ -1206,8 +1212,11 @@
     :duplicate-of  :unduplicate-of})
 
 (defn apply-commands!
-  "Apply commands from `email` against `report-eid`; true if anything
-  was applied.  A reply shipping patch content also fires an implicit
+  "Apply commands from `email` against `report-eid`; true when a
+  command was detected -- a line command counts even when every
+  detected command is then refused by scope, so callers (digest) still
+  record the sender as a participant on the source.  A reply shipping
+  patch content also fires an implicit
   `Acked. Owned.` (gated by :patch-triggers? and report-type in
   #{:bug :request}).
 

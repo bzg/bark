@@ -21,7 +21,7 @@
             :cover-mid "<c0>" :empty? false}]
     (testing "a new cover (0/N) threading back to the old series closes it"
       (is (= [1] (series/series-restart-plan 0 [s1] #{"<a>"}))))
-    (testing "a new 1/N closes a series that already holds a 1/…"
+    (testing "a new 1/N closes a series that already holds a 1/..."
       (is (= [1] (series/series-restart-plan 1 [s1] #{"<b>"}))))
     (testing "threading back to the old cover letter is enough"
       (is (= [1] (series/series-restart-plan 0 [s1] #{"<c0>"}))))

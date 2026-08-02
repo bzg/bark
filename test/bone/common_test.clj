@@ -102,20 +102,20 @@
   (pr-str (vec (partition 2 kvs))))
 
 (deftest classify-delivery-test
-  (testing "List-Id header → :list"
+  (testing "List-Id header => :list"
     (is (= :list (common/classify-delivery
                   (make-headers "List-Id" "<bugs.example.org>")))))
 
-  (testing "X-BeenThere header → :list"
+  (testing "X-BeenThere header => :list"
     (is (= :list (common/classify-delivery
                   (make-headers "X-BeenThere" "list@example.org")))))
 
-  (testing "original recipient not in To/Cc → :alias"
+  (testing "original recipient not in To/Cc => :alias"
     (is (= :alias (common/classify-delivery
                    (make-headers "X-Original-To" "alias@example.org"
                                 "To" "someone@else.org")))))
 
-  (testing "original recipient in To → :direct"
+  (testing "original recipient in To => :direct"
     (is (= :direct (common/classify-delivery
                     (make-headers "X-Original-To" "me@example.org"
                                  "To" "me@example.org")))))
@@ -129,11 +129,11 @@
                    (make-headers "X-Original-To" ["alias@example.org" "x@y.org"]
                                  "To" ["someone@else.org"])))))
 
-  (testing "no special headers → :direct"
+  (testing "no special headers => :direct"
     (is (= :direct (common/classify-delivery
                     (make-headers "To" "inbox@example.org")))))
 
-  (testing "nil headers → :direct"
+  (testing "nil headers => :direct"
     (is (= :direct (common/classify-delivery nil)))))
 
 ;; ---------------------------------------------------------------------------
@@ -165,7 +165,7 @@
             (make-headers "Delivered-To" "inbox@example.com")
             test-sources))))
 
-  (testing "no match → nil"
+  (testing "no match => nil"
     (is (nil? (common/classify-source
                (make-headers "To" "unknown@example.com")
                test-sources)))))
@@ -315,12 +315,12 @@
                   :from  #inst "2025-06-01T00:00:00Z"
                   :to    nil
                   :order 0}]]
-    (testing "no date check → any active tenure matches"
+    (testing "no date check => any active tenure matches"
       (is (common/maintainer? tenures "alice@test.org")))
-    (testing "email after :from → true"
+    (testing "email after :from => true"
       (is (common/maintainer? tenures "alice@test.org"
                               #inst "2025-07-01T00:00:00Z")))
-    (testing "email before :from → false"
+    (testing "email before :from => false"
       (is (not (common/maintainer? tenures "alice@test.org"
                                    #inst "2025-01-01T00:00:00Z")))))
 
@@ -348,7 +348,7 @@
     (let [tenures [{:email "first@t.org" :from nil :to #inst "2025-01-01" :order 0}
                    {:email "now@t.org"   :from #inst "2025-02-01"          :order 1}]]
       (is (= "now@t.org" (common/lead-maintainer tenures)))))
-  (testing "no active tenures → nil"
+  (testing "no active tenures => nil"
     (is (nil? (common/lead-maintainer []))))
   (testing "lead-maintainer? is case-insensitive"
     (let [tenures [{:email "lead@t.org" :from nil :order 0}]]
@@ -403,7 +403,7 @@
       (is (= ["lead@example.org"] (:maintainers eff))))
     (testing "global :labels fold in, per-source :labels merge over them"
       (is (= {:bug ["BUG" "DEFECT"] :patch ["PATCH"]} (:labels eff))))
-    (testing "global and per-source :commands merge key-by-key"
+    (testing "global :words and per-source overrides combine per command"
       (is (= {:closed {:words ["Done"] :scope :maintainer}} (:commands eff))))
     (testing ":command-syntax surfaces only when :strict"
       (is (= :strict (:command-syntax eff))))
@@ -412,6 +412,18 @@
       (is (nil? (some #{"secret"} (tree-seq coll? seq eff)))))
     (testing "unknown source -> nil"
       (is (nil? (common/effective-source-config config "missing"))))))
+
+(deftest effective-source-config-flat-command-override-test
+  ;; The daemon replaces a command's {:scope :report-types} override
+  ;; unit wholesale when the source redefines it (see
+  ;; resolve-command-overrides): the published effective config must
+  ;; not deep-merge the global :report-types back in.
+  (let [config {:commands {:closed {:scope :maintainer :report-types [:bug]}}
+                :sources  [{:name "demo" :list "demo.example.org"
+                            :commands {:closed {:scope :anyone}}}]}
+        eff    (common/effective-source-config config "demo")]
+    (is (= {:closed {:scope :anyone}} (:commands eff))
+        "the local override unit fully replaces the global one")))
 
 (deftest reproducible-config-test
   (let [config {:sources [{:name "demo" :list "demo.example.org"}]}
@@ -488,6 +500,55 @@
   (is (false? (common/ics-file? nil))))
 
 ;; ---------------------------------------------------------------------------
+;; fold-ics-line
+;; ---------------------------------------------------------------------------
+
+(defn- physical-lines [folded] (str/split folded #"\r\n"))
+
+(defn- octets [^String s] (alength (.getBytes s "UTF-8")))
+
+(defn- unfold [folded] (str/replace folded "\r\n " ""))
+
+(deftest fold-ics-line-test
+  (let [emoji (String. (Character/toChars 0x1F600))] ; non-BMP, 4 UTF-8 octets
+    (testing "long ASCII line folds to <= 75 octets per physical line"
+      (let [line   (apply str (repeat 200 "a"))
+            folded (common/fold-ics-line line)]
+        (is (every? #(<= (octets %) 75) (physical-lines folded)))
+        (is (= line (unfold folded)))))
+
+    (testing "a fold never splits a surrogate pair (74 ASCII + emoji)"
+      (let [line   (str (apply str (repeat 74 "a")) emoji)
+            folded (common/fold-ics-line line)]
+        (is (> (count (physical-lines folded)) 1) "the line did fold")
+        (is (every? #(<= (octets %) 75) (physical-lines folded)))
+        (is (= line (unfold folded)) "round-trip keeps the emoji intact")))
+
+    (testing "a run of 30 emoji folds on code-point boundaries"
+      (let [line   (apply str (repeat 30 emoji))
+            folded (common/fold-ics-line line)]
+        (is (> (count (physical-lines folded)) 1) "the line did fold")
+        (is (every? #(<= (octets %) 75) (physical-lines folded)))
+        (is (= line (unfold folded)))))))
+
+;; ---------------------------------------------------------------------------
+;; valid-config-name?
+;; ---------------------------------------------------------------------------
+
+(deftest valid-config-name-test
+  (testing "accepts alphanum start, spaces/dots/dashes in the middle"
+    (is (common/valid-config-name? "demo"))
+    (is (common/valid-config-name? "a"))
+    (is (common/valid-config-name? "My Source 2"))
+    (is (common/valid-config-name? "a.b_c-d")))
+  (testing "rejects trailing space, leading space and bad starts"
+    (is (not (common/valid-config-name? "demo ")))
+    (is (not (common/valid-config-name? " demo")))
+    (is (not (common/valid-config-name? "-demo")))
+    (is (not (common/valid-config-name? "")))
+    (is (not (common/valid-config-name? nil)))))
+
+;; ---------------------------------------------------------------------------
 ;; resolve-author -- Mailman/DMARC munging detection
 ;; ---------------------------------------------------------------------------
 
@@ -509,7 +570,7 @@
              :reply-to     [{:address "alice-work@example.com"
                              :name    "Alice (work)"}]}))))
 
-  (testing "Mailman/DMARC munging: From-name has 'via' + Reply-To different → use Reply-To"
+  (testing "Mailman/DMARC munging: From-name has 'via' + Reply-To different => use Reply-To"
     ;; Mirrors the BUG-org-habit fixture: Daniel Mendler's post via
     ;; gnu.org's mailman has From rewritten to the list address, and
     ;; the original sender address lives in Reply-To.

@@ -57,16 +57,30 @@
 ;; Queries (all-reports and report-pull-pattern loaded from bone-common.clj)
 ;; ---------------------------------------------------------------------------
 
-(defn emails-last-year [db]
-  (let [threshold (java.util.Date. (- (System/currentTimeMillis) one-year-ms))]
-    (-> (d/q '[:find (count ?e)
-               :in $ ?threshold
-               :where
-               [?e :email/message-id _]
-               [?e :email/date-sent ?date]
-               [(>= ?date ?threshold)]]
-             db threshold)
-        ffirst (or 0))))
+(defn emails-last-year
+  "Count emails sent in the last year, scoped to `source-name` when
+  given (stats.json is per-source; a global count would skew the
+  report/email ratio), all sources when nil."
+  ([db] (emails-last-year db nil))
+  ([db source-name]
+   (let [threshold (java.util.Date. (- (System/currentTimeMillis) one-year-ms))]
+     (-> (if source-name
+           (d/q '[:find (count ?e)
+                  :in $ ?threshold ?src
+                  :where
+                  [?e :email/source ?src]
+                  [?e :email/message-id _]
+                  [?e :email/date-sent ?date]
+                  [(>= ?date ?threshold)]]
+                db threshold source-name)
+           (d/q '[:find (count ?e)
+                  :in $ ?threshold
+                  :where
+                  [?e :email/message-id _]
+                  [?e :email/date-sent ?date]
+                  [(>= ?date ?threshold)]]
+                db threshold))
+         ffirst (or 0)))))
 
 (defn all-participants
   "Fetch all participant entities from the database."
@@ -341,7 +355,7 @@
   (let [mailmap       (load-mailmap)
         last-year     (filter #(within-last-year? (report-date %)) reports)
         open-yr       (remove :report/closed last-year)
-        emails-yr     (when db (emails-last-year db))
+        emails-yr     (when db (emails-last-year db source-name))
         contributors  (when db (cond->> (all-contributors db)
                                  source-name (filter #(= source-name (second %)))))
         participants  (when db (cond->> (all-participants db)

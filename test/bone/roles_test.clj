@@ -198,6 +198,26 @@
     (is (contains? (active conn "s") "bob@x.org")
         "bob stays active -- no :periods means no close date available")))
 
+(deftest sync-future-period-does-not-preempt
+  ;; A planned handover (:start in the future) must not close the
+  ;; current maintainers' tenures before the boundary arrives: a
+  ;; future :to would read as "no longer active" to every consumer
+  ;; of active tenures, revoking the old lead's rights immediately.
+  (let [conn   (fresh-conn)
+        future (common/format-date-iso
+                (java.util.Date. (+ (System/currentTimeMillis)
+                                    (* 30 86400000))))]
+    (roles/sync-source-tenures!
+     conn
+     {:name    "s"
+      :periods [{:end future :maintainers ["old@x.org" "co@x.org"]}
+                {:start future :maintainers ["new@x.org"]}]})
+    (is (= #{"old@x.org" "co@x.org"} (active conn "s"))
+        "the future boundary neither closes nor opens anything yet")
+    (is (common/lead-maintainer? (roles/get-tenures (d/db conn) "s")
+                                 "old@x.org")
+        "the old lead keeps their rights until the handover date")))
+
 (deftest sync-with-started-first-period-can-close
   ;; First period has :start, so a pre-existing mail-added maintainer
   ;; absent from the declared list IS closed.

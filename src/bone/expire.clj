@@ -39,12 +39,17 @@
         (assoc v :expires-on-deadline true)
 
         (string? after)
-        ;; parse-iso-date validates the ISO shape itself; anything else
-        ;; is tried as a duration.
-        (or (when-let [d (common/parse-iso-date after)]
-              (assoc v :expires-on-date d))
-            (when-let [d (parse-delay-safe after)]
-              (assoc v :delay-days d)))
+        ;; ISO-shaped strings are dates (parse-iso-date also validates
+        ;; the calendar); anything else is tried as a duration.
+        (if (re-matches #"\d{4}-\d{2}-\d{2}" after)
+          (if-let [d (common/parse-iso-date after)]
+            (assoc v :expires-on-date d)
+            ;; Well-shaped but calendar-invalid ("2026-02-30"): a
+            ;; silent nil would just never expire anything.
+            (log/warn "Ignoring expiry rule with invalid calendar date:"
+                      (pr-str after)))
+          (when-let [d (parse-delay-safe after)]
+            (assoc v :delay-days d)))
 
         :else
         (when-let [d (parse-delay-safe after)]
@@ -78,7 +83,7 @@
        (and delay-days last-activity
             (.before ^Date last-activity now)
             (> (common/days-between last-activity now) delay-days)))
-     ;; Status ceiling (activity score: acked=1 + owned=2, range 0–3)
+     ;; Status ceiling (activity score: acked=1 + owned=2, range 0-3)
      (or (nil? max-status)
          (<= (report-activity-score report-data) max-status))
      ;; Priority ceiling

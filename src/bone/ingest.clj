@@ -3,7 +3,7 @@
 ;; License-Filename: LICENSES/EPL-2.0.txt
 
 (ns bone.ingest
-  "Email ingestion: Datalevin connection, storage, and email→txdata transform."
+  "Email ingestion: Datalevin connection, storage, and email=>txdata transform."
   (:require [bone.common :as common]
             [bone.lookup :as lookup]
             [datalevin.core :as d]
@@ -105,6 +105,18 @@
   [conn]
   (into #{}
         (d/q '[:find [?id ...] :where [_ :email/id ?id]]
+             (d/db conn))))
+
+(defn undigested-email-ids
+  "Return the set of :email/id values for emails stored but never
+  digested (no :email/digested-at) -- e.g. the digest hit :retry.
+  Maildir catch-up removes these from its known baseline so they get
+  re-presented to the re-digest path of store-and-process!."
+  [conn]
+  (into #{}
+        (d/q '[:find [?id ...]
+               :where [?e :email/id ?id]
+                      (not [?e :email/digested-at _])]
              (d/db conn))))
 
 (defn seen-maildir-ids
@@ -329,8 +341,9 @@
                     "Subject:" (truncate (:email/subject txdata) 60))
           true
           (catch Exception e
-            ;; If the message-id now exists, another process (e.g. bb digest)
-            ;; inserted it between our exists? check and the transact -- harmless race.
+            ;; If the message-id now exists, a concurrent writer (another
+            ;; watch thread on a mailbox sharing this list) inserted it
+            ;; between our exists? check and the transact -- harmless race.
             (let [now-exists? (try (some? (lookup/email-eid (d/db conn) message-id))
                                   (catch Exception _ false))]
               (if now-exists?

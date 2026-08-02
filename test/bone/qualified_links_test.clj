@@ -80,7 +80,7 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest link-rel!-patch-replies-to-bug
-  (testing "patch posted in reply to bug → :related-to AND :resolves posted"
+  (testing "patch posted in reply to bug => :related-to AND :resolves posted"
     (let [{:keys [conn] :as setup} (fresh-conn)]
       (try
         (let [bug-email   (mk-email! conn "<bug-1@x>" "alice@x" #inst "2026-01-01")
@@ -101,7 +101,7 @@
         (finally (close-and-cleanup! setup))))))
 
 (deftest link-rel!-bug-replies-to-bug
-  (testing "bug posted in reply to another bug → :related-to only, no :resolves"
+  (testing "bug posted in reply to another bug => :related-to only, no :resolves"
     (let [{:keys [conn] :as setup} (fresh-conn)]
       (try
         (let [parent-email (mk-email! conn "<bug-A@x>" "alice@x" #inst "2026-01-01")
@@ -301,6 +301,58 @@
                 ":supersedes relation still active (not retracted)")))
         (finally (close-and-cleanup! setup))))))
 
+(deftest not-supersedes-clears-only-the-named-target
+  (testing "Not supersedes: <mid> on the superseder retracts only the
+            relation with the named report: another report superseded
+            by the same superseder keeps its closure and its relation."
+    (let [{:keys [conn] :as setup} (fresh-conn)]
+      (try
+        (let [mk-patch (fn [mid author date]
+                         (mk-report! conn mid (mk-email! conn mid author date)
+                                     :patch))
+              a-eid    (mk-patch "<patch-a@x>" "alice@x" #inst "2026-05-01")
+              b-eid    (mk-patch "<patch-b@x>" "bob@x"   #inst "2026-05-02")
+              c-eid    (mk-patch "<patch-c@x>" "carol@x" #inst "2026-05-03")
+              send!    (fn [rid mid date body]
+                         (commands/apply-commands!
+                          conn rid :patch
+                          {:db/id (mk-email! conn mid "alice@x" date)
+                           :email/author-address "alice@x"
+                           :email/date-sent date
+                           :email/body-text body}
+                          {} {} :direct nil))
+              active-supersedes
+              (fn [from-eid]
+                (d/q '[:find [?e ...] :in $ ?from
+                       :where
+                       [?e :rel/from ?from]
+                       [?e :rel/kind :supersedes]
+                       [?e :rel/active? true]]
+                     (d/db conn) from-eid))]
+          ;; B and C are both superseded by A.
+          (send! b-eid "<sup-b@x>" #inst "2026-05-04"
+                 "Superseded-by: <patch-a@x>\n")
+          (send! c-eid "<sup-c@x>" #inst "2026-05-05"
+                 "Superseded-by: <patch-a@x>\n")
+          ;; On A, clear only the relation with B.
+          (send! a-eid "<not-sup@x>" #inst "2026-05-06"
+                 "Not supersedes: <patch-b@x>\n")
+          (let [b-after (d/pull (d/db conn)
+                                [:report/closed :report/close-reason] b-eid)
+                c-after (d/pull (d/db conn)
+                                [:report/closed :report/close-reason] c-eid)]
+            (is (nil? (:report/closed b-after))       "B reopened")
+            (is (nil? (:report/close-reason b-after)) "B close-reason cleared")
+            (is (empty? (active-supersedes b-eid))
+                "B's :supersedes relation retracted")
+            (is (some? (:report/closed c-after))
+                "C stays closed -- not collateral damage of B's clear")
+            (is (= :superseded (:report/close-reason c-after))
+                "C's close-reason untouched")
+            (is (= 1 (count (active-supersedes c-eid)))
+                "C's :supersedes relation to A stays active")))
+        (finally (close-and-cleanup! setup))))))
+
 (deftest superseded-by-self-loop-is-recorded
   (testing "Superseded-by: <own-mid> records a :self-loop failure and
             leaves the report open.  This catches the common pitfall
@@ -436,7 +488,7 @@
           (let [mk-bug (fn [mid author date]
                          (mk-report! conn mid (mk-email! conn mid author date) :bug))
                 r-eid  (mk-bug "<bug-rr@x>" "alice@x" #inst "2026-05-01")
-                x-eid  (mk-bug "<bug-xx@x>" "bob@x"   #inst "2026-05-02")
+                _x-eid (mk-bug "<bug-xx@x>" "bob@x"   #inst "2026-05-02")
                 y-eid  (mk-bug "<bug-yy@x>" "carol@x" #inst "2026-05-03")
                 send!  (fn [mid date text]
                          (commands/apply-commands!
@@ -458,8 +510,7 @@
               (is (some? (:report/closed after)) "report ends up closed")
               (is (= :superseded (:report/close-reason after)))
               (is (= #{y-eid} active)
-                  "the closure relation follows the pose, not the reopen")
-              (is (some? x-eid) "_")))
+                  "the closure relation follows the pose, not the reopen")))
           (finally (close-and-cleanup! setup)))))))
 
 ;; ---------------------------------------------------------------------------
@@ -523,7 +574,7 @@
         (let [orig-mid  "<bug-orig@x>"
               dup-mid   "<bug-dup@x>"
               orig-email (mk-email! conn orig-mid "alice@x" #inst "2026-03-01")
-              orig-eid   (mk-report! conn orig-mid orig-email :bug)
+              _orig-eid  (mk-report! conn orig-mid orig-email :bug)
               dup-email  (mk-email! conn dup-mid "bob@x" #inst "2026-03-02")
               dup-eid    (mk-report! conn dup-mid dup-email :bug)
               cmd-email-eid (mk-email! conn "<cmd@x>" "carol@x" #inst "2026-03-03")
@@ -543,8 +594,7 @@
             (is (contains? kinds :duplicates)    ":duplicates posted")
             (is (contains? kinds :duplicated-by) "inverse :duplicated-by posted")
             (is (contains? kinds :related-to)
-                ":related-to also posted (cohesion)")
-            (is (some? orig-eid) "_")))
+                ":related-to also posted (cohesion)")))
         (finally (close-and-cleanup! setup))))))
 
 (deftest duplicate-of-rejects-cross-type
@@ -580,7 +630,7 @@
         (let [orig-mid  "<bug-orig@x>"
               dup-mid   "<bug-dup@x>"
               orig-email (mk-email! conn orig-mid "alice@x" #inst "2026-03-01")
-              orig-eid   (mk-report! conn orig-mid orig-email :bug)
+              _orig-eid  (mk-report! conn orig-mid orig-email :bug)
               dup-email  (mk-email! conn dup-mid "bob@x" #inst "2026-03-02")
               dup-eid    (mk-report! conn dup-mid dup-email :bug)
               ;; Carol posts Duplicate-of:
@@ -607,8 +657,7 @@
                                 (d/db conn) dup-eid)]
             (is (nil? (:report/closed after))      "duplicate reopened")
             (is (nil? (:report/close-reason after)) "close-reason cleared")
-            (is (empty? active-dup)                ":duplicates retracted")
-            (is (some? orig-eid)                   "_")))
+            (is (empty? active-dup)                ":duplicates retracted")))
         (finally (close-and-cleanup! setup))))))
 
 (defn- attach-descendant!
@@ -777,7 +826,7 @@
         (finally (close-and-cleanup! setup))))))
 
 (deftest r4-supersede-transfers-ownership
-  (testing "R4: P2 supersedes P1 → auto-ownership transfers to P2's author"
+  (testing "R4: P2 supersedes P1 => auto-ownership transfers to P2's author"
     (let [{:keys [conn] :as setup} (fresh-conn)]
       (try
         (let [bug-email (mk-email! conn "<bug@x>" "alice@x" #inst "2026-04-01")
@@ -817,7 +866,7 @@
         (finally (close-and-cleanup! setup))))))
 
 (deftest r4-chain-of-supersession
-  (testing "R4 chain: P1 → P2 → P3, ownership ends up with P3's author"
+  (testing "R4 chain: P1 => P2 => P3, ownership ends up with P3's author"
     (let [{:keys [conn] :as setup} (fresh-conn)]
       (try
         (let [bug-email (mk-email! conn "<bug@x>" "alice@x" #inst "2026-04-01")
@@ -846,7 +895,7 @@
                             :email/author-address "eve@x"
                             :email/date-sent #inst "2026-04-05"
                             :email/source "test"}
-              p3-eid    (mk-report! conn "<p3@x>" (:db/id p3-email-map) :patch)
+              _p3-eid   (mk-report! conn "<p3@x>" (:db/id p3-email-map) :patch)
               ;; Step 2: P2 superseded by P3
               cmd2-eid (mk-email! conn "<cmd2@x>" "carol@x" #inst "2026-04-06")
               cmd2     {:db/id cmd2-eid :email/author-address "carol@x"
@@ -857,8 +906,7 @@
           (let [bug-state (read-attrs (d/db conn) bug-eid
                                        [:report/owned-address])]
             (is (= "eve@x" (:report/owned-address bug-state))
-                "after chain of supersession, ownership is at P3 (Eve)")
-            (is (some? p3-eid) "_")))
+                "after chain of supersession, ownership is at P3 (Eve)")))
         (finally (close-and-cleanup! setup))))))
 
 (deftest link-rel!-related-to-canonical

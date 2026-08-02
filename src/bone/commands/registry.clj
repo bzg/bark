@@ -126,6 +126,12 @@
 (def attr->word-cmd
   (into {} (map (juxt :attr identity)) word-commands))
 
+;; Explicit command-id => report attr for bareword commands.  Keeps
+;; the id/attr coupling declared here instead of re-deriving attr
+;; names from command ids at detection time (`match-words`).
+(def word-id->attr
+  (into {} (map (juxt :id :attr)) word-commands))
+
 ;; Cross-reference annotations (Supersedes:, Related-to: and unsets):
 ;; neutral links, no state change -- :kind :annotation with a :rel/*
 ;; :attr.  Closure relations are triggers and excluded.  Used by

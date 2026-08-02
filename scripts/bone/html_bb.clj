@@ -29,11 +29,11 @@
   Each map is either {:link url} or {:inline css-content}.
 
   Resolution order:
-  1. https:// URL           → [{:link url}]
-  2. file:///path           → [{:inline (slurp path)}]
-  3. path ending in .css    → [{:inline (slurp path)}] (relative or absolute)
-  4. bare name (no spaces)  → pico-themes CDN [{:link base} {:link bone-overlay}]
-  5. \"none\" or nil          → nil"
+  1. https:// URL           => [{:link url}]
+  2. file:///path           => [{:inline (slurp path)}]
+  3. path ending in .css    => [{:inline (slurp path)}] (relative or absolute)
+  4. bare name (no spaces)  => pico-themes CDN [{:link base} {:link bone-overlay}]
+  5. \"none\" or nil          => nil"
   [theme]
   (when (and theme (not= theme "none"))
     (cond
@@ -286,9 +286,16 @@
   [[url][label]] -> <a href=\"url\">label</a>
   [[url]]        -> <a href=\"url\">url</a>"
   [s]
-  (-> s
-      (str/replace #"\[\[([^\]]+)\]\[([^\]]+)\]\]" "<a href=\"$1\">$2</a>")
-      (str/replace #"\[\[([^\]]+)\]\]" "<a href=\"$1\">$1</a>")))
+  ;; Quotes are not covered by the caller's & < > escaping; escape them
+  ;; in the href so a URL cannot break out of the attribute.
+  (let [href #(str/replace % "\"" "&quot;")]
+    (-> s
+        (str/replace #"\[\[([^\]]+)\]\[([^\]]+)\]\]"
+                     (fn [[_ url label]]
+                       (str "<a href=\"" (href url) "\">" label "</a>")))
+        (str/replace #"\[\[([^\]]+)\]\]"
+                     (fn [[_ url]]
+                       (str "<a href=\"" (href url) "\">" url "</a>"))))))
 
 (defn org-inline
   "Convert a single line of inline org markup to HTML, with HTML

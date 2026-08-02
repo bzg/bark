@@ -246,6 +246,34 @@
       (is (not (report-closed? conn "<dl-none@test>")))
       (teardown! ctx))))
 
+(deftest fixed-date-rule-test
+  (testing "Rule with a past ISO :inactive-after date expires the report"
+    (let [{:keys [conn] :as ctx} (setup-db!)
+          source-map {"test-src" {:expiry {:bug {:inactive-after "2020-01-01"}}}}
+          eid (insert-email! conn {:mid "<date-past@test>" :date-sent (days-ago 3)})
+          _   (insert-report! conn {:mid "<date-past@test>" :type :bug :email-eid eid})]
+      (expire/expire-reports! conn source-map)
+      (is (report-closed? conn "<date-past@test>"))
+      (teardown! ctx)))
+
+  (testing "Rule with a future ISO :inactive-after date does NOT expire"
+    (let [{:keys [conn] :as ctx} (setup-db!)
+          source-map {"test-src" {:expiry {:bug {:inactive-after "2999-01-01"}}}}
+          eid (insert-email! conn {:mid "<date-future@test>" :date-sent (days-ago 100)})
+          _   (insert-report! conn {:mid "<date-future@test>" :type :bug :email-eid eid})]
+      (expire/expire-reports! conn source-map)
+      (is (not (report-closed? conn "<date-future@test>")))
+      (teardown! ctx)))
+
+  (testing "Calendar-invalid ISO date expires nothing (rule skipped)"
+    (let [{:keys [conn] :as ctx} (setup-db!)
+          source-map {"test-src" {:expiry {:bug {:inactive-after "2026-02-30"}}}}
+          eid (insert-email! conn {:mid "<date-bad@test>" :date-sent (days-ago 100)})
+          _   (insert-report! conn {:mid "<date-bad@test>" :type :bug :email-eid eid})]
+      (expire/expire-reports! conn source-map)
+      (is (not (report-closed? conn "<date-bad@test>")))
+      (teardown! ctx))))
+
 (deftest combined-rules-test
   (testing "All conditions met -- expires"
     (let [{:keys [conn] :as ctx} (setup-db!)

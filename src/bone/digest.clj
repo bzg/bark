@@ -349,16 +349,32 @@
     (boolean (some email-closure (ancestor-mid-closure db cand-email)))))
 
 (defn- auto-supersede-patch!
-  "Close `old-rid` as :superseded by `new-report-eid`, pose the
-  :supersedes + :related-to relations, propagate auto-credit transfers."
+  "Close `old-rid` as :superseded by `new-report-eid`, posing the
+  :supersedes + :related-to relations in the same transaction (a crash
+  cannot leave the closure without its audit relation), then propagate
+  patch-closure effects.  Pre-existing :rel/ids go through
+  `pose-if-absent!` to keep reactivation arbitration."
   [conn old-rid new-report-eid email log-msg]
   (let [email-eid (:db/id email)
-        endpoints {:from-eid old-rid :to-eid new-report-eid}]
-    (d/transact! conn [{:db/id old-rid
-                        :report/closed email-eid
-                        :report/close-reason :superseded}])
-    (rel/pose-from-email! conn email (assoc endpoints :kind :supersedes))
-    (rel/pose-from-email! conn email (assoc endpoints :kind :related-to))
+        endpoints {:from-eid old-rid :to-eid new-report-eid}
+        db        (d/db conn)
+        base-opts (assoc endpoints
+                         :setter    (:email/author-address email)
+                         :email-eid email-eid
+                         :posed-at  (or (:email/date-sent email) (Date.))
+                         :value     nil)
+        fresh?    (fn [kind]
+                    (not-any? #(d/entid db [:rel/id %])
+                              (rel/paired-relation-ids kind old-rid new-report-eid)))
+        {fresh true existing false} (group-by fresh? [:supersedes :related-to])]
+    (d/transact! conn
+                 (into [{:db/id old-rid
+                         :report/closed email-eid
+                         :report/close-reason :superseded}]
+                       (mapcat #(rel/pose-tx (assoc base-opts :kind %)))
+                       fresh))
+    (doseq [kind existing]
+      (rel/pose-from-email! conn email (assoc endpoints :kind kind)))
     (rel/propagate-patch-closure! conn old-rid :patch email-eid
                                   :superseded new-report-eid)
     (tracking/bump-report-updated! conn old-rid)
@@ -434,9 +450,7 @@
 (defn- supersede-candidate-eids
   "Auto-supersession targets for a new patch: thread-adjacent reports
   (`nearest-report-eids`) plus open same-sender patches sharing a common
-  thread ancestor with `email`.  Computed once and shared by both hooks
-  (each re-checks :report/closed on its own snapshot, so the first hook's
-  closures are seen by the second)."
+  thread ancestor with `email`."
   [db report-eid email nearest-report-eids]
   (let [sender-wide   (open-patch-eids-by-sender
                        db report-eid (:email/author-address email))
@@ -445,88 +459,52 @@
           (filter #(shares-common-ancestor? db @email-closure %))
           sender-wide)))
 
-(defn- close-patch-previous-version! [conn report-eid report-info email candidate-eids]
-  (let [new-version (:version report-info)
-        n           (parse-version-number new-version)]
-    (when (and n (>= n 1))
-      (let [versions-to-close (cond-> #{new-version}
-                                (> n 1) (conj (str "v" (dec n))))
-            ;; Match on the full normalized subject, not the colon topic:
-            ;; the topic prefix (\"ox-texinfo\") is shared by every patch in
-            ;; a numbered series, so it would conflate distinct siblings
-            ;; (\"[PATCH v5 2/4] ox-texinfo: @itemx\" vs \"[PATCH v5 3/4]
-            ;; ox-texinfo: Define ...\").  The normalized subject drops the
-            ;; bracket tag, keeping each member's own title.
-            new-subj          (normalize-subject (:email/subject email))
-            ;; One snapshot is safe: this section is single-threaded.
-            db                (d/db conn)
-            new-idents        (patch-idents
-                               (d/pull db [{:report/patches patch-pull}] report-eid))
-            candidates        (keep
-                               (fn [rid]
-                                 (let [r (d/pull db
-                                                 [:report/type :report/version
-                                                  :report/topic-value :report/closed
-                                                  :report/message-id
-                                                  {:report/email [:email/subject]}
-                                                  {:report/patches patch-pull}]
-                                                 rid)]
-                                   (when (and (= :patch (:report/type r))
-                                              (contains? versions-to-close
-                                                         (:report/version r))
-                                              (not (:report/closed r))
-                                              new-subj
-                                              (= new-subj
-                                                 (normalize-subject
-                                                  (get-in r [:report/email :email/subject])))
-                                              ;; ... but veto plainly different patches.
-                                              (not (patch-idents-conflict?
-                                                    new-idents (patch-idents r))))
-                                     [rid r])))
-                               candidate-eids)]
-        (doseq [[rid r] candidates]
+(defn- close-superseded-thread-patches!
+  "Close open patch reports among `candidate-eids` (see
+  `supersede-candidate-eids`) sharing the new patch's base subject
+  (Re:/[TAG] stripped).  Matching uses the full normalized subject, not
+  the colon topic, which every sibling of a numbered series shares;
+  when the subject normalizes to nothing, patch identifiers stand in.
+  Version guard: when both sides carry a parsable \"vN\", a candidate
+  newer than the new patch is spared (a re-ingested old v2 must not
+  close the live v3)."
+  [conn report-eid report-info email candidate-eids]
+  (let [new-subj    (normalize-subject (:email/subject email))
+        new-version (:version report-info)
+        new-n       (parse-version-number new-version)
+        db          (d/db conn)
+        new-idents  (patch-idents
+                     (d/pull db [{:report/patches patch-pull}] report-eid))
+        match?      (fn [r]
+                      (let [r-idents (patch-idents r)
+                            cand-n   (parse-version-number (:report/version r))]
+                        (and
+                         ;; Version-order guard (see docstring).
+                         (or (nil? new-n) (nil? cand-n) (<= cand-n new-n))
+                         (if new-subj
+                           (and (= new-subj
+                                   (normalize-subject
+                                    (get-in r [:report/email :email/subject])))
+                                ;; ... but veto plainly different patches.
+                                (not (patch-idents-conflict? new-idents r-idents)))
+                           ;; No subject signal: require identical idents.
+                           (and (seq new-idents) (seq r-idents)
+                                (not (patch-idents-conflict? new-idents r-idents)))))))]
+    (doseq [rid candidate-eids
+            :when (not= rid report-eid)]
+      (let [r (d/pull db [:report/type :report/version :report/closed
+                          :report/message-id
+                          {:report/email [:email/subject]}
+                          {:report/patches patch-pull}] rid)]
+        (when (and (= :patch (:report/type r))
+                   (not (:report/closed r))
+                   (match? r))
           (auto-supersede-patch!
            conn rid report-eid email
-           (str "[PATCH " (:report/version r)
-                (when-let [t (:report/topic-value r)] (str " " t)) "] "
-                "(" (:report/message-id r) ") "
-                "(superseded by " new-version ")")))))))
-
-(defn- close-superseded-thread-patches!
-  "Close open patch reports (thread-adjacent, or from the same sender
-  and tracing back to a common ancestor -- see `supersede-candidate-eids`)
-  sharing the new patch's base subject (Re:/[TAG] stripped).  Handles
-  unnumbered re-sends, including ones posted on a different thread branch.
-  When the subject normalizes to nothing (a bare \"[PATCH]\"), matching
-  patch identifiers on both sides stand in for it."
-  [conn report-eid email candidate-eids]
-  (let [new-subj   (normalize-subject (:email/subject email))
-        db         (d/db conn)
-        new-idents (patch-idents
-                    (d/pull db [{:report/patches patch-pull}] report-eid))
-        match?     (fn [r]
-                     (let [r-idents (patch-idents r)]
-                       (if new-subj
-                         (and (= new-subj
-                                 (normalize-subject
-                                  (get-in r [:report/email :email/subject])))
-                              ;; ... but veto plainly different patches.
-                              (not (patch-idents-conflict? new-idents r-idents)))
-                         ;; No subject signal: require identical idents.
-                         (and (seq new-idents) (seq r-idents)
-                              (not (patch-idents-conflict? new-idents r-idents))))))]
-    (when (seq candidate-eids)
-      (doseq [rid candidate-eids
-              :when (not= rid report-eid)]
-        (let [r (d/pull db [:report/type :report/closed :report/message-id
-                            {:report/email [:email/subject]}
-                            {:report/patches patch-pull}] rid)]
-          (when (and (= :patch (:report/type r))
-                     (not (:report/closed r))
-                     (match? r))
-            (auto-supersede-patch!
-             conn rid report-eid email
-             (str (:report/message-id r) " (superseded by same-subject thread patch)"))))))))
+           (str (:report/message-id r)
+                (when-let [v (:report/version r)] (str " (" v ")"))
+                " (superseded by same-subject patch"
+                (when new-version (str " " new-version)) ")")))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Source resolution
@@ -612,9 +590,11 @@
     (cond-> #{}
       (seq parent-eids)                                       (conj :link-related)
       (and (= :release rtype) (:version report-info))        (conj :close-changes)
-      (and (= :patch rtype) (:version report-info)
-           (seq nearest-eids))                                (conj :close-previous-version)
-      (and (= :patch rtype) (seq nearest-eids))               (conj :close-superseded-thread)
+      ;; No (seq nearest-eids) gate: `supersede-candidate-eids` also
+      ;; reaches same-sender patches sharing a common thread ancestor
+      ;; when no ancestor is a report (e.g. v1 posted under a
+      ;; non-report mail, v2 on another branch of the same thread).
+      (= :patch rtype)                                        (conj :close-superseded-thread)
       (and (= :patch rtype) (:patch-seq report-info))         (conj :manage-series)
       ;; Patches are normally stored at creation (see report-entity);
       ;; this hook only heals reports created pending by versions that
@@ -879,13 +859,9 @@
     (link-rel! conn report-eid (:type report-info) email parent-eids))
   (when (:close-changes plan)
     (close-changes-for-release! conn (:version report-info) email report-eid))
-  ;; Both auto-supersession hooks share one candidate set; compute it once.
-  (when (or (:close-previous-version plan) (:close-superseded-thread plan))
+  (when (:close-superseded-thread plan)
     (let [cand-eids (supersede-candidate-eids (d/db conn) report-eid email nearest-eids)]
-      (when (:close-previous-version plan)
-        (close-patch-previous-version! conn report-eid report-info email cand-eids))
-      (when (:close-superseded-thread plan)
-        (close-superseded-thread-patches! conn report-eid email cand-eids))))
+      (close-superseded-thread-patches! conn report-eid report-info email cand-eids)))
   (when (:manage-series plan)
     (series/manage-series! conn report-eid email report-info from-addr parent-eids))
   (when (:store-patches plan)
@@ -909,15 +885,16 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- thread-anchorable?
-  "True when the email can be threaded now: at least one ancestor mid
-  is in the DB, or In-Reply-To is absent (root).
-  Accepting any References ancestor (not just the immediate parent)
-  approximates public-inbox: a missing intermediate doesn't orphan
-  its descendants as long as some ancestor is known."
+  "True when the email can be threaded now: no ancestor mid at all (a
+  thread root), or at least one ancestor mid already in the DB.  Keyed
+  on `ancestor-mids` (References included), not In-Reply-To alone: any
+  known ancestor anchors the thread (public-inbox style), and a client
+  setting References without In-Reply-To waits for an ancestor instead
+  of being misfiled as a root."
   [db email]
-  (let [irt (:email/in-reply-to email)]
-    (or (nil? irt)
-        (boolean (some #(lookup/email-eid db %) (ancestor-mids email))))))
+  (let [ancestors (ancestor-mids email)]
+    (or (empty? ancestors)
+        (boolean (some #(lookup/email-eid db %) ancestors)))))
 
 ;; In-memory pending index: ancestor-mid-hash => #{pending eids}.  A
 ;; value join on the hash attr is forbidden (see bone.lookup) and
@@ -1055,13 +1032,12 @@
                 (pending-index-remove! conn eid (:email/ancestor-mid-hashes email))
                 (log/info "Cleared pending flag on" message-id))
               (let [{parent-eids :all nearest-eids :nearest} (thread-lookup email db)
-                    ;; Recover the existing report-eid on retry so Phase 4
-                    ;; hooks (link-related, close-superseded-thread, …) can
-                    ;; run for pending emails that created a report on first
-                    ;; pass but were skipped past Phase 3/4.
+                    ;; Recover the report-eid of an interrupted pass
+                    ;; (pending retry, or crash between the pending retract
+                    ;; above and Phase 4) so the Phase 4 hooks still run.
+                    ;; Safe: process-email! only runs on undigested emails.
                     report-eid   (or report-eid
-                                     (when was-pending?
-                                       (lookup/report-eid db message-id)))]
+                                     (lookup/report-eid db message-id))]
 
                 ;; Channel gating: an email that did not reach the
                 ;; source's public channel is excluded from both

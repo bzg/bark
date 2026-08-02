@@ -22,7 +22,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn parse-size
-  "\"10MB\" → bytes (supports KB/MB/GB, internal spaces tolerated).
+  "\"10MB\" => bytes (supports KB/MB/GB, internal spaces tolerated).
   Returns nil on bad input."
   [s]
   (let [s (str/replace (str/upper-case (str s)) #"\s+" "")]
@@ -55,7 +55,7 @@
 
 (defn- escape-log-line
   "Neutralize CR/LF in a single log message so email-controlled fields
-   (subject, From, …) cannot inject forged log lines."
+   (subject, From, ...) cannot inject forged log lines."
   ^String [^String s]
   (-> s
       (str/replace "\r" "\\r")

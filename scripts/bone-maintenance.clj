@@ -33,6 +33,14 @@
 ;; CLI parsing
 ;; ---------------------------------------------------------------------------
 
+(defn- missing-value!
+  "A valued option with no value must abort loudly: silently ignoring
+  it would widen the scope of a --delete run (e.g. `--delete -n` with
+  the source name forgotten would delete orphans from ALL sources)."
+  [opt expected]
+  (log/error "Missing value for" opt (str "(expected " expected ")"))
+  (System/exit 1))
+
 (defn- parse-args [args]
   (loop [opts {:delete? false :verbose? false :failures? false}
          [a & [v & r :as more]] args]
@@ -41,8 +49,12 @@
       (= a "--delete")       (recur (assoc opts :delete? true) more)
       (= a "--verbose")      (recur (assoc opts :verbose? true) more)
       (= a "--failures")     (recur (assoc opts :failures? true) more)
-      (#{"-n" "--source"} a) (if v (recur (assoc opts :source-name v) r) opts)
-      (= a "--retention")    (if v (recur (assoc opts :retention v) r) opts)
+      (#{"-n" "--source"} a) (if v
+                               (recur (assoc opts :source-name v) r)
+                               (missing-value! a "a source name"))
+      (= a "--retention")    (if v
+                               (recur (assoc opts :retention v) r)
+                               (missing-value! a "a duration like \"90d\" or an ISO date"))
       :else                  (recur opts more))))
 
 ;; ---------------------------------------------------------------------------
@@ -51,8 +63,9 @@
 
 (defn- report-referenced-eids
   "All email entity IDs reachable from any report via any ref attribute,
-  PLUS the emails referenced by qualified relations (:rel/email), series
-  (:series/cover-letter, :series/closed) and votes (:vote/email).
+  PLUS the emails referenced by qualified relations (:rel/email,
+  :rel/retracted-by), series (:series/cover-letter, :series/closed)
+  and votes (:vote/email).
   If an email is pointed to by any of these, it's protected."
   [db]
   (let [via-reports (dq '[:find [?e ...]
@@ -69,7 +82,7 @@
                             [?e :email/message-id _]]
                           db attr))]
     (set (concat via-reports
-                 (mapcat via-attr [:rel/email
+                 (mapcat via-attr [:rel/email :rel/retracted-by
                                    :series/cover-letter :series/closed
                                    :vote/email])))))
 
@@ -177,17 +190,21 @@
       _       (when (and source-name (not (contains? source-map source-name)))
                 (log/error "Unknown source:" source-name)
                 (log/error "Available:" (str/join ", " (keys source-map)))
-                (System/exit 1))
-      ;; Validated before the connection opens: System/exit here must
-      ;; not skip the (finally (d/close conn)) below.
-      cutoff  (resolve-retention-cutoff retention)
-      ;; Open with WAL for potential writes
-      conn    (d/get-conn dbp bone-schema {})]
-  (try
-    (let [db (d/db conn)]
-      (if failures?
-        (show-failures source-name)
-        (let [orphans (find-orphans db source-map source-name cutoff)]
+                (System/exit 1))]
+  (if failures?
+    ;; --failures only reads the failures EDN file -- no DB connection
+    ;; (nor retention cutoff) needed, so the daemon can keep running.
+    (do (when retention
+          (log/warn "--retention is ignored with --failures"))
+        (show-failures source-name))
+    (let [;; Validated before the connection opens: System/exit here must
+          ;; not skip the (finally (d/close conn)) below.
+          cutoff (resolve-retention-cutoff retention)
+          ;; Open with WAL for potential writes
+          conn   (d/get-conn dbp bone-schema {})]
+      (try
+        (let [db      (d/db conn)
+              orphans (find-orphans db source-map source-name cutoff)]
           (if (empty? orphans)
             (log/info "No orphan emails found.")
             (let [by-source (group-by :source orphans)]
@@ -199,14 +216,14 @@
                   (println (str "  " source " | " mid " | " from " | " date))))
               (if delete?
                 (do
-                  (log/info "Deleting" (count orphans) "orphan email(s)…")
+                  (log/info "Deleting" (count orphans) "orphan email(s)...")
                   (let [tx-data (mapv (fn [{:keys [eid]}]
-                                       [:db/retractEntity eid])
-                                     orphans)]
+                                        [:db/retractEntity eid])
+                                      orphans)]
                     (d/transact! conn tx-data)
                     (log/info "Done. Deleted" (count orphans) "email(s).")))
                 (do
                   (log/info "Dry run -- no changes made. Pass --delete to remove.")
-                  (log/info "Tip: use --verbose to list individual orphan message-ids."))))))))
-    (finally
-      (d/close conn))))
+                  (log/info "Tip: use --verbose to list individual orphan message-ids."))))))
+        (finally
+          (d/close conn))))))

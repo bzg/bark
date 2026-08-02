@@ -162,6 +162,8 @@
       nil
 
       :else
+      ;; (first rels) suffices: both directions of a pair are always
+      ;; retracted together, sharing the same :rel/retracted-by email.
       (let [^java.util.Date posed-at     (:posed-at opts)
             ^java.util.Date retracted-at (some-> (first rels)
                                                  :rel/retracted-by
@@ -218,9 +220,13 @@
        db from-eid to-eid kind))
 
 (defn retract-by-from!
-  "Retract every active relation of `kind` with :rel/from = `from-eid`
-  (plus its inverse-direction sibling for asymmetric kinds)."
+  "Retract every active relation of `kind` with :rel/from = `from-eid`,
+  plus its inverse-direction sibling.  Asymmetric kinds only: a
+  symmetric kind (:related-to) is canonicalized by ascending eid
+  order, so `from-eid` may be stored in :rel/to and a one-sided scan
+  would miss half the relations -- use `retract-pair!` for those."
   [conn from-eid kind retracted-by-email-eid]
+  {:pre [(contains? asymmetric-kinds kind)]}
   (let [db   (d/db conn)
         eids (d/q '[:find [?e ...]
                     :in $ ?from ?kind
@@ -242,32 +248,6 @@
                                         [?e :rel/kind ?inv-kind]
                                         [?e :rel/active? true]]
                                       db from-eid inv-kind)]
-                    (mapcat #(retract-tx % retracted-by-email-eid) inv-eids)))]
-        (d/transact! conn (vec (concat tx inv)))
-        (count eids)))))
-
-(defn retract-by-to!
-  "Mirror of `retract-by-from!` keyed on :rel/to."
-  [conn to-eid kind retracted-by-email-eid]
-  (let [db   (d/db conn)
-        eids (d/q '[:find [?e ...]
-                    :in $ ?to ?kind
-                    :where
-                    [?e :rel/to ?to]
-                    [?e :rel/kind ?kind]
-                    [?e :rel/active? true]]
-                  db to-eid kind)]
-    (when (seq eids)
-      (let [tx (mapcat #(retract-tx % retracted-by-email-eid) eids)
-            inv (when (asymmetric-kinds kind)
-                  (let [inv-kind (inverse-kinds kind)
-                        inv-eids (d/q '[:find [?e ...]
-                                        :in $ ?from ?inv-kind
-                                        :where
-                                        [?e :rel/from ?from]
-                                        [?e :rel/kind ?inv-kind]
-                                        [?e :rel/active? true]]
-                                      db to-eid inv-kind)]
                     (mapcat #(retract-tx % retracted-by-email-eid) inv-eids)))]
         (d/transact! conn (vec (concat tx inv)))
         (count eids)))))
@@ -353,7 +333,7 @@
   also supersedes the still-open patch reports upthread: applying the
   head of a revision chain retires the revisions it replaced.  Bumps
   every modified target so the incremental export and notifications
-  pick them up.  No-op if `patch-type` ≠ :patch."
+  pick them up.  No-op if `patch-type` != :patch."
   [conn patch-eid patch-type email-eid close-reason successor-eid]
   (when (= :patch patch-type)
     (let [db   (d/db conn)

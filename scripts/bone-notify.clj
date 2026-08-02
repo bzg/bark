@@ -361,6 +361,12 @@
           (let [db           (d/db conn)
                 src-map      (build-source-map config)
                 reports      (all-reports db)
+                ;; Watermark candidate, captured BEFORE reading the
+                ;; failures file: a failure written by the daemon
+                ;; between the read and the send may be shown twice on
+                ;; the next run, but is never lost (storing the send
+                ;; time instead would skip it forever).
+                run-started  (java.util.Date.)
                 all-failures (load-failures)
                 pairs        (for [[email subs] subscribers
                                    s             subs]
@@ -386,7 +392,7 @@
                         (when-not dry-run?
                           (try
                             (send-notification! smtp email source body admin-bcc)
-                            (swap! updated-shown assoc k (.getTime (java.util.Date.)))
+                            (swap! updated-shown assoc k (.getTime run-started))
                             (swap! sent inc)
                             (catch Exception e
                               ;; Don't advance the timestamp on failure so the

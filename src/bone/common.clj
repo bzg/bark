@@ -73,9 +73,10 @@
 
 ;; Shared identifier rule for :sources [{:name ...}] and :mailboxes
 ;; [{:name ...}].  Starts with alphanum; spaces allowed in the middle
-;; to keep current :source/name configs valid; no slash / colon /
-;; control chars (those would break paths or watermark ids).
-(def config-name-regex #"[a-zA-Z0-9][a-zA-Z0-9 ._-]*")
+;; (but not trailing) to keep current :source/name configs valid; no
+;; slash / colon / control chars (those would break paths or
+;; watermark ids).
+(def config-name-regex #"[a-zA-Z0-9](?:[a-zA-Z0-9 ._-]*[a-zA-Z0-9._-])?")
 
 (defn valid-config-name?
   "True iff `s` is a non-blank string matching `config-name-regex`."
@@ -123,8 +124,9 @@
 (defn escape-script-payload
   "Neutralize HTML-script-closing and comment sequences in a JSON payload that
    will be inlined inside an HTML <script> tag.  Email-controlled fields
-   (subject, from-name, …) reach this path verbatim, so a `</script>` in any
-   string would otherwise break out of the script element."
+   (subject, from-name, ...) reach this path verbatim, so a `</script>` in any
+   string would otherwise break out of the script element.
+   JS-literal context only, not JSON.parse-safe."
   ^String [^String s]
   (-> s
       (str/replace "</" "<\\/")
@@ -281,17 +283,29 @@
   Returns the folded line without a trailing CRLF.  nil-safe."
   [line]
   (when line
-    (let [limit 75]
-      (loop [chars (seq line)
+    (let [^String s line
+          limit    75
+          len      (.length s)]
+      (loop [i 0
              width 0
              ^StringBuilder out (StringBuilder.)]
-        (if (empty? chars)
+        (if (>= i len)
           (.toString out)
-          (let [c (first chars)
-                n (alength (.getBytes (str c) "UTF-8"))]
+          ;; Iterate by code point, not by UTF-16 char: a non-BMP
+          ;; character (e.g. an emoji) is a surrogate pair whose two
+          ;; halves must never be separated by a fold, and whose UTF-8
+          ;; size (4 octets) must be counted as a whole.
+          (let [c  (.charAt s i)
+                cp (if (and (Character/isHighSurrogate c)
+                            (< (inc i) len)
+                            (Character/isLowSurrogate (.charAt s (inc i))))
+                     (str c (.charAt s (inc i)))
+                     (str c))
+                n  (alength (.getBytes cp "UTF-8"))
+                i' (+ i (.length ^String cp))]
             (if (> (+ width n) limit)
-              (recur (rest chars) (+ 1 n) (-> out (.append "\r\n ") (.append c)))
-              (recur (rest chars) (+ width n) (.append out c)))))))))
+              (recur i' (+ 1 n) (-> out (.append "\r\n ") (.append cp)))
+              (recur i' (+ width n) (.append out cp)))))))))
 
 (defn build-vcalendar
   "Assemble a complete VCALENDAR document (CRLF-terminated) wrapping
@@ -626,20 +640,20 @@
   [headers-edn]
   (let [hdrs (parse-headers headers-edn)]
     (cond
-      ;; 1. Any List-Id or X-BeenThere → mailing list
+      ;; 1. Any List-Id or X-BeenThere => mailing list
       (or (get-header hdrs "List-Id")
           (get-header hdrs "X-BeenThere"))
       :list
 
-      ;; 2a. Original recipient not in To/Cc → alias
+      ;; 2a. Original recipient not in To/Cc => alias
       (original-recipient-not-in-to-cc? hdrs)
       :alias
 
-      ;; 2b. Multiple distinct Delivered-To → alias
+      ;; 2b. Multiple distinct Delivered-To => alias
       (multiple-delivered-to? hdrs)
       :alias
 
-      ;; 3. Otherwise → direct
+      ;; 3. Otherwise => direct
       :else :direct)))
 
 (defn- matches?
@@ -833,6 +847,21 @@
        ";; is private and not needed here.  See \"Deploying BONE\" in the manual,\n"
        ";; then validate with: bb test-config\n"))
 
+(defn- merge-command-entry
+  "Merge one command's global and local config the way the daemon
+  resolves them: the :words vector and the {:scope :report-types}
+  override unit are each replaced wholesale by the local entry when it
+  defines them (see merged-raw-words and resolve-command-overrides) --
+  never deep-merged, so a local {:scope ...} does not inherit the
+  global entry's :report-types."
+  [g l]
+  (let [words     (if (contains? l :words)
+                    (select-keys l [:words])
+                    (select-keys g [:words]))
+        overrides (let [lo (select-keys l [:scope :report-types])]
+                    (if (seq lo) lo (select-keys g [:scope :report-types])))]
+    (merge words overrides)))
+
 (defn effective-source-config
   "Pure.  Return a sanitised, self-contained source map for `source-name`:
   per-source values with the operator's global :labels/:commands/... folded
@@ -849,7 +878,8 @@
                          (:alias src) [:alias (:alias src)]
                          (:to src)    [:to    (:to src)])
           labels   (merge (:labels config) (:labels src))
-          commands (merge-with merge (:commands config) (:commands src))
+          commands (merge-with merge-command-entry
+                               (:commands config) (:commands src))
           csyntax  (or (:command-syntax src) (:command-syntax config))
           rtypes   (or (:report-types src) (:report-types config))
           restr    (or (:restricted-types src) (:restricted-types config))
@@ -1027,7 +1057,7 @@
         (vec (cond-> (vec mailboxes) smtp (conj smtp)))))))
 
 (defn load-mailmap
-  "Load ./mailmap.edn (shape `{\"Canonical Name\" [emails…]}`) and return
+  "Load ./mailmap.edn (shape `{\"Canonical Name\" [emails...]}`) and return
   `{email-lc -> canonical-name}` (inverted, flat).  Returns `{}` if
   the file is absent.  Export-only -- never read on the ingest path."
   ([] (load-mailmap "mailmap.edn"))
@@ -1044,7 +1074,7 @@
        {}))))
 
 (defn db-path
-  "Resolve the Datalevin DB path: prefer :db {:path …} from the
+  "Resolve the Datalevin DB path: prefer :db {:path ...} from the
   config, fall back to BONE_DB env var, then default \"data/bone-db\"."
   [config]
   (or (get-in config [:db :path])
@@ -1140,12 +1170,16 @@
     :report/has-ics :report/has-text-attachments
     :report/trailers
     :report/last-activity :report/last-activity-address :report/descendants :report/updated-at
+    ;; :email/source lets the export resolve the linked report's own
+    ;; source (archive-url suppression and format-string).
     {:rel/_from [:rel/kind :rel/active? :rel/setter :rel/posed-at :rel/value
                  {:rel/to [:db/id :report/type :report/message-id
-                           {:report/email [:email/subject :email/headers-edn]}]}]}
+                           {:report/email [:email/subject :email/headers-edn
+                                           :email/source]}]}]}
     {:rel/_to [:rel/kind :rel/active? :rel/setter :rel/posed-at :rel/value
                {:rel/from [:db/id :report/type :report/message-id
-                           {:report/email [:email/subject :email/headers-edn]}]}]}
+                           {:report/email [:email/subject :email/headers-edn
+                                           :email/source]}]}]}
     {:report/series [:series/id :series/expected :series/closed
                      {:series/patches [:db/id]}
                      {:series/cover-letter [:email/message-id]}]}
@@ -1187,7 +1221,7 @@
 
 (defn votes-by-report
   "Group raw vote tuples into {report-eid [{:value :up :voter \"a@b\"
-  :email-mid \"<…>\" :email-mid-raw \"<…>\"} …]}.
+  :email-mid \"<...>\" :email-mid-raw \"<...>\"} ...]}.
   :email-mid-raw preserves the original case (defaults to :email-mid
   when headers-edn is absent).  Expects tuples of [report-eid value
   voter email-mid headers-edn?] (headers-edn optional)."
