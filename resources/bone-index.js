@@ -1130,10 +1130,13 @@ var _setupToggles, _showTogglesIfNeeded;
        and this rule clips whatever does not fit it. */
     'td:nth-child(8) { position: relative; white-space: nowrap; overflow: hidden; }' +
     'td:nth-child(8).expanded { white-space: normal; overflow: visible; }' +
+    /* Neutralize Pico's [role=button] chrome: the ellipsis must look
+       like plain text, not a framed button. */
     '.unfold { position: absolute; right: 0; top: 50%; transform: translateY(-50%);' +
     '  cursor: pointer; font-weight: 700; font-size: 1em;' +
     '  padding: 0.1em 0.4em 0.1em 0.6em; user-select: none; z-index: 1;' +
-    '  background-color: inherit; }';
+    '  background-color: inherit; border: none; color: inherit;' +
+    '  line-height: inherit; display: inline; }';
   document.head.appendChild(style);
 
   _setupToggles = function(container) {
