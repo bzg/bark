@@ -320,9 +320,8 @@
            [?r :report/type :patch]
            [(not= ?r ?self)]
            (not [?r :report/closed _])
-           (not-join [?r ?self]
-                     [?r :report/series ?s]
-                     [?self :report/series ?s])]
+           (not [?r :report/series ?s]
+                [?self :report/series ?s])]
          db root-email patch-eid)))
 
 (defn propagate-patch-closure!
